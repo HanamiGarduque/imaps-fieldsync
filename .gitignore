@@ -49,3 +49,21 @@ android/key.properties
 **/google-services.json
 ios/Runner/GoogleService-Info.plist
 .env
+
+# Environment & secrets
+.env
+.env.local
+
+# Firebase config files (may laman na project credentials)
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Android signing keys
+android/key.properties
+android/app/upload-keystore.jks
+*.jks
+*.keystore
+
+# IDE-specific (optional pero maganda idagdag)
+.vscode/
+*.iml
