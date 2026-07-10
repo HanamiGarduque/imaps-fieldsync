@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
+import 'tasks_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -30,11 +31,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
       await NotificationService.registerCurrentDevice();
 
-      if (mounted) {
-        // TODO: navigate to Tasks screen (next step)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Login successful!')),
+      final profile = await AuthService.getCurrentProfile();
+
+      if (mounted && profile != null) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => TasksScreen(profile: profile)),
         );
+      } else if (mounted) {
+        setState(() {
+          _errorMessage = 'Login succeeded, but no profile found. Contact your Administrator.';
+        });
       }
     } catch (e) {
       debugPrint("LOGIN ERROR: $e");
