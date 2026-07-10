@@ -27,23 +27,24 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text,
       );
 
+      // I-register ang device para sa push notifications
       await NotificationService.registerCurrentDevice();
 
-      final profile = await AuthService.getCurrentProfile();
-
       if (mounted) {
+        // TODO: i-navigate papunta sa Tasks screen (susunod na step)
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Welcome, ${profile?.fullName} (${profile?.role})')),
+          const SnackBar(content: Text('Login successful!')),
         );
-        // TODO: i-navigate papunta sa Admin dashboard o Inspector Tasks screen
-        // depende sa profile?.role — susunod na hakbang natin ito
       }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Login failed. Check your email/password.';
-      });
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+} catch (e) {
+  print("LOGIN ERROR:");
+  print(e);
+
+  setState(() {
+    _errorMessage = e.toString();
+  });
+}finally {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -77,7 +78,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   hintText: 'Email Address',
                   filled: true,
                   fillColor: Colors.white,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -89,7 +92,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   hintText: 'Password',
                   filled: true,
                   fillColor: Colors.white,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
               if (_errorMessage != null) ...[
