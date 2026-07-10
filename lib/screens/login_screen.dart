@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
-
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -37,8 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 } catch (e) {
-  print("LOGIN ERROR:");
-  print(e);
+  debugPrint("LOGIN ERROR: $e");
 
   setState(() {
     _errorMessage = e.toString();

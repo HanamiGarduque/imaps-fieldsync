@@ -1,14 +1,12 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupabaseService {
-  static const String _supabaseUrl = "https://laapipjyprmmaylunxib.supabase.co";
-  static const String _supabasePublishableKey = "sb_publishable_LZJLxNjhPbvXTGwj2tvnpg_cZGcXiT8";
-
   static Future<void> initialize() async {
     await Supabase.initialize(
-      url: _supabaseUrl,
-      publishableKey: _supabasePublishableKey,
+      url: dotenv.env['SUPABASE_URL']!,
+      publishableKey: dotenv.env['SUPABASE_PUBLISHABLE_KEY']!,
     );
   }
 

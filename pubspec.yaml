@@ -41,8 +41,11 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
 
-  # State management
+# State management
   provider: ^6.1.2
+
+  # Environment variables
+  flutter_dotenv: ^5.2.1
 
 dev_dependencies:
   flutter_test:
@@ -52,6 +55,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - .env
 
 dependency_overrides:
   path_provider_foundation: 2.4.2
