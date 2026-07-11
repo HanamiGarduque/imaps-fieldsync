@@ -21,7 +21,7 @@ class MyApp extends StatelessWidget {
       title: 'iMAPS FieldSync',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.indigo, useMaterial3: true),
-      home: const LoginScreen(),
+      home: const WelcomeScreen(),
     );
   }
 }
