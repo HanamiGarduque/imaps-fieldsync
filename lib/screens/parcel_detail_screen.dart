@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'tasks_screen.dart';
 import 'capture_photo_screen.dart';
@@ -143,34 +144,37 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                   // Photo thumbnails + add button
                   Row(
                     children: [
-                      ..._photos.take(2).map(
-                            (p) => Container(
-                              width: 64,
-                              height: 64,
-                              margin: const EdgeInsets.only(right: 12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEDEBFB),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(Icons.image, color: Color(0xFF3D2FE0)),
-                            ),
-                          ),
+..._photos.take(2).map(
+      (p) => Container(
+        width: 64,
+        height: 64,
+        margin: const EdgeInsets.only(right: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEDEBFB),
+          borderRadius: BorderRadius.circular(12),
+          image: DecorationImage(
+            image: FileImage(File(p)),
+            fit: BoxFit.cover,
+          ),
+        ),
+      ),
+    ),
                       if (_photos.isEmpty) ...[
                         _photoPlaceholder(),
                         const SizedBox(width: 12),
                         _photoPlaceholder(),
                         const SizedBox(width: 12),
                       ],
-                      GestureDetector(
-                        onTap: () async {
-                          final result = await Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const CapturePhotoScreen()),
-                          );
-                          if (result == true) {
-                            setState(() => _photos.add('photo'));
-                          }
-                        },
+GestureDetector(
+  onTap: () async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CapturePhotoScreen()),
+    );
+    if (result != null && result is Map && result['photoPath'] != null) {
+      setState(() => _photos.add(result['photoPath'] as String));
+    }
+  },
                         child: Container(
                           width: 64,
                           height: 64,
