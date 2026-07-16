@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'inspection_checklist_screen.dart';
+import 'capture_photo_screen.dart';
+import 'tasks_screen.dart';
+import 'inspection_progress.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -44,7 +46,8 @@ class InsightTheme {
 /// SCREEN 8 — GPS VERIFICATION
 /// ==================================================================
 class GpsVerificationScreen extends StatelessWidget {
-  const GpsVerificationScreen({super.key});
+  final TaskItem task;
+  const GpsVerificationScreen({super.key, required this.task});
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +129,7 @@ class GpsVerificationScreen extends StatelessWidget {
                         ),
                         child: FractionallySizedBox(
                           alignment: Alignment.centerLeft,
-                          widthFactor: 0.166, // 16.6% Step 1 of 6
+                          widthFactor: 0.333, // 33.3% Step 2 of 6
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -143,7 +146,7 @@ class GpsVerificationScreen extends StatelessWidget {
                       Row(
                         children: [
                           Text('STEP 2 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
-                          Text(' — Site verification', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
+                          Text(' — GPS verification', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
                         ],
                       ),
                     ],
@@ -277,9 +280,10 @@ class GpsVerificationScreen extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: () {
                       HapticFeedback.selectionClick();
+                      InspectionProgress.instance.markStepComplete(2);
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const InspectionChecklistScreen()),
+                        MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: task)),
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -306,7 +310,7 @@ class GpsVerificationScreen extends StatelessWidget {
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
                         child: Text(
-                          'Start inspection',
+                          'Continue to photo evidence',
                           style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
                         ),
                       ),

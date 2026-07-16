@@ -3,7 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'review_submit_screen.dart'; // Original routing preserved[cite: 10]
+// Note: this screen is a standalone assessment picker used from the
+// Zoning Comparison placeholder flow. The main 6-step inspection
+// workflow (Site → GPS → Photos → Checklist → Findings → Review &
+// submit) now handles final-status selection directly inside the
+// Review & Submit screen, so this one simply returns the chosen
+// status to whoever opened it.
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -186,9 +191,7 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
                   child: ElevatedButton(
                     onPressed: () {
                       HapticFeedback.selectionClick();
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => ReviewSubmitScreen(result: _selected)), //[cite: 10]
-                      );
+                      Navigator.of(context).pop(_selected);
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
@@ -214,7 +217,7 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
                         child: Text(
-                          'Continue to review',
+                          'Save assessment',
                           style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
                         ),
                       ),

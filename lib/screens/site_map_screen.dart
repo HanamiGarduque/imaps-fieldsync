@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'gps_verification_screen.dart';
+import 'tasks_screen.dart';
+import 'inspection_progress.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -40,7 +42,8 @@ class InsightTheme {
 /// SCREEN 7 — SITE MAP
 /// ==================================================================
 class SiteMapScreen extends StatelessWidget {
-  const SiteMapScreen({super.key});
+  final TaskItem task;
+  const SiteMapScreen({super.key, required this.task});
 
   @override
   Widget build(BuildContext context) {
@@ -98,9 +101,20 @@ class SiteMapScreen extends StatelessWidget {
                       _GlassBackButton(onTap: () => Navigator.pop(context)),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          'Site map',
-                          style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Site map',
+                              style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
+                            ),
+                            Text(
+                              task.location,
+                              style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -237,9 +251,10 @@ class SiteMapScreen extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: () {
                       HapticFeedback.selectionClick();
+                      InspectionProgress.instance.markStepComplete(1);
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const GpsVerificationScreen()),
+                        MaterialPageRoute(builder: (_) => GpsVerificationScreen(task: task)),
                       );
                     },
                     style: ElevatedButton.styleFrom(

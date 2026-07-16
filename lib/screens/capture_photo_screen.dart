@@ -10,6 +10,10 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/location_service.dart';
 import '../services/geotag_service.dart';
 
+import 'tasks_screen.dart';
+import 'inspection_progress.dart';
+import 'inspection_checklist_screen.dart';
+
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
 /// ==================================================================
@@ -44,7 +48,8 @@ class InsightTheme {
 /// SCREEN 10 — PHOTO EVIDENCE (Includes Camera UI)
 /// ==================================================================
 class CapturePhotoScreen extends StatefulWidget {
-  const CapturePhotoScreen({super.key});
+  final TaskItem task;
+  const CapturePhotoScreen({super.key, required this.task});
 
   @override
   State<CapturePhotoScreen> createState() => _CapturePhotoScreenState();
@@ -175,8 +180,22 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   void _finishAndContinue() {
-    // Return the last captured photo to maintain contract with FieldFindingsScreen
-    Navigator.pop(context, _capturedPhotos.isNotEmpty ? _capturedPhotos.last : null);
+    if (_capturedPhotos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Capture at least one photo before continuing.')),
+      );
+      return;
+    }
+    InspectionProgress.instance.markStepComplete(3);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => InspectionChecklistScreen(
+          task: widget.task,
+          capturedPhotos: _capturedPhotos,
+        ),
+      ),
+    );
   }
 
   @override
@@ -234,7 +253,18 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                       _GlassBackButton(onTap: () => Navigator.pop(context)),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text('Photo evidence', style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Photo evidence', style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink)),
+                            Text(
+                              widget.task.location,
+                              style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -318,7 +348,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                       child: Container(
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
-                        child: Text('Continue to findings', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
+                        child: Text('Continue to checklist', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
                       ),
                     ),
                   ),

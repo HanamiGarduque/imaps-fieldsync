@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'inspection_result_screen.dart'; // Updated import
+import 'review_submit_screen.dart';
+import 'tasks_screen.dart';
+import 'inspection_progress.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -44,9 +46,18 @@ class InsightTheme {
 /// SCREEN 11 — FIELD FINDINGS
 /// ==================================================================
 class FieldFindingsScreen extends StatelessWidget {
-  final Map? capturedPhoto;
-  
-  const FieldFindingsScreen({super.key, this.capturedPhoto});
+  final TaskItem task;
+  final List<Map<String, dynamic>> capturedPhotos;
+  final int checklistDone;
+  final int checklistTotal;
+
+  const FieldFindingsScreen({
+    super.key,
+    required this.task,
+    this.capturedPhotos = const [],
+    this.checklistDone = 0,
+    this.checklistTotal = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -104,9 +115,20 @@ class FieldFindingsScreen extends StatelessWidget {
                       _GlassBackButton(onTap: () => Navigator.pop(context)),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          'Field findings',
-                          style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Field findings',
+                              style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
+                            ),
+                            Text(
+                              task.location,
+                              style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -128,7 +150,7 @@ class FieldFindingsScreen extends StatelessWidget {
                         ),
                         child: FractionallySizedBox(
                           alignment: Alignment.centerLeft,
-                          widthFactor: 0.666, // 66.6% Step 4 of 6
+                          widthFactor: 0.833, // 83.3% Step 5 of 6
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -144,7 +166,7 @@ class FieldFindingsScreen extends StatelessWidget {
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          Text('STEP 4 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
+                          Text('STEP 5 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
                           Text(' — FINDINGS', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
                         ],
                       ),
@@ -165,8 +187,9 @@ class FieldFindingsScreen extends StatelessWidget {
                         text: 'Rear portion of the lot shows a small storage structure not reflected in the declared building plan. Main residence otherwise matches submitted layout.',
                       ),
                       
-                      // Conditionally show photo confirmation (Preserved from original logic)
-                      if (capturedPhoto != null && capturedPhoto!['photoPath'] != null) ...[
+                      // Confirms the evidence gathered in the earlier steps carried
+                      // through to this screen, instead of appearing disconnected.
+                      if (capturedPhotos.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -174,8 +197,27 @@ class FieldFindingsScreen extends StatelessWidget {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                'Photo evidence attached from capture', 
-                                style: InsightTheme.inter(11.5, c: InsightTheme.green)
+                                '${capturedPhotos.length} geotagged photo${capturedPhotos.length == 1 ? '' : 's'} attached from capture',
+                                style: InsightTheme.inter(11.5, c: InsightTheme.green),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      if (checklistTotal > 0) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(
+                              checklistDone == checklistTotal ? Icons.check_circle_rounded : Icons.info_rounded,
+                              size: 14,
+                              color: checklistDone == checklistTotal ? InsightTheme.green : InsightTheme.ink3,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Checklist · $checklistDone of $checklistTotal items reviewed',
+                                style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
                               ),
                             ),
                           ],
@@ -230,10 +272,17 @@ class FieldFindingsScreen extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: () {
                       HapticFeedback.selectionClick();
-                      // Updated Routing directly to InspectionResultScreen
+                      InspectionProgress.instance.markStepComplete(5);
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const InspectionResultScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => ReviewSubmitScreen(
+                            task: task,
+                            capturedPhotos: capturedPhotos,
+                            checklistDone: checklistDone,
+                            checklistTotal: checklistTotal,
+                          ),
+                        ),
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -260,7 +309,7 @@ class FieldFindingsScreen extends StatelessWidget {
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
                         child: Text(
-                          'Continue to inspection result', // Updated label text
+                          'Continue to review',
                           style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
                         ),
                       ),

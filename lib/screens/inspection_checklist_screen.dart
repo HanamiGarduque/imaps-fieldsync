@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'capture_photo_screen.dart'; // preserved — real camera/GPS/geotag logic[cite: 7]
-import 'field_findings_screen.dart'; //[cite: 7]
+import 'field_findings_screen.dart';
+import 'tasks_screen.dart';
+import 'inspection_progress.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -40,7 +41,14 @@ class InsightTheme {
 /// SCREEN 8 — INSPECTION CHECKLIST
 /// ==================================================================
 class InspectionChecklistScreen extends StatefulWidget {
-  const InspectionChecklistScreen({super.key});
+  final TaskItem task;
+  final List<Map<String, dynamic>> capturedPhotos;
+
+  const InspectionChecklistScreen({
+    super.key,
+    required this.task,
+    this.capturedPhotos = const [],
+  });
 
   @override
   State<InspectionChecklistScreen> createState() => _InspectionChecklistScreenState();
@@ -63,15 +71,17 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
       _siteCondition.values.where((v) => v).length + _zoningObservations.values.where((v) => v).length;
   int get _totalCount => _siteCondition.length + _zoningObservations.length;
 
-  // Original preserved routing logic to capture photo and forward to findings[cite: 7]
-  Future<void> _continueToPhotos() async {
-    final result = await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const CapturePhotoScreen()),
-    );
-    if (!mounted) return;
-    
+  void _continueToFindings() {
+    InspectionProgress.instance.markStepComplete(4);
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => FieldFindingsScreen(capturedPhoto: result is Map ? result : null)),
+      MaterialPageRoute(
+        builder: (_) => FieldFindingsScreen(
+          task: widget.task,
+          capturedPhotos: widget.capturedPhotos,
+          checklistDone: _doneCount,
+          checklistTotal: _totalCount,
+        ),
+      ),
     );
   }
 
@@ -131,9 +141,20 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       _GlassBackButton(onTap: () => Navigator.pop(context)),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          'Checklist',
-                          style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Checklist',
+                              style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
+                            ),
+                            Text(
+                              widget.task.location,
+                              style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -155,7 +176,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                         ),
                         child: FractionallySizedBox(
                           alignment: Alignment.centerLeft,
-                          widthFactor: 0.333, // 33.3% Step 2 of 6
+                          widthFactor: 0.666, // 66.6% Step 4 of 6
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -171,7 +192,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          Text('STEP 2 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
+                          Text('STEP 4 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
                           Text(' — CHECKLIST · $_doneCount/$_totalCount COMPLETE', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
                         ],
                       ),
@@ -249,7 +270,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
                   child: ElevatedButton(
-                    onPressed: _continueToPhotos, // Original routing preserved[cite: 7]
+                    onPressed: _continueToFindings,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       backgroundColor: Colors.transparent, 
@@ -274,7 +295,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
                         child: Text(
-                          'Continue to photo evidence',
+                          'Continue to findings',
                           style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
                         ),
                       ),
