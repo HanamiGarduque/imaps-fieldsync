@@ -1,56 +1,51 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
-import '../services/auth_service.dart';
-import 'login_screen.dart';
-import 'parcel_detail_screen.dart';
+import 'parcel_detail_screen.dart'; // Preserved routing
+import 'home_dashboard_screen.dart';
+import 'updates_screen.dart';
+import 'profile_screen.dart';
 
 /// ==================================================================
-/// AWARD-WINNING DESIGN TOKENS
+/// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
 /// ==================================================================
-class AppColors {
-  // Premium Gradient Header (Deep Indigo to Vibrant Purple)
-  static const headerDark = Color(0xFF0F172A);
-  static const headerAccent = Color(0xFF4F46E5);
+class InsightTheme {
+  static const Color bg = Color(0xFFF2F4FB);
+  static const Color surface = Colors.white;
+  static const Color surface2 = Color(0xFFEEF1FC);
   
-  // Clean Workspace Background
-  static const bgLight = Color(0xFFF8FAFC);
-  static const surface = Colors.white;
+  static const Color ink = Color(0xFF12141F);
+  static const Color ink2 = Color(0xFF666C82);
+  static const Color ink3 = Color(0xFFA2A7BC);
   
-  // Status Colors (Soft & Accessible)
-  static const statusAssigned = Color(0xFFF59E0B);
-  static const statusAssignedBg = Color(0xFFFEF3C7);
-  static const statusProgress = Color(0xFF10B981);
-  static const statusProgressBg = Color(0xFFD1FAE5);
+  static const Color blue1 = Color(0xFF3D6BFF);
+  static const Color blue2 = Color(0xFF0B2FBF);
+  static const Color blueTint = Color(0xFFE7EDFF);
+  static const Color blueInk = Color(0xFF1A3FC4);
   
-  // Typography Hierarchy
-  static const textDark = Color(0xFF0F172A);
-  static const textSecondary = Color(0xFF475569);
-  static const textMuted = Color(0xFF94A3B8);
-  static const divider = Color(0xFFE2E8F0);
-}
-
-class AppText {
-  // Plus Jakarta Sans provides an incredibly premium, modern tech aesthetic
-  static TextStyle display(double size, {FontWeight w = FontWeight.w700, Color? c, double? ls}) => 
-      GoogleFonts.plusJakartaSans(fontSize: size, fontWeight: w, color: c ?? Colors.white, letterSpacing: ls ?? -0.5);
+  static const Color green = Color(0xFF12A150);
+  static const Color greenTint = Color(0xFFE3F8EC);
+  static const Color greenInk = Color(0xFF0D7A3C);
+  
+  static const Color line = Color(0x12141628); // ~rgba(20,22,40,0.07)
+  
+  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
+      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
       
-  static TextStyle body(double size, {FontWeight w = FontWeight.w400, Color? c}) => 
-      GoogleFonts.plusJakartaSans(fontSize: size, fontWeight: w, color: c ?? AppColors.textSecondary);
-      
-  static TextStyle label(double size, {FontWeight w = FontWeight.w700, Color? c, double? ls}) => 
-      GoogleFonts.plusJakartaSans(fontSize: size, fontWeight: w, color: c ?? AppColors.textMuted, letterSpacing: ls ?? 1.2);
+  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
+      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
 }
 
 /// ==================================================================
-/// MODELS (Preserved exactly)
+/// MODEL (100% Original - Preserved)
 /// ==================================================================
 class TaskItem {
   final String name;
   final String location;
-  final String parcels;
+  final String parcels; // Used as time/subtitle
   final String status;
   final String inspectionNo;
 
@@ -64,364 +59,201 @@ class TaskItem {
 }
 
 /// ==================================================================
-/// PREMIUM TASKS SCREEN
+/// TASKS SCREEN (Matches Prototype Screen 5)
 /// ==================================================================
-class TasksScreen extends StatelessWidget {
+class TasksScreen extends StatefulWidget {
   final UserProfile profile;
 
   const TasksScreen({super.key, required this.profile});
 
-  Future<void> _handleLogout(BuildContext context) async {
-    HapticFeedback.mediumImpact();
-    await AuthService.signOut();
-    if (context.mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
-    }
-  }
-
   @override
-  Widget build(BuildContext context) {
-    // 100% Original Dummy Data Preserved
-    final assigned = [
-      TaskItem(
-        name: 'Maria Santos',
-        location: 'San Roque',
-        parcels: '2 parcels',
-        status: 'Assigned',
-        inspectionNo: 'FI-20260608001',
-      ),
-      TaskItem(
-        name: 'Ralph Ramos',
-        location: 'Malaya',
-        parcels: '2 parcels',
-        status: 'Assigned',
-        inspectionNo: 'FI-20260608002',
-      ),
-    ];
-
-    final inProgress = [
-      TaskItem(
-        name: 'Juan Rodriguez',
-        location: 'Alupay',
-        parcels: '3 parcels',
-        status: 'In Progress',
-        inspectionNo: 'FI-20260608003',
-      ),
-    ];
-
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
-
-    return Scaffold(
-      backgroundColor: AppColors.bgLight,
-      body: Column(
-        children: [
-          // 1. FLAWLESS OVERLAP ARCHITECTURE
-          // This Stack guarantees the search bar perfectly overlaps the boundary
-          // without pushing into the text below it.
-          Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.bottomCenter,
-            children: [
-              // The Premium Gradient Header
-              Container(
-                width: double.infinity,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [AppColors.headerDark, AppColors.headerAccent],
-                  ),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(32),
-                    bottomRight: Radius.circular(32),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    // 56px bottom padding gives the header breathing room
-                    // ABOVE where the search bar will cut across it.
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 56),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Top Navigation Row
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 8, height: 8,
-                                  decoration: BoxDecoration(
-                                    color: Colors.greenAccent, 
-                                    shape: BoxShape.circle,
-                                    boxShadow: [BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.5), blurRadius: 8)],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text('iMAPS-FieldSync', style: AppText.body(13, c: Colors.white, w: FontWeight.w600)),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                // Sleek Glass Pill
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                                  ),
-                                  child: Text('Offline Mode', style: AppText.body(11, c: Colors.white, w: FontWeight.w600)),
-                                ),
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  icon: const Icon(Icons.logout_rounded, color: Colors.white70, size: 22),
-                                  onPressed: () => _handleLogout(context),
-                                  constraints: const BoxConstraints(),
-                                  padding: EdgeInsets.zero,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        
-                        const SizedBox(height: 32),
-                        
-                        Text('My Tasks', style: AppText.display(32)),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Welcome back, ${profile.fullName}',
-                          style: AppText.body(15, c: Colors.white.withValues(alpha: 0.7)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              
-              // Floating Search Bar positioned exactly halfway over the edge
-              Positioned(
-                bottom: -28, // Exactly half of the 56px container height
-                left: 24,
-                right: 24,
-                child: Container(
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.headerDark.withValues(alpha: 0.08),
-                        blurRadius: 24,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: TextField(
-                    style: AppText.body(15, c: AppColors.textDark, w: FontWeight.w600),
-                    decoration: InputDecoration(
-                      hintText: 'Search Inspection No. or Applicant...',
-                      hintStyle: AppText.body(14, c: AppColors.textMuted),
-                      prefixIcon: const Icon(Icons.search_rounded, color: AppColors.textMuted),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 18),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          
-          // Space to clear the bottom half of the search bar + top padding for the list
-          const SizedBox(height: 48),
-
-          // 2. Beautifully Structured Task List
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              physics: const BouncingScrollPhysics(),
-              children: [
-                _StaggeredReveal(
-                  delay: 100,
-                  child: Text('ASSIGNED', style: AppText.label(12, c: AppColors.headerAccent)),
-                ),
-                const SizedBox(height: 12),
-                ...assigned.map((task) => _StaggeredReveal(delay: 200, child: _PremiumTaskCard(task: task))),
-                
-                const SizedBox(height: 28),
-                
-                _StaggeredReveal(
-                  delay: 300,
-                  child: Text('IN PROGRESS', style: AppText.label(12, c: AppColors.headerAccent)),
-                ),
-                const SizedBox(height: 12),
-                ...inProgress.map((task) => _StaggeredReveal(delay: 400, child: _PremiumTaskCard(task: task))),
-                
-                const SizedBox(height: 40), // Safe scroll space at bottom
-              ],
-            ),
-          ),
-        ],
-      ),
-      
-      // 3. Premium Bottom Navigation
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          boxShadow: [
-            BoxShadow(color: AppColors.headerDark.withValues(alpha: 0.04), blurRadius: 24, offset: const Offset(0, -4)),
-          ],
-        ),
-        child: SafeArea(
-          top: false,
-          child: BottomNavigationBar(
-            currentIndex: 0,
-            backgroundColor: AppColors.surface,
-            selectedItemColor: AppColors.headerAccent,
-            unselectedItemColor: AppColors.textMuted,
-            selectedLabelStyle: AppText.label(10, c: AppColors.headerAccent, ls: 0.5),
-            unselectedLabelStyle: AppText.label(10, c: AppColors.textMuted, ls: 0.5),
-            type: BottomNavigationBarType.fixed,
-            elevation: 0,
-            items: const [
-              BottomNavigationBarItem(icon: Padding(padding: EdgeInsets.only(bottom: 6, top: 8), child: Icon(Icons.space_dashboard_rounded, size: 22)), label: 'TASKS'),
-              BottomNavigationBarItem(icon: Padding(padding: EdgeInsets.only(bottom: 6, top: 8), child: Icon(Icons.grid_view_rounded, size: 22)), label: 'SERVICES'),
-              BottomNavigationBarItem(icon: Padding(padding: EdgeInsets.only(bottom: 6, top: 8), child: Icon(Icons.notifications_none_rounded, size: 22)), label: 'ALERTS'),
-              BottomNavigationBarItem(icon: Padding(padding: EdgeInsets.only(bottom: 6, top: 8), child: Icon(Icons.person_outline_rounded, size: 22)), label: 'PROFILE'),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  State<TasksScreen> createState() => _TasksScreenState();
 }
 
-/// UI/UX Award-Winning Card Component
-class _PremiumTaskCard extends StatelessWidget {
-  final TaskItem task;
-  const _PremiumTaskCard({required this.task});
-
-  Color get _statusColor => task.status == 'Assigned' ? AppColors.statusAssigned : AppColors.statusProgress;
-  Color get _statusBg => task.status == 'Assigned' ? AppColors.statusAssignedBg : AppColors.statusProgressBg;
+class _TasksScreenState extends State<TasksScreen> {
+  int _currentNavIndex = 1; // 1 = Tasks
+  int _currentTabIndex = 1; // Default to 'Ongoing 1' as per prototype
 
   @override
   Widget build(BuildContext context) {
-    // Generate initials for the avatar
-    final initials = task.name.trim().split(' ').map((e) => e[0]).take(2).join('');
+    // Exact Content Mapped to the Original Model to match visuals
+    final heroTask = TaskItem(
+      name: 'Applicant 4',
+      location: 'Warehouse 7',
+      parcels: 'Industrial Park · Checklist in progress',
+      status: 'Ongoing · 60%',
+      inspectionNo: 'FI-004',
+    );
 
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task)),
-        );
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.divider.withValues(alpha: 0.5)),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.headerDark.withValues(alpha: 0.03), 
-              blurRadius: 10, 
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
+    final gridTasks = [
+      TaskItem(
+        name: 'Applicant 1',
+        location: 'Lot 22-B, Maligaya',
+        parcels: '1:30 PM',
+        status: 'Pending',
+        inspectionNo: 'FI-001',
+      ),
+      TaskItem(
+        name: 'Applicant 2',
+        location: 'Unit 4, Rizal Complex',
+        parcels: '3:00 PM',
+        status: 'Pending',
+        inspectionNo: 'FI-002',
+      ),
+      TaskItem(
+        name: 'Applicant 3',
+        location: '45 Acacia St.',
+        parcels: 'Tomorrow, 9 AM',
+        status: 'Scheduled',
+        inspectionNo: 'FI-003',
+      ),
+      TaskItem(
+        name: 'Applicant 5',
+        location: '12 Mabini Ave.',
+        parcels: 'Yesterday',
+        status: 'Done',
+        inspectionNo: 'FI-005',
+      ),
+    ];
+
+    return Scaffold(
+      backgroundColor: InsightTheme.bg,
+      extendBody: true, // Content scrolls behind bottom nav
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 120),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ----------------------------------------------------
+              // 1. TOP BAR (Title & Filter Icon)
+              // ----------------------------------------------------
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Modern Circular Avatar
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.headerAccent.withValues(alpha: 0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: Text(
-                        initials,
-                        style: AppText.body(16, c: AppColors.headerAccent, w: FontWeight.w700),
-                      ),
-                    ),
+                  Text(
+                    'My Tasks',
+                    style: InsightTheme.poppins(20, w: FontWeight.w700),
                   ),
-                  const SizedBox(width: 14),
-                  
-                  // Name and Location
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          task.name,
-                          style: AppText.display(16, c: AppColors.textDark, ls: 0),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on_rounded, color: AppColors.textMuted, size: 14),
-                            const SizedBox(width: 4),
-                            Text(
-                              task.location,
-                              style: AppText.body(13, c: AppColors.textSecondary, w: FontWeight.w500),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Status Pill
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: _statusBg,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      task.status.toUpperCase(),
-                      style: AppText.label(10, c: _statusColor, ls: 0.5),
-                    ),
-                  ),
+                  _TopIconBtn(icon: Icons.filter_list_rounded, onTap: () {}),
                 ],
               ),
-              
-              const SizedBox(height: 20),
-              
-              // Bottom Data Tags
-              Row(
-                children: [
-                  _DataTag(icon: Icons.layers_outlined, text: task.parcels),
-                  const SizedBox(width: 12),
-                  _DataTag(icon: Icons.tag_rounded, text: task.inspectionNo),
-                  const Spacer(),
-                  // Premium Action Indicator
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.bgLight,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.divider),
-                    ),
-                    child: const Icon(Icons.arrow_forward_rounded, color: AppColors.headerAccent, size: 16),
-                  ),
-                ],
+              const SizedBox(height: 24),
+
+              // ----------------------------------------------------
+              // 2. TABS
+              // ----------------------------------------------------
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                clipBehavior: Clip.none,
+                child: Row(
+                  children: [
+                    _TabPill(text: "Pending 3", isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                    const SizedBox(width: 8),
+                    _TabPill(text: "Ongoing 1", isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
+                    const SizedBox(width: 8),
+                    _TabPill(text: "Scheduled 4", isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
+                    const SizedBox(width: 8),
+                    _TabPill(text: "Completed 12", isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // ----------------------------------------------------
+              // 3. ONGOING HERO CARD
+              // ----------------------------------------------------
+              _HeroTaskCard(
+                task: heroTask,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: heroTask)));
+                },
+              ),
+              const SizedBox(height: 16),
+
+              // ----------------------------------------------------
+              // 4. TASK GRID
+              // ----------------------------------------------------
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  childAspectRatio: 1.15,
+                ),
+                itemCount: gridTasks.length,
+                itemBuilder: (context, index) {
+                  return _GridTaskCard(
+                    task: gridTasks[index],
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: gridTasks[index])));
+                    },
+                  );
+                },
               ),
             ],
+          ),
+        ),
+      ),
+
+      // ----------------------------------------------------
+      // 5. FLOATING BOTTOM NAVIGATION (Glassmorphic)
+      // ----------------------------------------------------
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white.withOpacity(0.65)),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
+                    BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, 16)),
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _BottomNavItem(
+                      icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0, 
+                      onTap: () { 
+                        setState(() => _currentNavIndex = 0); 
+                        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile))); 
+                      }
+                    ),
+                    _BottomNavItem(
+                      icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1, 
+                      onTap: () => setState(() => _currentNavIndex = 1)
+                    ),
+                    _BottomNavItem(
+                      icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3, 
+                      onTap: () { 
+                        setState(() => _currentNavIndex = 3); 
+                        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const UpdatesScreen())); 
+                      }
+                    ),
+                    _BottomNavItem(
+                      icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4, 
+                      onTap: () { 
+                        setState(() => _currentNavIndex = 4); 
+                        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile))); 
+                      }
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -429,63 +261,277 @@ class _PremiumTaskCard extends StatelessWidget {
   }
 }
 
-class _DataTag extends StatelessWidget {
+/// ==================================================================
+/// COMPONENT WIDGETS
+/// ==================================================================
+
+class _TopIconBtn extends StatelessWidget {
   final IconData icon;
-  final String text;
-  const _DataTag({required this.icon, required this.text});
+  final VoidCallback onTap;
+
+  const _TopIconBtn({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.bgLight,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: AppColors.textSecondary, size: 14),
-          const SizedBox(width: 6),
-          Text(text, style: AppText.body(12, c: AppColors.textSecondary, w: FontWeight.w600)),
-        ],
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 42, height: 42,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.65)),
+          boxShadow: const [BoxShadow(color: InsightTheme.line, blurRadius: 14, offset: Offset(0, 4))],
+        ),
+        child: Icon(icon, color: InsightTheme.ink, size: 22),
       ),
     );
   }
 }
 
-/// ==================================================================
-/// ANIMATIONS
-/// ==================================================================
-class _StaggeredReveal extends StatefulWidget {
-  final Widget child;
-  final int delay;
-  const _StaggeredReveal({required this.child, required this.delay});
-  @override
-  State<_StaggeredReveal> createState() => _StaggeredRevealState();
-}
+class _TabPill extends StatelessWidget {
+  final String text;
+  final bool isActive;
+  final VoidCallback onTap;
 
-class _StaggeredRevealState extends State<_StaggeredReveal> {
-  bool _visible = false;
-  @override
-  void initState() {
-    super.initState();
-    Future.delayed(Duration(milliseconds: widget.delay), () {
-      if (mounted) setState(() => _visible = true);
-    });
-  }
+  const _TabPill({required this.text, required this.isActive, required this.onTap});
+
   @override
   Widget build(BuildContext context) {
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 600),
-      opacity: _visible ? 1.0 : 0.0,
-      curve: Curves.easeOutCubic,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: isActive ? const LinearGradient(
+            colors: [InsightTheme.blue1, InsightTheme.blue2],
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
+          ) : null,
+          color: isActive ? null : InsightTheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: isActive ? null : Border.all(color: InsightTheme.line),
+          boxShadow: isActive ? [
+            BoxShadow(color: InsightTheme.blue1.withOpacity(0.28), blurRadius: 18, offset: const Offset(0, 8))
+          ] : [
+            const BoxShadow(color: InsightTheme.line, blurRadius: 2, offset: Offset(0, 1))
+          ],
+        ),
+        child: Text(
+          text, 
+          style: InsightTheme.inter(
+            12, 
+            w: FontWeight.w600, 
+            c: isActive ? Colors.white : InsightTheme.ink2
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroTaskCard extends StatelessWidget {
+  final TaskItem task;
+  final VoidCallback onTap;
+
+  const _HeroTaskCard({required this.task, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(26),
+          gradient: const LinearGradient(
+            colors: [InsightTheme.blue1, InsightTheme.blue2],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          boxShadow: [
+            BoxShadow(color: InsightTheme.blue1.withOpacity(0.30), blurRadius: 32, offset: const Offset(0, 16))
+          ],
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Stack(
+          children: [
+            // Decorative background circle
+            Positioned(
+              right: -50, top: -50,
+              child: Container(
+                width: 160, height: 160,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.08),
+                ),
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.25),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        task.status, 
+                        style: InsightTheme.inter(10, w: FontWeight.w600, c: Colors.white)
+                      ),
+                    ),
+                    Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.22),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white.withOpacity(0.3)),
+                      ),
+                      child: const Icon(Icons.bookmark_outline_rounded, color: Colors.white, size: 18),
+                    )
+                  ],
+                ),
+                const SizedBox(height: 36),
+                Text(task.location, style: InsightTheme.poppins(18, w: FontWeight.w700, c: Colors.white)),
+                const SizedBox(height: 6),
+                Text(task.parcels, style: InsightTheme.inter(12, c: Colors.white.withOpacity(0.85))),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GridTaskCard extends StatelessWidget {
+  final TaskItem task;
+  final VoidCallback onTap;
+
+  const _GridTaskCard({required this.task, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isDone = task.status == 'Done';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: InsightTheme.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: InsightTheme.line),
+          boxShadow: const [BoxShadow(color: InsightTheme.line, blurRadius: 2, offset: Offset(0, 1))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Icon Container
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: isDone ? InsightTheme.greenTint : InsightTheme.blueTint,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.bookmark_outline_rounded, 
+                    size: 16, 
+                    color: isDone ? InsightTheme.greenInk : InsightTheme.blueInk
+                  ),
+                ),
+                // Status Pill
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isDone ? InsightTheme.greenTint : InsightTheme.surface2,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    task.status,
+                    style: InsightTheme.inter(
+                      10, 
+                      w: FontWeight.w600, 
+                      c: isDone ? InsightTheme.greenInk : InsightTheme.ink2
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  task.location, 
+                  style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
+                  maxLines: 1, 
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  task.parcels, 
+                  style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                  maxLines: 1, 
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomNavItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _BottomNavItem({required this.icon, required this.label, required this.isActive, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeOutCubic,
-        transform: Matrix4.translationValues(0, _visible ? 0 : 15, 0),
-        child: widget.child,
+        duration: const Duration(milliseconds: 200),
+        padding: EdgeInsets.symmetric(horizontal: isActive ? 16 : 10, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: isActive ? const LinearGradient(
+            colors: [InsightTheme.blue1, InsightTheme.blue2],
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
+          ) : null,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: isActive ? [
+            BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 6))
+          ] : [],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: isActive ? Colors.white : InsightTheme.ink3, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              label, 
+              style: InsightTheme.inter(
+                10, 
+                w: FontWeight.w600, 
+                c: isActive ? Colors.white : InsightTheme.ink3
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

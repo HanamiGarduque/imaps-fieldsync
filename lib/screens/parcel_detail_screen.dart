@@ -1,279 +1,309 @@
-import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'tasks_screen.dart'; // Ensure TaskItem is accessible here
+import 'site_map_screen.dart';
+import 'gps_verification_screen.dart';
+import 'inspection_checklist_screen.dart';
 import 'capture_photo_screen.dart';
+import 'field_findings_screen.dart';
+import 'review_submit_screen.dart';
 
-/// Design Tokens
-class AppColors {
-  static const headerDark = Color(0xFF0F172A);
-  static const headerAccent = Color(0xFF4F46E5);
-  static const bgLight = Color(0xFFF8FAFC);
-  static const surface = Colors.white;
-  static const textDark = Color(0xFF0F172A);
-  static const textSecondary = Color(0xFF475569);
-  static const divider = Color(0xFFE2E8F0);
-  static const statusProgress = Color(0xFF10B981);
+/// ==================================================================
+/// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
+/// ==================================================================
+class InsightTheme {
+  static const Color bg = Color(0xFFF2F4FB);
+  static const Color surface = Colors.white;
+  static const Color surface2 = Color(0xFFEEF1FC);
+  
+  static const Color ink = Color(0xFF12141F);
+  static const Color ink2 = Color(0xFF666C82);
+  static const Color ink3 = Color(0xFFA2A7BC);
+  
+  static const Color blue1 = Color(0xFF3D6BFF);
+  static const Color blue2 = Color(0xFF0B2FBF);
+  static const Color blueTint = Color(0xFFE7EDFF);
+  static const Color blueInk = Color(0xFF1A3FC4);
+  
+  static const Color line = Color(0x12141628); // ~rgba(20,22,40,0.07)
+  static const Color lineStrong = Color(0x21141628); // ~rgba(20,22,40,0.13)
+  
+  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
+      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
+      
+  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
+      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
+      
+  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
+      GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
 }
 
-class AppText {
-  static TextStyle display(double size, {FontWeight w = FontWeight.w700, Color? c}) => 
-      GoogleFonts.plusJakartaSans(fontSize: size, fontWeight: w, color: c ?? Colors.white, letterSpacing: -0.5);
-  static TextStyle body(double size, {FontWeight w = FontWeight.w500, Color? c}) => 
-      GoogleFonts.plusJakartaSans(fontSize: size, fontWeight: w, color: c ?? AppColors.textSecondary);
-}
-
-class ParcelDetailScreen extends StatefulWidget {
+/// ==================================================================
+/// SCREEN 6 — INSPECTION DETAILS
+/// ==================================================================
+class ParcelDetailScreen extends StatelessWidget {
   final TaskItem task;
+  
   const ParcelDetailScreen({super.key, required this.task});
 
   @override
-  State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
-}
-
-class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
-  // Original state preserved[cite: 4]
-  String _boundaryStatus = 'Matches recorded area';
-  String _landUseStatus = 'Consistent with zoning';
-  final List<String> _photos = [];
-
-  @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
     return Scaffold(
-      backgroundColor: AppColors.bgLight,
-      body: Column(
+      backgroundColor: InsightTheme.bg,
+      body: Stack(
         children: [
-          // 1. Premium Gradient Header
-          Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [AppColors.headerDark, AppColors.headerAccent],
-              ),
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(32),
-                bottomRight: Radius.circular(32),
+          // ----------------------------------------------------
+          // BACKGROUND GRADIENT BLOBS (Matching HTML ::before / ::after)
+          // ----------------------------------------------------
+          Positioned(
+            top: -60,
+            right: -60,
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+              child: Container(
+                width: 260,
+                height: 260,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: InsightTheme.blue1.withOpacity(0.20),
+                ),
               ),
             ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 24, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Top Bar
-                    Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        Row(
-                          children: [
-                            Container(
-                              width: 8, height: 8,
-                              decoration: BoxDecoration(
-                                color: Colors.greenAccent, 
-                                shape: BoxShape.circle,
-                                boxShadow: [BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.5), blurRadius: 8)],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text('iMAPS-FieldSync', style: AppText.body(13, c: Colors.white, w: FontWeight.w600)),
-                          ],
-                        ),
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                          ),
-                          child: Text('Offline Mode', style: AppText.body(11, c: Colors.white, w: FontWeight.w600)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    // Titles
-                    Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(widget.task.name, style: AppText.display(28)),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Inspection No: ${widget.task.inspectionNo}',
-                            style: AppText.body(14, c: Colors.white.withValues(alpha: 0.7)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+          ),
+          Positioned(
+            bottom: -80,
+            left: -80,
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+              child: Container(
+                width: 220,
+                height: 220,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: InsightTheme.blue1.withOpacity(0.10),
                 ),
               ),
             ),
           ),
 
-          // 2. Main Content Body
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-              physics: const BouncingScrollPhysics(),
+          // ----------------------------------------------------
+          // MAIN CONTENT
+          // ----------------------------------------------------
+          SafeArea(
+            child: Column(
               children: [
-                // Modern Map Placeholder
-                Container(
-                  height: 160,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: AppColors.headerAccent.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: AppColors.headerAccent.withValues(alpha: 0.1)),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.map_rounded, color: AppColors.headerAccent.withValues(alpha: 0.5), size: 40),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Map pinpointing parcel location',
-                        style: AppText.body(14, c: AppColors.headerAccent.withValues(alpha: 0.8), w: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // Forms
-                Text('Actual lot boundaries vs 300 sqm', style: AppText.body(14, c: AppColors.textDark, w: FontWeight.w700)),
-                const SizedBox(height: 12),
-                _buildModernDropdown(
-                  value: _boundaryStatus,
-                  items: const ['Matches recorded area', 'Exceeds recorded area', 'Below recorded area'],
-                  onChanged: (v) => setState(() => _boundaryStatus = v!), // State logic preserved[cite: 4]
-                ),
-                
-                const SizedBox(height: 24),
-
-                Text('Land-use consistency', style: AppText.body(14, c: AppColors.textDark, w: FontWeight.w700)),
-                const SizedBox(height: 12),
-                _buildModernDropdown(
-                  value: _landUseStatus,
-                  items: const ['Consistent with zoning', 'Inconsistent with zoning', 'Needs further review'],
-                  onChanged: (v) => setState(() => _landUseStatus = v!), // State logic preserved[cite: 4]
-                ),
-                
-                const SizedBox(height: 32),
-
-                // Photo Section[cite: 4]
-                Text('Site Photos', style: AppText.body(14, c: AppColors.textDark, w: FontWeight.w700)),
-                const SizedBox(height: 12),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
+                // TOP BAR
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      // Render captured photos[cite: 4]
-                      ..._photos.take(2).map((p) => Container(
-                        width: 80, height: 80,
-                        margin: const EdgeInsets.only(right: 12),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))],
-                          image: DecorationImage(image: FileImage(File(p)), fit: BoxFit.cover),
-                        ),
-                      )),
-                      // Render placeholders if empty[cite: 4]
-                      if (_photos.isEmpty) ...[
-                        _photoPlaceholder(),
-                        const SizedBox(width: 12),
-                        _photoPlaceholder(),
-                        const SizedBox(width: 12),
-                      ],
-                      // Add Photo Button[cite: 4]
-                      GestureDetector(
-                        onTap: () async {
-                          final result = await Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const CapturePhotoScreen()),
-                          );
-                          // Exact original condition preserved[cite: 4]
-                          if (result != null && result is Map && result['photoPath'] != null) {
-                            setState(() => _photos.add(result['photoPath'] as String));
-                          }
-                        },
-                        child: Container(
-                          width: 80, height: 80,
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppColors.divider),
-                          ),
-                          child: const Icon(Icons.add_a_photo_rounded, color: AppColors.headerAccent),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 40),
-
-                // Offline sync notice
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFFDE68A)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.cloud_off_rounded, color: Color(0xFFD97706), size: 24),
+                      _GlassBackButton(onTap: () => Navigator.pop(context)),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Saved locally. Will sync to iMAPS intranet when connection returns.',
-                          style: AppText.body(13, c: const Color(0xFFB45309), w: FontWeight.w600),
+                          'Inspection details',
+                          style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
                         ),
                       ),
                     ],
                   ),
                 ),
-                
-                const SizedBox(height: 24),
 
-                // Action Button[cite: 4]
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Parcel marked complete (local).')), // Original logic[cite: 4]
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.headerAccent,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.check_circle_outline_rounded, size: 20),
-                        const SizedBox(width: 8),
-                        Text('Mark parcel complete', style: AppText.body(15, c: Colors.white, w: FontWeight.w700)),
-                      ],
-                    ),
+                // PROGRESS BAR
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        height: 6,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface2,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: 0.166, // 16.6% Step 1 of 6
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [InsightTheme.blue1, InsightTheme.blue2],
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text('STEP 1 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
+                          Text(' — Site verification', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // SCROLLABLE CONTENT
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                    physics: const BouncingScrollPhysics(),
+                    children: [
+                      // DETAILS CARD
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1)),
+                            BoxShadow(color: Color(0x0F141628), blurRadius: 30, offset: Offset(0, 14)),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(task.location, style: InsightTheme.inter(15, w: FontWeight.w600, c: InsightTheme.ink)),
+                            const SizedBox(height: 4),
+                            Text('Ref. no. ${task.inspectionNo}', style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
+                            const SizedBox(height: 12),
+                            
+                            _buildListRow('Applicant', task.name),
+                            _buildListRow('Project type', 'Residential reclassification'),
+                            _buildListRow('Declared land use', 'Single-detached residential', isLast: true),
+                          ],
+                        ),
+                      ),
+                      
+                      const SizedBox(height: 18),
+                      
+                      // LOCATION SECTION LABEL
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 10, height: 2,
+                            decoration: BoxDecoration(color: InsightTheme.blue1, borderRadius: BorderRadius.circular(1)),
+                          ),
+                          const SizedBox(width: 7),
+                          Text('LOCATION', style: InsightTheme.jetBrains(10, w: FontWeight.w500, ls: 1.2)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // LOCATION MAP CARD
+                      Container(
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1)),
+                            BoxShadow(color: Color(0x0F141628), blurRadius: 30, offset: Offset(0, 14)),
+                          ],
+                        ),
+                        clipBehavior: Clip.hardEdge,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Gradient Map Placeholder
+                            Container(
+                              height: 100,
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [Color(0xFFE6EAFB), Color(0xFFD5DDF9)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                              ),
+                            ),
+                            // Map Details
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              child: Text(
+                                'Brgy. Maligaya, Zone 3 · 340m from main road',
+                                style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      // INSPECTION STEPS TIMELINE (premium glass card)
+                      _StepsTimelineCard(
+                        steps: [
+                          _StepInfo(
+                            index: 1,
+                            title: 'Site verification',
+                            icon: Icons.map_rounded,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const SiteMapScreen()),
+                            ),
+                          ),
+                          _StepInfo(
+                            index: 2,
+                            title: 'GPS verification',
+                            icon: Icons.gps_fixed_rounded,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const GpsVerificationScreen()),
+                            ),
+                          ),
+                          _StepInfo(
+                            index: 3,
+                            title: 'Checklist',
+                            icon: Icons.checklist_rounded,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const InspectionChecklistScreen()),
+                            ),
+                          ),
+                          _StepInfo(
+                            index: 4,
+                            title: 'Photos',
+                            icon: Icons.photo_camera_rounded,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const CapturePhotoScreen()),
+                            ),
+                          ),
+                          _StepInfo(
+                            index: 5,
+                            title: 'Findings',
+                            icon: Icons.fact_check_rounded,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const FieldFindingsScreen()),
+                            ),
+                          ),
+                          _StepInfo(
+                            index: 6,
+                            title: 'Review & submit',
+                            icon: Icons.task_alt_rounded,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ReviewSubmitScreen(result: 'With discrepancy'),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -284,41 +314,284 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     );
   }
 
-  Widget _photoPlaceholder() {
+  Widget _buildListRow(String label, String value, {bool isLast = false}) {
     return Container(
-      width: 80, height: 80,
+      padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
-        color: AppColors.bgLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.divider),
+        border: isLast ? null : const Border(bottom: BorderSide(color: InsightTheme.line)),
       ),
-      child: const Icon(Icons.image_outlined, color: AppColors.textSecondary),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
+          const SizedBox(height: 2),
+          Text(value, style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink)),
+        ],
+      ),
     );
   }
+}
 
-  Widget _buildModernDropdown({
-    required String value,
-    required List<String> items,
-    required ValueChanged<String?> onChanged,
-  }) {
+/// ==================================================================
+/// STEP TIMELINE — premium, clickable inspection workflow tracker
+/// ==================================================================
+class _StepInfo {
+  final int index;
+  final String title;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _StepInfo({
+    required this.index,
+    required this.title,
+    required this.icon,
+    required this.onTap,
+  });
+}
+
+class _StepsTimelineCard extends StatelessWidget {
+  final List<_StepInfo> steps;
+  // Which step is considered "current" — the flow always starts at Site verification.
+  static const int currentStep = 1;
+
+  const _StepsTimelineCard({required this.steps});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.divider),
-        boxShadow: [BoxShadow(color: AppColors.headerDark.withValues(alpha: 0.02), blurRadius: 8, offset: const Offset(0, 2))],
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: const [
+          BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1)),
+          BoxShadow(color: Color(0x14141628), blurRadius: 36, offset: Offset(0, 16)),
+        ],
       ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          isExpanded: true,
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.textSecondary),
-          dropdownColor: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          style: AppText.body(15, c: AppColors.textDark, w: FontWeight.w600),
-          items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-          onChanged: onChanged,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // HEADER
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [InsightTheme.blue1, InsightTheme.blue2],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(color: InsightTheme.blue1.withOpacity(0.30), blurRadius: 10, offset: const Offset(0, 4)),
+                    ],
+                  ),
+                  child: const Icon(Icons.route_rounded, size: 15, color: Colors.white),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Inspection workflow', style: InsightTheme.poppins(13.5, w: FontWeight.w700, c: InsightTheme.ink)),
+                      const SizedBox(height: 1),
+                      Text('Tap a step to jump in', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Column(
+              children: List.generate(steps.length, (i) {
+                final step = steps[i];
+                final isLast = i == steps.length - 1;
+                final isCurrent = step.index == currentStep;
+                final isDone = step.index < currentStep;
+                return _StepRow(
+                  step: step,
+                  isLast: isLast,
+                  isCurrent: isCurrent,
+                  isDone: isDone,
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepRow extends StatelessWidget {
+  final _StepInfo step;
+  final bool isLast;
+  final bool isCurrent;
+  final bool isDone;
+
+  const _StepRow({
+    required this.step,
+    required this.isLast,
+    required this.isCurrent,
+    required this.isDone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final Color badgeColor = isCurrent
+        ? InsightTheme.blue1
+        : isDone
+            ? InsightTheme.blue1
+            : InsightTheme.surface2;
+    final Color labelColor = isCurrent ? InsightTheme.ink : InsightTheme.ink;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          step.onTap();
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // BADGE + CONNECTOR LINE
+                Column(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: isCurrent || isDone
+                            ? const LinearGradient(
+                                colors: [InsightTheme.blue1, InsightTheme.blue2],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                            : null,
+                        color: isCurrent || isDone ? null : InsightTheme.surface2,
+                        border: isCurrent || isDone
+                            ? null
+                            : Border.all(color: InsightTheme.lineStrong, width: 1.4),
+                        boxShadow: isCurrent
+                            ? [BoxShadow(color: InsightTheme.blue1.withOpacity(0.30), blurRadius: 12, offset: const Offset(0, 5))]
+                            : null,
+                      ),
+                      child: Icon(
+                        step.icon,
+                        size: 15,
+                        color: isCurrent || isDone ? Colors.white : InsightTheme.ink3,
+                      ),
+                    ),
+                    if (!isLast)
+                      Expanded(
+                        child: Container(
+                          width: 2,
+                          margin: const EdgeInsets.symmetric(vertical: 2),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                (isCurrent || isDone) ? InsightTheme.blue1.withOpacity(0.45) : InsightTheme.line,
+                                InsightTheme.line,
+                              ],
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 14),
+                // LABEL
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: isLast ? 0 : 18, top: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'STEP ${step.index} OF 6',
+                                style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: isCurrent ? InsightTheme.blueInk : InsightTheme.ink3, ls: 0.4),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                step.title,
+                                style: InsightTheme.inter(13.5, w: FontWeight.w600, c: labelColor),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isCurrent)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blueTint,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              'Current',
+                              style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk),
+                            ),
+                          )
+                        else
+                          Icon(Icons.chevron_right_rounded, size: 20, color: InsightTheme.ink3.withOpacity(0.7)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Glassmorphic back button matching the prototype
+class _GlassBackButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _GlassBackButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: Colors.white.withOpacity(0.65)),
+          boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 14, offset: Offset(0, 4))],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(13),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: const Center(
+              child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink),
+            ),
+          ),
         ),
       ),
     );
