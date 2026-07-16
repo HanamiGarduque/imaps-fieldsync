@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/supabase_service.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -37,9 +38,71 @@ class InsightTheme {
 /// ==================================================================
 /// SCREEN 14 — REVIEW & SUBMIT
 /// ==================================================================
-class ReviewSubmitScreen extends StatelessWidget {
+class ReviewSubmitScreen extends StatefulWidget {
   final String result;
-  const ReviewSubmitScreen({super.key, required this.result});
+  final String jobId;
+  final String referenceNo;
+  final String siteName;
+  final int checklistCompleted;
+  final int checklistTotal;
+  final int photoCount;
+
+  const ReviewSubmitScreen({
+    super.key,
+    required this.result,
+    required this.jobId,
+    this.referenceNo = '',
+    this.siteName = '',
+    this.checklistCompleted = 7,
+    this.checklistTotal = 7,
+    this.photoCount = 5,
+  });
+
+  @override
+  State<ReviewSubmitScreen> createState() => _ReviewSubmitScreenState();
+}
+
+class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
+  bool _submitting = false;
+
+  Future<void> _handleSubmit() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    HapticFeedback.heavyImpact();
+
+    try {
+      await SupabaseService.submitInspection(
+        jobId: widget.jobId,
+        findings: widget.result,
+        isCompliant: widget.result == 'Compliant',
+        inspectionResult: widget.result,
+        checklistCompletedCount: widget.checklistCompleted,
+        checklistTotalCount: widget.checklistTotal,
+        photoCount: widget.photoCount,
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => SubmissionSuccessScreen(
+            referenceNo: widget.referenceNo.isNotEmpty
+                ? widget.referenceNo
+                : 'ZN-2026-00871',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Submission failed: $e'),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -144,10 +207,10 @@ class ReviewSubmitScreen extends StatelessWidget {
                         ),
                         child: Column(
                           children: [
-                            _SummaryRow(label: 'Site', value: 'Lot 22-B, Brgy. Maligaya'),
-                            _SummaryRow(label: 'Checklist', value: '7 of 7 items reviewed'),
-                            _SummaryRow(label: 'Photos', value: '5 geotagged photos'),
-                            _SummaryRow(label: 'Result', value: result, isLast: true),
+                            _SummaryRow(label: 'Site', value: widget.siteName.isNotEmpty ? widget.siteName : 'Lot 22-B, Brgy. Maligaya'),
+                            _SummaryRow(label: 'Checklist', value: '${widget.checklistCompleted} of ${widget.checklistTotal} items reviewed'),
+                            _SummaryRow(label: 'Photos', value: '${widget.photoCount} geotagged photo${widget.photoCount == 1 ? '' : 's'}'),
+                            _SummaryRow(label: 'Result', value: widget.result, isLast: true),
                           ],
                         ),
                       ),
@@ -193,35 +256,36 @@ class ReviewSubmitScreen extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
                   child: ElevatedButton(
-                    onPressed: () {
-                      HapticFeedback.heavyImpact();
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (_) => const SubmissionSuccessScreen(referenceNo: 'ZN-2026-00871')
-                        ),
-                      );
-                    },
+                    onPressed: _submitting ? null : _handleSubmit,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: Colors.transparent, 
+                      backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
+                      disabledBackgroundColor: Colors.transparent,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ).copyWith(elevation: WidgetStateProperty.all(0)),
                     child: Ink(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [InsightTheme.blue1, InsightTheme.blue2],
+                        gradient: LinearGradient(
+                          colors: _submitting
+                              ? [InsightTheme.blue1.withOpacity(0.5), InsightTheme.blue2.withOpacity(0.5)]
+                              : [InsightTheme.blue1, InsightTheme.blue2],
                           begin: Alignment.topCenter, end: Alignment.bottomCenter,
                         ),
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
+                        boxShadow: _submitting ? [] : [
                           BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10)),
                         ],
                       ),
                       child: Container(
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
-                        child: Text('Submit inspection', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 22, height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                              )
+                            : Text('Submit inspection', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
                       ),
                     ),
                   ),

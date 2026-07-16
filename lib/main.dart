@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:provider/provider.dart';
 import 'services/supabase_service.dart';
 import 'services/notification_service.dart';
+import 'providers/inspection_provider.dart';
 import 'screens/splash_screen.dart'; // draft screen 1 — new entry point
 
 Future<void> main() async {
@@ -9,7 +11,12 @@ Future<void> main() async {
   await dotenv.load(fileName: ".env");
   await SupabaseService.initialize();
   await NotificationService.initialize();
-  runApp(const MyApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => InspectionProvider(),
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {

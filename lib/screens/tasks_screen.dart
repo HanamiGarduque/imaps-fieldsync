@@ -7,6 +7,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import '../services/db_helper.dart';
 import 'login_screen.dart';
 import 'parcel_detail_screen.dart';
 import 'home_dashboard_screen.dart';
@@ -123,16 +125,71 @@ class _TasksScreenState extends State<TasksScreen> {
       _errorMessage = null;
     });
     try {
-      final jobs = await SupabaseService.fetchMyJobs();
-      setState(() {
-        _allTasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
-        _isLoading = false;
-      });
+      final connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult != ConnectivityResult.none) {
+        // Fetch from cloud and cache locally
+        final jobs = await SupabaseService.fetchMyJobs();
+        await DBHelper.cacheJobs(jobs);
+        if (mounted) {
+          setState(() {
+            _allTasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
+            _isLoading = false;
+          });
+        }
+      } else {
+        // Load from local database
+        final localJobs = await DBHelper.getCachedJobs();
+        if (mounted) {
+          setState(() {
+            _allTasks = localJobs.map((j) {
+              return TaskItem.fromJob({
+                'id': j['id'],
+                'supabase_parcel_id': j['supabase_parcel_id'],
+                'status': j['status'],
+                'local_inspection_id': j['local_inspection_id'],
+                'scheduled_date': j['scheduled_date'],
+                'supabase_zoning_applications': {
+                  'applicant_name': j['applicant_name'],
+                  'barangay': j['barangay'],
+                  'reference_number': j['reference_number'],
+                }
+              });
+            }).toList();
+            _isLoading = false;
+          });
+        }
+      }
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to load tasks: $e';
-        _isLoading = false;
-      });
+      // Fallback to cache if anything fails
+      try {
+        final localJobs = await DBHelper.getCachedJobs();
+        if (mounted) {
+          setState(() {
+            _allTasks = localJobs.map((j) {
+              return TaskItem.fromJob({
+                'id': j['id'],
+                'supabase_parcel_id': j['supabase_parcel_id'],
+                'status': j['status'],
+                'local_inspection_id': j['local_inspection_id'],
+                'scheduled_date': j['scheduled_date'],
+                'supabase_zoning_applications': {
+                  'applicant_name': j['applicant_name'],
+                  'barangay': j['barangay'],
+                  'reference_number': j['reference_number'],
+                }
+              });
+            }).toList();
+            _isLoading = false;
+          });
+        }
+      } catch (dbError) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Failed to load tasks: $e';
+            _isLoading = false;
+          });
+        }
+      }
     }
   }
 
