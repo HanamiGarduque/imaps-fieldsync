@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'tasks_screen.dart';
+import 'inspection_progress.dart';
+
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
 /// ==================================================================
@@ -37,9 +40,33 @@ class InsightTheme {
 /// ==================================================================
 /// SCREEN 14 — REVIEW & SUBMIT
 /// ==================================================================
-class ReviewSubmitScreen extends StatelessWidget {
-  final String result;
-  const ReviewSubmitScreen({super.key, required this.result});
+class ReviewSubmitScreen extends StatefulWidget {
+  final TaskItem task;
+  final List<Map<String, dynamic>> capturedPhotos;
+  final int checklistDone;
+  final int checklistTotal;
+
+  const ReviewSubmitScreen({
+    super.key,
+    required this.task,
+    this.capturedPhotos = const [],
+    this.checklistDone = 0,
+    this.checklistTotal = 0,
+  });
+
+  @override
+  State<ReviewSubmitScreen> createState() => _ReviewSubmitScreenState();
+}
+
+class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
+  static const _statusOptions = [
+    (title: 'Compliant', subtitle: 'Matches declared use, no issues'),
+    (title: 'With discrepancy', subtitle: 'Observed use differs from declared'),
+    (title: 'For review', subtitle: 'Needs supervisor sign-off'),
+    (title: 'Requires reinspection', subtitle: 'Site access or conditions incomplete'),
+  ];
+
+  String _selectedStatus = 'With discrepancy';
 
   @override
   Widget build(BuildContext context) {
@@ -87,7 +114,18 @@ class ReviewSubmitScreen extends StatelessWidget {
                       _GlassBackButton(onTap: () => Navigator.pop(context)),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text('Review & submit', style: InsightTheme.poppins(17, w: FontWeight.w700)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Review & submit', style: InsightTheme.poppins(17, w: FontWeight.w700)),
+                            Text(
+                              widget.task.location,
+                              style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -130,7 +168,8 @@ class ReviewSubmitScreen extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      // SUMMARY CARD
+                      // SUMMARY CARD — reflects what actually happened in steps 1-5
+                      // instead of hardcoded numbers unrelated to this inspection.
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
@@ -144,14 +183,39 @@ class ReviewSubmitScreen extends StatelessWidget {
                         ),
                         child: Column(
                           children: [
-                            _SummaryRow(label: 'Site', value: 'Lot 22-B, Brgy. Maligaya'),
-                            _SummaryRow(label: 'Checklist', value: '7 of 7 items reviewed'),
-                            _SummaryRow(label: 'Photos', value: '5 geotagged photos'),
-                            _SummaryRow(label: 'Result', value: result, isLast: true),
+                            _SummaryRow(label: 'Site', value: widget.task.location),
+                            _SummaryRow(
+                              label: 'Checklist',
+                              value: widget.checklistTotal > 0
+                                  ? '${widget.checklistDone} of ${widget.checklistTotal} items reviewed'
+                                  : 'Not completed',
+                            ),
+                            _SummaryRow(
+                              label: 'Photos',
+                              value: widget.capturedPhotos.isNotEmpty
+                                  ? '${widget.capturedPhotos.length} geotagged photo${widget.capturedPhotos.length == 1 ? '' : 's'}'
+                                  : 'None captured',
+                              isLast: true,
+                            ),
                           ],
                         ),
                       ),
-                      
+
+                      const SizedBox(height: 24),
+
+                      // FINAL STATUS SECTION
+                      const _SectionLabel(title: 'FINAL STATUS'),
+                      const SizedBox(height: 10),
+                      ..._statusOptions.map((o) => _ResultOption(
+                            title: o.title,
+                            subtitle: o.subtitle,
+                            isSelected: _selectedStatus == o.title,
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setState(() => _selectedStatus = o.title);
+                            },
+                          )),
+
                       const SizedBox(height: 24),
 
                       // SIGNATURE SECTION
@@ -195,9 +259,13 @@ class ReviewSubmitScreen extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: () {
                       HapticFeedback.heavyImpact();
+                      InspectionProgress.instance.markStepComplete(6);
                       Navigator.of(context).pushReplacement(
                         MaterialPageRoute(
-                          builder: (_) => const SubmissionSuccessScreen(referenceNo: 'ZN-2026-00871')
+                          builder: (_) => SubmissionSuccessScreen(
+                            referenceNo: widget.task.inspectionNo,
+                            finalStatus: _selectedStatus,
+                          ),
                         ),
                       );
                     },
@@ -240,7 +308,8 @@ class ReviewSubmitScreen extends StatelessWidget {
 /// ==================================================================
 class SubmissionSuccessScreen extends StatelessWidget {
   final String referenceNo;
-  const SubmissionSuccessScreen({super.key, required this.referenceNo});
+  final String finalStatus;
+  const SubmissionSuccessScreen({super.key, required this.referenceNo, required this.finalStatus});
 
   @override
   Widget build(BuildContext context) {
@@ -298,7 +367,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
                     Text('Inspection submitted', style: InsightTheme.poppins(19, w: FontWeight.w700)),
                     const SizedBox(height: 8),
                     Text(
-                      'Reference no. $referenceNo has been recorded and sent for review.',
+                      'Reference no. $referenceNo has been recorded as "$finalStatus" and sent for review.',
                       textAlign: TextAlign.center,
                       style: InsightTheme.inter(12.5, c: InsightTheme.ink2, h: 1.6),
                     ),
@@ -310,6 +379,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
                       child: ElevatedButton(
                         onPressed: () {
                           HapticFeedback.lightImpact();
+                          InspectionProgress.instance.reset();
                           Navigator.of(context).popUntil((route) => route.isFirst);
                         },
                         style: ElevatedButton.styleFrom(
@@ -379,10 +449,6 @@ class _SummaryRow extends StatelessWidget {
               ],
             ),
           ),
-          GestureDetector(
-            onTap: () {},
-            child: Text('Edit', style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
-          ),
         ],
       ),
     );
@@ -405,6 +471,80 @@ class _SectionLabel extends StatelessWidget {
         const SizedBox(width: 7),
         Text(title, style: InsightTheme.jetBrains(10, w: FontWeight.w500, ls: 1.2)),
       ],
+    );
+  }
+}
+
+class _ResultOption extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ResultOption({
+    required this.title,
+    required this.subtitle,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: isSelected
+              ? const LinearGradient(
+                  colors: [InsightTheme.blue1, InsightTheme.blue2],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: isSelected ? null : InsightTheme.surface,
+          border: isSelected ? null : Border.all(color: InsightTheme.line, width: 1.5),
+          boxShadow: isSelected
+              ? [BoxShadow(color: InsightTheme.blue1.withOpacity(0.3), blurRadius: 22, offset: const Offset(0, 10))]
+              : [const BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1))],
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 22, height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? Colors.white.withOpacity(0.9) : Colors.transparent,
+                border: Border.all(
+                  color: isSelected ? Colors.white : InsightTheme.lineStrong,
+                  width: isSelected ? 5 : 2,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: InsightTheme.inter(13.5, w: FontWeight.w600, c: isSelected ? Colors.white : InsightTheme.ink),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: InsightTheme.inter(11.5, c: isSelected ? Colors.white.withOpacity(0.85) : InsightTheme.ink2),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

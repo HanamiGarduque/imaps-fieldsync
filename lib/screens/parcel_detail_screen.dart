@@ -10,6 +10,7 @@ import 'inspection_checklist_screen.dart';
 import 'capture_photo_screen.dart';
 import 'field_findings_screen.dart';
 import 'review_submit_screen.dart';
+import 'inspection_progress.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -44,14 +45,57 @@ class InsightTheme {
 /// ==================================================================
 /// SCREEN 6 — INSPECTION DETAILS
 /// ==================================================================
-class ParcelDetailScreen extends StatelessWidget {
+class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
-  
+
   const ParcelDetailScreen({super.key, required this.task});
+
+  @override
+  State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
+}
+
+class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
+  TaskItem get task => widget.task;
+  InspectionProgress get progress => InspectionProgress.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    // Starting a fresh inspection for this parcel shouldn't carry over
+    // progress left behind from a different one.
+    progress.ensureActiveInspection(task.inspectionNo);
+    progress.addListener(_onProgressChanged);
+  }
+
+  @override
+  void dispose() {
+    progress.removeListener(_onProgressChanged);
+    super.dispose();
+  }
+
+  void _onProgressChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Only lets the inspector open a step that's already done or is the
+  /// current one — jumping ahead to a step whose prerequisites haven't
+  /// been completed is what made the workflow feel disconnected before.
+  void _goToStep(BuildContext context, int step, WidgetBuilder builder) {
+    if (progress.isLocked(step)) {
+      HapticFeedback.selectionClick();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Complete "${progress.currentStepTitle}" first.')),
+      );
+      return;
+    }
+    HapticFeedback.selectionClick();
+    Navigator.push(context, MaterialPageRoute(builder: builder));
+  }
 
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    final currentStep = progress.currentStep;
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -129,7 +173,7 @@ class ParcelDetailScreen extends StatelessWidget {
                         ),
                         child: FractionallySizedBox(
                           alignment: Alignment.centerLeft,
-                          widthFactor: 0.166, // 16.6% Step 1 of 6
+                          widthFactor: progress.isComplete ? 1.0 : (currentStep - 1) / InspectionProgress.totalSteps,
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -145,8 +189,14 @@ class ParcelDetailScreen extends StatelessWidget {
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          Text('STEP 1 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
-                          Text(' — Site verification', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
+                          Text(
+                            progress.isComplete ? 'SUBMITTED' : 'STEP $currentStep OF ${InspectionProgress.totalSteps}',
+                            style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5),
+                          ),
+                          Text(
+                            progress.isComplete ? ' — READY FOR REVIEW' : ' — ${progress.currentStepTitle.toUpperCase()}',
+                            style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5),
+                          ),
                         ],
                       ),
                     ],
@@ -202,8 +252,11 @@ class ParcelDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 10),
 
-                      // LOCATION MAP CARD
-                      Container(
+                      // LOCATION MAP CARD — tapping it opens Site verification,
+                      // the same place Step 1 in the timeline below leads to.
+                      GestureDetector(
+                        onTap: () => _goToStep(context, 1, (_) => SiteMapScreen(task: task)),
+                        child: Container(
                         decoration: BoxDecoration(
                           color: InsightTheme.surface,
                           borderRadius: BorderRadius.circular(22),
@@ -238,72 +291,125 @@ class ParcelDetailScreen extends StatelessWidget {
                             ),
                           ],
                         ),
+                        ),
                       ),
 
                       const SizedBox(height: 10),
 
                       // INSPECTION STEPS TIMELINE (premium glass card)
                       _StepsTimelineCard(
+                        currentStep: currentStep,
+                        isComplete: progress.isComplete,
                         steps: [
                           _StepInfo(
                             index: 1,
                             title: 'Site verification',
                             icon: Icons.map_rounded,
-                            onTap: () => Navigator.push(
+                            onTap: () => _goToStep(
                               context,
-                              MaterialPageRoute(builder: (_) => const SiteMapScreen()),
+                              1,
+                              (_) => SiteMapScreen(task: task),
                             ),
                           ),
                           _StepInfo(
                             index: 2,
                             title: 'GPS verification',
                             icon: Icons.gps_fixed_rounded,
-                            onTap: () => Navigator.push(
+                            onTap: () => _goToStep(
                               context,
-                              MaterialPageRoute(builder: (_) => const GpsVerificationScreen()),
+                              2,
+                              (_) => GpsVerificationScreen(task: task),
                             ),
                           ),
                           _StepInfo(
                             index: 3,
-                            title: 'Checklist',
-                            icon: Icons.checklist_rounded,
-                            onTap: () => Navigator.push(
+                            title: 'Photos',
+                            icon: Icons.photo_camera_rounded,
+                            onTap: () => _goToStep(
                               context,
-                              MaterialPageRoute(builder: (_) => const InspectionChecklistScreen()),
+                              3,
+                              (_) => CapturePhotoScreen(task: task),
                             ),
                           ),
                           _StepInfo(
                             index: 4,
-                            title: 'Photos',
-                            icon: Icons.photo_camera_rounded,
-                            onTap: () => Navigator.push(
+                            title: 'Checklist',
+                            icon: Icons.checklist_rounded,
+                            onTap: () => _goToStep(
                               context,
-                              MaterialPageRoute(builder: (_) => const CapturePhotoScreen()),
+                              4,
+                              (_) => InspectionChecklistScreen(task: task),
                             ),
                           ),
                           _StepInfo(
                             index: 5,
                             title: 'Findings',
                             icon: Icons.fact_check_rounded,
-                            onTap: () => Navigator.push(
+                            onTap: () => _goToStep(
                               context,
-                              MaterialPageRoute(builder: (_) => const FieldFindingsScreen()),
+                              5,
+                              (_) => FieldFindingsScreen(task: task),
                             ),
                           ),
                           _StepInfo(
                             index: 6,
                             title: 'Review & submit',
                             icon: Icons.task_alt_rounded,
-                            onTap: () => Navigator.push(
+                            onTap: () => _goToStep(
                               context,
-                              MaterialPageRoute(
-                                builder: (_) => const ReviewSubmitScreen(result: 'With discrepancy'),
-                              ),
+                              6,
+                              (_) => ReviewSubmitScreen(task: task),
                             ),
                           ),
                         ],
                       ),
                     ],
+                  ),
+                ),
+
+                // PRIMARY CTA — always points at whatever comes next
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  child: ElevatedButton(
+                    onPressed: progress.isComplete
+                        ? null
+                        : () => _goToStep(
+                              context,
+                              currentStep,
+                              (_) => _screenForStep(currentStep),
+                            ),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      disabledBackgroundColor: Colors.transparent,
+                    ).copyWith(elevation: WidgetStateProperty.all(0)),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: progress.isComplete
+                              ? [InsightTheme.ink3, InsightTheme.ink3]
+                              : const [InsightTheme.blue1, InsightTheme.blue2],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: progress.isComplete
+                            ? null
+                            : [BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10))],
+                      ),
+                      child: Container(
+                        alignment: Alignment.center,
+                        constraints: const BoxConstraints(minHeight: 50),
+                        child: Text(
+                          progress.isComplete
+                              ? 'Inspection submitted'
+                              : 'Continue · ${InspectionProgress.stepTitles[currentStep - 1]}',
+                          style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -312,6 +418,25 @@ class ParcelDetailScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Maps a step number to the screen that owns it — used by the
+  /// "Continue" CTA so it always opens exactly what's next.
+  Widget _screenForStep(int step) {
+    switch (step) {
+      case 1:
+        return SiteMapScreen(task: task);
+      case 2:
+        return GpsVerificationScreen(task: task);
+      case 3:
+        return CapturePhotoScreen(task: task);
+      case 4:
+        return InspectionChecklistScreen(task: task);
+      case 5:
+        return FieldFindingsScreen(task: task);
+      default:
+        return ReviewSubmitScreen(task: task);
+    }
   }
 
   Widget _buildListRow(String label, String value, {bool isLast = false}) {
@@ -351,10 +476,10 @@ class _StepInfo {
 
 class _StepsTimelineCard extends StatelessWidget {
   final List<_StepInfo> steps;
-  // Which step is considered "current" — the flow always starts at Site verification.
-  static const int currentStep = 1;
+  final int currentStep;
+  final bool isComplete;
 
-  const _StepsTimelineCard({required this.steps});
+  const _StepsTimelineCard({required this.steps, required this.currentStep, this.isComplete = false});
 
   @override
   Widget build(BuildContext context) {
@@ -399,7 +524,12 @@ class _StepsTimelineCard extends StatelessWidget {
                     children: [
                       Text('Inspection workflow', style: InsightTheme.poppins(13.5, w: FontWeight.w700, c: InsightTheme.ink)),
                       const SizedBox(height: 1),
-                      Text('Tap a step to jump in', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
+                      Text(
+                        isComplete
+                            ? 'All steps complete'
+                            : 'Up next: Step $currentStep · ${InspectionProgress.stepTitles[currentStep - 1]}',
+                        style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                      ),
                     ],
                   ),
                 ),
@@ -413,13 +543,15 @@ class _StepsTimelineCard extends StatelessWidget {
               children: List.generate(steps.length, (i) {
                 final step = steps[i];
                 final isLast = i == steps.length - 1;
-                final isCurrent = step.index == currentStep;
-                final isDone = step.index < currentStep;
+                final isCurrent = step.index == currentStep && !isComplete;
+                final isDone = step.index < currentStep || isComplete;
+                final isLocked = !isDone && !isCurrent;
                 return _StepRow(
                   step: step,
                   isLast: isLast,
                   isCurrent: isCurrent,
                   isDone: isDone,
+                  isLocked: isLocked,
                 );
               }),
             ),
@@ -436,22 +568,19 @@ class _StepRow extends StatelessWidget {
   final bool isLast;
   final bool isCurrent;
   final bool isDone;
+  final bool isLocked;
 
   const _StepRow({
     required this.step,
     required this.isLast,
     required this.isCurrent,
     required this.isDone,
+    required this.isLocked,
   });
 
   @override
   Widget build(BuildContext context) {
-    final Color badgeColor = isCurrent
-        ? InsightTheme.blue1
-        : isDone
-            ? InsightTheme.blue1
-            : InsightTheme.surface2;
-    final Color labelColor = isCurrent ? InsightTheme.ink : InsightTheme.ink;
+    final Color labelColor = isLocked ? InsightTheme.ink3 : InsightTheme.ink;
 
     return Material(
       color: Colors.transparent,
@@ -492,7 +621,7 @@ class _StepRow extends StatelessWidget {
                             : null,
                       ),
                       child: Icon(
-                        step.icon,
+                        isLocked ? Icons.lock_outline_rounded : step.icon,
                         size: 15,
                         color: isCurrent || isDone ? Colors.white : InsightTheme.ink3,
                       ),
@@ -528,7 +657,7 @@ class _StepRow extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'STEP ${step.index} OF 6',
+                                'STEP ${step.index} OF ${InspectionProgress.totalSteps}',
                                 style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: isCurrent ? InsightTheme.blueInk : InsightTheme.ink3, ls: 0.4),
                               ),
                               const SizedBox(height: 2),
@@ -551,6 +680,8 @@ class _StepRow extends StatelessWidget {
                               style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk),
                             ),
                           )
+                        else if (isLocked)
+                          Icon(Icons.lock_outline_rounded, size: 16, color: InsightTheme.ink3.withOpacity(0.6))
                         else
                           Icon(Icons.chevron_right_rounded, size: 20, color: InsightTheme.ink3.withOpacity(0.7)),
                       ],
