@@ -217,191 +217,164 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    // Exact Content Mapped to the Original Model to match visuals
-    final heroTask = TaskItem(
-      name: 'Applicant 4',
-      location: 'Warehouse 7',
-      parcels: 'Industrial Park · Checklist in progress',
-      status: 'Ongoing · 60%',
-      inspectionNo: 'FI-004',
-    );
+Widget build(BuildContext context) {
+  final categorized = _categorize();
+  final ongoing = categorized['Ongoing'] ?? [];
+  final pending = categorized['Pending'] ?? [];
+  final scheduled = categorized['Scheduled'] ?? [];
+  final completed = categorized['Completed'] ?? [];
 
-    final gridTasks = [
-      TaskItem(
-        name: 'Applicant 1',
-        location: 'Lot 22-B, Maligaya',
-        parcels: '1:30 PM',
-        status: 'Pending',
-        inspectionNo: 'FI-001',
-      ),
-      TaskItem(
-        name: 'Applicant 2',
-        location: 'Unit 4, Rizal Complex',
-        parcels: '3:00 PM',
-        status: 'Pending',
-        inspectionNo: 'FI-002',
-      ),
-      TaskItem(
-        name: 'Applicant 3',
-        location: '45 Acacia St.',
-        parcels: 'Tomorrow, 9 AM',
-        status: 'Scheduled',
-        inspectionNo: 'FI-003',
-      ),
-      TaskItem(
-        name: 'Applicant 5',
-        location: '12 Mabini Ave.',
-        parcels: 'Yesterday',
-        status: 'Done',
-        inspectionNo: 'FI-005',
-      ),
-    ];
+  // Tasks belonging to whichever tab is currently selected.
+  final selectedCategory = _tabOrder[_currentTabIndex];
+  final selectedTasks = categorized[selectedCategory] ?? [];
 
-    return Scaffold(
-      backgroundColor: InsightTheme.bg,
-      extendBody: true, // Content scrolls behind bottom nav
-      body: SafeArea(
-        bottom: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 120),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ----------------------------------------------------
-              // 1. TOP BAR (Title & Filter Icon)
-              // ----------------------------------------------------
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'My Tasks',
-                    style: InsightTheme.poppins(20, w: FontWeight.w700),
+  // Hero card: unang task sa currently selected tab lang, hindi sa buong _allTasks.
+  final TaskItem? heroTask = selectedTasks.isNotEmpty ? selectedTasks.first : null;
+
+  // Grid: natitirang tasks sa parehong tab, maliban sa ipinakita na sa hero card.
+  final gridTasks = selectedTasks.where((t) => t.id != heroTask?.id).toList();
+
+  return Scaffold(
+    backgroundColor: InsightTheme.bg,
+    extendBody: true,
+    body: SafeArea(
+      bottom: false,
+      child: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _errorMessage != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(_errorMessage!, textAlign: TextAlign.center),
                   ),
-                  _TopIconBtn(icon: Icons.filter_list_rounded, onTap: () {}),
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadTasks,
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 120),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('My Tasks', style: InsightTheme.poppins(20, w: FontWeight.w700)),
+                            _TopIconBtn(icon: Icons.filter_list_rounded, onTap: () {}),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          clipBehavior: Clip.none,
+                          child: Row(
+                            children: [
+                              _TabPill(text: "Pending ${pending.length}", isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                              const SizedBox(width: 8),
+                              _TabPill(text: "Ongoing ${ongoing.length}", isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
+                              const SizedBox(width: 8),
+                              _TabPill(text: "Scheduled ${scheduled.length}", isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
+                              const SizedBox(width: 8),
+                              _TabPill(text: "Completed ${completed.length}", isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        if (heroTask != null) ...[
+                          _HeroTaskCard(
+                            task: heroTask,
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: heroTask)));
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                        ] else
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text('No assigned tasks yet.'),
+                          ),
+                        if (gridTasks.isNotEmpty)
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: 10,
+                              mainAxisSpacing: 10,
+                              childAspectRatio: 1.15,
+                            ),
+                            itemCount: gridTasks.length,
+                            itemBuilder: (context, index) {
+                              return _GridTaskCard(
+                                task: gridTasks[index],
+                                onTap: () {
+                                  HapticFeedback.selectionClick();
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: gridTasks[index])));
+                                },
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+    ),
+    bottomNavigationBar: SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withOpacity(0.65)),
+                boxShadow: const [
+                  BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
+                  BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, 16)),
                 ],
               ),
-              const SizedBox(height: 24),
-
-              // ----------------------------------------------------
-              // 2. TABS
-              // ----------------------------------------------------
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                clipBehavior: Clip.none,
-                child: Row(
-                  children: [
-                    _TabPill(text: "Pending 3", isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
-                    const SizedBox(width: 8),
-                    _TabPill(text: "Ongoing 1", isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
-                    const SizedBox(width: 8),
-                    _TabPill(text: "Scheduled 4", isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
-                    const SizedBox(width: 8),
-                    _TabPill(text: "Completed 12", isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // ----------------------------------------------------
-              // 3. ONGOING HERO CARD
-              // ----------------------------------------------------
-              _HeroTaskCard(
-                task: heroTask,
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: heroTask)));
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // ----------------------------------------------------
-              // 4. TASK GRID
-              // ----------------------------------------------------
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  childAspectRatio: 1.15,
-                ),
-                itemCount: gridTasks.length,
-                itemBuilder: (context, index) {
-                  return _GridTaskCard(
-                    task: gridTasks[index],
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _BottomNavItem(
+                    icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0,
                     onTap: () {
-                      HapticFeedback.selectionClick();
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: gridTasks[index])));
-                    },
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-
-      // ----------------------------------------------------
-      // 5. FLOATING BOTTOM NAVIGATION (Glassmorphic)
-      // ----------------------------------------------------
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white.withOpacity(0.65)),
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
-                    BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, 16)),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _BottomNavItem(
-                      icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0, 
-                      onTap: () { 
-                        setState(() => _currentNavIndex = 0); 
-                        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile))); 
-                      }
-                    ),
-                    _BottomNavItem(
-                      icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1, 
-                      onTap: () => setState(() => _currentNavIndex = 1)
-                    ),
-                    _BottomNavItem(
-                      icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3, 
-                      onTap: () { 
-                        setState(() => _currentNavIndex = 3); 
-                        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const UpdatesScreen())); 
-                      }
-                    ),
-                    _BottomNavItem(
-                      icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4, 
-                      onTap: () { 
-                        setState(() => _currentNavIndex = 4); 
-                        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile))); 
-                      }
-                    ),
-                  ],
-                ),
+                      setState(() => _currentNavIndex = 0);
+                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile)));
+                    }
+                  ),
+                  _BottomNavItem(
+                    icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1,
+                    onTap: () => setState(() => _currentNavIndex = 1)
+                  ),
+                  _BottomNavItem(
+                    icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3,
+                    onTap: () {
+                      setState(() => _currentNavIndex = 3);
+                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const UpdatesScreen()));
+                    }
+                  ),
+                  _BottomNavItem(
+                    icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4,
+                    onTap: () {
+                      setState(() => _currentNavIndex = 4);
+                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)));
+                    }
+                  ),
+                ],
               ),
             ),
           ),
         ),
       ),
-    );
-  }
-}
+    ),
+  );
+}}
 
 /// ==================================================================
 /// COMPONENT WIDGETS

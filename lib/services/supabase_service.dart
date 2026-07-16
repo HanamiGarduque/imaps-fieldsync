@@ -43,40 +43,33 @@ class SupabaseService {
   //   FK hint: field_jobs.supabase_application_id → supabase_zoning_applications
   // ─────────────────────────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchMyJobs() async {
-    final userId = client.auth.currentUser?.id;
-    if (userId == null) return [];
+  final userId = client.auth.currentUser?.id;
+  if (userId == null) return [];
 
-    final response = await client
-        .from('field_jobs')
-        .select('''
-          id,
-          local_inspection_id,
-          status,
-          scheduled_date,
-          priority,
-          supabase_parcel_id,
-          supabase_zoning_applications!supabase_application_id (
-            reference_number,
-            applicant_name,
-            barangay,
-            application_type,
-            declared_land_use
-          ),
-          supabase_parcels!supabase_parcel_id (
-            id,
-            latitude,
-            longitude,
-            land_area_sqm,
-            lot_number,
-            land_classification
-          )
-        ''')
-        .eq('assigned_inspector_id', userId)
-        .inFilter('status', ['assigned', 'in_progress'])
-        .order('scheduled_date', ascending: true);
+  final response = await client
+      .from('field_jobs')
+      .select('''
+        id,
+        local_inspection_id,
+        status,
+        scheduled_date,
+        supabase_parcel_id,
+        supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
+          reference_number,
+          applicant_name,
+          barangay
+        ),
+        supabase_parcels!field_jobs_supabase_parcel_id_fkey (
+          lot_area_sqm,
+          land_use_class,
+          property_index_number
+        )
+      ''')
+      .eq('assigned_inspector_id', userId)
+      .order('scheduled_date', ascending: true);
 
-    return List<Map<String, dynamic>>.from(response);
-  }
+  return List<Map<String, dynamic>>.from(response);
+}
 
   // ─────────────────────────────────────────────────────────────────────────
   // FETCH PARCEL DETAILS  (Parcel detail screen)
@@ -241,4 +234,4 @@ class SupabaseService {
     }
   }
 }
-
+

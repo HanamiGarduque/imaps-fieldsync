@@ -276,12 +276,7 @@ class FieldFindingsScreen extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => ReviewSubmitScreen(
-                            task: task,
-                            capturedPhotos: capturedPhotos,
-                            checklistDone: checklistDone,
-                            checklistTotal: checklistTotal,
-                          ),
+builder: (_) => ReviewSubmitScreen(task: task),
                         ),
                       );
                     },

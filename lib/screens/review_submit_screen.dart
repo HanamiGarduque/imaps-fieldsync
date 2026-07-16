@@ -2,6 +2,12 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+
+import '../providers/inspection_provider.dart';
+import '../services/supabase_service.dart';
+import 'inspection_progress.dart';
+import 'tasks_screen.dart'; // TaskItem
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -10,40 +16,150 @@ class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
   static const Color surface = Colors.white;
   static const Color surface2 = Color(0xFFEEF1FC);
-  
+
   static const Color ink = Color(0xFF12141F);
   static const Color ink2 = Color(0xFF666C82);
   static const Color ink3 = Color(0xFFA2A7BC);
-  
+
   static const Color blue1 = Color(0xFF3D6BFF);
   static const Color blue2 = Color(0xFF0B2FBF);
   static const Color blueInk = Color(0xFF1A3FC4);
-  
+
   static const Color green = Color(0xFF12A150);
-  
+
   static const Color line = Color(0x12141628); // ~rgba(20,22,40,0.07)
   static const Color lineStrong = Color(0x21141628); // ~rgba(20,22,40,0.13)
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
+
+  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) =>
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
+
+  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) =>
       GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
-      
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
+
+  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) =>
       GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
 }
 
 /// ==================================================================
 /// SCREEN 14 — REVIEW & SUBMIT
 /// ==================================================================
-class ReviewSubmitScreen extends StatelessWidget {
-  final String result;
-  const ReviewSubmitScreen({super.key, required this.result});
+/// Accepts the same params FieldFindingsScreen passes (task, photos,
+/// checklist counts) so that call site keeps working, but ParcelDetailScreen's
+/// "jump straight to step 6" shortcut (which only passes `task`) also works —
+/// the other 3 are optional and, when omitted, we fall back to whatever is
+/// already tracked in the shared InspectionProvider for this active task.
+class ReviewSubmitScreen extends StatefulWidget {
+  final TaskItem task;
+  final List<Map<String, dynamic>> capturedPhotos;
+  final int checklistDone;
+  final int checklistTotal;
+
+  const ReviewSubmitScreen({
+    super.key,
+    required this.task,
+    this.capturedPhotos = const [],
+    this.checklistDone = 0,
+    this.checklistTotal = 0,
+  });
+
+  @override
+  State<ReviewSubmitScreen> createState() => _ReviewSubmitScreenState();
+}
+
+class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
+  // Same 4 options used by the (now legacy/standalone) InspectionResultScreen —
+  // kept here since this is where final-status selection actually lives now.
+  static const _statusOptions = [
+    (title: 'Compliant', subtitle: 'Matches declared use, no issues'),
+    (title: 'With Discrepancy', subtitle: 'Observed use differs from declared'),
+    (title: 'For Review', subtitle: 'Needs supervisor sign-off'),
+    (title: 'Requires Reinspection', subtitle: 'Site access or conditions incomplete'),
+  ];
+
+  late String _selectedStatus;
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Carry over whatever result was already picked back in the Findings step.
+    final provider = context.read<InspectionProvider>();
+    _selectedStatus = provider.inspectionResult;
+  }
+
+  Future<void> _handleSubmit() async {
+    if (_submitting) return;
+    HapticFeedback.heavyImpact();
+    setState(() => _submitting = true);
+
+    final provider = context.read<InspectionProvider>();
+
+    try {
+      // Merge both checklist sections into one flat list for the backend.
+      final checklist = <Map<String, dynamic>>[
+        ...provider.siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
+        ...provider.zoningObservations.entries.map((e) => {'item': e.key, 'checked': e.value}),
+      ];
+      final checklistCompleted = checklist.where((c) => c['checked'] == true).length;
+
+      final photoPaths = provider.capturedPhotos
+          .map((p) => (p['photoPath'] as String?) ?? '')
+          .where((p) => p.isNotEmpty)
+          .toList();
+
+      await SupabaseService.submitInspection(
+        jobId: widget.task.id,
+        findings: provider.notes,
+        isCompliant: _selectedStatus == 'Compliant',
+        inspectionResult: _selectedStatus,
+        observations: 'Actual land use: ${provider.actualLandUse}. Boundary status: ${provider.boundaryStatus}.',
+        discrepancies: provider.discrepancies.isNotEmpty ? provider.discrepancies : null,
+        recommendations: provider.recommendations.isNotEmpty ? provider.recommendations : null,
+        inspectorNotes: provider.notes,
+        checklistData: checklist,
+        checklistCompletedCount: checklistCompleted,
+        checklistTotalCount: checklist.length,
+        photoPaths: photoPaths,
+        photoCount: photoPaths.length,
+      );
+
+      InspectionProgress.instance.markStepComplete(6);
+
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => SubmissionSuccessScreen(
+            referenceNo: widget.task.inspectionNo,
+            finalStatus: _selectedStatus,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to submit inspection: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+
+    // Prefer the live provider state (source of truth for the whole
+    // 6-step flow); fall back to whatever was passed in via constructor
+    // for the "jump straight here" shortcut where the provider might not
+    // have been freshly populated for this session.
+    final provider = context.watch<InspectionProvider>();
+    final photoCount = provider.capturedPhotos.isNotEmpty
+        ? provider.capturedPhotos.length
+        : widget.capturedPhotos.length;
+    final checklistTotal = provider.siteCondition.length + provider.zoningObservations.length;
+    final checklistDone = provider.siteCondition.values.where((v) => v).length +
+        provider.zoningObservations.values.where((v) => v).length;
+    final effectiveChecklistTotal = checklistTotal > 0 ? checklistTotal : widget.checklistTotal;
+    final effectiveChecklistDone = checklistTotal > 0 ? checklistDone : widget.checklistDone;
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -141,7 +257,7 @@ class ReviewSubmitScreen extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      // SUMMARY CARD — reflects what actually happened in steps 1-5
+                      // SUMMARY CARD — now reflects real data from InspectionProvider
                       // instead of hardcoded numbers unrelated to this inspection.
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -156,10 +272,18 @@ class ReviewSubmitScreen extends StatelessWidget {
                         ),
                         child: Column(
                           children: [
-                            _SummaryRow(label: 'Site', value: 'Lot 22-B, Brgy. Maligaya'),
-                            _SummaryRow(label: 'Checklist', value: '7 of 7 items reviewed'),
-                            _SummaryRow(label: 'Photos', value: '5 geotagged photos'),
-                            _SummaryRow(label: 'Result', value: result, isLast: true),
+                            _SummaryRow(label: 'Site', value: widget.task.location),
+                            _SummaryRow(
+                              label: 'Checklist',
+                              value: effectiveChecklistTotal > 0
+                                  ? '$effectiveChecklistDone of $effectiveChecklistTotal items reviewed'
+                                  : 'No checklist items recorded',
+                            ),
+                            _SummaryRow(
+                              label: 'Photos',
+                              value: photoCount > 0 ? '$photoCount geotagged photo${photoCount == 1 ? '' : 's'}' : 'No photos attached',
+                            ),
+                            _SummaryRow(label: 'Result', value: _selectedStatus, isLast: true),
                           ],
                         ),
                       ),
@@ -176,6 +300,7 @@ class ReviewSubmitScreen extends StatelessWidget {
                             onTap: () {
                               HapticFeedback.selectionClick();
                               setState(() => _selectedStatus = o.title);
+                              context.read<InspectionProvider>().updateResult(o.title);
                             },
                           )),
 
@@ -190,22 +315,19 @@ class ReviewSubmitScreen extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: InsightTheme.surface,
                           borderRadius: BorderRadius.circular(18),
-                          // Approximating the dashed border with a solid subtle border for standard Flutter
-                          border: Border.all(color: InsightTheme.lineStrong, width: 1.5), 
+                          border: Border.all(color: InsightTheme.lineStrong, width: 1.5),
                         ),
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            // Fake Signature Path
                             SizedBox(
                               width: 130, height: 44,
                               child: CustomPaint(painter: _SignaturePainter()),
                             ),
-                            // Hint text at bottom
                             Positioned(
                               bottom: 10,
                               child: Text(
-                                'Signed by J. Reyes · Jul 15, 2026',
+                                'Signed by ${widget.task.name}',
                                 style: InsightTheme.jetBrains(10, c: InsightTheme.ink3),
                               ),
                             )
@@ -220,14 +342,7 @@ class ReviewSubmitScreen extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
                   child: ElevatedButton(
-                    onPressed: () {
-                      HapticFeedback.heavyImpact();
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (_) => const SubmissionSuccessScreen(referenceNo: 'ZN-2026-00871')
-                        ),
-                      );
-                    },
+                    onPressed: _submitting ? null : _handleSubmit,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       backgroundColor: Colors.transparent,
@@ -286,7 +401,6 @@ class SubmissionSuccessScreen extends StatelessWidget {
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
-          // Background Gradient Blobs
           Positioned(
             top: -60, right: -60,
             child: ImageFiltered(
@@ -307,7 +421,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
               ),
             ),
           ),
-          
+
           SafeArea(
             child: Center(
               child: Padding(
@@ -315,7 +429,6 @@ class SubmissionSuccessScreen extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Success Ring
                     Container(
                       width: 88, height: 88,
                       decoration: BoxDecoration(
@@ -339,19 +452,24 @@ class SubmissionSuccessScreen extends StatelessWidget {
                       style: InsightTheme.inter(12.5, c: InsightTheme.ink2, h: 1.6),
                     ),
                     const SizedBox(height: 24),
-                    
-                    // Action Button
+
                     SizedBox(
                       width: 220,
                       child: ElevatedButton(
                         onPressed: () {
                           HapticFeedback.lightImpact();
                           InspectionProgress.instance.reset();
+                          // Pop back to the first route (Tasks/Home) instead of
+                          // just going back one step, since the whole 6-step
+                          // flow is done. NOTE: if that screen doesn't refetch
+                          // on return, pull down to refresh (RefreshIndicator
+                          // is already wired on TasksScreen) to see the updated
+                          // status right away.
                           Navigator.of(context).popUntil((route) => route.isFirst);
                         },
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 15),
-                          backgroundColor: Colors.transparent, 
+                          backgroundColor: Colors.transparent,
                           shadowColor: Colors.transparent,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         ).copyWith(elevation: WidgetStateProperty.all(0)),
@@ -557,7 +675,6 @@ class _SignaturePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     final path = Path();
-    // Replicating: <path d="M10 35 Q25 10 40 32 T70 30 Q85 15 100 32 T130 28" />
     path.moveTo(size.width * 0.07, size.height * 0.7);
     path.quadraticBezierTo(size.width * 0.18, size.height * 0.2, size.width * 0.28, size.height * 0.64);
     path.quadraticBezierTo(size.width * 0.38, size.height * 1.08, size.width * 0.50, size.height * 0.60);

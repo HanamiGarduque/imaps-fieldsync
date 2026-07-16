@@ -17,7 +17,16 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // Existing installs won't have this column yet — add it so
+          // drafts saved before this fix don't crash on read/write.
+          await db.execute(
+            'ALTER TABLE local_inspections ADD COLUMN inspection_result TEXT',
+          );
+        }
+      },
       onCreate: (db, version) async {
         // Table for caching assigned jobs
         await db.execute('''
@@ -45,6 +54,7 @@ class DBHelper {
             actual_land_use TEXT,
             notes TEXT,
             is_compliant INTEGER,
+            inspection_result TEXT,
             checklist_json TEXT,
             boundary_status TEXT,
             is_synced INTEGER DEFAULT 0,
@@ -116,6 +126,7 @@ class DBHelper {
     required String actualLandUse,
     required String notes,
     required bool isCompliant,
+    required String inspectionResult,
     required Map<String, dynamic> checklist,
     required String boundaryStatus,
   }) async {
@@ -127,6 +138,7 @@ class DBHelper {
         'actual_land_use': actualLandUse,
         'notes': notes,
         'is_compliant': isCompliant ? 1 : 0,
+        'inspection_result': inspectionResult,
         'checklist_json': jsonEncode(checklist),
         'boundary_status': boundaryStatus,
         'is_synced': 0,

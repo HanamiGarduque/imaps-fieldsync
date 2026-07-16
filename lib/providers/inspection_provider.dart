@@ -146,7 +146,8 @@ class InspectionProvider extends ChangeNotifier {
       _actualLandUse = draft['actual_land_use'] ?? _actualLandUse;
       _notes = draft['notes'] ?? _notes;
       _boundaryStatus = draft['boundary_status'] ?? _boundaryStatus;
-      _inspectionResult = draft['is_compliant'] == 1 ? 'Compliant' : 'With discrepancy';
+      _inspectionResult = draft['inspection_result'] as String? ??
+          (draft['is_compliant'] == 1 ? 'Compliant' : 'With Discrepancy');
       
       if (draft['checklist_json'] != null) {
         try {
@@ -191,6 +192,7 @@ class InspectionProvider extends ChangeNotifier {
       actualLandUse: _actualLandUse,
       notes: _notes,
       isCompliant: _inspectionResult == 'Compliant',
+      inspectionResult: _inspectionResult,
       checklist: combinedChecklist,
       boundaryStatus: _boundaryStatus,
     );
@@ -225,70 +227,70 @@ class InspectionProvider extends ChangeNotifier {
   }
 
   Future<void> syncToServer() async {
-    if (_isSyncing) return;
-    _isSyncing = true;
-    notifyListeners();
+  if (_isSyncing) return;
+  _isSyncing = true;
+  notifyListeners();
 
-    try {
-      final supabase = SupabaseService.client;
+  try {
+    final supabase = SupabaseService.client;
 
-      // 1. Sync Pending Photos first (needed for database metadata joins)
-      final pendingPhotos = await DBHelper.getPendingPhotos();
-      for (final photo in pendingPhotos) {
-        final file = File(photo['photo_path']);
-        if (!await file.exists()) {
-          // File was deleted/missing locally, skip it
-          await DBHelper.markPhotoSynced(photo['id']);
-          continue;
-        }
-
-        final fileName = 'photo_${photo['id']}.jpg';
-        final storagePath = 'inspections/${photo['job_id']}/$fileName';
-
-        // Upload physical file to Supabase Storage Bucket 'inspection-photos'
-        await supabase.storage.from('inspection-photos').upload(
-          storagePath,
-          file,
-          fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
-        );
-
-        final publicUrl = supabase.storage.from('inspection-photos').getPublicUrl(storagePath);
-
-        // Save metadata to field_job_photos table (or similar DB mapping)
-        await supabase.from('field_job_photos').upsert({
-          'id': photo['id'],
-          'job_id': photo['job_id'],
-          'photo_url': publicUrl,
-          'notes': photo['notes'],
-          'latitude': photo['latitude'],
-          'longitude': photo['longitude'],
-          'created_at': photo['captured_at'],
-        });
-
+    // 1. Sync Pending Photos first (needed for database metadata joins)
+    final pendingPhotos = await DBHelper.getPendingPhotos();
+    for (final photo in pendingPhotos) {
+      final file = File(photo['photo_path']);
+      if (!await file.exists()) {
         await DBHelper.markPhotoSynced(photo['id']);
+        continue;
       }
 
-      // 2. Sync Pending Inspections
-      final pendingInspections = await DBHelper.getPendingInspections();
-      for (final insp in pendingInspections) {
-        // Update field_jobs table in cloud Supabase
-        await supabase.from('field_jobs').update({
-          'status': 'completed',
-          'actual_land_use': insp['actual_land_use'],
-          'findings': insp['notes'],
-          'is_compliant': insp['is_compliant'] == 1,
-          'checklist_json': jsonDecode(insp['checklist_json']),
-          'boundary_status': insp['boundary_status'],
-          'updated_at': insp['updated_at'],
-        }).eq('id', insp['id']);
+      final fileName = 'photo_${photo['id']}.jpg';
+      final storagePath = 'inspections/${photo['job_id']}/$fileName';
 
-        await DBHelper.markInspectionSynced(insp['id']);
-      }
-    } catch (e) {
-      debugPrint('Sync failed: $e');
-    } finally {
-      _isSyncing = false;
-      notifyListeners();
+      await supabase.storage.from('inspection-photos').upload(
+        storagePath,
+        file,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
+
+      final publicUrl = supabase.storage.from('inspection-photos').getPublicUrl(storagePath);
+
+      await supabase.from('field_job_photos').upsert({
+        'id': photo['id'],
+        'field_job_id': photo['job_id'],
+        'photo_url': publicUrl,
+        'latitude': photo['latitude'],
+        'longitude': photo['longitude'],
+        'captured_at': photo['captured_at'],
+      });
+
+      await DBHelper.markPhotoSynced(photo['id']);
     }
+
+    // 2. Sync Pending Inspections
+    final pendingInspections = await DBHelper.getPendingInspections();
+    for (final insp in pendingInspections) {
+      final Map<String, dynamic> checklist = jsonDecode(insp['checklist_json']);
+      final checklistSummary = checklist.entries
+          .map((e) => '${e.key}: ${e.value == true ? "Yes" : "No"}')
+          .join('; ');
+
+      await supabase.from('field_jobs').update({
+        'status': 'completed',
+        'findings': '${insp['notes']}\n\nChecklist: $checklistSummary',
+        'is_compliant': insp['is_compliant'] == 1,
+        'inspection_result': insp['inspection_result'] as String? ??
+            (insp['is_compliant'] == 1 ? 'Compliant' : 'With Discrepancy'),
+        'remarks': insp['boundary_status'],
+        'updated_at': insp['updated_at'],
+      }).eq('id', insp['id']);
+
+      await DBHelper.markInspectionSynced(insp['id']);
+    }
+  } catch (e) {
+    debugPrint('Sync failed: $e');
+  } finally {
+    _isSyncing = false;
+    notifyListeners();
   }
+}
 }

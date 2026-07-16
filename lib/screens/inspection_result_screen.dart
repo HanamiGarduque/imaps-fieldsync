@@ -53,12 +53,12 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
   // Preserved options and state[cite: 10]
   static const _options = [
     (title: 'Compliant', subtitle: 'Matches declared use, no issues'),
-    (title: 'With discrepancy', subtitle: 'Observed use differs from declared'),
-    (title: 'For review', subtitle: 'Needs supervisor sign-off'),
-    (title: 'Requires reinspection', subtitle: 'Site access or conditions incomplete'),
+    (title: 'With Discrepancy', subtitle: 'Observed use differs from declared'),
+    (title: 'For Review', subtitle: 'Needs supervisor sign-off'),
+    (title: 'Requires Reinspection', subtitle: 'Site access or conditions incomplete'),
   ];
 
-  String _selected = 'With discrepancy'; //[cite: 10]
+  String _selected = 'With Discrepancy'; //[cite: 10]
 
   @override
   Widget build(BuildContext context) {
