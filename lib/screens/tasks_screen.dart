@@ -36,7 +36,7 @@ class InsightTheme {
   static const Color greenTint = Color(0xFFE3F8EC);
   static const Color greenInk = Color(0xFF0D7A3C);
   
-  static const Color line = Color(0x12141628); // ~rgba(20,22,40,0.07)
+  static const Color line = Color(0x12141628); 
   
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
@@ -46,14 +46,14 @@ class InsightTheme {
 }
 
 /// ==================================================================
-/// MODEL (100% Original - Preserved)
+/// MODEL
 /// ==================================================================
 class TaskItem {
   final String id;
   final String? parcelId;
   final String name;
   final String location;
-  final String parcels; // Used as time/subtitle
+  final String parcels; 
   final String status;
   final String inspectionNo;
   final String scheduledDate;
@@ -189,7 +189,7 @@ class TaskItem {
 }
 
 /// ==================================================================
-/// TASKS SCREEN (Matches Prototype Screen 5)
+/// TASKS SCREEN
 /// ==================================================================
 class TasksScreen extends StatefulWidget {
   final UserProfile profile;
@@ -202,7 +202,7 @@ class TasksScreen extends StatefulWidget {
 
 class _TasksScreenState extends State<TasksScreen> {
   int _currentNavIndex = 1; // 1 = Tasks
-  int _currentTabIndex = 1; // Default to 'Ongoing' as per prototype
+  int _currentTabIndex = 1; // Default to 'Ongoing'
 
   static const _tabOrder = ['Pending', 'Ongoing', 'Scheduled', 'Completed'];
 
@@ -224,7 +224,6 @@ class _TasksScreenState extends State<TasksScreen> {
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult != ConnectivityResult.none) {
-        // Fetch from cloud and cache locally
         final jobs = await SupabaseService.fetchMyJobs();
         await DBHelper.cacheJobs(jobs);
         if (mounted) {
@@ -234,7 +233,6 @@ class _TasksScreenState extends State<TasksScreen> {
           });
         }
       } else {
-        // Load from local database
         final localJobs = await DBHelper.getCachedJobs();
         if (mounted) {
           setState(() {
@@ -257,7 +255,6 @@ class _TasksScreenState extends State<TasksScreen> {
         }
       }
     } catch (e) {
-      // Fallback to cache if anything fails
       try {
         final localJobs = await DBHelper.getCachedJobs();
         if (mounted) {
@@ -330,14 +327,10 @@ Widget build(BuildContext context) {
   final scheduled = categorized['Scheduled'] ?? [];
   final completed = categorized['Completed'] ?? [];
 
-  // Tasks belonging to whichever tab is currently selected.
   final selectedCategory = _tabOrder[_currentTabIndex];
   final selectedTasks = categorized[selectedCategory] ?? [];
 
-  // Hero card: unang task sa currently selected tab lang, hindi sa buong _allTasks.
   final TaskItem? heroTask = selectedTasks.isNotEmpty ? selectedTasks.first : null;
-
-  // Grid: natitirang tasks sa parehong tab, maliban sa ipinakita na sa hero card.
   final gridTasks = selectedTasks.where((t) => t.id != heroTask?.id).toList();
 
   return Scaffold(
@@ -422,20 +415,20 @@ Widget build(BuildContext context) {
     ),
     bottomNavigationBar: SafeArea(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(20),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: Colors.white.withOpacity(0.65)),
                 boxShadow: const [
                   BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
-                  BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, 16)),
+                  BoxShadow(color: Color(0x1A000000), blurRadius: 24, offset: Offset(0, 12)),
                 ],
               ),
               child: Row(
@@ -456,7 +449,7 @@ Widget build(BuildContext context) {
                     icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3,
                     onTap: () {
                       setState(() => _currentNavIndex = 3);
-                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const UpdatesScreen()));
+                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)));
                     }
                   ),
                   _BottomNavItem(
@@ -571,7 +564,6 @@ class _HeroTaskCard extends StatelessWidget {
         clipBehavior: Clip.hardEdge,
         child: Stack(
           children: [
-            // Decorative background circle
             Positioned(
               right: -50, top: -50,
               child: Container(
@@ -650,7 +642,6 @@ class _GridTaskCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Icon Container
                 Container(
                   width: 32, height: 32,
                   decoration: BoxDecoration(
@@ -663,7 +654,6 @@ class _GridTaskCard extends StatelessWidget {
                     color: isDone ? InsightTheme.greenInk : InsightTheme.blueInk
                   ),
                 ),
-                // Status Pill
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
@@ -721,15 +711,15 @@ class _BottomNavItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: EdgeInsets.symmetric(horizontal: isActive ? 16 : 10, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: isActive ? 14 : 10, vertical: 10),
         decoration: BoxDecoration(
           gradient: isActive ? const LinearGradient(
             colors: [InsightTheme.blue1, InsightTheme.blue2],
             begin: Alignment.topLeft, end: Alignment.bottomRight,
           ) : null,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           boxShadow: isActive ? [
-            BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 6))
+            BoxShadow(color: InsightTheme.blue1.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))
           ] : [],
         ),
         child: Column(
