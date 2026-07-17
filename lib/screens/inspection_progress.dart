@@ -11,9 +11,7 @@ import 'package:flutter/foundation.dart';
 ///
 /// Every screen in the workflow reads/writes this instead of guessing
 /// its own step number, which is what caused the step labels and
-/// progress bars to disagree with each other before. It's plain
-/// in-memory state (no backend) — good enough for a static prototype,
-/// but structured so a real persistence layer could slot in later.
+/// progress bars to disagree with each other before.
 class InspectionProgress extends ChangeNotifier {
   InspectionProgress._();
   static final InspectionProgress instance = InspectionProgress._();
@@ -30,20 +28,20 @@ class InspectionProgress extends ChangeNotifier {
   ];
 
   int _highestCompleted = 0; // 0 = nothing done yet
-  String? _activeInspectionNo;
 
-  /// Highest step number (1-6) the inspector has finished.
+  // Keyed by task.id (the real field_jobs primary key) — NOT inspectionNo
+  // (reference_number). Reference numbers can repeat across different
+  // field_jobs rows (e.g. two jobs pointing at the same application, which
+  // is exactly what our own test data did), and keying by that caused
+  // progress to silently carry over into an unrelated task.
+  String? _activeTaskId;
+
   int get highestCompleted => _highestCompleted;
-
-  /// The step the inspector should land on next.
   int get currentStep => (_highestCompleted + 1).clamp(1, totalSteps);
-
   bool get isComplete => _highestCompleted >= totalSteps;
-
   bool isDone(int step) => step <= _highestCompleted;
   bool isCurrent(int step) => step == currentStep;
   bool isLocked(int step) => step > currentStep;
-
   String get currentStepTitle => stepTitles[currentStep - 1];
 
   /// Call when a step's "Continue" action fires, right before navigating
@@ -55,19 +53,29 @@ class InspectionProgress extends ChangeNotifier {
     }
   }
 
-  /// Makes sure progress belongs to the parcel currently open. If the
-  /// inspector opens a different parcel, progress starts fresh instead
-  /// of carrying over from whatever they were last inspecting.
-  void ensureActiveInspection(String inspectionNo) {
-    if (_activeInspectionNo != inspectionNo) {
-      _activeInspectionNo = inspectionNo;
+  /// Makes sure progress belongs to the task currently open. If the
+  /// inspector opens a different task, progress starts fresh instead of
+  /// carrying over from whatever they were last inspecting.
+  void ensureActiveInspection(String taskId) {
+    if (_activeTaskId != taskId) {
+      _activeTaskId = taskId;
       _highestCompleted = 0;
     }
   }
 
   void reset() {
     _highestCompleted = 0;
-    _activeInspectionNo = null;
+    _activeTaskId = null;
+    notifyListeners();
+  }
+
+  /// Used when opening an already-completed inspection for viewing/rework.
+  /// Every step has real submitted data, so every step should be tappable —
+  /// unlike a fresh inspection, the inspector shouldn't have to redo step 1
+  /// just to look at (or fix) step 5.
+  void unlockAllForReview(String taskId) {
+    _activeTaskId = taskId;
+    _highestCompleted = totalSteps;
     notifyListeners();
   }
 }

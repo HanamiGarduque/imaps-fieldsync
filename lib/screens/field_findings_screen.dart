@@ -16,38 +16,38 @@ class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
   static const Color surface = Colors.white;
   static const Color surface2 = Color(0xFFEEF1FC);
-  
+
   static const Color ink = Color(0xFF12141F);
   static const Color ink2 = Color(0xFF666C82);
   static const Color ink3 = Color(0xFFA2A7BC);
-  
+
   static const Color blue1 = Color(0xFF3D6BFF);
   static const Color blue2 = Color(0xFF0B2FBF);
   static const Color blueTint = Color(0xFFE7EDFF);
   static const Color blueInk = Color(0xFF1A3FC4);
-  
+
   static const Color redTint = Color(0xFFFDECEE);
   static const Color redInk = Color(0xFFB72A3B);
-  
+
   static const Color green = Color(0xFF12A150);
-  
-  static const Color line = Color(0x12141628); // ~rgba(20,22,40,0.07)
-  static const Color lineStrong = Color(0x21141628); // ~rgba(20,22,40,0.13)
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
+
+  static const Color line = Color(0x12141628);
+  static const Color lineStrong = Color(0x21141628);
+
+  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) =>
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
+
+  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) =>
       GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
-      
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
+
+  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) =>
       GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
 }
 
 /// ==================================================================
 /// SCREEN 11 — FIELD FINDINGS
 /// ==================================================================
-class FieldFindingsScreen extends StatelessWidget {
+class FieldFindingsScreen extends StatefulWidget {
   final TaskItem task;
   final List<Map<String, dynamic>> capturedPhotos;
   final int checklistDone;
@@ -62,6 +62,55 @@ class FieldFindingsScreen extends StatelessWidget {
   });
 
   @override
+  State<FieldFindingsScreen> createState() => _FieldFindingsScreenState();
+}
+
+class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
+  late final TextEditingController _notesController;
+  late final TextEditingController _discrepancyTitleController;
+  late final TextEditingController _discrepancyDetailController;
+  late final TextEditingController _recommendationsController;
+
+  @override
+  void initState() {
+    super.initState();
+    _notesController = TextEditingController(
+      text: 'Describe what you observed on site — structure condition, land use, notable features...',
+    );
+    _discrepancyTitleController = TextEditingController(text: 'Unpermitted accessory structure');
+    _discrepancyDetailController = TextEditingController(text: 'Rear yard, approx. 12 sqm');
+    _recommendationsController = TextEditingController(
+      text: 'Enter recommendation for this inspection (e.g., required permits, follow-up actions)...',
+    );
+  }
+
+  @override
+  void dispose() {
+    _notesController.dispose();
+    _discrepancyTitleController.dispose();
+    _discrepancyDetailController.dispose();
+    _recommendationsController.dispose();
+    super.dispose();
+  }
+
+  void _handleContinue() {
+    HapticFeedback.selectionClick();
+    context.read<InspectionProvider>().updateFindings(
+          actualLandUse: widget.task.landUseClass,
+          notes: _notesController.text.trim(),
+          discrepancies: '${_discrepancyTitleController.text.trim()} — ${_discrepancyDetailController.text.trim()}',
+          recommendations: _recommendationsController.text.trim(),
+          boundaryStatus: 'Not yet verified via GPS',
+        );
+
+    InspectionProgress.instance.markStepComplete(5);
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
@@ -69,9 +118,6 @@ class FieldFindingsScreen extends StatelessWidget {
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
-          // ----------------------------------------------------
-          // BACKGROUND GRADIENT BLOBS
-          // ----------------------------------------------------
           Positioned(
             top: -60,
             right: -60,
@@ -102,14 +148,9 @@ class FieldFindingsScreen extends StatelessWidget {
               ),
             ),
           ),
-
-          // ----------------------------------------------------
-          // MAIN CONTENT
-          // ----------------------------------------------------
           SafeArea(
             child: Column(
               children: [
-                // TOP BAR
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
@@ -125,7 +166,7 @@ class FieldFindingsScreen extends StatelessWidget {
                               style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
                             ),
                             Text(
-                              task.location,
+                              widget.task.location,
                               style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -136,8 +177,6 @@ class FieldFindingsScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-
-                // PROGRESS BAR
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
                   child: Column(
@@ -152,7 +191,7 @@ class FieldFindingsScreen extends StatelessWidget {
                         ),
                         child: FractionallySizedBox(
                           alignment: Alignment.centerLeft,
-                          widthFactor: 0.833, // 83.3% Step 5 of 6
+                          widthFactor: 0.833,
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -175,23 +214,16 @@ class FieldFindingsScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-
-                // SCROLLABLE LIST
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      // OBSERVATIONS SECTION
                       const _SectionLabel(title: 'OBSERVATIONS'),
                       const SizedBox(height: 10),
-                      const _TextCard(
-                        text: 'Rear portion of the lot shows a small storage structure not reflected in the declared building plan. Main residence otherwise matches submitted layout.',
-                      ),
-                      
-                      // Confirms the evidence gathered in the earlier steps carried
-                      // through to this screen, instead of appearing disconnected.
-                      if (capturedPhotos.isNotEmpty) ...[
+                      _EditableTextCard(controller: _notesController, hint: 'Describe what you observed on-site...'),
+
+                      if (widget.capturedPhotos.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -199,40 +231,38 @@ class FieldFindingsScreen extends StatelessWidget {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                '${capturedPhotos.length} geotagged photo${capturedPhotos.length == 1 ? '' : 's'} attached from capture',
+                                '${widget.capturedPhotos.length} geotagged photo${widget.capturedPhotos.length == 1 ? '' : 's'} attached from capture',
                                 style: InsightTheme.inter(11.5, c: InsightTheme.green),
                               ),
                             ),
                           ],
                         ),
                       ],
-                      if (checklistTotal > 0) ...[
+                      if (widget.checklistTotal > 0) ...[
                         const SizedBox(height: 6),
                         Row(
                           children: [
                             Icon(
-                              checklistDone == checklistTotal ? Icons.check_circle_rounded : Icons.info_rounded,
+                              widget.checklistDone == widget.checklistTotal ? Icons.check_circle_rounded : Icons.info_rounded,
                               size: 14,
-                              color: checklistDone == checklistTotal ? InsightTheme.green : InsightTheme.ink3,
+                              color: widget.checklistDone == widget.checklistTotal ? InsightTheme.green : InsightTheme.ink3,
                             ),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                'Checklist · $checklistDone of $checklistTotal items reviewed',
+                                'Checklist · ${widget.checklistDone} of ${widget.checklistTotal} items reviewed',
                                 style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
                               ),
                             ),
                           ],
                         ),
                       ],
-                      
-                      const SizedBox(height: 24),
 
-                      // DISCREPANCIES SECTION
+                      const SizedBox(height: 24),
                       const _SectionLabel(title: 'DISCREPANCIES'),
                       const SizedBox(height: 10),
-                      // Styled as a clean list row per the HTML spec
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
                             width: 40, height: 40,
@@ -247,52 +277,47 @@ class FieldFindingsScreen extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Unpermitted accessory structure', style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink)),
+                                TextField(
+                                  controller: _discrepancyTitleController,
+                                  style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    border: InputBorder.none,
+                                    hintText: 'Discrepancy title',
+                                  ),
+                                ),
                                 const SizedBox(height: 2),
-                                Text('Rear yard, approx. 12 sqm', style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
+                                TextField(
+                                  controller: _discrepancyDetailController,
+                                  style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    border: InputBorder.none,
+                                    hintText: 'Details / location',
+                                  ),
+                                ),
                               ],
                             ),
                           ),
                         ],
                       ),
-                      
-                      const SizedBox(height: 24),
 
-                      // RECOMMENDATIONS SECTION
+                      const SizedBox(height: 24),
                       const _SectionLabel(title: 'RECOMMENDATIONS'),
                       const SizedBox(height: 10),
-                      const _TextCard(
-                        text: 'Advise applicant to file supplementary permit for accessory structure prior to final approval.',
-                      ),
+                      _EditableTextCard(controller: _recommendationsController, hint: 'Enter recommendation for this application...'),
                     ],
                   ),
                 ),
-
-                // BOTTOM ACTION BUTTON
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
                   child: ElevatedButton(
-                    onPressed: () {
-                      HapticFeedback.selectionClick();
-                      context.read<InspectionProvider>().updateFindings(
-                        actualLandUse: task.landUseClass,
-                        notes: 'Rear portion of the lot shows a small storage structure not reflected in the declared building plan. Main residence otherwise matches submitted layout.',
-                        discrepancies: 'Unpermitted accessory structure — Rear yard, approx. 12 sqm',
-                        recommendations: 'Advise applicant to file supplementary permit for accessory structure prior to final approval.',
-                        boundaryStatus: 'Not yet verified via GPS',
-                      );
-
-                      InspectionProgress.instance.markStepComplete(5);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ReviewSubmitScreen(task: task),
-                        ),
-                      );
-                    },
+                    onPressed: _handleContinue,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: Colors.transparent, 
+                      backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ).copyWith(
@@ -354,10 +379,12 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-class _TextCard extends StatelessWidget {
-  final String text;
-  
-  const _TextCard({required this.text});
+/// Same visual container as the old read-only _TextCard, pero editable na.
+class _EditableTextCard extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+
+  const _EditableTextCard({required this.controller, required this.hint});
 
   @override
   Widget build(BuildContext context) {
@@ -369,9 +396,17 @@ class _TextCard extends StatelessWidget {
         border: Border.all(color: InsightTheme.line),
         boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1))],
       ),
-      child: Text(
-        text,
+      child: TextField(
+        controller: controller,
+        maxLines: null,
+        minLines: 2,
         style: InsightTheme.inter(12.5, c: InsightTheme.ink2, h: 1.6),
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding: EdgeInsets.zero,
+          border: InputBorder.none,
+          hintText: hint,
+        ),
       ),
     );
   }

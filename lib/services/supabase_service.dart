@@ -173,6 +173,56 @@ class SupabaseService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // FETCH FULL JOB DETAIL  (Completed inspection detail / rework screen)
+  //   fetchMyJobs() only selects the columns the Tasks list needs — this
+  //   pulls everything else (findings, observations, discrepancies,
+  //   recommendations, checklist_data, photo_paths, GPS confirmation, etc.)
+  //   for the one job the inspector is actually opening.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>?> fetchJobDetail(String jobId) async {
+    try {
+      final response = await client
+          .from('field_jobs')
+          .select('''
+            *,
+            supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
+              reference_number,
+              applicant_name,
+              barangay
+            ),
+            supabase_parcels!field_jobs_supabase_parcel_id_fkey (
+              lot_area_sqm,
+              land_use_class,
+              property_index_number
+            )
+          ''')
+          .eq('id', jobId)
+          .single();
+      return response;
+    } catch (e) {
+      debugPrint('Error fetching job detail: $e');
+      return null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // REOPEN A COMPLETED JOB FOR REWORK  (Completed detail screen → "Rework")
+  //   Moves the job back to in_progress (so it shows under Ongoing again)
+  //   without touching the previously submitted answers — those stay in
+  //   place until the inspector actually edits and resubmits that step.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<void> reopenForRework({required String jobId}) async {
+    try {
+      await client.from('field_jobs').update({
+        'status': 'in_progress',
+      }).eq('id', jobId);
+    } catch (e) {
+      debugPrint('Error reopening job for rework: $e');
+      rethrow;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // GENERIC PARTIAL UPDATE  (checklist progress, photo upload count, etc.)
   // ─────────────────────────────────────────────────────────────────────────
   static Future<void> updateJobInspectionProgress({

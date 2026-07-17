@@ -10,6 +10,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/db_helper.dart';
 import 'login_screen.dart';
 import 'parcel_detail_screen.dart';
+import 'completed_inspection_detail_screen.dart';
 import 'home_dashboard_screen.dart';
 import 'updates_screen.dart';
 import 'profile_screen.dart';
@@ -60,6 +61,26 @@ class TaskItem {
   final double? lotAreaSqm;
   final String? propertyIndexNumber;
 
+  // Populated once a job has been submitted — used by the read-only
+  // Completed-task view instead of hardcoded placeholder text.
+  final String? findings;
+  final String? observations;
+  final String? discrepancies;
+  final String? recommendations;
+  final String? inspectorNotes;
+  final String? inspectionResult;
+  final bool? isCompliant;
+  final List<String> photoPaths;
+  final int photoCount;
+  final int checklistCompletedCount;
+  final int checklistTotalCount;
+  final String? submittedAt;
+  final List<Map<String, dynamic>> checklistData;
+  final double? confirmedLatitude;
+  final double? confirmedLongitude;
+  final double? gpsAccuracyM;
+  final String? gpsConfirmedAt;
+
   TaskItem({
     required this.id,
     this.parcelId,
@@ -72,6 +93,23 @@ class TaskItem {
     this.landUseClass = 'Not yet on file',
     this.lotAreaSqm,
     this.propertyIndexNumber,
+    this.findings,
+    this.observations,
+    this.discrepancies,
+    this.recommendations,
+    this.inspectorNotes,
+    this.inspectionResult,
+    this.isCompliant,
+    this.photoPaths = const [],
+    this.photoCount = 0,
+    this.checklistCompletedCount = 0,
+    this.checklistTotalCount = 0,
+    this.submittedAt,
+    this.checklistData = const [],
+    this.confirmedLatitude,
+    this.confirmedLongitude,
+    this.gpsAccuracyM,
+    this.gpsConfirmedAt,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -92,15 +130,61 @@ class TaskItem {
       landUseClass: parcel?['land_use_class'] as String? ?? 'Not yet on file',
       lotAreaSqm: (parcel?['lot_area_sqm'] as num?)?.toDouble(),
       propertyIndexNumber: parcel?['property_index_number'] as String?,
+      findings: job['findings'] as String?,
+      observations: job['observations'] as String?,
+      discrepancies: job['discrepancies'] as String?,
+      recommendations: job['recommendations'] as String?,
+      inspectorNotes: job['inspector_notes'] as String?,
+      inspectionResult: job['inspection_result'] as String?,
+      isCompliant: job['is_compliant'] as bool?,
+      photoPaths: (job['photo_paths'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      photoCount: (job['photo_count'] as num?)?.toInt() ?? 0,
+      checklistCompletedCount: (job['checklist_completed_count'] as num?)?.toInt() ?? 0,
+      checklistTotalCount: (job['checklist_total_count'] as num?)?.toInt() ?? 0,
+      submittedAt: job['submitted_at'] as String?,
+      checklistData: (job['checklist_data'] as List?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList() ?? const [],
+      confirmedLatitude: (job['confirmed_latitude'] as num?)?.toDouble(),
+      confirmedLongitude: (job['confirmed_longitude'] as num?)?.toDouble(),
+      gpsAccuracyM: (job['gps_accuracy_m'] as num?)?.toDouble(),
+      gpsConfirmedAt: job['gps_confirmed_at'] as String?,
     );
   }
 
   String get category {
     final s = status.toLowerCase();
-    if (s.contains('progress') || s.contains('ongoing')) return 'Ongoing';
-    if (s.contains('schedule')) return 'Scheduled';
+
+    // Final state — once submitted, always Completed. Nothing below can
+    // override this, even if the scheduled date has since passed.
     if (s.contains('complete') || s.contains('done')) return 'Completed';
+
+    // The inspector has actually started this job (DB status flips to
+    // 'in_progress' when GPS is confirmed on-site — see
+    // SupabaseService.confirmGpsOnSite) but hasn't submitted yet.
+    if (s.contains('progress') || s.contains('ongoing')) return 'Ongoing';
+
+    // Not started yet. "Scheduled" == due today or overdue — computed from
+    // scheduled_date, not a manually-assigned status, so it updates itself
+    // as the date arrives instead of depending on an admin flag.
+    if (_isDueOrOverdue) return 'Scheduled';
+
+    // Not started, still has time before its scheduled date — can be done
+    // whenever the inspector has a slot.
     return 'Pending';
+  }
+
+  bool get _isDueOrOverdue {
+    if (scheduledDate.isEmpty) return false;
+    try {
+      final due = DateTime.parse(scheduledDate);
+      final today = DateTime.now();
+      final dueDay = DateTime(due.year, due.month, due.day);
+      final todayDay = DateTime(today.year, today.month, today.day);
+      return !dueDay.isAfter(todayDay); // due today or already overdue
+    } catch (_) {
+      return false;
+    }
   }
 }
 
@@ -206,6 +290,18 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
+  /// Completed jobs are done — open the read-only summary instead of the
+  /// editable step flow (which used to show "Continue" on already-submitted
+  /// work because it only tracked in-session progress, not real job status).
+  void _openTask(BuildContext context, TaskItem task) {
+    HapticFeedback.selectionClick();
+    if (task.category == 'Completed') {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => CompletedInspectionDetailScreen(task: task)));
+    } else {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task)));
+    }
+  }
+
   Future<void> _handleLogout(BuildContext context) async {
     await AuthService.signOut();
     if (context.mounted) {
@@ -293,10 +389,7 @@ Widget build(BuildContext context) {
                         if (heroTask != null) ...[
                           _HeroTaskCard(
                             task: heroTask,
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: heroTask)));
-                            },
+                            onTap: () => _openTask(context, heroTask),
                           ),
                           const SizedBox(height: 16),
                         ] else
@@ -318,10 +411,7 @@ Widget build(BuildContext context) {
                             itemBuilder: (context, index) {
                               return _GridTaskCard(
                                 task: gridTasks[index],
-                                onTap: () {
-                                  HapticFeedback.selectionClick();
-                                  Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: gridTasks[index])));
-                                },
+                                onTap: () => _openTask(context, gridTasks[index]),
                               );
                             },
                           ),

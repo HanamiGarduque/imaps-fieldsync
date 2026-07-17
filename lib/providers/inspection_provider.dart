@@ -138,6 +138,57 @@ class InspectionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Rebuilds in-memory state from a completed job's real submitted data,
+/// instead of the blanks `startInspection` uses. Called on "Rework this
+/// step" — unlike startInspection, this does NOT reset anything, so the
+/// inspector doesn't lose the other steps' answers.
+void hydrateForRework(TaskItem task) {
+  _activeTask = task;
+  _currentStep = 1;
+
+  // Match stored checklist entries back onto the two known maps.
+  // Expects each entry to look like {'label': ..., 'value': true/false} —
+  // adjust the keys below if your actual checklist_data shape differs.
+  for (final entry in task.checklistData) {
+    final key = entry['label'] ?? entry['key'];
+    final value = entry['value'] ?? entry['checked'];
+    if (key == null) continue;
+    if (_siteCondition.containsKey(key)) {
+      _siteCondition[key] = value == true;
+    } else if (_zoningObservations.containsKey(key)) {
+      _zoningObservations[key] = value == true;
+    }
+  }
+
+  // Photos — only paths were persisted on field_jobs.photo_paths (no
+  // notes/lat/lng), so those come back empty. If you want that metadata
+  // to survive a rework round-trip, pull from field_job_photos instead,
+  // which DOES have latitude/longitude/captured_at.
+  _capturedPhotos
+    ..clear()
+    ..addAll(task.photoPaths.map((path) => {
+          'photoPath': path,
+          'notes': '',
+          'latitude': null,
+          'longitude': null,
+          'capturedAt': task.submittedAt,
+        }));
+
+  _notes = task.inspectorNotes ?? '';
+  _discrepancies = task.discrepancies ?? '';
+  _recommendations = task.recommendations ?? '';
+  _inspectionResult = task.inspectionResult ??
+      (task.isCompliant == true ? 'Compliant' : 'With Discrepancy');
+  _boundaryStatus = task.isCompliant == false ? 'Non-compliant' : 'Compliant';
+  // NOTE: `observations` was historically written as one freeform
+  // sentence (e.g. "Actual land use: X. Boundary status: Y.") rather than
+  // matching `_actualLandUse` 1:1 — I'm not auto-parsing that back apart
+  // since it'd be guesswork. If you want exact round-trip, the fix is
+  // upstream: store actualLandUse as its own column instead of folding
+  // it into `observations`.
+
+  notifyListeners();
+}
   // --- LOCAL SQLite DRAFT RECOVERY ---
 
   Future<void> _loadLocalDraftIfExists(String jobId) async {

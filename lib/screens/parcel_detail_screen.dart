@@ -65,7 +65,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     super.initState();
     // Starting a fresh inspection for this parcel shouldn't carry over
     // progress left behind from a different one.
-    progress.ensureActiveInspection(task.inspectionNo);
+    progress.ensureActiveInspection(task.id);
     progress.addListener(_onProgressChanged);
 
     // Reset/init the shared InspectionProvider session for this task so
