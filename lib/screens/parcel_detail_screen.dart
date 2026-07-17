@@ -11,6 +11,8 @@ import 'capture_photo_screen.dart';
 import 'field_findings_screen.dart';
 import 'review_submit_screen.dart';
 import 'inspection_progress.dart';
+import 'package:provider/provider.dart';
+import '../providers/inspection_provider.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -65,6 +67,14 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     // progress left behind from a different one.
     progress.ensureActiveInspection(task.inspectionNo);
     progress.addListener(_onProgressChanged);
+
+    // Reset/init the shared InspectionProvider session for this task so
+    // the checklist, photo, and findings screens have something to write
+    // into (and Review & Submit has something real to read from).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<InspectionProvider>().startInspection(task);
+    });
   }
 
   @override

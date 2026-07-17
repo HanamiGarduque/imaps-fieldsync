@@ -89,6 +89,26 @@ class SupabaseService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // GPS DISTANCE CHECK  (GPS verification screen)
+  //   Calls the distance_to_parcel_boundary() RPC — supabase_parcels.geom is
+  //   a Point (confirmed via ST_GeometryType), so this returns straight-line
+  //   distance in meters to the parcel's declared pin, and 0 only when the
+  //   device is at that exact point.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<double> getDistanceToParcelBoundary({
+    required String parcelId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final result = await client.rpc('distance_to_parcel_boundary', params: {
+      'parcel_id': parcelId,
+      'lat': latitude,
+      'lng': longitude,
+    });
+    return (result as num).toDouble();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // CONFIRM GPS ON-SITE  (GPS verification screen → marks job in_progress)
   // ─────────────────────────────────────────────────────────────────────────
   static Future<void> confirmGpsOnSite({
@@ -234,4 +254,3 @@ class SupabaseService {
     }
   }
 }
-

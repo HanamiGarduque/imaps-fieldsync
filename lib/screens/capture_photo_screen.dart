@@ -13,6 +13,8 @@ import '../services/geotag_service.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'inspection_checklist_screen.dart';
+import 'package:provider/provider.dart';
+import '../providers/inspection_provider.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -69,10 +71,15 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   bool _isCapturing = false;
 
   @override
+  @override
   void initState() {
     super.initState();
     _initCamera();
     _fetchLocation();
+    final existingPhotos = context.read<InspectionProvider>().capturedPhotos;
+    if (existingPhotos.isNotEmpty) {
+      _capturedPhotos.addAll(existingPhotos);
+    }
   }
 
   // Original Camera Init Logic
@@ -164,6 +171,13 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       );
       return;
     }
+
+    context.read<InspectionProvider>().addPhoto(
+      photoPath: _capturedPhotoPath!,
+      photoNotes: _notesController.text,
+      latitude: _currentPosition?.latitude,
+      longitude: _currentPosition?.longitude,
+    );
 
     setState(() {
       _capturedPhotos.add({

@@ -8,6 +8,7 @@ import '../providers/inspection_provider.dart';
 import '../services/supabase_service.dart';
 import 'inspection_progress.dart';
 import 'tasks_screen.dart'; // TaskItem
+import '../models/user_profile.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -456,16 +457,23 @@ class SubmissionSuccessScreen extends StatelessWidget {
                     SizedBox(
                       width: 220,
                       child: ElevatedButton(
-                        onPressed: () {
+                        onPressed: () async {
                           HapticFeedback.lightImpact();
                           InspectionProgress.instance.reset();
-                          // Pop back to the first route (Tasks/Home) instead of
-                          // just going back one step, since the whole 6-step
-                          // flow is done. NOTE: if that screen doesn't refetch
-                          // on return, pull down to refresh (RefreshIndicator
-                          // is already wired on TasksScreen) to see the updated
-                          // status right away.
-                          Navigator.of(context).popUntil((route) => route.isFirst);
+                          final profileMap = await SupabaseService.fetchMyProfile();
+                          if (!context.mounted) return;
+
+                          if (profileMap != null) {
+                            Navigator.of(context).pushAndRemoveUntil(
+                              MaterialPageRoute(
+                                builder: (_) => TasksScreen(profile: UserProfile.fromMap(profileMap)),
+                              ),
+                              (route) => false,
+                            );
+                          } else {
+                            // Fallback lang kung sakaling di makuha ang profile
+                            Navigator.of(context).popUntil((route) => route.isFirst);
+                          }
                         },
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 15),

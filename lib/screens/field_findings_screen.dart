@@ -6,6 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'review_submit_screen.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
+import 'package:provider/provider.dart';
+import '../providers/inspection_provider.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -272,11 +274,19 @@ class FieldFindingsScreen extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: () {
                       HapticFeedback.selectionClick();
+                      context.read<InspectionProvider>().updateFindings(
+                        actualLandUse: task.landUseClass,
+                        notes: 'Rear portion of the lot shows a small storage structure not reflected in the declared building plan. Main residence otherwise matches submitted layout.',
+                        discrepancies: 'Unpermitted accessory structure — Rear yard, approx. 12 sqm',
+                        recommendations: 'Advise applicant to file supplementary permit for accessory structure prior to final approval.',
+                        boundaryStatus: 'Not yet verified via GPS',
+                      );
+
                       InspectionProgress.instance.markStepComplete(5);
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-builder: (_) => ReviewSubmitScreen(task: task),
+                          builder: (_) => ReviewSubmitScreen(task: task),
                         ),
                       );
                     },

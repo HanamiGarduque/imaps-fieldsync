@@ -6,6 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'field_findings_screen.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
+import 'package:provider/provider.dart';
+import '../providers/inspection_provider.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -228,7 +230,11 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                               subtitle: e.value ? null : 'Not yet reviewed',
                               isChecked: e.value,
                               isLast: idx == _siteCondition.length - 1,
-                              onTap: () => setState(() => _siteCondition[e.key] = !e.value), //[cite: 7]
+                              onTap: () {
+  final newValue = !e.value;
+  setState(() => _siteCondition[e.key] = newValue);
+  context.read<InspectionProvider>().setSiteCondition(e.key, newValue);
+},
                             );
                           }).toList(),
                         ),
@@ -257,7 +263,11 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                               title: e.key,
                               isChecked: e.value,
                               isLast: idx == _zoningObservations.length - 1,
-                              onTap: () => setState(() => _zoningObservations[e.key] = !e.value), //[cite: 7]
+                              onTap: () {
+  final newValue = !e.value;
+  setState(() => _zoningObservations[e.key] = newValue);
+  context.read<InspectionProvider>().setZoningObservation(e.key, newValue);
+},
                             );
                           }).toList(),
                         ),

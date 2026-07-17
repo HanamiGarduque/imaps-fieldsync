@@ -3,7 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:geolocator/geolocator.dart';
 
+import '../services/location_service.dart';
+import '../services/supabase_service.dart';
 import 'capture_photo_screen.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
@@ -45,9 +48,105 @@ class InsightTheme {
 /// ==================================================================
 /// SCREEN 8 — GPS VERIFICATION
 /// ==================================================================
-class GpsVerificationScreen extends StatelessWidget {
+class GpsVerificationScreen extends StatefulWidget {
   final TaskItem task;
   const GpsVerificationScreen({super.key, required this.task});
+
+  @override
+  State<GpsVerificationScreen> createState() => _GpsVerificationScreenState();
+}
+
+class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
+  // Within this many meters of the parcel's declared point location counts
+  // as "on site". supabase_parcels.geom is a single Point (confirmed via
+  // ST_GeometryType), not a boundary polygon — so this is distance-to-pin,
+  // not distance-to-polygon-edge.
+  // Distance is 0 whenever the device is already inside the polygon.
+  static const double _rangeThresholdMeters = 30.0;
+
+  bool _loading = true;
+  bool _submitting = false;
+  String? _error;
+
+  double? _distance;
+  double? _accuracy;
+  double? _latitude;
+  double? _longitude;
+
+  bool get _verified =>
+      _distance != null && _distance! <= _rangeThresholdMeters;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLocation();
+  }
+
+  Future<void> _checkLocation() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      if (widget.task.parcelId == null) {
+        throw Exception('No parcel linked to this task.');
+      }
+
+      final Position pos = await LocationService.getCurrentLocation();
+      final double distance = await SupabaseService.getDistanceToParcelBoundary(
+        parcelId: widget.task.parcelId!,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _latitude = pos.latitude;
+        _longitude = pos.longitude;
+        _accuracy = pos.accuracy;
+        _distance = distance;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _startInspection() async {
+    if (!_verified || _latitude == null || _longitude == null || _submitting) {
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      await SupabaseService.confirmGpsOnSite(
+        jobId: widget.task.id,
+        latitude: _latitude!,
+        longitude: _longitude!,
+        accuracyMeters: _accuracy ?? 0,
+      );
+
+      if (!mounted) return;
+      HapticFeedback.selectionClick();
+      InspectionProgress.instance.markStepComplete(2);
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save GPS check-in: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -156,7 +255,37 @@ class GpsVerificationScreen extends StatelessWidget {
                 // DIAL WIDGET (CENTER)
                 Expanded(
                   child: Center(
-                    child: Column(
+                    child: _loading
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(color: InsightTheme.blue1),
+                              const SizedBox(height: 16),
+                              Text('Getting your location...', style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                            ],
+                          )
+                        : _error != null
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 32),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.location_off_rounded, size: 40, color: InsightTheme.ink3),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      _error!,
+                                      textAlign: TextAlign.center,
+                                      style: InsightTheme.inter(13, c: InsightTheme.ink2),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    OutlinedButton(
+                                      onPressed: _checkLocation,
+                                      child: const Text('Try again'),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
@@ -178,13 +307,15 @@ class GpsVerificationScreen extends StatelessWidget {
                                   width: 5,
                                   height: 16,
                                   decoration: BoxDecoration(
-                                    gradient: const LinearGradient(
-                                      colors: [InsightTheme.blue1, InsightTheme.blue2],
+                                    gradient: LinearGradient(
+                                      colors: _verified
+                                          ? [InsightTheme.blue1, InsightTheme.blue2]
+                                          : const [Color(0xFFE0A526), Color(0xFFB9821A)],
                                       begin: Alignment.topCenter, end: Alignment.bottomCenter,
                                     ),
                                     borderRadius: BorderRadius.circular(3),
                                     boxShadow: [
-                                      BoxShadow(color: InsightTheme.blue1.withOpacity(0.6), blurRadius: 10),
+                                      BoxShadow(color: (_verified ? InsightTheme.blue1 : const Color(0xFFE0A526)).withOpacity(0.6), blurRadius: 10),
                                     ],
                                   ),
                                 ),
@@ -203,8 +334,11 @@ class GpsVerificationScreen extends StatelessWidget {
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Text('12m', style: InsightTheme.poppins(32, w: FontWeight.w800)),
-                                    Text('from boundary', style: InsightTheme.inter(11, w: FontWeight.w500)),
+                                    Text(
+                                      _distance != null ? '${_distance!.round()}m' : '--',
+                                      style: InsightTheme.poppins(32, w: FontWeight.w800),
+                                    ),
+                                    Text('from site', style: InsightTheme.inter(11, w: FontWeight.w500)),
                                   ],
                                 ),
                               ),
@@ -222,13 +356,22 @@ class GpsVerificationScreen extends StatelessWidget {
                               Text('100m', style: InsightTheme.jetBrains(10)),
                             ],
                           ),
-                        )
+                        ),
+                        if (!_verified) ...[
+                          const SizedBox(height: 10),
+                          TextButton.icon(
+                            onPressed: _checkLocation,
+                            icon: const Icon(Icons.refresh_rounded, size: 16, color: InsightTheme.blueInk),
+                            label: Text('Recheck location', style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ),
 
                 // GLASS BOTTOM READOUT
+                if (!_loading && _error == null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: ClipRRect(
@@ -248,23 +391,23 @@ class GpsVerificationScreen extends StatelessWidget {
                           children: [
                             _ReadoutItem(
                               icon: Icons.map_outlined,
-                              value: '12m',
+                              value: _distance != null ? '${_distance!.round()}m' : '--',
                               label: 'DISTANCE',
                               isGreen: false,
                             ),
                             Container(width: 1, height: 36, color: InsightTheme.lineStrong),
                             _ReadoutItem(
                               icon: Icons.gps_fixed_rounded,
-                              value: '±4m',
+                              value: _accuracy != null ? '±${_accuracy!.round()}m' : '--',
                               label: 'ACCURACY',
                               isGreen: false,
                             ),
                             Container(width: 1, height: 36, color: InsightTheme.lineStrong),
                             _ReadoutItem(
-                              icon: Icons.check_rounded,
-                              value: 'Verified',
+                              icon: _verified ? Icons.check_rounded : Icons.error_outline_rounded,
+                              value: _verified ? 'Verified' : 'Too far',
                               label: 'STATUS',
-                              isGreen: true,
+                              isGreen: _verified,
                             ),
                           ],
                         ),
@@ -275,17 +418,11 @@ class GpsVerificationScreen extends StatelessWidget {
                 const SizedBox(height: 14),
 
                 // START INSPECTION BUTTON
+                if (!_loading && _error == null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                   child: ElevatedButton(
-                    onPressed: () {
-                      HapticFeedback.selectionClick();
-                      InspectionProgress.instance.markStepComplete(2);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: task)),
-                      );
-                    },
+                    onPressed: (_verified && !_submitting) ? _startInspection : null,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       backgroundColor: Colors.transparent, 
@@ -296,23 +433,31 @@ class GpsVerificationScreen extends StatelessWidget {
                     ),
                     child: Ink(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [InsightTheme.blue1, InsightTheme.blue2],
+                        gradient: LinearGradient(
+                          colors: _verified
+                              ? const [InsightTheme.blue1, InsightTheme.blue2]
+                              : [InsightTheme.ink3, InsightTheme.ink3],
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                         ),
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10)),
-                        ],
+                        boxShadow: _verified
+                            ? [BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10))]
+                            : [],
                       ),
                       child: Container(
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
-                        child: Text(
-                          'Continue to photo evidence',
-                          style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
-                        ),
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                              )
+                            : Text(
+                                _verified ? 'Continue to photo evidence' : 'Get closer to the site',
+                                style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
+                              ),
                       ),
                     ),
                   ),

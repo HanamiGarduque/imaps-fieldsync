@@ -56,6 +56,9 @@ class TaskItem {
   final String status;
   final String inspectionNo;
   final String scheduledDate;
+  final String landUseClass;
+  final double? lotAreaSqm;
+  final String? propertyIndexNumber;
 
   TaskItem({
     required this.id,
@@ -66,10 +69,14 @@ class TaskItem {
     required this.status,
     required this.inspectionNo,
     this.scheduledDate = '',
+    this.landUseClass = 'Not yet on file',
+    this.lotAreaSqm,
+    this.propertyIndexNumber,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
     final application = job['supabase_zoning_applications'] as Map<String, dynamic>?;
+    final parcel = job['supabase_parcels'] as Map<String, dynamic>?;
     final scheduledDate = job['scheduled_date'] as String? ?? '';
     return TaskItem(
       id: job['id']?.toString() ?? '',
@@ -82,6 +89,9 @@ class TaskItem {
       status: job['status'] as String? ?? 'Pending',
       inspectionNo: application?['reference_number'] as String? ?? job['local_inspection_id']?.toString() ?? 'N/A',
       scheduledDate: scheduledDate,
+      landUseClass: parcel?['land_use_class'] as String? ?? 'Not yet on file',
+      lotAreaSqm: (parcel?['lot_area_sqm'] as num?)?.toDouble(),
+      propertyIndexNumber: parcel?['property_index_number'] as String?,
     );
   }
 
