@@ -4,12 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
-import '../services/auth_service.dart'; // Preserved real service
-import 'login_screen.dart'; // Preserved
+import '../services/auth_service.dart';
+import 'login_screen.dart'; 
 import 'home_dashboard_screen.dart';
 import 'tasks_screen.dart';
 import 'updates_screen.dart';
-import 'profile_edit_screen.dart'; // Imported the edit screen
+import 'profile_edit_screen.dart'; 
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -31,8 +31,8 @@ class InsightTheme {
   static const Color amberTint = Color(0xFFFEF3DE);
   static const Color amberInk = Color(0xFFA66C00);
   
-  static const Color line = Color(0x12141628); // ~rgba(20,22,40,0.07)
-  static const Color lineStrong = Color(0x21141628); // ~rgba(20,22,40,0.13)
+  static const Color line = Color(0x12141628); 
+  static const Color lineStrong = Color(0x21141628); 
   
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
@@ -60,7 +60,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _handleSignOut(BuildContext context) async {
     HapticFeedback.mediumImpact();
-    await AuthService.signOut(); // Preserved business logic
+    await AuthService.signOut(); 
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -97,12 +97,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
-      extendBody: true, // Content scrolls behind bottom nav
+      extendBody: true, 
       body: Stack(
         children: [
-          // ----------------------------------------------------
-          // BACKGROUND GRADIENT BLOBS
-          // ----------------------------------------------------
           Positioned(
             top: -60,
             right: -60,
@@ -134,14 +131,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
 
-          // ----------------------------------------------------
-          // MAIN CONTENT
-          // ----------------------------------------------------
           SafeArea(
             bottom: false,
             child: Column(
               children: [
-                // TOP BAR
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
@@ -156,13 +149,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
 
-                // SCROLLABLE LIST
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      // PROFILE HEADER
                       Row(
                         children: [
                           Container(
@@ -195,7 +186,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       
                       const SizedBox(height: 32),
 
-                      // COMBINED OPTIONS LIST
                       _ProfileListRow(
                         icon: Icons.person_outline_rounded,
                         title: 'Personal information',
@@ -226,7 +216,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       const SizedBox(height: 32),
 
-                      // SIGN OUT BUTTON
                       SizedBox(
                         width: double.infinity,
                         height: 52,
@@ -253,25 +242,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
 
-      // ----------------------------------------------------
-      // FLOATING BOTTOM NAVIGATION (Glassmorphic)
-      // ----------------------------------------------------
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
               child: Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: Colors.white.withOpacity(0.65)),
                   boxShadow: const [
                     BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
-                    BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, 16)),
+                    BoxShadow(color: Color(0x1A000000), blurRadius: 24, offset: Offset(0, 12)),
                   ],
                 ),
                 child: Row(
@@ -287,7 +273,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     _BottomNavItem(
                       icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3, 
-                      onTap: () { setState(() => _currentNavIndex = 3); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const UpdatesScreen())); }
+                      onTap: () { setState(() => _currentNavIndex = 3); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile))); }
                     ),
                     _BottomNavItem(
                       icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4, 
@@ -303,10 +289,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
-
-/// ==================================================================
-/// COMPONENT WIDGETS
-/// ==================================================================
 
 class _ProfileListRow extends StatelessWidget {
   final IconData icon;
@@ -387,15 +369,15 @@ class _BottomNavItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: EdgeInsets.symmetric(horizontal: isActive ? 16 : 10, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: isActive ? 14 : 10, vertical: 10),
         decoration: BoxDecoration(
           gradient: isActive ? const LinearGradient(
             colors: [InsightTheme.blue1, InsightTheme.blue2],
             begin: Alignment.topLeft, end: Alignment.bottomRight,
           ) : null,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           boxShadow: isActive ? [
-            BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 6))
+            BoxShadow(color: InsightTheme.blue1.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))
           ] : [],
         ),
         child: Column(

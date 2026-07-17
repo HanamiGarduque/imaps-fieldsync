@@ -328,7 +328,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildFieldLabel('EMAIL'),
+                          _buildFieldLabel('INSPECTOR EMAIL'),
                           const SizedBox(height: 6),
                           _buildTextField(
                             controller: _emailController,

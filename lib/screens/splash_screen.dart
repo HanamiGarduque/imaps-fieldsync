@@ -338,7 +338,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('PORTAL ACCESS', style: AppText.mono(10, w: FontWeight.w600, ls: 1.0)),
+                        Text('LOG IN TO CONTINUE', style: AppText.mono(10, w: FontWeight.w600, ls: 1.0)),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -358,11 +358,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildFieldLabel('INSPECTOR ID'),
+                          _buildFieldLabel('EMAIL'),
                           const SizedBox(height: 6),
                           _buildTextField(
                             controller: _emailController,
-                            hintText: 'INSP-0245',
+                            hintText: 'inspector@test.com',
                             icon: Icons.badge_outlined,
                             obscureText: false,
                           ),
