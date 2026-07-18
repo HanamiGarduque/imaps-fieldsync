@@ -73,3 +73,8 @@ android/app/upload-keystore.jks
 
 # APKs
 *.apk
+
+apk_check/
+app-debug-check.zip
+flutter_verbose_log.txt
+kotlin_build_log.txt

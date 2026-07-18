@@ -7,7 +7,7 @@ import '../services/supabase_service.dart';
 import '../providers/inspection_provider.dart';
 import 'inspection_progress.dart';
 
-import 'site_map_screen.dart' as site_map;
+import 'parcel_detail_screen.dart' hide InsightTheme;
 import 'gps_verification_screen.dart' hide InsightTheme;
 import 'inspection_checklist_screen.dart' hide InsightTheme;
 import 'capture_photo_screen.dart' hide InsightTheme;
@@ -117,7 +117,7 @@ class _CompletedInspectionDetailScreenState
     final Widget target;
     switch (step) {
       case 1:
-        target = site_map.SiteMapScreen(task: task);
+        target = ParcelDetailScreen(task: task);
         break;
       case 2:
         target = GpsVerificationScreen(task: task);

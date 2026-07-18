@@ -133,6 +133,14 @@ class InspectionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Called by GpsVerificationScreen right after a successful on-site
+  // confirmation, so Step 5 (Findings) reflects the real GPS result
+  // instead of a hardcoded placeholder string.
+  void recordGpsVerification({required double distanceMeters}) {
+    _boundaryStatus = 'Verified on-site — ${distanceMeters.round()}m from declared location';
+    notifyListeners();
+  }
+
   void updateResult(String result) {
     _inspectionResult = result;
     notifyListeners();
