@@ -53,16 +53,15 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   InspectionProgress get progress => InspectionProgress.instance;
 
   @override
-  void initState() {
-    super.initState();
-    progress.ensureActiveInspection(task.id, label: task.location);
-    progress.addListener(_onProgressChanged);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      context.read<InspectionProvider>().startInspection(task);
-    });
-  }
+void initState() {
+  super.initState();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final provider = context.read<InspectionProvider>();
+    if (provider.activeTask?.id != widget.task.id) {
+      provider.startInspection(widget.task);
+    }
+  });
+}
 
   @override
   void dispose() {

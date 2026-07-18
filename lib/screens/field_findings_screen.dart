@@ -49,9 +49,15 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
   @override
   void initState() {
     super.initState();
-    _notesController = TextEditingController(text: 'Structure condition appears stable. Need to verify land use documents.');
-    _discrepancyTitleController = TextEditingController(text: 'Unpermitted accessory structure');
-    _discrepancyDetailController = TextEditingController(text: 'Rear yard, approx. 12 sqm');
+    // Fields start EMPTY on purpose — these strings were previously set as
+    // the controllers' initial text (not hintText), which meant the sample
+    // wording (and, for Discrepancies, entirely fake sample findings) would
+    // get submitted as real data unless the inspector manually cleared it
+    // first. The hintText below already carries the guidance text; leaving
+    // the controllers empty lets that hintText actually show.
+    _notesController = TextEditingController();
+    _discrepancyTitleController = TextEditingController();
+    _discrepancyDetailController = TextEditingController();
     _recommendationsController = TextEditingController();
   }
 
@@ -63,7 +69,25 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
 
   void _handleContinue() {
     HapticFeedback.selectionClick();
-    context.read<InspectionProvider>().updateFindings(actualLandUse: widget.task.landUseClass, notes: _notesController.text.trim(), discrepancies: '${_discrepancyTitleController.text.trim()} — ${_discrepancyDetailController.text.trim()}', recommendations: _recommendationsController.text.trim(), boundaryStatus: 'Verified');
+
+    final discrepancyTitle = _discrepancyTitleController.text.trim();
+    final discrepancyDetail = _discrepancyDetailController.text.trim();
+    // Don't save a bare " — " when the inspector legitimately found nothing.
+    final discrepancies = (discrepancyTitle.isEmpty && discrepancyDetail.isEmpty)
+        ? ''
+        : [discrepancyTitle, discrepancyDetail].where((s) => s.isNotEmpty).join(' — ');
+
+    final provider = context.read<InspectionProvider>();
+    provider.updateFindings(
+          actualLandUse: widget.task.landUseClass,
+          notes: _notesController.text.trim(),
+          discrepancies: discrepancies,
+          recommendations: _recommendationsController.text.trim(),
+          // Carries forward whatever GpsVerificationScreen actually recorded
+          // in Step 2 (e.g. "Verified on-site — 6m from declared location")
+          // instead of hardcoding a status that may not reflect reality.
+          boundaryStatus: provider.boundaryStatus,
+        );
     InspectionProgress.instance.markStepComplete(5);
     Navigator.push(context, MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)));
   }
@@ -131,7 +155,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
-                        child: TextField(controller: _notesController, maxLines: 4, minLines: 3, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Enter specific observations...')),
+                        child: TextField(controller: _notesController, maxLines: 4, minLines: 3, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Describe what you observed on-site — structure condition, land use, notable features...')),
                       ),
                       if (widget.capturedPhotos.isNotEmpty || widget.checklistTotal > 0) ...[
                         const SizedBox(height: 16),
@@ -152,9 +176,9 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                             Expanded(
                               child: Column(
                                 children: [
-                                  TextField(controller: _discrepancyTitleController, style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Issue Title')),
+                                  TextField(controller: _discrepancyTitleController, style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Issue title (leave blank if none found)')),
                                   const SizedBox(height: 6),
-                                  TextField(controller: _discrepancyDetailController, style: InsightTheme.inter(13, c: InsightTheme.ink2), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Location or Details')),
+                                  TextField(controller: _discrepancyDetailController, style: InsightTheme.inter(13, c: InsightTheme.ink2), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Location or details')),
                                 ],
                               ),
                             )
@@ -167,7 +191,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
-                        child: TextField(controller: _recommendationsController, maxLines: 3, minLines: 2, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Required actions or permits...')),
+                        child: TextField(controller: _recommendationsController, maxLines: 3, minLines: 2, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Enter recommendation for this application (e.g., required permits, follow-up actions)...')),
                       ),
                     ],
                   ),

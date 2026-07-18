@@ -98,6 +98,7 @@ class SupabaseService {
           local_inspection_id,
           status,
           scheduled_date,
+          deadline_date,
           supabase_parcel_id,
           supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
             reference_number,
@@ -133,6 +134,26 @@ class SupabaseService {
       debugPrint('Error fetching parcel details: $e');
       return null;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SCHEDULE A PENDING JOB  (Tasks screen → long-press a Pending card)
+  //   Inspector picks a specific future date (never past deadline_date,
+  //   enforced both here and by the date picker's lastDate on the UI side).
+  //   TaskItem.category treats any future scheduled_date as "Scheduled",
+  //   so this alone is enough to move the card into that tab.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<void> scheduleJob({
+    required String jobId,
+    required DateTime date,
+    String? note,
+  }) async {
+    final dateStr =
+        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    await client.from('field_jobs').update({
+      'scheduled_date': dateStr,
+      if (note != null && note.trim().isNotEmpty) 'remarks': note.trim(),
+    }).eq('id', jobId);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -413,3 +434,27 @@ class SupabaseService {
     }
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+  // AVATAR UPLOAD  (Profile edit screen)
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<String?> uploadAvatar({
+    required String userId,
+    required File file,
+  }) async {
+    try {
+      final fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final storagePath = '$userId/$fileName';
+
+      await client.storage.from('avatars').upload(
+        storagePath,
+        file,
+        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+      );
+
+      return client.storage.from('avatars').getPublicUrl(storagePath);
+    } catch (e) {
+      debugPrint('Error uploading avatar: $e');
+      return null;
+    }
+  }

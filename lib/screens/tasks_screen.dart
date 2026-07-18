@@ -73,6 +73,7 @@ class TaskItem {
   final String status;
   final String inspectionNo;
   final String scheduledDate;
+  final String? deadlineDate;
   final String landUseClass;
   final double? lotAreaSqm;
   final String? propertyIndexNumber;
@@ -99,7 +100,7 @@ class TaskItem {
   TaskItem({
     required this.id, this.parcelId, required this.name, required this.location,
     required this.parcels, required this.status, required this.inspectionNo, 
-    this.scheduledDate = '', this.landUseClass = 'Not yet on file', this.lotAreaSqm,
+    this.scheduledDate = '', this.deadlineDate, this.landUseClass = 'Not yet on file', this.lotAreaSqm,
     this.propertyIndexNumber, this.applicationType, this.findings, this.observations,
     this.discrepancies, this.recommendations, this.inspectorNotes, this.inspectionResult,
     this.isCompliant, this.photoPaths = const [], this.photoCount = 0,
@@ -121,6 +122,7 @@ class TaskItem {
       status: job['status'] as String? ?? 'Pending',
       inspectionNo: application?['reference_number'] as String? ?? job['local_inspection_id']?.toString() ?? 'N/A',
       scheduledDate: scheduledDate,
+      deadlineDate: job['deadline_date'] as String?,
       landUseClass: parcel?['land_use_class'] as String? ?? 'Not yet on file',
       lotAreaSqm: (parcel?['lot_area_sqm'] as num?)?.toDouble(),
       propertyIndexNumber: parcel?['property_index_number'] as String?,
@@ -149,7 +151,11 @@ class TaskItem {
     final s = status.toLowerCase();
     if (s.contains('complete') || s.contains('done')) return 'Completed';
     if (s.contains('progress') || s.contains('ongoing')) return 'Ongoing';
-    if (_isDueOrOverdue) return 'Scheduled';
+    // "Scheduled" == the inspector has actively booked a future date for
+    // this job (via the Schedule action / long-press on a Pending card).
+    // "Pending" is the default: no future date locked in yet, so it can be
+    // done whenever there's a slot — due-today/overdue included.
+    if (_isScheduledAhead) return 'Scheduled';
     return 'Pending';
   }
 
@@ -162,14 +168,14 @@ class TaskItem {
     return Icons.home_rounded;
   }
 
-  bool get _isDueOrOverdue {
+  bool get _isScheduledAhead {
     if (scheduledDate.isEmpty) return false;
     try {
       final due = DateTime.parse(scheduledDate);
       final today = DateTime.now();
       final dueDay = DateTime(due.year, due.month, due.day);
       final todayDay = DateTime(today.year, today.month, today.day);
-      return !dueDay.isAfter(todayDay); 
+      return dueDay.isAfter(todayDay); // booked for a future date
     } catch (_) {
       return false;
     }
@@ -250,6 +256,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 'status': j['status'],
                 'local_inspection_id': j['local_inspection_id'],
                 'scheduled_date': j['scheduled_date'],
+                'deadline_date': j['deadline_date'],
                 'supabase_zoning_applications': {
                   'applicant_name': j['applicant_name'],
                   'barangay': j['barangay'],
@@ -736,6 +743,7 @@ class _TasksScreenState extends State<TasksScreen> {
                                       key: ValueKey(task.id), 
                                       task: task,
                                       onTapDetail: () => _openTask(context, task),
+                                      onScheduled: _loadTasks,
                                     ),
                                   );
                                 },
@@ -891,8 +899,9 @@ class _SegmentTab extends StatelessWidget {
 class _CompactTaskCard extends StatefulWidget {
   final TaskItem task;
   final VoidCallback onTapDetail;
+  final VoidCallback? onScheduled;
 
-  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail});
+  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled});
 
   @override
   State<_CompactTaskCard> createState() => _CompactTaskCardState();
@@ -952,6 +961,161 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     }
   }
 
+  // Long-press a Pending card -> pick a date (never past the admin's
+  // deadline_date) + optional note -> updates scheduled_date, which moves
+  // this task into the Scheduled tab automatically (see TaskItem.category).
+  Future<void> _scheduleTask(BuildContext context) async {
+    HapticFeedback.mediumImpact();
+
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    DateTime? deadline;
+    if (widget.task.deadlineDate != null && widget.task.deadlineDate!.isNotEmpty) {
+      try {
+        deadline = DateTime.parse(widget.task.deadlineDate!);
+      } catch (_) {}
+    }
+    final lastPickableDate = (deadline != null && deadline.isAfter(tomorrow)) ? deadline : tomorrow;
+
+    DateTime? pickedDate;
+    final notesController = TextEditingController();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                decoration: const BoxDecoration(
+                  color: InsightTheme.surface,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40, height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(color: InsightTheme.line, borderRadius: BorderRadius.circular(2)),
+                      ),
+                    ),
+                    Text('Schedule this task', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+                    const SizedBox(height: 4),
+                    Text(widget.task.location, style: InsightTheme.inter(12.5, c: InsightTheme.ink2)),
+                    const SizedBox(height: 18),
+
+                    Text('Date', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2)),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () async {
+                        final result = await showDatePicker(
+                          context: sheetContext,
+                          initialDate: pickedDate ?? tomorrow,
+                          firstDate: tomorrow,
+                          lastDate: lastPickableDate,
+                        );
+                        if (result != null) setSheetState(() => pickedDate = result);
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.bg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: InsightTheme.line),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.calendar_today_rounded, size: 16, color: InsightTheme.blueInk),
+                            const SizedBox(width: 10),
+                            Text(
+                              pickedDate == null
+                                  ? 'Select a date'
+                                  : '${pickedDate!.year}-${pickedDate!.month.toString().padLeft(2, '0')}-${pickedDate!.day.toString().padLeft(2, '0')}',
+                              style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (deadline != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Must be on or before ${deadline.year}-${deadline.month.toString().padLeft(2, '0')}-${deadline.day.toString().padLeft(2, '0')} (deadline set by admin)',
+                        style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+                    Text('Notes (optional)', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2)),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: InsightTheme.bg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: InsightTheme.line),
+                      ),
+                      child: TextField(
+                        controller: notesController,
+                        maxLines: 3,
+                        style: InsightTheme.inter(13, c: InsightTheme.ink2),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: 'e.g. "Applicant requested morning slot"',
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: pickedDate == null
+                            ? null
+                            : () async {
+                                try {
+                                  await SupabaseService.scheduleJob(
+                                    jobId: widget.task.id,
+                                    date: pickedDate!,
+                                    note: notesController.text,
+                                  );
+                                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                                  widget.onScheduled?.call();
+                                } catch (e) {
+                                  if (sheetContext.mounted) {
+                                    ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                      SnackBar(content: Text('Could not schedule: $e')),
+                                    );
+                                  }
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: InsightTheme.blue1,
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: Text('Confirm schedule', style: InsightTheme.poppins(14, w: FontWeight.w600, c: Colors.white)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final statusColor = _getStatusColor();
@@ -973,6 +1137,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                 setState(() => _isExpanded = !_isExpanded);
                 HapticFeedback.selectionClick();
               },
+              onLongPress: widget.task.category == 'Pending' ? () => _scheduleTask(context) : null,
               behavior: HitTestBehavior.opaque,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1089,6 +1254,30 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                         ),
                       ),
                     ),
+                    if (widget.task.category == 'Pending') ...[
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => _scheduleTask(context),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: InsightTheme.orangeTint,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: InsightTheme.orange.withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.event_available_rounded, color: InsightTheme.orangeInk, size: 16),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text('Schedule this task', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.orangeInk)),
+                              ),
+                              const Icon(Icons.arrow_forward_ios_rounded, color: InsightTheme.orangeInk, size: 10),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

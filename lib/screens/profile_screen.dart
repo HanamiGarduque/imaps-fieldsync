@@ -58,13 +58,48 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int _currentNavIndex = 4; 
-  late UserProfile _currentProfile; 
+  int _currentNavIndex = 4;
+  late UserProfile _currentProfile;
+
+  int _tasksTodayCount = 0;
+  int _completedCount = 0;
+  bool _isLoadingStats = true;
 
   @override
   void initState() {
     super.initState();
-    _currentProfile = widget.profile; 
+    _currentProfile = widget.profile;
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    try {
+      final jobs = await SupabaseService.fetchMyJobs();
+      final tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
+
+      final today = DateTime.now();
+      final dueToday = tasks.where((t) {
+        if (t.scheduledDate.isEmpty) return false;
+        try {
+          final d = DateTime.parse(t.scheduledDate);
+          return d.year == today.year && d.month == today.month && d.day == today.day;
+        } catch (_) {
+          return false;
+        }
+      }).length;
+
+      final completed = tasks.where((t) => t.category == 'Completed').length;
+
+      if (mounted) {
+        setState(() {
+          _tasksTodayCount = dueToday;
+          _completedCount = completed;
+          _isLoadingStats = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingStats = false);
+    }
   }
 
   Future<void> _openEditScreen() async {
@@ -74,7 +109,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (_) => ProfileEditScreen(profile: _currentProfile),
       ),
     );
-    
+
     if (result != null && result is UserProfile && mounted) {
       setState(() {
         _currentProfile = result;
@@ -84,7 +119,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _handleSignOut(BuildContext context) async {
     HapticFeedback.mediumImpact();
-    await AuthService.signOut(); 
+    await AuthService.signOut();
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -187,22 +222,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       
                       Container(
-                        width: 86, height: 86,
-                        margin: const EdgeInsets.only(top: 4, bottom: 16),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: const LinearGradient(
-                            colors: [InsightTheme.blue1, InsightTheme.blue2],
-                            begin: Alignment.topLeft, end: Alignment.bottomRight,
+                            width: 86, height: 86,
+                            margin: const EdgeInsets.only(top: 4, bottom: 16),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: const LinearGradient(
+                                colors: [InsightTheme.blue1, InsightTheme.blue2],
+                                begin: Alignment.topLeft, end: Alignment.bottomRight,
+                              ),
+                              boxShadow: [
+                                BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 8))
+                              ],
+                              border: Border.all(color: Colors.white, width: 3.5),
+                              image: _currentProfile.avatarUrl != null
+                                  ? DecorationImage(image: NetworkImage(_currentProfile.avatarUrl!), fit: BoxFit.cover)
+                                  : null,
+                            ),
+                            alignment: Alignment.center,
+                            child: _currentProfile.avatarUrl == null
+                                ? Text(initials, style: InsightTheme.poppins(28, w: FontWeight.w700, c: Colors.white))
+                                : null,
                           ),
-                          boxShadow: [
-                            BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 8))
-                          ],
-                          border: Border.all(color: Colors.white, width: 3.5),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(initials, style: InsightTheme.poppins(28, w: FontWeight.w700, c: Colors.white)),
-                      ),
                       
                       Text(displayName, style: InsightTheme.poppins(20, w: FontWeight.w700)),
                       const SizedBox(height: 10),
@@ -239,9 +279,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 // 2. FIELD STATS DASHBOARD
                 Row(
                   children: [
-                    _buildStatCard('Tasks Today', '4', Icons.assignment_outlined, InsightTheme.amber),
+                    _buildStatCard(
+                      'Tasks Today',
+                      _isLoadingStats ? '—' : '$_tasksTodayCount',
+                      Icons.assignment_outlined,
+                      InsightTheme.amber,
+                    ),
                     const SizedBox(width: 16),
-                    _buildStatCard('Completed', '128', Icons.check_circle_outline_rounded, InsightTheme.green),
+                    _buildStatCard(
+                      'Completed',
+                      _isLoadingStats ? '—' : '$_completedCount',
+                      Icons.check_circle_outline_rounded,
+                      InsightTheme.green,
+                    ),
                   ],
                 ),
                 

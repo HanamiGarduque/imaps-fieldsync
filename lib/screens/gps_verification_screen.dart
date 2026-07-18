@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
 
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
+import '../providers/inspection_provider.dart';
 import 'capture_photo_screen.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
@@ -98,6 +100,9 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     try {
       await SupabaseService.confirmGpsOnSite(jobId: widget.task.id, latitude: _latitude!, longitude: _longitude!, accuracyMeters: _accuracy ?? 0, locationLabel: widget.task.location);
       if (!mounted) return;
+      // Carries the real on-site result forward so Step 5 (Findings) shows
+      // the actual distance instead of a hardcoded "Verified"/placeholder.
+      context.read<InspectionProvider>().recordGpsVerification(distanceMeters: _distance ?? 0);
       HapticFeedback.selectionClick();
       InspectionProgress.instance.markStepComplete(2);
       Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));

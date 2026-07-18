@@ -1,10 +1,12 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/user_profile.dart';
-import '../services/supabase_service.dart'; 
+import '../services/supabase_service.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -13,24 +15,24 @@ class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
   static const Color surface = Colors.white;
   static const Color surface2 = Color(0xFFEEF1FC);
-  
+
   static const Color ink = Color(0xFF12141F);
   static const Color ink2 = Color(0xFF666C82);
   static const Color ink3 = Color(0xFFA2A7BC);
-  
+
   static const Color blue1 = Color(0xFF3D6BFF);
   static const Color blue2 = Color(0xFF0B2FBF);
   static const Color blueInk = Color(0xFF1A3FC4);
-  
+
   static const Color lineStrong = Color(0x21141628);
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
+
+  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) =>
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
+
+  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) =>
       GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
-      
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
+
+  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) =>
       GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
 }
 
@@ -39,7 +41,7 @@ class InsightTheme {
 /// ==================================================================
 class ProfileEditScreen extends StatefulWidget {
   final UserProfile profile;
-  
+
   const ProfileEditScreen({super.key, required this.profile});
 
   @override
@@ -50,19 +52,23 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   late TextEditingController _nameCtrl;
   late TextEditingController _emailCtrl;
   late TextEditingController _phoneCtrl;
-  
+
   bool _isLoading = false;
+  bool _isUploadingAvatar = false;
+  File? _pickedAvatarFile;
+  String? _currentAvatarUrl;
 
   @override
   void initState() {
     super.initState();
-    
+
     final currentUser = SupabaseService.client.auth.currentUser;
     final userEmail = currentUser?.email ?? 'No email found';
 
-    _nameCtrl = TextEditingController(text: widget.profile.fullName); 
-    _emailCtrl = TextEditingController(text: userEmail); 
-    _phoneCtrl = TextEditingController(text: '+63 917 123 4567'); 
+    _nameCtrl = TextEditingController(text: widget.profile.fullName);
+    _emailCtrl = TextEditingController(text: userEmail);
+    _phoneCtrl = TextEditingController(text: widget.profile.phoneNumber ?? '');
+    _currentAvatarUrl = widget.profile.avatarUrl;
   }
 
   @override
@@ -73,21 +79,93 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     super.dispose();
   }
 
+  Future<void> _pickAvatarSource() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: InsightTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined, color: InsightTheme.blueInk),
+              title: Text('Take a photo', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: InsightTheme.blueInk),
+              title: Text('Choose from gallery', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source, imageQuality: 80, maxWidth: 800);
+    if (picked == null) return;
+
+    setState(() {
+      _pickedAvatarFile = File(picked.path);
+      _isUploadingAvatar = true;
+    });
+
+    final uploadedUrl = await SupabaseService.uploadAvatar(
+      userId: widget.profile.id,
+      file: _pickedAvatarFile!,
+    );
+
+    if (uploadedUrl != null) {
+      await SupabaseService.client.from('profiles').update({
+        'avatar_url': uploadedUrl,
+      }).eq('id', widget.profile.id);
+
+      setState(() {
+        _currentAvatarUrl = uploadedUrl;
+        _isUploadingAvatar = false;
+      });
+    } else {
+      setState(() => _isUploadingAvatar = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to upload photo. Please try again.')),
+        );
+      }
+    }
+  }
+
   Future<void> _updateProfile() async {
     setState(() => _isLoading = true);
 
     try {
       final updatedName = _nameCtrl.text.trim();
+      final updatedPhone = _phoneCtrl.text.trim();
 
       await SupabaseService.client.from('profiles').update({
-        'full_name': updatedName, 
-      }).eq('id', widget.profile.id); 
+        'full_name': updatedName,
+        'phone_number': updatedPhone,
+      }).eq('id', widget.profile.id);
 
-      // Create a fresh model containing the new name but keeping old values for the rest
       final updatedProfile = UserProfile(
         id: widget.profile.id,
         fullName: updatedName,
         role: widget.profile.role,
+        phoneNumber: updatedPhone,
+        avatarUrl: _currentAvatarUrl,
       );
 
       if (mounted) {
@@ -96,9 +174,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             content: Text('Profile updated successfully', style: InsightTheme.inter(13, c: Colors.white)),
             backgroundColor: const Color(0xFF10B981),
             behavior: SnackBarBehavior.floating,
-          )
+          ),
         );
-        Navigator.pop(context, updatedProfile); 
+        Navigator.pop(context, updatedProfile);
       }
     } catch (e) {
       if (mounted) {
@@ -107,7 +185,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             content: Text('Failed to update profile: $e', style: InsightTheme.inter(13, c: Colors.white)),
             backgroundColor: const Color(0xFFE23B4E),
             behavior: SnackBarBehavior.floating,
-          )
+          ),
         );
       }
     } finally {
@@ -155,7 +233,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               ),
             ),
           ),
-
           SafeArea(
             child: Column(
               children: [
@@ -163,87 +240,99 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(
-                        onTap: () {
-                          // Return null deliberately when back is pressed so ProfileScreen keeps active state
-                          Navigator.pop(context, null); 
-                        }
-                      ),
+                      _GlassBackButton(onTap: () => Navigator.pop(context, null)),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text('Edit profile', style: InsightTheme.poppins(17, w: FontWeight.w700)),
                       ),
                       GestureDetector(
                         onTap: _isLoading ? null : () { _updateProfile(); },
-                        child: _isLoading 
+                        child: _isLoading
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                           : Text('Save', style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
                       ),
                     ],
                   ),
                 ),
-
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
                     physics: const BouncingScrollPhysics(),
                     children: [
                       Center(
-                        child: Container(
-                          margin: const EdgeInsets.only(top: 6, bottom: 28),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            alignment: Alignment.bottomRight,
-                            children: [
-                              Container(
-                                width: 76, height: 76,
-                                decoration: const BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: LinearGradient(
-                                    colors: [InsightTheme.blue1, InsightTheme.blue2],
-                                    begin: Alignment.topLeft, end: Alignment.bottomRight,
-                                  ),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(initials, style: InsightTheme.poppins(22, w: FontWeight.w700, c: Colors.white)),
-                              ),
-                              Positioned(
-                                bottom: -4, right: -4,
-                                child: Container(
-                                  width: 28, height: 28,
+                        child: GestureDetector(
+                          onTap: _isUploadingAvatar ? null : _pickAvatarSource,
+                          child: Container(
+                            margin: const EdgeInsets.only(top: 6, bottom: 28),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              alignment: Alignment.bottomRight,
+                              children: [
+                                Container(
+                                  width: 76, height: 76,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    border: Border.all(color: InsightTheme.bg, width: 2.5),
                                     gradient: const LinearGradient(
                                       colors: [InsightTheme.blue1, InsightTheme.blue2],
                                       begin: Alignment.topLeft, end: Alignment.bottomRight,
                                     ),
+                                    image: _currentAvatarUrl != null
+                                        ? DecorationImage(image: NetworkImage(_currentAvatarUrl!), fit: BoxFit.cover)
+                                        : (_pickedAvatarFile != null
+                                            ? DecorationImage(image: FileImage(_pickedAvatarFile!), fit: BoxFit.cover)
+                                            : null),
                                   ),
-                                  child: const Icon(Icons.edit_outlined, color: Colors.white, size: 14),
+                                  alignment: Alignment.center,
+                                  child: (_currentAvatarUrl == null && _pickedAvatarFile == null)
+                                      ? Text(initials, style: InsightTheme.poppins(22, w: FontWeight.w700, c: Colors.white))
+                                      : null,
                                 ),
-                              ),
-                            ],
+                                if (_isUploadingAvatar)
+                                  const Positioned.fill(
+                                    child: CircleAvatar(
+                                      backgroundColor: Colors.black38,
+                                      child: SizedBox(
+                                        width: 20, height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      ),
+                                    ),
+                                  ),
+                                Positioned(
+                                  bottom: -4, right: -4,
+                                  child: Container(
+                                    width: 28, height: 28,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: InsightTheme.bg, width: 2.5),
+                                      gradient: const LinearGradient(
+                                        colors: [InsightTheme.blue1, InsightTheme.blue2],
+                                        begin: Alignment.topLeft, end: Alignment.bottomRight,
+                                      ),
+                                    ),
+                                    child: const Icon(Icons.edit_outlined, color: Colors.white, size: 14),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-
                       _ProfileField(label: 'FULL NAME', controller: _nameCtrl),
                       _ProfileField(label: 'EMAIL', controller: _emailCtrl, isEnabled: false),
                       _ProfileField(label: 'PHONE NUMBER', controller: _phoneCtrl),
                     ],
                   ),
                 ),
-
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : () {
                       HapticFeedback.lightImpact();
-                      _updateProfile(); 
+                      _updateProfile();
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: Colors.transparent, 
+                      backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ).copyWith(elevation: WidgetStateProperty.all(0)),
@@ -261,7 +350,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       child: Container(
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
-                        child: _isLoading 
+                        child: _isLoading
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                           : Text('Save changes', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
                       ),
