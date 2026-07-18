@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
+import '../services/supabase_service.dart'; 
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -21,7 +22,6 @@ class InsightTheme {
   static const Color blue2 = Color(0xFF0B2FBF);
   static const Color blueInk = Color(0xFF1A3FC4);
   
-  static const Color line = Color(0x12141628); 
   static const Color lineStrong = Color(0x21141628);
   
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
@@ -50,18 +50,19 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   late TextEditingController _nameCtrl;
   late TextEditingController _emailCtrl;
   late TextEditingController _phoneCtrl;
-  late TextEditingController _regionCtrl;
-  late TextEditingController _idCtrl;
+  
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    // Pre-filled with data matching the prototype design
-    _nameCtrl = TextEditingController(text: 'Juan Reyes');
-    _emailCtrl = TextEditingController(text: 'j.reyes@zoning.gov.ph');
-    _phoneCtrl = TextEditingController(text: '+63 917 123 4567');
-    _regionCtrl = TextEditingController(text: 'Region IV-A · Zone 3');
-    _idCtrl = TextEditingController(text: 'INSP-0245');
+    
+    final currentUser = SupabaseService.client.auth.currentUser;
+    final userEmail = currentUser?.email ?? 'No email found';
+
+    _nameCtrl = TextEditingController(text: widget.profile.fullName); 
+    _emailCtrl = TextEditingController(text: userEmail); 
+    _phoneCtrl = TextEditingController(text: '+63 917 123 4567'); 
   }
 
   @override
@@ -69,9 +70,51 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
-    _regionCtrl.dispose();
-    _idCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _updateProfile() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final updatedName = _nameCtrl.text.trim();
+
+      await SupabaseService.client.from('profiles').update({
+        'full_name': updatedName, 
+      }).eq('id', widget.profile.id); 
+
+      // Create a fresh model containing the new name but keeping old values for the rest
+      final updatedProfile = UserProfile(
+        id: widget.profile.id,
+        fullName: updatedName,
+        role: widget.profile.role,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Profile updated successfully', style: InsightTheme.inter(13, c: Colors.white)),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+          )
+        );
+        Navigator.pop(context, updatedProfile); 
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update profile: $e', style: InsightTheme.inter(13, c: Colors.white)),
+            backgroundColor: const Color(0xFFE23B4E),
+            behavior: SnackBarBehavior.floating,
+          )
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   String _getInitials(String name) {
@@ -92,9 +135,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
-          // ----------------------------------------------------
-          // BACKGROUND GRADIENT BLOBS
-          // ----------------------------------------------------
           Positioned(
             top: -60, right: -60,
             child: ImageFiltered(
@@ -116,37 +156,38 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             ),
           ),
 
-          // ----------------------------------------------------
-          // MAIN CONTENT
-          // ----------------------------------------------------
           SafeArea(
             child: Column(
               children: [
-                // TOP BAR
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
+                      _GlassBackButton(
+                        onTap: () {
+                          // Return null deliberately when back is pressed so ProfileScreen keeps active state
+                          Navigator.pop(context, null); 
+                        }
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text('Edit profile', style: InsightTheme.poppins(17, w: FontWeight.w700)),
                       ),
                       GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: Text('Save', style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                        onTap: _isLoading ? null : () { _updateProfile(); },
+                        child: _isLoading 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : Text('Save', style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
                       ),
                     ],
                   ),
                 ),
 
-                // SCROLLABLE FORM
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      // AVATAR WITH EDIT BADGE
                       Center(
                         child: Container(
                           margin: const EdgeInsets.only(top: 6, bottom: 28),
@@ -186,23 +227,19 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                         ),
                       ),
 
-                      // INPUT FIELDS
                       _ProfileField(label: 'FULL NAME', controller: _nameCtrl),
-                      _ProfileField(label: 'EMAIL', controller: _emailCtrl),
+                      _ProfileField(label: 'EMAIL', controller: _emailCtrl, isEnabled: false),
                       _ProfileField(label: 'PHONE NUMBER', controller: _phoneCtrl),
-                      _ProfileField(label: 'REGION / ZONE ASSIGNED', controller: _regionCtrl),
-                      _ProfileField(label: 'INSPECTOR ID', controller: _idCtrl, isEnabled: false),
                     ],
                   ),
                 ),
 
-                // BOTTOM ACTION BUTTON
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
                   child: ElevatedButton(
-                    onPressed: () {
+                    onPressed: _isLoading ? null : () {
                       HapticFeedback.lightImpact();
-                      Navigator.pop(context);
+                      _updateProfile(); 
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 15),
@@ -224,7 +261,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       child: Container(
                         alignment: Alignment.center,
                         constraints: const BoxConstraints(minHeight: 50),
-                        child: Text('Save changes', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
+                        child: _isLoading 
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text('Save changes', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
                       ),
                     ),
                   ),

@@ -5,11 +5,13 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
+import '../services/supabase_service.dart';
 import 'login_screen.dart'; 
 import 'home_dashboard_screen.dart';
 import 'tasks_screen.dart';
 import 'updates_screen.dart';
-import 'profile_edit_screen.dart'; 
+import 'profile_edit_screen.dart';
+import 'about_insight_screen.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -28,11 +30,11 @@ class InsightTheme {
   static const Color blueTint = Color(0xFFE7EDFF);
   static const Color blueInk = Color(0xFF1A3FC4);
   
-  static const Color amberTint = Color(0xFFFEF3DE);
-  static const Color amberInk = Color(0xFFA66C00);
+  static const Color amber = Color(0xFFFFB700);
+  static const Color green = Color(0xFF10B981);
+  static const Color coral = Color(0xFFE23B4E);
   
   static const Color line = Color(0x12141628); 
-  static const Color lineStrong = Color(0x21141628); 
   
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
@@ -56,7 +58,29 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int _currentNavIndex = 4; // 4 = Profile
+  int _currentNavIndex = 4; 
+  late UserProfile _currentProfile; 
+
+  @override
+  void initState() {
+    super.initState();
+    _currentProfile = widget.profile; 
+  }
+
+  Future<void> _openEditScreen() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProfileEditScreen(profile: _currentProfile),
+      ),
+    );
+    
+    if (result != null && result is UserProfile && mounted) {
+      setState(() {
+        _currentProfile = result;
+      });
+    }
+  }
 
   Future<void> _handleSignOut(BuildContext context) async {
     HapticFeedback.mediumImpact();
@@ -91,147 +115,167 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
-    final initials = _getInitials(widget.profile.fullName);
-    final displayName = _getFirstNameInitialAndLastName(widget.profile.fullName);
-    final inspectorId = widget.profile.id.isNotEmpty ? widget.profile.id : 'INSP-0245';
+    final initials = _getInitials(_currentProfile.fullName);
+    final displayName = _getFirstNameInitialAndLastName(_currentProfile.fullName);
+    
+    final currentUser = SupabaseService.client.auth.currentUser;
+    final userEmail = currentUser?.email ?? 'No email found';
+    final positionLabel = _currentProfile.isAdmin ? 'Administrator' : 'Zoning Officer I';
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
       extendBody: true, 
       body: Stack(
         children: [
+          // Background Blobs for Premium Feel
           Positioned(
-            top: -60,
-            right: -60,
+            top: -60, right: -60,
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withOpacity(0.20),
-                ),
+                width: 260, height: 260,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.20)),
               ),
             ),
           ),
           Positioned(
-            bottom: -80,
-            left: -80,
+            bottom: -80, left: -80,
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
-                width: 220,
-                height: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withOpacity(0.10),
-                ),
+                width: 220, height: 220,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.10)),
               ),
             ),
           ),
 
           SafeArea(
             bottom: false,
-            child: Column(
+            // Removed the redundant Column and Padding header entirely
+            child: ListView(
+              // Added slightly more top padding so the card breathes below the status bar
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
+              physics: const BouncingScrollPhysics(),
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Row(
+                // 1. IDENTITY CARD
+                Container(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface.withOpacity(0.75),
+                    borderRadius: BorderRadius.circular(32),
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x08141628), blurRadius: 30, offset: Offset(0, 10)),
+                    ],
+                  ),
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: Text(
-                          'Profile',
-                          style: InsightTheme.poppins(22, w: FontWeight.w700, c: InsightTheme.ink),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: GestureDetector(
+                          onTap: _openEditScreen,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blueTint,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: InsightTheme.blue1.withOpacity(0.1)),
+                            ),
+                            child: const Icon(Icons.edit_outlined, size: 16, color: InsightTheme.blueInk),
+                          ),
                         ),
+                      ),
+                      
+                      Container(
+                        width: 86, height: 86,
+                        margin: const EdgeInsets.only(top: 4, bottom: 16),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: const LinearGradient(
+                            colors: [InsightTheme.blue1, InsightTheme.blue2],
+                            begin: Alignment.topLeft, end: Alignment.bottomRight,
+                          ),
+                          boxShadow: [
+                            BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 8))
+                          ],
+                          border: Border.all(color: Colors.white, width: 3.5),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(initials, style: InsightTheme.poppins(28, w: FontWeight.w700, c: Colors.white)),
+                      ),
+                      
+                      Text(displayName, style: InsightTheme.poppins(20, w: FontWeight.w700)),
+                      const SizedBox(height: 10),
+                      
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.blue1.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: InsightTheme.blue1.withOpacity(0.15)),
+                        ),
+                        child: Text(
+                          positionLabel.toUpperCase(),
+                          style: InsightTheme.jetBrains(10, w: FontWeight.w600, c: InsightTheme.blueInk, ls: 0.8),
+                        ),
+                      ),
+                      
+                      const SizedBox(height: 18),
+                      
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.email_outlined, size: 15, color: InsightTheme.ink3),
+                          const SizedBox(width: 8),
+                          Text(userEmail, style: InsightTheme.inter(13, w: FontWeight.w500, c: InsightTheme.ink2)),
+                        ],
                       ),
                     ],
                   ),
                 ),
+                
+                const SizedBox(height: 24),
 
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
-                    physics: const BouncingScrollPhysics(),
+                // 2. FIELD STATS DASHBOARD
+                Row(
+                  children: [
+                    _buildStatCard('Tasks Today', '4', Icons.assignment_outlined, InsightTheme.amber),
+                    const SizedBox(width: 16),
+                    _buildStatCard('Completed', '128', Icons.check_circle_outline_rounded, InsightTheme.green),
+                  ],
+                ),
+                
+                const SizedBox(height: 24),
+
+                // 3. UNIFIED ACTION CARD
+                Container(
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: InsightTheme.line),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
+                    ],
+                  ),
+                  child: Column(
                     children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 52, height: 52,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: LinearGradient(
-                                colors: [InsightTheme.blue1, InsightTheme.blue2],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              initials, 
-                              style: InsightTheme.poppins(16, w: FontWeight.w700, c: Colors.white)
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(displayName, style: InsightTheme.inter(15, w: FontWeight.w600)),
-                              const SizedBox(height: 2),
-                              Text('Inspector ID · $inspectorId', style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
-                            ],
-                          ),
-                        ],
-                      ),
-                      
-                      const SizedBox(height: 32),
-
-                      _ProfileListRow(
-                        icon: Icons.person_outline_rounded,
-                        title: 'Personal information',
-                        isLast: false,
+                      _ActionTile(
+                        icon: Icons.info_outline_rounded,
+                        title: 'About InSight',
+                        subtitle: 'Version 1.0.0',
                         onTap: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
-                              builder: (_) => ProfileEditScreen(profile: widget.profile),
-                            ),
+                            MaterialPageRoute(builder: (_) => const AboutInsightScreen()),
                           );
                         },
                       ),
-                      _ProfileListRow(
-                        icon: Icons.notifications_none_rounded,
-                        title: 'Notifications',
-                        isAmber: true,
-                        isLast: false,
-                        onTap: () {},
-                      ),
-                      _ProfileListRow(
-                        icon: Icons.info_outline_rounded,
-                        title: 'About InSight',
-                        subtitle: 'v1.0.0',
-                        isLast: true,
-                        onTap: () {},
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: OutlinedButton(
-                          onPressed: () => _handleSignOut(context),
-                          style: OutlinedButton.styleFrom(
-                            backgroundColor: InsightTheme.surface,
-                            side: const BorderSide(color: InsightTheme.blue1, width: 1.5),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            elevation: 0,
-                          ),
-                          child: Text(
-                            'Sign out',
-                            style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.blueInk),
-                          ),
-                        ),
+                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+                      _ActionTile(
+                        icon: Icons.logout_rounded,
+                        title: 'Sign out',
+                        isDestructive: true,
+                        onTap: () => _handleSignOut(context),
                       ),
                     ],
                   ),
@@ -265,15 +309,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     _BottomNavItem(
                       icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0, 
-                      onTap: () { setState(() => _currentNavIndex = 0); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile))); }
+                      onTap: () { setState(() => _currentNavIndex = 0); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: _currentProfile))); }
                     ),
                     _BottomNavItem(
                       icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1, 
-                      onTap: () { setState(() => _currentNavIndex = 1); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile))); }
+                      onTap: () { setState(() => _currentNavIndex = 1); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => TasksScreen(profile: _currentProfile))); }
                     ),
                     _BottomNavItem(
                       icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3, 
-                      onTap: () { setState(() => _currentNavIndex = 3); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile))); }
+                      onTap: () { setState(() => _currentNavIndex = 3); Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: _currentProfile))); }
                     ),
                     _BottomNavItem(
                       icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4, 
@@ -288,65 +332,93 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
+
+  // WIDGET: Stat Card
+  Widget _buildStatCard(String title, String count, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: InsightTheme.surface.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: InsightTheme.line),
+          boxShadow: const [
+            BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(height: 16),
+            Text(count, style: InsightTheme.poppins(24, w: FontWeight.w700)),
+            const SizedBox(height: 2),
+            Text(title, style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink2)),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _ProfileListRow extends StatelessWidget {
+// WIDGET: Unified Action Tile
+class _ActionTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? subtitle;
-  final bool isAmber;
-  final bool isLast;
+  final bool isDestructive;
   final VoidCallback onTap;
 
-  const _ProfileListRow({
+  const _ActionTile({
     required this.icon,
     required this.title,
     this.subtitle,
-    this.isAmber = false,
-    this.isLast = false,
+    this.isDestructive = false,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final fgColor = isDestructive ? InsightTheme.coral : InsightTheme.ink;
+    final iconBgColor = isDestructive ? InsightTheme.coral.withOpacity(0.1) : InsightTheme.blueTint;
+    final iconColor = isDestructive ? InsightTheme.coral : InsightTheme.blueInk;
+
     return InkWell(
       onTap: () {
         HapticFeedback.lightImpact();
         onTap();
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: isLast ? null : const Border(bottom: BorderSide(color: InsightTheme.line)),
-        ),
+      borderRadius: BorderRadius.circular(24),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
             Container(
               width: 40, height: 40,
-              decoration: BoxDecoration(
-                color: isAmber ? InsightTheme.amberTint : InsightTheme.blueTint,
-                borderRadius: BorderRadius.circular(13),
-              ),
-              child: Icon(
-                icon, 
-                size: 18, 
-                color: isAmber ? InsightTheme.amberInk : InsightTheme.blueInk
-              ),
+              decoration: BoxDecoration(color: iconBgColor, borderRadius: BorderRadius.circular(14)),
+              child: Icon(icon, size: 18, color: iconColor),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink)),
+                  Text(title, style: InsightTheme.inter(14, w: FontWeight.w600, c: fgColor)),
                   if (subtitle != null) ...[
                     const SizedBox(height: 2),
-                    Text(subtitle!, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
+                    Text(subtitle!, style: InsightTheme.inter(11.5, c: InsightTheme.ink3)),
                   ]
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3, size: 20),
+            Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3.withOpacity(0.5), size: 20),
           ],
         ),
       ),
