@@ -2,13 +2,13 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:url_launcher/url_launcher.dart'; 
 
 import '../models/user_profile.dart';
-import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/db_helper.dart';
-import 'login_screen.dart';
+
 import 'parcel_detail_screen.dart';
 import 'completed_inspection_detail_screen.dart';
 import 'home_dashboard_screen.dart';
@@ -16,34 +16,50 @@ import 'updates_screen.dart';
 import 'profile_screen.dart';
 
 /// ==================================================================
-/// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
+/// THEME COLORS & TOKENS (Strict Enterprise Theme)
 /// ==================================================================
 class InsightTheme {
-  static const Color bg = Color(0xFFF2F4FB);
+  static const Color bg = Color(0xFFF7F9FC); 
   static const Color surface = Colors.white;
-  static const Color surface2 = Color(0xFFEEF1FC);
+  static const Color surface2 = Color(0xFFEDF1F5);
   
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
+  static const Color ink = Color(0xFF0F172A);
+  static const Color ink2 = Color(0xFF475569);
+  static const Color ink3 = Color(0xFF94A3B8);
   
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-  static const Color blueTint = Color(0xFFE7EDFF);
-  static const Color blueInk = Color(0xFF1A3FC4);
+  static const Color blue1 = Color(0xFF2563EB); 
+  static const Color blue2 = Color(0xFF1D4ED8);
+  static const Color blueTint = Color(0xFFEFF6FF);
+  static const Color blueInk = Color(0xFF1E3A8A); 
   
-  static const Color green = Color(0xFF12A150);
-  static const Color greenTint = Color(0xFFE3F8EC);
-  static const Color greenInk = Color(0xFF0D7A3C);
+  static const Color green = Color(0xFF16A34A);
+  static const Color greenTint = Color(0xFFF0FDF4);
+  static const Color greenInk = Color(0xFF14532D); 
   
-  static const Color line = Color(0x12141628); 
+  static const Color orange = Color(0xFFD97706);
+  static const Color orangeTint = Color(0xFFFFFBEB);
+  static const Color orangeInk = Color(0xFF78350F); 
+  
+  static const Color line = Color(0xFFE2E8F0); 
   
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
       
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
+  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => 
+      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
 }
+
+/// ==================================================================
+/// CONSTANTS
+/// ==================================================================
+const List<String> rosarioBarangays = [
+  'All Barangays', 'Alupay', 'Antipolo', 'Bagong Tubig', 'Bayawang', 'Bulihan', 
+  'Cahigam', 'Calantas', 'Colongan', 'Itlugan', 'Lumbangan', 'Macalamcam A', 
+  'Macalamcam B', 'Maligaya', 'Marilag', 'Matamis', 'Mawal', 'Mayuro', 'Nasi', 
+  'Natu', 'Palakpak', 'Pinagsibaan', 'Poblacion A', 'Poblacion B', 'Poblacion C', 
+  'Poblacion D', 'Poblacion E', 'Putingkahoy', 'Quilib', 'Salao', 'San Carlos', 
+  'San Ignacio', 'San Isidro', 'San Jose', 'San Roque', 'Santa Cruz', 'Timbugan', 'Tulos'
+];
 
 /// ==================================================================
 /// MODEL
@@ -62,8 +78,6 @@ class TaskItem {
   final String? propertyIndexNumber;
   final String? applicationType;
 
-  // Populated once a job has been submitted — used by the read-only
-  // Completed-task view instead of hardcoded placeholder text.
   final String? findings;
   final String? observations;
   final String? discrepancies;
@@ -83,35 +97,15 @@ class TaskItem {
   final String? gpsConfirmedAt;
 
   TaskItem({
-    required this.id,
-    this.parcelId,
-    required this.name,
-    required this.location,
-    required this.parcels,
-    required this.status,
-    required this.inspectionNo,
-    this.scheduledDate = '',
-    this.landUseClass = 'Not yet on file',
-    this.lotAreaSqm,
-    this.propertyIndexNumber,
-    this.applicationType,
-    this.findings,
-    this.observations,
-    this.discrepancies,
-    this.recommendations,
-    this.inspectorNotes,
-    this.inspectionResult,
-    this.isCompliant,
-    this.photoPaths = const [],
-    this.photoCount = 0,
-    this.checklistCompletedCount = 0,
-    this.checklistTotalCount = 0,
-    this.submittedAt,
-    this.checklistData = const [],
-    this.confirmedLatitude,
-    this.confirmedLongitude,
-    this.gpsAccuracyM,
-    this.gpsConfirmedAt,
+    required this.id, this.parcelId, required this.name, required this.location,
+    required this.parcels, required this.status, required this.inspectionNo, 
+    this.scheduledDate = '', this.landUseClass = 'Not yet on file', this.lotAreaSqm,
+    this.propertyIndexNumber, this.applicationType, this.findings, this.observations,
+    this.discrepancies, this.recommendations, this.inspectorNotes, this.inspectionResult,
+    this.isCompliant, this.photoPaths = const [], this.photoCount = 0,
+    this.checklistCompletedCount = 0, this.checklistTotalCount = 0, this.submittedAt,
+    this.checklistData = const [], this.confirmedLatitude, this.confirmedLongitude,
+    this.gpsAccuracyM, this.gpsConfirmedAt,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -123,9 +117,7 @@ class TaskItem {
       parcelId: job['supabase_parcel_id'] as String?,
       name: application?['applicant_name'] as String? ?? 'Unknown Applicant',
       location: application?['barangay'] as String? ?? 'No barangay listed',
-      parcels: scheduledDate.isNotEmpty
-          ? scheduledDate
-          : application?['reference_number'] as String? ?? 'No schedule',
+      parcels: scheduledDate.isNotEmpty ? scheduledDate : application?['reference_number'] as String? ?? 'No schedule',
       status: job['status'] as String? ?? 'Pending',
       inspectionNo: application?['reference_number'] as String? ?? job['local_inspection_id']?.toString() ?? 'N/A',
       scheduledDate: scheduledDate,
@@ -144,9 +136,7 @@ class TaskItem {
       checklistCompletedCount: (job['checklist_completed_count'] as num?)?.toInt() ?? 0,
       checklistTotalCount: (job['checklist_total_count'] as num?)?.toInt() ?? 0,
       submittedAt: job['submitted_at'] as String?,
-      checklistData: (job['checklist_data'] as List?)
-          ?.map((e) => Map<String, dynamic>.from(e as Map))
-          .toList() ?? const [],
+      checklistData: (job['checklist_data'] as List?)?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? const [],
       confirmedLatitude: (job['confirmed_latitude'] as num?)?.toDouble(),
       confirmedLongitude: (job['confirmed_longitude'] as num?)?.toDouble(),
       gpsAccuracyM: (job['gps_accuracy_m'] as num?)?.toDouble(),
@@ -157,23 +147,9 @@ class TaskItem {
 
   String get category {
     final s = status.toLowerCase();
-
-    // Final state — once submitted, always Completed. Nothing below can
-    // override this, even if the scheduled date has since passed.
     if (s.contains('complete') || s.contains('done')) return 'Completed';
-
-    // The inspector has actually started this job (DB status flips to
-    // 'in_progress' when GPS is confirmed on-site — see
-    // SupabaseService.confirmGpsOnSite) but hasn't submitted yet.
     if (s.contains('progress') || s.contains('ongoing')) return 'Ongoing';
-
-    // Not started yet. "Scheduled" == due today or overdue — computed from
-    // scheduled_date, not a manually-assigned status, so it updates itself
-    // as the date arrives instead of depending on an admin flag.
     if (_isDueOrOverdue) return 'Scheduled';
-
-    // Not started, still has time before its scheduled date — can be done
-    // whenever the inspector has a slot.
     return 'Pending';
   }
 
@@ -193,7 +169,7 @@ class TaskItem {
       final today = DateTime.now();
       final dueDay = DateTime(due.year, due.month, due.day);
       final todayDay = DateTime(today.year, today.month, today.day);
-      return !dueDay.isAfter(todayDay); // due today or already overdue
+      return !dueDay.isAfter(todayDay); 
     } catch (_) {
       return false;
     }
@@ -205,7 +181,6 @@ class TaskItem {
 /// ==================================================================
 class TasksScreen extends StatefulWidget {
   final UserProfile profile;
-
   const TasksScreen({super.key, required this.profile});
 
   @override
@@ -213,8 +188,13 @@ class TasksScreen extends StatefulWidget {
 }
 
 class _TasksScreenState extends State<TasksScreen> {
-  int _currentNavIndex = 1; // 1 = Tasks
-  int _currentTabIndex = 1; // Default to 'Ongoing'
+  int _currentNavIndex = 1; 
+  int _currentTabIndex = 1; 
+
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  String _sortBy = 'Recent'; 
+  String _selectedBarangay = 'All Barangays';
 
   static const _tabOrder = ['Pending', 'Ongoing', 'Scheduled', 'Completed'];
 
@@ -226,6 +206,17 @@ class _TasksScreenState extends State<TasksScreen> {
   void initState() {
     super.initState();
     _loadTasks();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadTasks() async {
@@ -235,16 +226,9 @@ class _TasksScreenState extends State<TasksScreen> {
     });
     try {
       final dynamic connectivityResult = await Connectivity().checkConnectivity();
-      final bool hasConnection;
-      if (connectivityResult is ConnectivityResult) {
-        hasConnection = connectivityResult != ConnectivityResult.none;
-      } else if (connectivityResult is List) {
-        hasConnection = connectivityResult
-            .cast<ConnectivityResult>()
-            .any((status) => status != ConnectivityResult.none);
-      } else {
-        hasConnection = false;
-      }
+      final bool hasConnection = (connectivityResult is ConnectivityResult) 
+          ? connectivityResult != ConnectivityResult.none
+          : (connectivityResult as List).any((status) => status != ConnectivityResult.none);
 
       if (hasConnection) {
         final jobs = await SupabaseService.fetchMyJobs();
@@ -270,6 +254,7 @@ class _TasksScreenState extends State<TasksScreen> {
                   'applicant_name': j['applicant_name'],
                   'barangay': j['barangay'],
                   'reference_number': j['reference_number'],
+                  'application_type': j['application_type'],
                 }
               });
             }).toList();
@@ -278,41 +263,15 @@ class _TasksScreenState extends State<TasksScreen> {
         }
       }
     } catch (e) {
-      try {
-        final localJobs = await DBHelper.getCachedJobs();
-        if (mounted) {
-          setState(() {
-            _allTasks = localJobs.map((j) {
-              return TaskItem.fromJob({
-                'id': j['id'],
-                'supabase_parcel_id': j['supabase_parcel_id'],
-                'status': j['status'],
-                'local_inspection_id': j['local_inspection_id'],
-                'scheduled_date': j['scheduled_date'],
-                'supabase_zoning_applications': {
-                  'applicant_name': j['applicant_name'],
-                  'barangay': j['barangay'],
-                  'reference_number': j['reference_number'],
-                }
-              });
-            }).toList();
-            _isLoading = false;
-          });
-        }
-      } catch (dbError) {
-        if (mounted) {
-          setState(() {
-            _errorMessage = 'Failed to load tasks: $e';
-            _isLoading = false;
-          });
-        }
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Failed to load tasks: $e';
+          _isLoading = false;
+        });
       }
     }
   }
 
-  /// Completed jobs are done — open the read-only summary instead of the
-  /// editable step flow (which used to show "Continue" on already-submitted
-  /// work because it only tracked in-session progress, not real job status).
   void _openTask(BuildContext context, TaskItem task) {
     HapticFeedback.selectionClick();
     if (task.category == 'Completed') {
@@ -321,316 +280,819 @@ class _TasksScreenState extends State<TasksScreen> {
       Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task)));
     }
   }
+  
+  void _showFilterBottomSheet() {
+    HapticFeedback.lightImpact();
+    String tempSortBy = _sortBy;
+    String tempBarangay = _selectedBarangay;
+    String barangaySearchQuery = '';
 
-  Future<void> _handleLogout(BuildContext context) async {
-    await AuthService.signOut();
-    if (context.mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
-    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setModalState) {
+          final filteredBarangays = rosarioBarangays
+              .where((b) => b.toLowerCase().contains(barangaySearchQuery.toLowerCase()))
+              .toList();
+
+          return Container(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              top: 12, left: 24, right: 24,
+            ),
+            decoration: const BoxDecoration(
+              color: InsightTheme.surface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              boxShadow: [BoxShadow(color: Color(0x1A000000), blurRadius: 40, offset: Offset(0, -10))],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(color: InsightTheme.line, borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Filter & Sort', style: InsightTheme.poppins(18, w: FontWeight.w600)),
+                    TextButton(
+                      onPressed: () {
+                        setModalState(() {
+                          tempSortBy = 'Recent';
+                          tempBarangay = 'All Barangays';
+                          barangaySearchQuery = '';
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text('Reset', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blue1)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(color: InsightTheme.line, height: 1),
+                
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 24),
+                        
+                        // SORT SECTION
+                        Row(
+                          children: [
+                            const Icon(Icons.sort_rounded, color: InsightTheme.ink3, size: 18),
+                            const SizedBox(width: 8),
+                            Text('SORT BY SCHEDULE', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'Recent First',
+                                isSelected: tempSortBy == 'Recent',
+                                onTap: () => setModalState(() => tempSortBy = 'Recent'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'Oldest First',
+                                isSelected: tempSortBy == 'Oldest',
+                                onTap: () => setModalState(() => tempSortBy = 'Oldest'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 28),
+                        
+                        // SEARCHABLE BARANGAY SECTION
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on_outlined, color: InsightTheme.ink3, size: 18),
+                            const SizedBox(width: 8),
+                            Text('BARANGAY', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        
+                        // Local Search Bar inside Sheet
+                        Container(
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: InsightTheme.bg,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: InsightTheme.line),
+                          ),
+                          child: TextField(
+                            style: InsightTheme.inter(14, w: FontWeight.w400, c: InsightTheme.ink),
+                            decoration: const InputDecoration(
+                              hintText: 'Search fields or barangays...',
+                              hintStyle: TextStyle(color: InsightTheme.ink3, fontSize: 14),
+                              prefixIcon: Icon(Icons.search_rounded, color: InsightTheme.ink2, size: 18),
+                              border: InputBorder.none,
+                              contentPadding: EdgeInsets.symmetric(vertical: 11),
+                            ),
+                            onChanged: (value) {
+                              setModalState(() {
+                                barangaySearchQuery = value;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        
+                        // Filtered Scrollable List Frame
+                        Container(
+                          height: 180,
+                          decoration: BoxDecoration(
+                            color: InsightTheme.bg.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: InsightTheme.line),
+                          ),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: filteredBarangays.length,
+                            physics: const BouncingScrollPhysics(),
+                            itemBuilder: (context, idx) {
+                              final b = filteredBarangays[idx];
+                              final isSelected = tempBarangay == b;
+                              return InkWell(
+                                onTap: () {
+                                  setModalState(() {
+                                    tempBarangay = b;
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? InsightTheme.blueTint : Colors.transparent,
+                                    border: Border(bottom: BorderSide(color: InsightTheme.line.withValues(alpha: 0.5))),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        b, 
+                                        style: InsightTheme.inter(14, w: isSelected ? FontWeight.w600 : FontWeight.w400, c: isSelected ? InsightTheme.blue2 : InsightTheme.ink)
+                                      ),
+                                      if (isSelected)
+                                        const Icon(Icons.check_circle_rounded, color: InsightTheme.blue1, size: 18),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
+                ),
+                
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _sortBy = tempSortBy;
+                        _selectedBarangay = tempBarangay;
+                      });
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: InsightTheme.ink,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    child: Text('Apply Filters', style: InsightTheme.inter(14, w: FontWeight.w600, c: Colors.white)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
-  Map<String, List<TaskItem>> _categorize() {
+  Map<String, List<TaskItem>> _categorizeAndFilter() {
     final map = <String, List<TaskItem>>{
       for (final t in _tabOrder) t: <TaskItem>[],
     };
+    
     for (final task in _allTasks) {
+      if (_searchQuery.isNotEmpty) {
+        final query = _searchQuery.toLowerCase();
+        if (!task.name.toLowerCase().contains(query) && 
+            !task.location.toLowerCase().contains(query) &&
+            !task.inspectionNo.toLowerCase().contains(query)) {
+          continue; 
+        }
+      }
+      if (_selectedBarangay != 'All Barangays') {
+        if (!task.location.toLowerCase().contains(_selectedBarangay.toLowerCase())) continue;
+      }
       map[task.category]!.add(task);
+    }
+
+    for (final category in map.keys) {
+      map[category]!.sort((a, b) {
+        final dateA = a.scheduledDate.isEmpty ? '1970-01-01' : a.scheduledDate;
+        final dateB = b.scheduledDate.isEmpty ? '1970-01-01' : b.scheduledDate;
+        
+        if (_sortBy == 'Recent') {
+          return dateB.compareTo(dateA); 
+        } else {
+          return dateA.compareTo(dateB); 
+        }
+      });
     }
     return map;
   }
 
   @override
-Widget build(BuildContext context) {
-  final categorized = _categorize();
-  final ongoing = categorized['Ongoing'] ?? [];
-  final pending = categorized['Pending'] ?? [];
-  final scheduled = categorized['Scheduled'] ?? [];
-  final completed = categorized['Completed'] ?? [];
+  Widget build(BuildContext context) {
+    final categorized = _categorizeAndFilter();
+    final ongoing = categorized['Ongoing'] ?? [];
+    final pending = categorized['Pending'] ?? [];
+    final scheduled = categorized['Scheduled'] ?? [];
+    final completed = categorized['Completed'] ?? [];
 
-  final selectedCategory = _tabOrder[_currentTabIndex];
-  final selectedTasks = categorized[selectedCategory] ?? [];
+    final selectedCategory = _tabOrder[_currentTabIndex];
+    final selectedTasks = categorized[selectedCategory] ?? [];
 
-  final TaskItem? heroTask = selectedTasks.isNotEmpty ? selectedTasks.first : null;
-  final gridTasks = selectedTasks.where((t) => t.id != heroTask?.id).toList();
+    final bool hasActiveFilters = _selectedBarangay != 'All Barangays';
 
-  return Scaffold(
-    backgroundColor: InsightTheme.bg,
-    extendBody: true,
-    body: SafeArea(
-      bottom: false,
-      child: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _errorMessage != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_errorMessage!, textAlign: TextAlign.center),
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadTasks,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 120),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('My Tasks', style: InsightTheme.poppins(20, w: FontWeight.w700)),
-                            _TopIconBtn(icon: Icons.filter_list_rounded, onTap: () {}),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          clipBehavior: Clip.none,
-                          child: Row(
-                            children: [
-                              _TabPill(text: "Pending ${pending.length}", isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
-                              const SizedBox(width: 8),
-                              _TabPill(text: "Ongoing ${ongoing.length}", isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
-                              const SizedBox(width: 8),
-                              _TabPill(text: "Scheduled ${scheduled.length}", isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
-                              const SizedBox(width: 8),
-                              _TabPill(text: "Completed ${completed.length}", isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        if (heroTask != null) ...[
-                          _HeroTaskCard(
-                            task: heroTask,
-                            onTap: () => _openTask(context, heroTask),
-                          ),
-                          const SizedBox(height: 16),
-                        ] else
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: Text('No assigned tasks yet.'),
-                          ),
-                        if (gridTasks.isNotEmpty)
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                              childAspectRatio: 1.15,
+    return Scaffold(
+      backgroundColor: InsightTheme.bg,
+      extendBody: true,
+      appBar: AppBar(
+        backgroundColor: InsightTheme.surface,
+        elevation: 0,
+        automaticallyImplyLeading: false, 
+        surfaceTintColor: Colors.transparent,
+        toolbarHeight: 85,
+        title: Padding(
+          padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Active Monitoring', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blue1, ls: 1.2)),
+                  const SizedBox(height: 4),
+                  Text('My Tasks', style: InsightTheme.poppins(24, w: FontWeight.w700, c: InsightTheme.ink)),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: InsightTheme.bg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: InsightTheme.line),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      '${_allTasks.length}',
+                      style: InsightTheme.poppins(16, w: FontWeight.w700, c: InsightTheme.blue1, h: 1.0),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Assigned',
+                      style: InsightTheme.inter(10, w: FontWeight.w600, c: InsightTheme.ink3),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        centerTitle: false,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1.0),
+          child: Container(color: InsightTheme.line, height: 1.0),
+        ),
+      ),
+      body: SafeArea(
+        bottom: false,
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
+            : _errorMessage != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(_errorMessage!, textAlign: TextAlign.center, style: InsightTheme.inter(14)),
+                    ),
+                  )
+                : RefreshIndicator(
+                    color: InsightTheme.blue1,
+                    onRefresh: _loadTasks,
+                    child: CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: Container(
+                            color: InsightTheme.surface,
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // SEARCH & FILTER COMPONENT
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Container(
+                                        height: 42,
+                                        decoration: BoxDecoration(
+                                          color: InsightTheme.bg,
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(color: InsightTheme.line),
+                                        ),
+                                        child: TextField(
+                                          controller: _searchController,
+                                          style: InsightTheme.inter(14, w: FontWeight.w400, c: InsightTheme.ink),
+                                          decoration: InputDecoration(
+                                            hintText: 'Search fields or inspection IDs...',
+                                            hintStyle: InsightTheme.inter(14, c: InsightTheme.ink3),
+                                            prefixIcon: const Icon(Icons.search_rounded, color: InsightTheme.ink2, size: 18),
+                                            suffixIcon: _searchQuery.isNotEmpty 
+                                                ? GestureDetector(
+                                                    onTap: () {
+                                                      _searchController.clear();
+                                                      FocusScope.of(context).unfocus();
+                                                    },
+                                                    child: const Icon(Icons.cancel, color: InsightTheme.ink3, size: 18),
+                                                  )
+                                                : null,
+                                            border: InputBorder.none,
+                                            contentPadding: const EdgeInsets.symmetric(vertical: 11),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    GestureDetector(
+                                      onTap: _showFilterBottomSheet,
+                                      child: Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          Container(
+                                            height: 42, width: 42,
+                                            decoration: BoxDecoration(
+                                              color: InsightTheme.surface,
+                                              border: Border.all(color: InsightTheme.line),
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: const Icon(Icons.tune_rounded, color: InsightTheme.ink, size: 20),
+                                          ),
+                                          if (hasActiveFilters)
+                                            Positioned(
+                                              top: -3, right: -3,
+                                              child: Container(
+                                                width: 10, height: 10,
+                                                decoration: BoxDecoration(
+                                                  color: InsightTheme.blue1,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(color: InsightTheme.surface, width: 2),
+                                                ),
+                                              ),
+                                            )
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                
+                                // SEGMENTED ROW UNDERLINE CONTROLS
+                                SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const BouncingScrollPhysics(),
+                                  child: Row(
+                                    children: [
+                                      _SegmentTab(text: "Pending", count: pending.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                                      _SegmentTab(text: "Ongoing", count: ongoing.length, isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
+                                      _SegmentTab(text: "Scheduled", count: scheduled.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
+                                      _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
-                            itemCount: gridTasks.length,
-                            itemBuilder: (context, index) {
-                              return _GridTaskCard(
-                                task: gridTasks[index],
-                                onTap: () => _openTask(context, gridTasks[index]),
-                              );
-                            },
+                          ),
+                        ),
+                        
+                        // ACTIVE LIST VIEW
+                        if (selectedTasks.isEmpty)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 80, horizontal: 20),
+                              child: Column(
+                                children: [
+                                  Icon(Icons.feed_outlined, size: 48, color: InsightTheme.ink3.withValues(alpha: 0.3)),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    _searchQuery.isNotEmpty || hasActiveFilters 
+                                        ? 'No records match active query parameters.' 
+                                        : 'No operational tasks assigned.', 
+                                    textAlign: TextAlign.center,
+                                    style: InsightTheme.inter(14, c: InsightTheme.ink2)
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          SliverPadding(
+                            padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 120),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final task = selectedTasks[index];
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: _CompactTaskCard(
+                                      key: ValueKey(task.id), 
+                                      task: task,
+                                      onTapDetail: () => _openTask(context, task),
+                                    ),
+                                  );
+                                },
+                                childCount: selectedTasks.length,
+                              ),
+                            ),
                           ),
                       ],
                     ),
                   ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.8)),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2)),
+                    BoxShadow(color: Color(0x15000000), blurRadius: 24, offset: Offset(0, 12)),
+                  ],
                 ),
-    ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withOpacity(0.65)),
-                boxShadow: const [
-                  BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
-                  BoxShadow(color: Color(0x1A000000), blurRadius: 24, offset: Offset(0, 12)),
-                ],
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _BottomNavItem(
-                    icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0,
-                    onTap: () {
-                      setState(() => _currentNavIndex = 0);
-                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile)));
-                    }
-                  ),
-                  _BottomNavItem(
-                    icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1,
-                    onTap: () => setState(() => _currentNavIndex = 1)
-                  ),
-                  _BottomNavItem(
-                    icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3,
-                    onTap: () {
-                      setState(() => _currentNavIndex = 3);
-                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)));
-                    }
-                  ),
-                  _BottomNavItem(
-                    icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4,
-                    onTap: () {
-                      setState(() => _currentNavIndex = 4);
-                      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)));
-                    }
-                  ),
-                ],
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Expanded(
+                      child: _BottomNavItem(
+                        icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0,
+                        onTap: () {
+                          setState(() => _currentNavIndex = 0);
+                          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile)));
+                        }
+                      ),
+                    ),
+                    Expanded(
+                      child: _BottomNavItem(
+                        icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1,
+                        onTap: () => setState(() => _currentNavIndex = 1)
+                      ),
+                    ),
+                    Expanded(
+                      child: _BottomNavItem(
+                        icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3,
+                        onTap: () {
+                          setState(() => _currentNavIndex = 3);
+                          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)));
+                        }
+                      ),
+                    ),
+                    Expanded(
+                      child: _BottomNavItem(
+                        icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4,
+                        onTap: () {
+                          setState(() => _currentNavIndex = 4);
+                          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)));
+                        }
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}}
+    );
+  }
+}
 
 /// ==================================================================
 /// COMPONENT WIDGETS
 /// ==================================================================
 
-class _TopIconBtn extends StatelessWidget {
-  final IconData icon;
+class _NativeFilterChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
   final VoidCallback onTap;
 
-  const _TopIconBtn({required this.icon, required this.onTap});
+  const _NativeFilterChip({required this.label, required this.isSelected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 42, height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.65)),
-          boxShadow: const [BoxShadow(color: InsightTheme.line, blurRadius: 14, offset: Offset(0, 4))],
+          color: isSelected ? InsightTheme.blueTint : InsightTheme.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: isSelected ? InsightTheme.blue1 : InsightTheme.line),
         ),
-        child: Icon(icon, color: InsightTheme.ink, size: 22),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: InsightTheme.inter(12, w: isSelected ? FontWeight.w600 : FontWeight.w500, c: isSelected ? InsightTheme.blue2 : InsightTheme.ink2),
+          maxLines: 1, overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }
 }
 
-class _TabPill extends StatelessWidget {
+class _SegmentTab extends StatelessWidget {
   final String text;
+  final int count;
   final bool isActive;
   final VoidCallback onTap;
 
-  const _TabPill({required this.text, required this.isActive, required this.onTap});
+  const _SegmentTab({required this.text, required this.count, required this.isActive, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        padding: const EdgeInsets.only(bottom: 14, right: 24),
         decoration: BoxDecoration(
-          gradient: isActive ? const LinearGradient(
-            colors: [InsightTheme.blue1, InsightTheme.blue2],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
-          ) : null,
-          color: isActive ? null : InsightTheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: isActive ? null : Border.all(color: InsightTheme.line),
-          boxShadow: isActive ? [
-            BoxShadow(color: InsightTheme.blue1.withOpacity(0.28), blurRadius: 18, offset: const Offset(0, 8))
-          ] : [
-            const BoxShadow(color: InsightTheme.line, blurRadius: 2, offset: Offset(0, 1))
-          ],
-        ),
-        child: Text(
-          text, 
-          style: InsightTheme.inter(
-            12, 
-            w: FontWeight.w600, 
-            c: isActive ? Colors.white : InsightTheme.ink2
+          border: Border(
+            bottom: BorderSide(
+              color: isActive ? InsightTheme.blue1 : Colors.transparent,
+              width: 2.0,
+            ),
           ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(text, style: InsightTheme.inter(14, w: isActive ? FontWeight.w600 : FontWeight.w500, c: isActive ? InsightTheme.ink : InsightTheme.ink3)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isActive ? InsightTheme.blue1 : InsightTheme.surface2,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(count.toString(), style: InsightTheme.inter(11, w: FontWeight.w600, c: isActive ? Colors.white : InsightTheme.ink2)),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _HeroTaskCard extends StatelessWidget {
+class _CompactTaskCard extends StatefulWidget {
   final TaskItem task;
-  final VoidCallback onTap;
+  final VoidCallback onTapDetail;
 
-  const _HeroTaskCard({required this.task, required this.onTap});
+  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail});
+
+  @override
+  State<_CompactTaskCard> createState() => _CompactTaskCardState();
+}
+
+class _CompactTaskCardState extends State<_CompactTaskCard> {
+  bool _isExpanded = false;
+
+  String _getInitials(String name) {
+    List<String> parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return '??';
+    if (parts.length == 1) return parts[0].length >= 2 ? parts[0].substring(0, 2).toUpperCase() : parts[0].toUpperCase();
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+  
+  Color _getStatusColor() {
+    final cat = widget.task.category;
+    if (cat == 'Completed') return InsightTheme.green;
+    if (cat == 'Scheduled') return InsightTheme.orange;
+    return InsightTheme.blue1;
+  }
+
+  Future<void> _handleCall() async {
+    HapticFeedback.lightImpact();
+    final Uri phoneUri = Uri.parse('tel:+639123456789'); 
+    try {
+      if (await canLaunchUrl(phoneUri)) await launchUrl(phoneUri);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> _handleSMS() async {
+    HapticFeedback.lightImpact();
+    final Uri smsUri = Uri.parse('sms:+639123456789'); 
+    try {
+      if (await canLaunchUrl(smsUri)) await launchUrl(smsUri);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> _handleEmail() async {
+    HapticFeedback.lightImpact();
+    String? encodeQueryParameters(Map<String, String> params) {
+      return params.entries.map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}').join('&');
+    }
+    final Uri emailUri = Uri(
+      scheme: 'mailto',
+      path: 'applicant@example.com', 
+      query: encodeQueryParameters({'subject': 'Inspection Notification: ${widget.task.inspectionNo}'}),
+    );
+    try {
+      if (await canLaunchUrl(emailUri)) await launchUrl(emailUri);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(26),
-          gradient: const LinearGradient(
-            colors: [InsightTheme.blue1, InsightTheme.blue2],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          boxShadow: [
-            BoxShadow(color: InsightTheme.blue1.withOpacity(0.30), blurRadius: 32, offset: const Offset(0, 16))
-          ],
-        ),
-        clipBehavior: Clip.hardEdge,
-        child: Stack(
+    final statusColor = _getStatusColor();
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Positioned(
-              right: -50, top: -50,
-              child: Container(
-                width: 160, height: 160,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.08),
+            GestureDetector(
+              onTap: () {
+                setState(() => _isExpanded = !_isExpanded);
+                HapticFeedback.selectionClick();
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8, height: 8,
+                      decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: InsightTheme.bg,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: InsightTheme.line),
+                      ),
+                      child: Center(
+                        child: Text(_getInitials(widget.task.name), style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  widget.task.name,
+                                  style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                widget.task.inspectionNo, 
+                                style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk)
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  widget.task.location,
+                                  style: InsightTheme.inter(11, c: InsightTheme.ink2),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Icon(
+                                _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                                color: InsightTheme.ink3, size: 16,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            if (_isExpanded) ...[
+              Container(color: InsightTheme.line, height: 1),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.25),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        task.status, 
-                        style: InsightTheme.inter(10, w: FontWeight.w600, c: Colors.white)
+                    Row(
+                      children: [
+                        Expanded(child: _ActionBtn(icon: Icons.phone_rounded, label: 'Call', onTap: _handleCall)),
+                        const SizedBox(width: 6),
+                        Expanded(child: _ActionBtn(icon: Icons.chat_bubble_outline_rounded, label: 'SMS', onTap: _handleSMS)),
+                        const SizedBox(width: 6),
+                        Expanded(child: _ActionBtn(icon: Icons.mail_outline_rounded, label: 'Email', onTap: _handleEmail)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      onTap: widget.onTapDetail,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.bg,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: InsightTheme.line),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(widget.task.typeIcon, color: InsightTheme.blue1, size: 16),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Application Details', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink)), 
+                                  const SizedBox(height: 1),
+                                  Text(
+                                    '${widget.task.applicationType ?? 'General'} • ${widget.task.landUseClass}',
+                                    style: InsightTheme.inter(10, c: InsightTheme.ink2),
+                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.arrow_forward_ios_rounded, color: InsightTheme.ink3, size: 10),
+                          ],
+                        ),
                       ),
                     ),
-                    Container(
-                      width: 36, height: 36,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.22),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.3)),
-                      ),
-                      child: const Icon(Icons.bookmark_outline_rounded, color: Colors.white, size: 18),
-                    )
                   ],
                 ),
-                const SizedBox(height: 36),
-                Text(task.location, style: InsightTheme.poppins(18, w: FontWeight.w700, c: Colors.white)),
-                const SizedBox(height: 6),
-                Text(task.parcels, style: InsightTheme.inter(12, c: Colors.white.withOpacity(0.85))),
-              ],
-            ),
+              ),
+            ]
           ],
         ),
       ),
@@ -638,79 +1100,35 @@ class _HeroTaskCard extends StatelessWidget {
   }
 }
 
-class _GridTaskCard extends StatelessWidget {
-  final TaskItem task;
+class _ActionBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
 
-  const _GridTaskCard({required this.task, required this.onTap});
+  const _ActionBtn({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final bool isDone = task.status == 'Done';
-
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
           color: InsightTheme.surface,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(color: InsightTheme.line),
-          boxShadow: const [BoxShadow(color: InsightTheme.line, blurRadius: 2, offset: Offset(0, 1))],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    color: isDone ? InsightTheme.greenTint : InsightTheme.blueTint,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    Icons.bookmark_outline_rounded, 
-                    size: 16, 
-                    color: isDone ? InsightTheme.greenInk : InsightTheme.blueInk
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: isDone ? InsightTheme.greenTint : InsightTheme.surface2,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    task.status,
-                    style: InsightTheme.inter(
-                      10, 
-                      w: FontWeight.w600, 
-                      c: isDone ? InsightTheme.greenInk : InsightTheme.ink2
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  task.location, 
-                  style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
-                  maxLines: 1, 
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  task.parcels, 
-                  style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
-                  maxLines: 1, 
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+            Icon(icon, color: InsightTheme.ink2, size: 14), 
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label, 
+                style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink), 
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -734,16 +1152,14 @@ class _BottomNavItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: EdgeInsets.symmetric(horizontal: isActive ? 14 : 10, vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        margin: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
           gradient: isActive ? const LinearGradient(
             colors: [InsightTheme.blue1, InsightTheme.blue2],
             begin: Alignment.topLeft, end: Alignment.bottomRight,
           ) : null,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: isActive ? [
-            BoxShadow(color: InsightTheme.blue1.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))
-          ] : [],
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -752,11 +1168,8 @@ class _BottomNavItem extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               label, 
-              style: InsightTheme.inter(
-                10, 
-                w: FontWeight.w600, 
-                c: isActive ? Colors.white : InsightTheme.ink3
-              ),
+              style: InsightTheme.inter(10, w: FontWeight.w600, c: isActive ? Colors.white : InsightTheme.ink3),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
             ),
           ],
         ),

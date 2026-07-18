@@ -16,7 +16,7 @@ dependencies:
 
   shared_preferences: ^2.2.2
 
-  url_launcher: ^6.2.5
+  url_launcher: ^6.3.2
 
   cupertino_icons: ^1.0.8
   google_fonts: ^6.1.0

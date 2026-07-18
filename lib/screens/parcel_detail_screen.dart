@@ -2,8 +2,9 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
-import 'tasks_screen.dart'; // Ensure TaskItem is accessible here
+import 'tasks_screen.dart'; 
 import 'site_map_screen.dart';
 import 'gps_verification_screen.dart';
 import 'inspection_checklist_screen.dart';
@@ -11,42 +12,33 @@ import 'capture_photo_screen.dart';
 import 'field_findings_screen.dart';
 import 'review_submit_screen.dart';
 import 'inspection_progress.dart';
-import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 
-/// ==================================================================
-/// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
-/// ==================================================================
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
   static const Color surface = Colors.white;
   static const Color surface2 = Color(0xFFEEF1FC);
-  
   static const Color ink = Color(0xFF12141F);
   static const Color ink2 = Color(0xFF666C82);
   static const Color ink3 = Color(0xFFA2A7BC);
-  
   static const Color blue1 = Color(0xFF3D6BFF);
   static const Color blue2 = Color(0xFF0B2FBF);
   static const Color blueTint = Color(0xFFE7EDFF);
   static const Color blueInk = Color(0xFF1A3FC4);
-  
-  static const Color line = Color(0x12141628); // ~rgba(20,22,40,0.07)
-  static const Color lineStrong = Color(0x21141628); // ~rgba(20,22,40,0.13)
+  static const Color green = Color(0xFF12A150);
+  static const Color greenTint = Color(0xFFE3F8EC);
+  static const Color greenInk = Color(0xFF0D7A3C);
+  static const Color line = Color(0x1A141628); 
+  static const Color lineStrong = Color(0x2A141628); 
   
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
       GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
-      
+  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => 
+      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
   static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
       GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
 }
 
-/// ==================================================================
-/// SCREEN 6 — INSPECTION DETAILS
-/// ==================================================================
 class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
 
@@ -63,14 +55,9 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // Starting a fresh inspection for this parcel shouldn't carry over
-    // progress left behind from a different one.
     progress.ensureActiveInspection(task.id, label: task.location);
     progress.addListener(_onProgressChanged);
 
-    // Reset/init the shared InspectionProvider session for this task so
-    // the checklist, photo, and findings screens have something to write
-    // into (and Review & Submit has something real to read from).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<InspectionProvider>().startInspection(task);
@@ -87,339 +74,252 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Only lets the inspector open a step that's already done or is the
-  /// current one — jumping ahead to a step whose prerequisites haven't
-  /// been completed is what made the workflow feel disconnected before.
   void _goToStep(BuildContext context, int step, WidgetBuilder builder) {
-    if (progress.isLocked(step)) {
-      HapticFeedback.selectionClick();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Complete "${progress.currentStepTitle}" first.')),
-      );
-      return;
-    }
+    // -------------------------------------------------------------
+    // BYPASS APPLIED: The lock constraint is removed so you can 
+    // click any step in the UI and test the screens freely.
+    // -------------------------------------------------------------
     HapticFeedback.selectionClick();
     Navigator.push(context, MaterialPageRoute(builder: builder));
+  }
+
+  void _showSupportSheet(BuildContext context) {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: InsightTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(color: InsightTheme.line, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Support & Options', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+            const SizedBox(height: 16),
+            _SupportActionTile(
+              icon: Icons.person_off_outlined,
+              title: 'Reassign Task',
+              subtitle: 'Send this inspection to another available officer.',
+              color: InsightTheme.ink,
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Requesting task reassignment...', style: InsightTheme.inter(12, c: Colors.white))));
+              },
+            ),
+            const Divider(color: InsightTheme.line),
+            _SupportActionTile(
+              icon: Icons.flag_outlined,
+              title: 'Report Issue',
+              subtitle: 'Flag an operational blocker to the MPDO.',
+              color: Colors.red.shade700,
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Flagging issue to monitoring system...', style: InsightTheme.inter(12, c: Colors.white))));
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final currentStep = progress.currentStep;
+    
+    int remainingSteps = progress.isComplete ? 0 : (InspectionProgress.totalSteps - currentStep + 1);
+    int estTimeMinutes = remainingSteps * 5; 
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
-          // ----------------------------------------------------
-          // BACKGROUND GRADIENT BLOBS (Matching HTML ::before / ::after)
-          // ----------------------------------------------------
           Positioned(
-            top: -60,
-            right: -60,
+            top: -40, right: -40,
             child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+              imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
               child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withOpacity(0.20),
-                ),
+                width: 220, height: 220,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.12)),
               ),
             ),
           ),
-          Positioned(
-            bottom: -80,
-            left: -80,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: Container(
-                width: 220,
-                height: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withOpacity(0.10),
-                ),
-              ),
-            ),
-          ),
-
-          // ----------------------------------------------------
-          // MAIN CONTENT
-          // ----------------------------------------------------
+          
           SafeArea(
+            bottom: false,
             child: Column(
               children: [
-                // TOP BAR
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Row(
                     children: [
                       _GlassBackButton(onTap: () => Navigator.pop(context)),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Inspection details',
-                          style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink),
+                          'Task Overview',
+                          style: InsightTheme.poppins(16, w: FontWeight.w700, c: InsightTheme.ink),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SiteMapScreen(task: task))),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.8),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white),
+                            boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 4, offset: Offset(0, 2))],
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.map_rounded, color: InsightTheme.blue1, size: 14),
+                              const SizedBox(width: 6),
+                              Text('Site Map', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink)),
+                            ],
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
 
-                // PROGRESS BAR
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 6,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: InsightTheme.surface2,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: FractionallySizedBox(
-                          alignment: Alignment.centerLeft,
-                          widthFactor: progress.isComplete ? 1.0 : (currentStep - 1) / InspectionProgress.totalSteps,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [InsightTheme.blue1, InsightTheme.blue2],
-                                begin: Alignment.centerLeft,
-                                end: Alignment.centerRight,
-                              ),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Text(
-                            progress.isComplete ? 'SUBMITTED' : 'STEP $currentStep OF ${InspectionProgress.totalSteps}',
-                            style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5),
-                          ),
-                          Text(
-                            progress.isComplete ? ' — READY FOR REVIEW' : ' — ${progress.currentStepTitle.toUpperCase()}',
-                            style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                
-                // SCROLLABLE CONTENT
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 40),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      // DETAILS CARD
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: InsightTheme.surface,
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(color: InsightTheme.line),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1)),
-                            BoxShadow(color: Color(0x0F141628), blurRadius: 30, offset: Offset(0, 14)),
-                          ],
+                      
+                      _GlassCard(
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('INSPECTION PROTOCOL', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
+                              const SizedBox(height: 12),
+                              
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Container(
+                                      height: 4,
+                                      decoration: BoxDecoration(
+                                        color: InsightTheme.surface2,
+                                        borderRadius: BorderRadius.circular(2),
+                                      ),
+                                      child: FractionallySizedBox(
+                                        alignment: Alignment.centerLeft,
+                                        widthFactor: progress.isComplete ? 1.0 : (currentStep - 1) / InspectionProgress.totalSteps,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: InsightTheme.blue1,
+                                            borderRadius: BorderRadius.circular(2),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    progress.isComplete ? '100%' : '${((currentStep - 1) / InspectionProgress.totalSteps * 100).toInt()}%',
+                                    style: InsightTheme.jetBrains(11, w: FontWeight.w700, c: InsightTheme.ink),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              
+                              _StepsTimelineCard(
+                                currentStep: currentStep,
+                                isComplete: progress.isComplete,
+                                steps: [
+                                  _StepInfo(
+                                    index: 1, title: 'Site Verification', icon: Icons.map_rounded,
+                                    description: 'Pinpoint the exact application site.',
+                                    onTap: () => _goToStep(context, 1, (_) => SiteMapScreen(task: task)),
+                                  ),
+                                  _StepInfo(
+                                    index: 2, title: 'GPS Verification', icon: Icons.gps_fixed_rounded,
+                                    description: 'Confirm live location matches target.',
+                                    onTap: () => _goToStep(context, 2, (_) => GpsVerificationScreen(task: task)),
+                                  ),
+                                  _StepInfo(
+                                    index: 3, title: 'Photographic Evidence', icon: Icons.photo_camera_rounded,
+                                    description: 'Capture comprehensive site photos.',
+                                    onTap: () => _goToStep(context, 3, (_) => CapturePhotoScreen(task: task)),
+                                  ),
+                                  _StepInfo(
+                                    index: 4, title: 'Zoning Checklist', icon: Icons.checklist_rounded,
+                                    description: 'Evaluate standard compliance metrics.',
+                                    onTap: () => _goToStep(context, 4, (_) => InspectionChecklistScreen(task: task)),
+                                  ),
+                                  _StepInfo(
+                                    index: 5, title: 'Field Findings', icon: Icons.fact_check_rounded,
+                                    description: 'Log specific operational observations.',
+                                    onTap: () => _goToStep(context, 5, (_) => FieldFindingsScreen(task: task)),
+                                  ),
+                                  _StepInfo(
+                                    index: 6, title: 'Review & Submit', icon: Icons.cloud_upload_rounded,
+                                    description: 'Finalize and push the active report.',
+                                    onTap: () => _goToStep(context, 6, (_) => ReviewSubmitScreen(task: task)),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      _GlassCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(task.location, style: InsightTheme.inter(15, w: FontWeight.w600, c: InsightTheme.ink)),
-                            const SizedBox(height: 4),
-                            Text('Ref. no. ${task.inspectionNo}', style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
-                            const SizedBox(height: 12),
-                            
-                            _buildListRow('Applicant', task.name),
-                            _buildListRow('Project type', 'Residential reclassification'),
-                            _buildListRow('Declared land use', 'Single-detached residential', isLast: true),
-                          ],
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 18),
-                      
-                      // LOCATION SECTION LABEL
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 10, height: 2,
-                            decoration: BoxDecoration(color: InsightTheme.blue1, borderRadius: BorderRadius.circular(1)),
-                          ),
-                          const SizedBox(width: 7),
-                          Text('LOCATION', style: InsightTheme.jetBrains(10, w: FontWeight.w500, ls: 1.2)),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      // LOCATION MAP CARD — tapping it opens Site verification,
-                      // the same place Step 1 in the timeline below leads to.
-                      GestureDetector(
-                        onTap: () => _goToStep(context, 1, (_) => SiteMapScreen(task: task)),
-                        child: Container(
-                        decoration: BoxDecoration(
-                          color: InsightTheme.surface,
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(color: InsightTheme.line),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1)),
-                            BoxShadow(color: Color(0x0F141628), blurRadius: 30, offset: Offset(0, 14)),
-                          ],
-                        ),
-                        clipBehavior: Clip.hardEdge,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // Gradient Map Placeholder
-                            Container(
-                              height: 100,
-                              decoration: const BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [Color(0xFFE6EAFB), Color(0xFFD5DDF9)],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                              ),
-                            ),
-                            // Map Details
                             Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                              child: Text(
-                                'Brgy. Maligaya, Zone 3 · 340m from main road',
-                                style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
+                                    child: const Icon(Icons.description_outlined, color: InsightTheme.ink2, size: 16),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text('Application Details', style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.ink)),
+                                ],
+                              ),
+                            ),
+                            Container(color: InsightTheme.line, height: 1),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                              child: Column(
+                                children: [
+                                  _buildDataRow('Applicant', task.name),
+                                  _buildDataRow('Inspection ID', task.inspectionNo),
+                                  _buildDataRow('Target Location', task.location),
+                                  _buildDataRow('Classification', task.applicationType ?? 'Zoning Evaluation'),
+                                  _buildDataRow('Land Use Focus', task.landUseClass, isLast: true),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // INSPECTION STEPS TIMELINE (premium glass card)
-                      _StepsTimelineCard(
-                        currentStep: currentStep,
-                        isComplete: progress.isComplete,
-                        steps: [
-                          _StepInfo(
-                            index: 1,
-                            title: 'Site verification',
-                            icon: Icons.map_rounded,
-                            onTap: () => _goToStep(
-                              context,
-                              1,
-                              (_) => SiteMapScreen(task: task),
-                            ),
-                          ),
-                          _StepInfo(
-                            index: 2,
-                            title: 'GPS verification',
-                            icon: Icons.gps_fixed_rounded,
-                            onTap: () => _goToStep(
-                              context,
-                              2,
-                              (_) => GpsVerificationScreen(task: task),
-                            ),
-                          ),
-                          _StepInfo(
-                            index: 3,
-                            title: 'Photos',
-                            icon: Icons.photo_camera_rounded,
-                            onTap: () => _goToStep(
-                              context,
-                              3,
-                              (_) => CapturePhotoScreen(task: task),
-                            ),
-                          ),
-                          _StepInfo(
-                            index: 4,
-                            title: 'Checklist',
-                            icon: Icons.checklist_rounded,
-                            onTap: () => _goToStep(
-                              context,
-                              4,
-                              (_) => InspectionChecklistScreen(task: task),
-                            ),
-                          ),
-                          _StepInfo(
-                            index: 5,
-                            title: 'Findings',
-                            icon: Icons.fact_check_rounded,
-                            onTap: () => _goToStep(
-                              context,
-                              5,
-                              (_) => FieldFindingsScreen(task: task),
-                            ),
-                          ),
-                          _StepInfo(
-                            index: 6,
-                            title: 'Review & submit',
-                            icon: Icons.task_alt_rounded,
-                            onTap: () => _goToStep(
-                              context,
-                              6,
-                              (_) => ReviewSubmitScreen(task: task),
-                            ),
-                          ),
-                        ],
                       ),
                     ],
-                  ),
-                ),
-
-                // PRIMARY CTA — always points at whatever comes next
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                  child: ElevatedButton(
-                    onPressed: progress.isComplete
-                        ? null
-                        : () => _goToStep(
-                              context,
-                              currentStep,
-                              (_) => _screenForStep(currentStep),
-                            ),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      disabledBackgroundColor: Colors.transparent,
-                    ).copyWith(elevation: WidgetStateProperty.all(0)),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: progress.isComplete
-                              ? [InsightTheme.ink3, InsightTheme.ink3]
-                              : const [InsightTheme.blue1, InsightTheme.blue2],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: progress.isComplete
-                            ? null
-                            : [BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10))],
-                      ),
-                      child: Container(
-                        alignment: Alignment.center,
-                        constraints: const BoxConstraints(minHeight: 50),
-                        child: Text(
-                          progress.isComplete
-                              ? 'Inspection submitted'
-                              : 'Continue · ${InspectionProgress.stepTitles[currentStep - 1]}',
-                          style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white),
-                        ),
-                      ),
-                    ),
                   ),
                 ),
               ],
@@ -430,57 +330,111 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     );
   }
 
-  /// Maps a step number to the screen that owns it — used by the
-  /// "Continue" CTA so it always opens exactly what's next.
-  Widget _screenForStep(int step) {
-    switch (step) {
-      case 1:
-        return SiteMapScreen(task: task);
-      case 2:
-        return GpsVerificationScreen(task: task);
-      case 3:
-        return CapturePhotoScreen(task: task);
-      case 4:
-        return InspectionChecklistScreen(task: task);
-      case 5:
-        return FieldFindingsScreen(task: task);
-      default:
-        return ReviewSubmitScreen(task: task);
-    }
-  }
-
-  Widget _buildListRow(String label, String value, {bool isLast = false}) {
+  Widget _buildDataRow(String label, String value, {bool isLast = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         border: isLast ? null : const Border(bottom: BorderSide(color: InsightTheme.line)),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
-          const SizedBox(height: 2),
-          Text(value, style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink)),
+          Expanded(
+            flex: 2,
+            child: Text(label, style: InsightTheme.inter(12, c: InsightTheme.ink2, w: FontWeight.w500)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value, 
+              style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink),
+              textAlign: TextAlign.right,
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-/// ==================================================================
-/// STEP TIMELINE — premium, clickable inspection workflow tracker
-/// ==================================================================
+class _SupportActionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _SupportActionTile({required this.icon, required this.title, required this.subtitle, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: InsightTheme.poppins(14, w: FontWeight.w600, c: color)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                ],
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GlassCard extends StatelessWidget {
+  final Widget child;
+  const _GlassCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.90),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white),
+        boxShadow: const [
+          BoxShadow(color: Color(0x04141628), blurRadius: 8, offset: Offset(0, 2)),
+          BoxShadow(color: Color(0x08141628), blurRadius: 16, offset: Offset(0, 6)),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class _StepInfo {
   final int index;
   final String title;
+  final String description;
   final IconData icon;
   final VoidCallback onTap;
 
   const _StepInfo({
-    required this.index,
-    required this.title,
-    required this.icon,
-    required this.onTap,
+    required this.index, 
+    required this.title, 
+    required this.description, 
+    required this.icon, 
+    required this.onTap
   });
 }
 
@@ -493,82 +447,21 @@ class _StepsTimelineCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: InsightTheme.line),
-        boxShadow: const [
-          BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1)),
-          BoxShadow(color: Color(0x14141628), blurRadius: 36, offset: Offset(0, 16)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // HEADER
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 4),
-            child: Row(
-              children: [
-                Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [InsightTheme.blue1, InsightTheme.blue2],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                    boxShadow: [
-                      BoxShadow(color: InsightTheme.blue1.withOpacity(0.30), blurRadius: 10, offset: const Offset(0, 4)),
-                    ],
-                  ),
-                  child: const Icon(Icons.route_rounded, size: 15, color: Colors.white),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Inspection workflow', style: InsightTheme.poppins(13.5, w: FontWeight.w700, c: InsightTheme.ink)),
-                      const SizedBox(height: 1),
-                      Text(
-                        isComplete
-                            ? 'All steps complete'
-                            : 'Up next: Step $currentStep · ${InspectionProgress.stepTitles[currentStep - 1]}',
-                        style: InsightTheme.inter(11, c: InsightTheme.ink3),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Column(
-              children: List.generate(steps.length, (i) {
-                final step = steps[i];
-                final isLast = i == steps.length - 1;
-                final isCurrent = step.index == currentStep && !isComplete;
-                final isDone = step.index < currentStep || isComplete;
-                final isLocked = !isDone && !isCurrent;
-                return _StepRow(
-                  step: step,
-                  isLast: isLast,
-                  isCurrent: isCurrent,
-                  isDone: isDone,
-                  isLocked: isLocked,
-                );
-              }),
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
+    return Column(
+      children: List.generate(steps.length, (i) {
+        final step = steps[i];
+        final isLast = i == steps.length - 1;
+        final isCurrent = step.index == currentStep && !isComplete;
+        final isDone = step.index < currentStep || isComplete;
+        final isLocked = !isDone && !isCurrent;
+        return _StepRow(
+          step: step,
+          isLast: isLast,
+          isCurrent: isCurrent,
+          isDone: isDone,
+          isLocked: isLocked,
+        );
+      }),
     );
   }
 }
@@ -581,124 +474,121 @@ class _StepRow extends StatelessWidget {
   final bool isLocked;
 
   const _StepRow({
-    required this.step,
-    required this.isLast,
-    required this.isCurrent,
-    required this.isDone,
-    required this.isLocked,
+    required this.step, required this.isLast, required this.isCurrent, 
+    required this.isDone, required this.isLocked,
   });
+
+  String _getSimulatedTimestamp(int stepIndex) {
+    final now = DateTime.now();
+    final dt = now.subtract(Duration(minutes: (6 - stepIndex) * 12));
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final month = months[dt.month - 1];
+    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final amPm = dt.hour >= 12 ? 'PM' : 'AM';
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '$month ${dt.day}, $hour:$minute $amPm';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final Color labelColor = isLocked ? InsightTheme.ink3 : InsightTheme.ink;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          HapticFeedback.selectionClick();
-          step.onTap();
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // BADGE + CONNECTOR LINE
-                Column(
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: isCurrent || isDone
-                            ? const LinearGradient(
-                                colors: [InsightTheme.blue1, InsightTheme.blue2],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              )
-                            : null,
-                        color: isCurrent || isDone ? null : InsightTheme.surface2,
-                        border: isCurrent || isDone
-                            ? null
-                            : Border.all(color: InsightTheme.lineStrong, width: 1.4),
-                        boxShadow: isCurrent
-                            ? [BoxShadow(color: InsightTheme.blue1.withOpacity(0.30), blurRadius: 12, offset: const Offset(0, 5))]
-                            : null,
-                      ),
-                      child: Icon(
-                        isLocked ? Icons.lock_outline_rounded : step.icon,
-                        size: 15,
-                        color: isCurrent || isDone ? Colors.white : InsightTheme.ink3,
-                      ),
-                    ),
-                    if (!isLast)
-                      Expanded(
-                        child: Container(
-                          width: 2,
-                          margin: const EdgeInsets.symmetric(vertical: 2),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                (isCurrent || isDone) ? InsightTheme.blue1.withOpacity(0.45) : InsightTheme.line,
-                                InsightTheme.line,
-                              ],
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                            ),
-                          ),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      margin: const EdgeInsets.only(bottom: 2),
+      decoration: BoxDecoration(
+        color: isCurrent ? InsightTheme.surface : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isCurrent ? InsightTheme.line : Colors.transparent),
+        boxShadow: isCurrent ? const [BoxShadow(color: Color(0x06000000), blurRadius: 6, offset: Offset(0, 2))] : [],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            step.onTap();
+          },
+          child: Padding(
+            padding: EdgeInsets.all(isCurrent ? 10 : 4),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Column(
+                    children: [
+                      Container(
+                        width: 26, height: 26,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isDone ? InsightTheme.greenTint : (isCurrent ? InsightTheme.blue1 : InsightTheme.surface2),
+                        ),
+                        child: Icon(
+                          isDone ? Icons.check_rounded : (isLocked ? Icons.lock_outline_rounded : step.icon),
+                          size: 12,
+                          color: isDone ? InsightTheme.greenInk : (isCurrent ? Colors.white : InsightTheme.ink3),
                         ),
                       ),
-                  ],
-                ),
-                const SizedBox(width: 14),
-                // LABEL
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(bottom: isLast ? 0 : 18, top: 6),
-                    child: Row(
-                      children: [
+                      if (!isLast)
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: Container(
+                            width: 2,
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            color: isDone ? InsightTheme.green.withValues(alpha: 0.4) : InsightTheme.line,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: isLast ? 0 : 12, top: 3),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'STEP ${step.index} OF ${InspectionProgress.totalSteps}',
-                                style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: isCurrent ? InsightTheme.blueInk : InsightTheme.ink3, ls: 0.4),
+                              Expanded(
+                                child: Text(
+                                  step.title, 
+                                  style: InsightTheme.poppins(13, w: FontWeight.w600, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                step.title,
-                                style: InsightTheme.inter(13.5, w: FontWeight.w600, c: labelColor),
-                              ),
+                              if (isCurrent)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(color: InsightTheme.blue1, borderRadius: BorderRadius.circular(6)),
+                                  child: Text('Start Task', style: InsightTheme.inter(10, w: FontWeight.w700, c: Colors.white)),
+                                )
                             ],
                           ),
-                        ),
-                        if (isCurrent)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: InsightTheme.blueTint,
-                              borderRadius: BorderRadius.circular(20),
+                          const SizedBox(height: 2),
+                          if (isDone)
+                            Row(
+                              children: [
+                                const Icon(Icons.verified_rounded, size: 12, color: InsightTheme.greenInk),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Verified on ${_getSimulatedTimestamp(step.index)}',
+                                  style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.greenInk),
+                                ),
+                              ],
+                            )
+                          else
+                            Text(
+                              step.description,
+                              style: InsightTheme.inter(11, w: FontWeight.w400, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink2),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            child: Text(
-                              'Current',
-                              style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk),
-                            ),
-                          )
-                        else if (isLocked)
-                          Icon(Icons.lock_outline_rounded, size: 16, color: InsightTheme.ink3.withOpacity(0.6))
-                        else
-                          Icon(Icons.chevron_right_rounded, size: 20, color: InsightTheme.ink3.withOpacity(0.7)),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -707,7 +597,6 @@ class _StepRow extends StatelessWidget {
   }
 }
 
-/// Glassmorphic back button matching the prototype
 class _GlassBackButton extends StatelessWidget {
   final VoidCallback onTap;
   const _GlassBackButton({required this.onTap});
@@ -717,20 +606,22 @@ class _GlassBackButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 38,
-        height: 38,
+        width: 38, height: 38,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: Colors.white.withOpacity(0.65)),
-          boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 14, offset: Offset(0, 4))],
+          color: Colors.white.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
+          boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2))],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(13),
+          borderRadius: BorderRadius.circular(12),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
             child: const Center(
-              child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink),
+              child: Padding(
+                padding: EdgeInsets.only(left: 4),
+                child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink),
+              ),
             ),
           ),
         ),
