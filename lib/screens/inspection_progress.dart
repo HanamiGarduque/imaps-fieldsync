@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-
+import '../services/supabase_service.dart';
 /// ==================================================================
 /// INSPECTION PROGRESS TRACKER
 /// ==================================================================
@@ -35,6 +35,7 @@ class InspectionProgress extends ChangeNotifier {
   // is exactly what our own test data did), and keying by that caused
   // progress to silently carry over into an unrelated task.
   String? _activeTaskId;
+  String? _activeTaskLabel;
 
   int get highestCompleted => _highestCompleted;
   int get currentStep => (_highestCompleted + 1).clamp(1, totalSteps);
@@ -50,22 +51,33 @@ class InspectionProgress extends ChangeNotifier {
     if (step == _highestCompleted + 1) {
       _highestCompleted = step;
       notifyListeners();
+
+      if (step < totalSteps && _activeTaskId != null) {
+        SupabaseService.logActivity(
+          eventType: 'step_completed',
+          title: 'Completed Step $step: ${stepTitles[step - 1]}',
+          subtitle: _activeTaskLabel,
+          fieldJobId: _activeTaskId,
+        );
+      }
     }
   }
 
   /// Makes sure progress belongs to the task currently open. If the
   /// inspector opens a different task, progress starts fresh instead of
   /// carrying over from whatever they were last inspecting.
-  void ensureActiveInspection(String taskId) {
+  void ensureActiveInspection(String taskId, {String? label}) {
     if (_activeTaskId != taskId) {
       _activeTaskId = taskId;
       _highestCompleted = 0;
     }
+    _activeTaskLabel = label ?? _activeTaskLabel;
   }
 
   void reset() {
     _highestCompleted = 0;
     _activeTaskId = null;
+    _activeTaskLabel = null;
     notifyListeners();
   }
 
@@ -73,8 +85,9 @@ class InspectionProgress extends ChangeNotifier {
   /// Every step has real submitted data, so every step should be tappable —
   /// unlike a fresh inspection, the inspector shouldn't have to redo step 1
   /// just to look at (or fix) step 5.
-  void unlockAllForReview(String taskId) {
+  void unlockAllForReview(String taskId, {String? label}) {
     _activeTaskId = taskId;
+    _activeTaskLabel = label ?? _activeTaskLabel;
     _highestCompleted = totalSteps;
     notifyListeners();
   }

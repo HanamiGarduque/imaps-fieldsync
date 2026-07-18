@@ -1,6 +1,9 @@
+import 'dart:io';
+import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// idagdag sa taas ng supabase_service.dart
 
 class SupabaseService {
   static Future<void> initialize() async {
@@ -39,34 +42,78 @@ class SupabaseService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // ACTIVITY LOG  (Dashboard → Recent Activity)
+  //   Fire-and-forget: a logging failure should never block the action
+  //   that triggered it (GPS confirm, submit, rework, sync).
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<void> logActivity({
+    required String eventType,
+    required String title,
+    String? subtitle,
+    String? fieldJobId,
+  }) async {
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      await client.from('activity_log').insert({
+        'inspector_id': userId,
+        'field_job_id': fieldJobId,
+        'event_type': eventType,
+        'title': title,
+        'subtitle': subtitle,
+      });
+    } catch (e) {
+      debugPrint('Error logging activity ($eventType): $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchRecentActivity({int limit = 10}) async {
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return [];
+    try {
+      final response = await client
+          .from('activity_log')
+          .select()
+          .eq('inspector_id', userId)
+          .order('occurred_at', ascending: false)
+          .limit(limit);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Error fetching recent activity: $e');
+      return [];
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
   // FETCH JOBS  (Tasks screen)
   //   FK hint: field_jobs.supabase_application_id → supabase_zoning_applications
   // ─────────────────────────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchMyJobs() async {
-  final userId = client.auth.currentUser?.id;
-  if (userId == null) return [];
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return [];
 
-  final response = await client
-      .from('field_jobs')
-      .select('''
-        id,
-        local_inspection_id,
-        status,
-        scheduled_date,
-        supabase_parcel_id,
-        supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
-          reference_number,
-          applicant_name,
-          barangay
-        ),
-        supabase_parcels!field_jobs_supabase_parcel_id_fkey (
-          lot_area_sqm,
-          land_use_class,
-          property_index_number
-        )
-      ''')
-      .eq('assigned_inspector_id', userId)
-      .order('scheduled_date', ascending: true);
+    final response = await client
+        .from('field_jobs')
+        .select('''
+          id,
+          local_inspection_id,
+          status,
+          scheduled_date,
+          supabase_parcel_id,
+          supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
+            reference_number,
+            applicant_name,
+            barangay,
+            application_type,
+            purpose
+          ),
+          supabase_parcels!field_jobs_supabase_parcel_id_fkey (
+            lot_area_sqm,
+            land_use_class,
+            property_index_number
+          )
+        ''')
+        .eq('assigned_inspector_id', userId)
+        .order('scheduled_date', ascending: true);
 
   return List<Map<String, dynamic>>.from(response);
 }
@@ -116,6 +163,7 @@ class SupabaseService {
     required double latitude,
     required double longitude,
     required double accuracyMeters,
+    String? locationLabel,
   }) async {
     try {
       await client.from('field_jobs').update({
@@ -125,10 +173,58 @@ class SupabaseService {
         'gps_accuracy_m': accuracyMeters,
         'gps_confirmed_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', jobId);
+      await logActivity(
+        eventType: 'gps_confirmed',
+        title: 'GPS verified on-site',
+        subtitle: locationLabel,
+        fieldJobId: jobId,
+      );
     } catch (e) {
       debugPrint('Error confirming GPS on site: $e');
       rethrow;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // UPLOAD INSPECTION PHOTOS  (Review & submit screen → runs before submit)
+  //   Uploads each locally-captured photo to the inspection-photos bucket
+  //   and returns the public URLs to store in field_jobs.photo_paths.
+  //   Local device paths (e.g. /data/user/0/.../inspection_xxx.jpg) only
+  //   exist on the phone that took them — they must never be written to
+  //   the DB as-is, since they're meaningless on any other device/session.
+  // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // UPLOAD INSPECTION PHOTOS  (Review & submit screen, online path)
+  //   Local device paths lang ang meron dito — i-upload sa Storage at
+  //   ibalik ang public URLs para hindi mawala kapag na-clear ang cache
+  //   ng device. Parehong bucket/path convention gaya ng
+  //   InspectionProvider.syncToServer para compatible ang dalawang path.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<List<String>> uploadInspectionPhotos({
+    required String jobId,
+    required List<String> localPaths,
+  }) async {
+    final List<String> uploadedUrls = [];
+    for (final path in localPaths) {
+      try {
+        final file = File(path);
+        if (!await file.exists()) continue;
+
+        final fileName = 'photo_${const Uuid().v4()}.jpg';
+        final storagePath = 'inspections/$jobId/$fileName';
+
+        await client.storage.from('inspection-photos').upload(
+          storagePath,
+          file,
+          fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+        );
+
+        uploadedUrls.add(client.storage.from('inspection-photos').getPublicUrl(storagePath));
+      } catch (e) {
+        debugPrint('Error uploading photo $path: $e');
+      }
+    }
+    return uploadedUrls;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -148,6 +244,7 @@ class SupabaseService {
     int checklistTotalCount = 0,
     List<String>? photoPaths,
     int photoCount = 0,
+    String? locationLabel,
   }) async {
     try {
       await client.from('field_jobs').update({
@@ -166,6 +263,12 @@ class SupabaseService {
         'photo_count': photoCount,
         'submitted_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', jobId);
+      await logActivity(
+        eventType: 'inspection_completed',
+        title: 'Inspection completed',
+        subtitle: locationLabel,
+        fieldJobId: jobId,
+      );
     } catch (e) {
       debugPrint('Error submitting inspection: $e');
       rethrow;
@@ -211,11 +314,17 @@ class SupabaseService {
   //   without touching the previously submitted answers — those stay in
   //   place until the inspector actually edits and resubmits that step.
   // ─────────────────────────────────────────────────────────────────────────
-  static Future<void> reopenForRework({required String jobId}) async {
+  static Future<void> reopenForRework({required String jobId, String? locationLabel}) async {
     try {
       await client.from('field_jobs').update({
         'status': 'in_progress',
       }).eq('id', jobId);
+      await logActivity(
+        eventType: 'rework_started',
+        title: 'Reopened for rework',
+        subtitle: locationLabel,
+        fieldJobId: jobId,
+      );
     } catch (e) {
       debugPrint('Error reopening job for rework: $e');
       rethrow;

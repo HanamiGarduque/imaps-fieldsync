@@ -60,6 +60,7 @@ class TaskItem {
   final String landUseClass;
   final double? lotAreaSqm;
   final String? propertyIndexNumber;
+  final String? applicationType;
 
   // Populated once a job has been submitted — used by the read-only
   // Completed-task view instead of hardcoded placeholder text.
@@ -93,6 +94,7 @@ class TaskItem {
     this.landUseClass = 'Not yet on file',
     this.lotAreaSqm,
     this.propertyIndexNumber,
+    this.applicationType,
     this.findings,
     this.observations,
     this.discrepancies,
@@ -149,6 +151,7 @@ class TaskItem {
       confirmedLongitude: (job['confirmed_longitude'] as num?)?.toDouble(),
       gpsAccuracyM: (job['gps_accuracy_m'] as num?)?.toDouble(),
       gpsConfirmedAt: job['gps_confirmed_at'] as String?,
+      applicationType: application?['application_type'] as String?,
     );
   }
 
@@ -172,6 +175,15 @@ class TaskItem {
     // Not started, still has time before its scheduled date — can be done
     // whenever the inspector has a slot.
     return 'Pending';
+  }
+
+  IconData get typeIcon {
+    final t = '${applicationType ?? ''} $landUseClass'.toLowerCase();
+    if (t.contains('commercial')) return Icons.location_city_rounded;
+    if (t.contains('industrial')) return Icons.factory_rounded;
+    if (t.contains('agri')) return Icons.grass_rounded;
+    if (t.contains('institutional')) return Icons.account_balance_rounded;
+    return Icons.home_rounded;
   }
 
   bool get _isDueOrOverdue {
@@ -222,8 +234,19 @@ class _TasksScreenState extends State<TasksScreen> {
       _errorMessage = null;
     });
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
-      if (connectivityResult != ConnectivityResult.none) {
+      final dynamic connectivityResult = await Connectivity().checkConnectivity();
+      final bool hasConnection;
+      if (connectivityResult is ConnectivityResult) {
+        hasConnection = connectivityResult != ConnectivityResult.none;
+      } else if (connectivityResult is List) {
+        hasConnection = connectivityResult
+            .cast<ConnectivityResult>()
+            .any((status) => status != ConnectivityResult.none);
+      } else {
+        hasConnection = false;
+      }
+
+      if (hasConnection) {
         final jobs = await SupabaseService.fetchMyJobs();
         await DBHelper.cacheJobs(jobs);
         if (mounted) {

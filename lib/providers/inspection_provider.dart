@@ -273,8 +273,16 @@ void hydrateForRework(TaskItem task) {
   }
 
   Future<bool> _checkConnectivity() async {
-    final result = await Connectivity().checkConnectivity();
-    return result != ConnectivityResult.none;
+    final dynamic result = await Connectivity().checkConnectivity();
+    if (result is ConnectivityResult) {
+      return result != ConnectivityResult.none;
+    }
+    if (result is List) {
+      return result
+          .cast<ConnectivityResult>()
+          .any((status) => status != ConnectivityResult.none);
+    }
+    return false;
   }
 
   Future<void> syncToServer() async {
@@ -317,6 +325,14 @@ void hydrateForRework(TaskItem task) {
       await DBHelper.markPhotoSynced(photo['id']);
     }
 
+    if (pendingPhotos.isNotEmpty) {
+      await SupabaseService.logActivity(
+        eventType: 'photos_synced',
+        title: 'Offline photos synced',
+        subtitle: '${pendingPhotos.length} photo(s) uploaded',
+      );
+    }
+
     // 2. Sync Pending Inspections
     final pendingInspections = await DBHelper.getPendingInspections();
     for (final insp in pendingInspections) {
@@ -336,6 +352,14 @@ void hydrateForRework(TaskItem task) {
       }).eq('id', insp['id']);
 
       await DBHelper.markInspectionSynced(insp['id']);
+    }
+
+    if (pendingInspections.isNotEmpty) {
+      await SupabaseService.logActivity(
+        eventType: 'inspection_completed',
+        title: 'Offline inspection synced',
+        subtitle: '${pendingInspections.length} report(s) uploaded',
+      );
     }
   } catch (e) {
     debugPrint('Sync failed: $e');

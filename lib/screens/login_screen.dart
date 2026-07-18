@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
@@ -22,6 +25,8 @@ class AppColors {
   static const blue2 = Color(0xFF0B2FBF);
   static const blueInk = Color(0xFF1A3FC4);
   
+  static const amber = Color(0xFFFFB700);
+  
   static const line = Color(0x12141628); 
   static const lineStrong = Color(0x21141628); 
 }
@@ -37,9 +42,9 @@ class AppText {
       GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? AppColors.ink3, letterSpacing: ls);
 }
 
-/// ------------------------------------------------------------------
-/// SPLASH SCREEN
-/// ------------------------------------------------------------------
+/// ==================================================================
+/// SCREEN 1 — SPLASH
+/// ==================================================================
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -51,24 +56,46 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _navigateToLogin();
+    _checkSession();
   }
 
-  Future<void> _navigateToLogin() async {
-    await Future.delayed(const Duration(seconds: 2));
+  Future<void> _checkSession() async {
+    // Artificial delay to allow the splash screen branding to show
+    await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
 
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 600),
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return FadeTransition(
-            opacity: CurvedAnimation(parent: animation, curve: Curves.easeIn),
-            child: const LoginScreen(),
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final staySignedIn = prefs.getBool('stay_signed_in') ?? false;
+
+      if (staySignedIn) {
+        final profile = await AuthService.getCurrentProfile();
+        if (profile != null && mounted) {
+          // Valid session found, bypass login
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
           );
-        },
-      ),
-    );
+          return;
+        }
+      } else {
+        // Force sign out to clear Supabase's auto-persisted local cache if user opted out
+        if (AuthService.isLoggedIn) {
+          await AuthService.signOut();
+        }
+      }
+    } catch (e) {
+      debugPrint('Session verification failed: $e');
+    }
+
+    // If no valid session or user opted out of stay signed in, route to Login
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 700),
+          pageBuilder: (_, anim, __) => FadeTransition(opacity: anim, child: const LoginScreen()),
+        ),
+      );
+    }
   }
 
   @override
@@ -84,51 +111,76 @@ class _SplashScreenState extends State<SplashScreen> {
             end: Alignment.bottomRight,
           ),
         ),
-        child: Stack(
-          children: [
-            Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 76,
-                    height: 76,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white.withOpacity(0.35)),
-                    ),
-                    child: const Center(
-                      child: _ExactLogoSVG(size: 36, color: Colors.white),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('InSight', style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white, ls: -0.01)),
-                      Text('.', style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white.withOpacity(0.7), ls: -0.01)),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Container(
+                            width: 76,
+                            height: 76,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+                            ),
+                            child: const Center(
+                              child: _ExactLogoSVG(size: 36, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      
+                      RichText(
+                        text: TextSpan(children: [
+                          TextSpan(
+                            text: 'InSight', 
+                            style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white, ls: -0.01)
+                          ),
+                          TextSpan(
+                            text: '.', 
+                            style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white.withValues(alpha: 0.7), ls: -0.01)
+                          ),
+                        ]),
+                      ),
+                      const SizedBox(height: 8),
+                      
+                      Text(
+                        'INITIALIZING FIELD UNIT…', 
+                        style: AppText.mono(10.5, c: Colors.white.withValues(alpha: 0.7), ls: 0.8)
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'INITIALIZING FIELD UNIT…', 
-                    style: AppText.mono(10.5, ls: 0.8, c: Colors.white.withOpacity(0.7))
-                  ),
-                ],
+                ),
               ),
-            ),
-            Positioned(
-              bottom: 40,
-              left: 0,
-              right: 0,
-              child: Text(
-                'MUNICIPAL PLANNING & ZONING OFFICE · V1.0.0',
-                textAlign: TextAlign.center,
-                style: AppText.mono(10, c: Colors.white.withOpacity(0.6)),
+              
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.amber),
+                ),
               ),
-            )
-          ],
+              const SizedBox(height: 24),
+              
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'MUNICIPAL PLANNING & ZONING OFFICE · V1.0.0', 
+                  style: AppText.mono(10, c: Colors.white.withValues(alpha: 0.6)),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -154,6 +206,23 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _staySignedIn = false;
   String? _errorMessage;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedEmail();
+  }
+
+  Future<void> _loadSavedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('saved_email');
+    if (savedEmail != null && mounted) {
+      setState(() {
+        _emailController.text = savedEmail;
+        _staySignedIn = prefs.getBool('stay_signed_in') ?? false;
+      });
+    }
+  }
+
   Future<void> _handleLogin() async {
     setState(() {
       _isLoading = true;
@@ -171,6 +240,14 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (profile != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('stay_signed_in', _staySignedIn);
+        if (_staySignedIn) {
+          await prefs.setString('saved_email', _emailController.text.trim());
+        } else {
+          await prefs.remove('saved_email');
+        }
+
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
         );
@@ -186,6 +263,48 @@ class _LoginScreenState extends State<LoginScreen> {
           _errorMessage = 'Invalid ID or passcode. Please try again.';
         });
       }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _handleForgotPasscode() async {
+    final email = _emailController.text.trim();
+    
+    if (email.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please enter your email to reset your passcode.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await AuthService.resetPassword(email: email);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Reset instructions sent to $email', 
+              style: AppText.inter(13, c: Colors.white),
+            ),
+            backgroundColor: const Color(0xFF10B981), 
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('RESET ERROR: $e');
+      await _contactAdministrator();
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -244,7 +363,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Sleek Header & Logo
                     Column(
                       children: [
                         Container(
@@ -259,7 +377,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.blue1.withOpacity(0.35),
+                                color: AppColors.blue1.withValues(alpha: 0.35),
                                 blurRadius: 20,
                                 offset: const Offset(0, 10),
                               )
@@ -282,9 +400,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                           decoration: BoxDecoration(
-                            color: AppColors.blue1.withOpacity(0.06),
+                            color: AppColors.blue1.withValues(alpha: 0.06),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppColors.blue1.withOpacity(0.1)),
+                            border: Border.all(color: AppColors.blue1.withValues(alpha: 0.1)),
                           ),
                           child: Text(
                             'ZONING & LAND USE VERIFICATION',
@@ -296,7 +414,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     
                     const SizedBox(height: 36),
                     
-                    // Section Label
                     Row(
                       children: [
                         Container(
@@ -308,12 +425,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('ACCOUNT ACCESS', style: AppText.mono(10, w: FontWeight.w600, ls: 1.0)),
+                        Text('LOG IN TO CONTINUE', style: AppText.mono(10, w: FontWeight.w600, ls: 1.0)),
                       ],
                     ),
                     const SizedBox(height: 12),
                     
-                    // Core Form Card - STRICTLY INPUTS ONLY
                     Container(
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
@@ -328,7 +444,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildFieldLabel('INSPECTOR EMAIL'),
+                          _buildFieldLabel('EMAIL'),
                           const SizedBox(height: 6),
                           _buildTextField(
                             controller: _emailController,
@@ -354,7 +470,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                     const SizedBox(height: 16),
 
-                    // Options Row: Checkbox + Forgot Passcode
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Row(
@@ -390,9 +505,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             ],
                           ),
                           
-                          // Sleek Text Button
                           GestureDetector(
-                            onTap: _contactAdministrator,
+                            onTap: _isLoading ? null : _handleForgotPasscode,
                             child: Text(
                               'Forgot passcode?',
                               style: AppText.inter(13, w: FontWeight.w600, c: AppColors.blueInk),
@@ -407,9 +521,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE23B4E).withOpacity(0.08),
+                          color: const Color(0xFFE23B4E).withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFE23B4E).withOpacity(0.2)),
+                          border: Border.all(color: const Color(0xFFE23B4E).withValues(alpha: 0.2)),
                         ),
                         child: Row(
                           children: [
@@ -425,7 +539,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                     const SizedBox(height: 28),
                     
-                    // Primary Sign In Button
                     Container(
                       height: 48,
                       decoration: BoxDecoration(
@@ -437,7 +550,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: AppColors.blue1.withOpacity(0.32),
+                            color: AppColors.blue1.withValues(alpha: 0.32),
                             blurRadius: 18,
                             offset: const Offset(0, 8),
                           )
@@ -486,7 +599,7 @@ class _LoginScreenState extends State<LoginScreen> {
         hintText: hintText,
         hintStyle: AppText.inter(13, w: FontWeight.w500, c: AppColors.ink3),
         filled: true,
-        fillColor: AppColors.bg.withOpacity(0.6),
+        fillColor: AppColors.bg.withValues(alpha: 0.6),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         prefixIcon: Icon(icon, color: AppColors.ink3, size: 18),
         suffixIcon: isPassword 
@@ -537,7 +650,7 @@ class _DeviceBackground extends StatelessWidget {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  AppColors.blue1.withOpacity(0.15),
+                  AppColors.blue1.withValues(alpha: 0.15),
                   Colors.transparent,
                 ],
                 stops: const [0.0, 0.7],
@@ -555,7 +668,7 @@ class _DeviceBackground extends StatelessWidget {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  AppColors.blue1.withOpacity(0.10),
+                  AppColors.blue1.withValues(alpha: 0.10),
                   Colors.transparent,
                 ],
                 stops: const [0.0, 0.7],
@@ -587,7 +700,7 @@ class _ExactLogoSVG extends StatelessWidget {
             height: size * 0.75,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: color.withOpacity(0.5), width: 1.8),
+              border: Border.all(color: color.withValues(alpha: 0.5), width: 1.8),
             ),
           ),
           Container(

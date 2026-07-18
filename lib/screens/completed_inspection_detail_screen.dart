@@ -88,14 +88,14 @@ class _CompletedInspectionDetailScreenState
 
     try {
       // 1. Flip status back to in_progress — keeps existing submitted data.
-      await SupabaseService.reopenForRework(jobId: task.id);
+      await SupabaseService.reopenForRework(jobId: task.id, locationLabel: task.location);
 
       // 2. Load real submitted data into the provider (not blanks).
       context.read<InspectionProvider>().hydrateForRework(task);
 
       // 3. Unlock every step, keyed by task.id — not inspectionNo, since
       //    two jobs can share a reference_number (see notes above).
-      InspectionProgress.instance.unlockAllForReview(task.id);
+      InspectionProgress.instance.unlockAllForReview(task.id, label: task.location);
 
       if (!mounted) return;
       _navigateToStep(step, task);

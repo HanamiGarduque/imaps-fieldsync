@@ -67,3 +67,9 @@ android/app/upload-keystore.jks
 # IDE-specific (optional pero maganda idagdag)
 .vscode/
 *.iml
+
+# Java heap dump files
+*.hprof
+
+# APKs
+*.apk

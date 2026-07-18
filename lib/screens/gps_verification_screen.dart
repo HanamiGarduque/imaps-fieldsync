@@ -72,9 +72,20 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   double? _accuracy;
   double? _latitude;
   double? _longitude;
+  double? _bearingToParcel;
 
   bool get _verified =>
       _distance != null && _distance! <= _rangeThresholdMeters;
+
+  String get _bearingLabel {
+    if (_bearingToParcel == null) return 'Direction unknown';
+    final bearing = _bearingToParcel!;
+    const labels = [
+      'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N',
+    ];
+    final index = ((bearing + 22.5) ~/ 45) % 8;
+    return '${labels[index]} (${bearing.round()}°)';
+  }
 
   @override
   void initState() {
@@ -100,12 +111,26 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
         longitude: pos.longitude,
       );
 
+      final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+      double? parcelLat;
+      double? parcelLng;
+      double? bearing;
+      if (parcel != null) {
+        parcelLat = (parcel['latitude'] as num?)?.toDouble();
+        parcelLng = (parcel['longitude'] as num?)?.toDouble();
+        if (parcelLat != null && parcelLng != null) {
+          bearing = _bearingBetween(pos.latitude, pos.longitude, parcelLat, parcelLng);
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _latitude = pos.latitude;
         _longitude = pos.longitude;
         _accuracy = pos.accuracy;
         _distance = distance;
+
+        _bearingToParcel = bearing;
         _loading = false;
       });
     } catch (e) {
@@ -115,6 +140,18 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
         _loading = false;
       });
     }
+  }
+
+  double _bearingBetween(double lat1, double lon1, double lat2, double lon2) {
+    final phi1 = lat1 * math.pi / 180.0;
+    final phi2 = lat2 * math.pi / 180.0;
+    final deltaLambda = (lon2 - lon1) * math.pi / 180.0;
+    final y = math.sin(deltaLambda) * math.cos(phi2);
+    final x = math.cos(phi1) * math.sin(phi2) -
+        math.sin(phi1) * math.cos(phi2) * math.cos(deltaLambda);
+    final bearingRad = math.atan2(y, x);
+    final bearingDeg = (bearingRad * 180.0 / math.pi + 360.0) % 360.0;
+    return bearingDeg;
   }
 
   Future<void> _startInspection() async {
@@ -129,6 +166,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
         latitude: _latitude!,
         longitude: _longitude!,
         accuracyMeters: _accuracy ?? 0,
+        locationLabel: widget.task.location,
       );
 
       if (!mounted) return;
@@ -342,10 +380,41 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                   ],
                                 ),
                               ),
+                              if (_bearingToParcel != null)
+                                Positioned(
+                                  child: Transform.rotate(
+                                    angle: _bearingToParcel! * math.pi / 180,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          width: 6,
+                                          height: 70,
+                                          decoration: BoxDecoration(
+                                            color: InsightTheme.blue1,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Icon(
+                                          Icons.arrow_drop_up_rounded,
+                                          size: 30,
+                                          color: InsightTheme.blue1,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 12),
+                        if (_bearingToParcel != null)
+                          Text(
+                            _bearingLabel,
+                            style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.blueInk),
+                          ),
+                        const SizedBox(height: 10),
                         // Dial Range Labels
                         SizedBox(
                           width: 230,
@@ -523,28 +592,49 @@ class _DialTicksPainter extends CustomPainter {
       ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round;
 
+    final ringPaint = Paint()
+      ..color = InsightTheme.lineStrong.withOpacity(0.35)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
     final innerRadius = radius - 14;
 
+    canvas.drawCircle(center, radius - 2, ringPaint);
+
     const int tickCount = 40;
-    
     for (int i = 0; i < tickCount; i++) {
-      // Don't draw the very top tick (index 30 if starting from right) so the blue dash can sit there
-      // We start at 0 radians (right side), so top is at 3pi/2 which is index 30.
-      if (i == 30) continue; 
-      
+      if (i == 30) continue;
+
       final angle = (i * 2 * math.pi) / tickCount;
-      final start = Offset(
-        center.dx + innerRadius * math.cos(angle),
-        center.dy + innerRadius * math.sin(angle)
+      final isCardinal = i % 10 == 0;
+      final tickStart = Offset(
+        center.dx + (innerRadius - (isCardinal ? 4 : 0)) * math.cos(angle),
+        center.dy + (innerRadius - (isCardinal ? 4 : 0)) * math.sin(angle),
       );
-      final end = Offset(
+      final tickEnd = Offset(
         center.dx + radius * math.cos(angle),
-        center.dy + radius * math.sin(angle)
+        center.dy + radius * math.sin(angle),
       );
-      
-      canvas.drawLine(start, end, paint);
+
+      final tickPaint = paint..strokeWidth = isCardinal ? 4.0 : 3.0;
+      canvas.drawLine(tickStart, tickEnd, tickPaint);
+    }
+
+    final labelStyle = InsightTheme.jetBrains(10).copyWith(color: InsightTheme.ink3);
+    const labels = ['N', 'E', 'S', 'W'];
+    final labelRadius = radius - 28;
+    for (var i = 0; i < labels.length; i++) {
+      final angle = -math.pi / 2 + i * math.pi / 2;
+      final offset = Offset(
+        center.dx + labelRadius * math.cos(angle),
+        center.dy + labelRadius * math.sin(angle),
+      );
+      final textSpan = TextSpan(text: labels[i], style: labelStyle);
+      final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr)
+        ..layout();
+      textPainter.paint(canvas, offset - Offset(textPainter.width / 2, textPainter.height / 2));
     }
   }
 

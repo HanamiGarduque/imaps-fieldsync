@@ -1,10 +1,13 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../models/user_profile.dart';
-import 'tasks_screen.dart'; 
-import 'site_map_screen.dart';
+import '../services/supabase_service.dart';
+import '../services/db_helper.dart';
+import 'tasks_screen.dart';
+import 'parcel_detail_screen.dart';
 import 'profile_screen.dart';
 import 'notifications_screen.dart';
 import 'updates_screen.dart';
@@ -53,20 +56,138 @@ class HomeDashboardScreen extends StatefulWidget {
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   int _currentNavIndex = 0;
-  
+
   late PageController _pageController;
   int _currentCardIndex = 0;
+
+  List<TaskItem> _upcomingTasks = [];
+  bool _isLoadingTasks = true;
+
+  List<Map<String, dynamic>> _recentActivity = [];
+  bool _isLoadingActivity = true;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController(viewportFraction: 0.85);
+    _loadUpcomingTasks();
+    _loadRecentActivity();
   }
 
   @override
   void dispose() {
     _pageController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadUpcomingTasks() async {
+    setState(() => _isLoadingTasks = true);
+    List<TaskItem> tasks = [];
+    try {
+      final dynamic connectivityResult = await Connectivity().checkConnectivity();
+      final bool hasConnection;
+      if (connectivityResult is ConnectivityResult) {
+        hasConnection = connectivityResult != ConnectivityResult.none;
+      } else if (connectivityResult is List) {
+        hasConnection = connectivityResult
+            .cast<ConnectivityResult>()
+            .any((status) => status != ConnectivityResult.none);
+      } else {
+        hasConnection = false;
+      }
+
+      if (hasConnection) {
+        final jobs = await SupabaseService.fetchMyJobs();
+        tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
+      } else {
+        final localJobs = await DBHelper.getCachedJobs();
+        tasks = localJobs.map((j) => TaskItem.fromJob({
+              'id': j['id'],
+              'supabase_parcel_id': j['supabase_parcel_id'],
+              'status': j['status'],
+              'local_inspection_id': j['local_inspection_id'],
+              'scheduled_date': j['scheduled_date'],
+              'supabase_zoning_applications': {
+                'applicant_name': j['applicant_name'],
+                'barangay': j['barangay'],
+                'reference_number': j['reference_number'],
+              }
+            })).toList();
+      }
+    } catch (e) {
+      debugPrint('Error loading upcoming tasks for dashboard: $e');
+    }
+
+    final upcoming = tasks.where((t) => t.category != 'Completed').toList()
+      ..sort((a, b) => a.scheduledDate.compareTo(b.scheduledDate));
+
+    if (mounted) {
+      setState(() {
+        _upcomingTasks = upcoming.take(5).toList();
+        _isLoadingTasks = false;
+      });
+    }
+  }
+
+  Future<void> _loadRecentActivity() async {
+    setState(() => _isLoadingActivity = true);
+    try {
+      final activity = await SupabaseService.fetchRecentActivity(limit: 6);
+      if (mounted) {
+        setState(() {
+          _recentActivity = activity;
+          _isLoadingActivity = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading recent activity: $e');
+      if (mounted) setState(() => _isLoadingActivity = false);
+    }
+  }
+
+  static const _monthNames = [
+    'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'
+  ];
+
+  String _formatScheduledDate(String isoDate) {
+    try {
+      final d = DateTime.parse(isoDate);
+      return '${_monthNames[d.month - 1]} ${d.day}, ${d.year}';
+    } catch (_) {
+      return isoDate;
+    }
+  }
+
+  String _timeAgo(String? isoTimestamp) {
+    if (isoTimestamp == null) return '';
+    try {
+      final then = DateTime.parse(isoTimestamp).toLocal();
+      final diff = DateTime.now().difference(then);
+      if (diff.inMinutes < 1) return 'Just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes} mins ago';
+      if (diff.inHours < 24) return '${diff.inHours} ${diff.inHours == 1 ? 'hour' : 'hours'} ago';
+      if (diff.inDays < 7) return '${diff.inDays} ${diff.inDays == 1 ? 'day' : 'days'} ago';
+      return _formatScheduledDate(then.toIso8601String());
+    } catch (_) {
+      return '';
+    }
+  }
+
+  IconData _iconForEvent(String eventType) {
+    switch (eventType) {
+      case 'gps_confirmed':
+        return Icons.gps_fixed_rounded;
+      case 'inspection_completed':
+        return Icons.check_circle_outline_rounded;
+      case 'rework_started':
+        return Icons.refresh_rounded;
+      case 'photos_synced':
+        return Icons.cloud_done_outlined;
+      case 'step_completed':
+        return Icons.trending_flat_rounded;
+      default:
+        return Icons.notifications_none_rounded;
+    }
   }
 
   String _getInitials(String name) {
@@ -177,60 +298,63 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               const SizedBox(height: 12),
               
               SizedBox(
-                height: 195, 
-                child: PageView(
-                  controller: _pageController,
-                  clipBehavior: Clip.none,
-                  onPageChanged: (int index) {
-                    setState(() {
-                      _currentCardIndex = index;
-                    });
-                  },
-                  children: [
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                      child: _HeroCard(
-                        date: 'Scheduled · Jul 20, 2026',
-                        location: 'Lot 22-B, Brgy. Maligaya',
-                        description: 'Residential reclassification review',
-                        bgIcon: Icons.home_rounded, // Consistent residential watermark
-                        smallIcon: Icons.home_rounded, // Consistent residential indicator
-                        gradientColors: const [InsightTheme.blue1, InsightTheme.blue2],
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile))),
-                      ),
-                    ),
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                      child: _HeroCard(
-                        date: 'Scheduled · Jul 22, 2026',
-                        location: 'Block 4, Downtown Center',
-                        description: 'Commercial zoning compliance check',
-                        bgIcon: Icons.location_city_rounded, // Consistent commercial building watermark
-                        smallIcon: Icons.location_city_rounded, // Consistent commercial building indicator
-                        gradientColors: const [InsightTheme.blue1, InsightTheme.blue2],
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile))),
-                      ),
-                    ),
-                  ],
-                ),
+                height: 195,
+                child: _isLoadingTasks
+                    ? const Center(child: CircularProgressIndicator())
+                    : _upcomingTasks.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No upcoming assignments.',
+                              style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                            ),
+                          )
+                        : PageView(
+                            controller: _pageController,
+                            clipBehavior: Clip.none,
+                            onPageChanged: (int index) {
+                              setState(() {
+                                _currentCardIndex = index;
+                              });
+                            },
+                            children: _upcomingTasks.map((task) {
+                              return Container(
+                                margin: const EdgeInsets.symmetric(horizontal: 6),
+                                child: _HeroCard(
+                                  date: task.scheduledDate.isNotEmpty
+                                      ? 'Scheduled · ${_formatScheduledDate(task.scheduledDate)}'
+                                      : task.category,
+                                  location: task.location,
+                                  description: task.applicationType?.isNotEmpty == true
+                                      ? task.applicationType!
+                                      : task.landUseClass,
+                                  bgIcon: task.typeIcon,
+                                  smallIcon: task.typeIcon,
+                                  gradientColors: const [InsightTheme.blue1, InsightTheme.blue2],
+                                  onTap: () => Navigator.of(context).push(
+                                      MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task))),
+                                ),
+                              );
+                            }).toList(),
+                          ),
               ),
               const SizedBox(height: 20),
-              
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(2, (index) {
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    height: 5,
-                    width: _currentCardIndex == index ? 20 : 6,
-                    decoration: BoxDecoration(
-                      color: _currentCardIndex == index ? InsightTheme.blue1 : InsightTheme.ink3.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  );
-                }),
-              ),
+
+              if (_upcomingTasks.length > 1)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(_upcomingTasks.length, (index) {
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      height: 5,
+                      width: _currentCardIndex == index ? 20 : 6,
+                      decoration: BoxDecoration(
+                        color: _currentCardIndex == index ? InsightTheme.blue1 : InsightTheme.ink3.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    );
+                  }),
+                ),
               const SizedBox(height: 32),
 
               // ----------------------------------------------------
@@ -281,33 +405,33 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  children: [
-                    _ActivityTile(
-                      icon: Icons.check_circle_outline_rounded,
-                      title: 'Inspection Completed',
-                      subtitle: 'Lot 22-B, Brgy. Maligaya',
-                      time: '15 mins ago',
-                      isRecent: true,
-                    ),
-                    const SizedBox(height: 12),
-                    _ActivityTile(
-                      icon: Icons.trending_flat_rounded,
-                      title: 'Moved to Step 2: Site Verification',
-                      subtitle: 'Block 4, Downtown Center',
-                      time: '1 hour ago',
-                      isRecent: false,
-                    ),
-                    const SizedBox(height: 12),
-                    _ActivityTile(
-                      icon: Icons.cloud_done_outlined,
-                      title: 'Offline Reports Synced',
-                      subtitle: '2 tasks uploaded to server',
-                      time: '3 hours ago',
-                      isRecent: false,
-                    ),
-                  ],
-                ),
+                child: _isLoadingActivity
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : _recentActivity.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Text(
+                              'No recent activity yet.',
+                              style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                            ),
+                          )
+                        : Column(
+                            children: [
+                              for (int i = 0; i < _recentActivity.length; i++) ...[
+                                if (i > 0) const SizedBox(height: 12),
+                                _ActivityTile(
+                                  icon: _iconForEvent(_recentActivity[i]['event_type'] as String? ?? ''),
+                                  title: _recentActivity[i]['title'] as String? ?? 'Update',
+                                  subtitle: _recentActivity[i]['subtitle'] as String? ?? '',
+                                  time: _timeAgo(_recentActivity[i]['occurred_at'] as String?),
+                                  isRecent: i == 0,
+                                ),
+                              ],
+                            ],
+                          ),
               ),
             ],
           ),

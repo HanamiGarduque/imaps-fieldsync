@@ -103,10 +103,18 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       ];
       final checklistCompleted = checklist.where((c) => c['checked'] == true).length;
 
-      final photoPaths = provider.capturedPhotos
+      final localPhotoPaths = provider.capturedPhotos
           .map((p) => (p['photoPath'] as String?) ?? '')
           .where((p) => p.isNotEmpty)
           .toList();
+
+      // Local paths only exist on this device — upload to Storage first and
+      // submit the resulting public URLs so photos survive on other
+      // devices/sessions and after this device's app cache is cleared.
+      final photoPaths = await SupabaseService.uploadInspectionPhotos(
+        jobId: widget.task.id,
+        localPaths: localPhotoPaths,
+      );
 
       await SupabaseService.submitInspection(
         jobId: widget.task.id,
@@ -122,6 +130,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
         checklistTotalCount: checklist.length,
         photoPaths: photoPaths,
         photoCount: photoPaths.length,
+        locationLabel: widget.task.location,
       );
 
       InspectionProgress.instance.markStepComplete(6);
@@ -304,37 +313,6 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                               context.read<InspectionProvider>().updateResult(o.title);
                             },
                           )),
-
-                      const SizedBox(height: 24),
-
-                      // SIGNATURE SECTION
-                      const _SectionLabel(title: 'INSPECTOR SIGNATURE'),
-                      const SizedBox(height: 10),
-                      Container(
-                        height: 120,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: InsightTheme.surface,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: InsightTheme.lineStrong, width: 1.5),
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            SizedBox(
-                              width: 130, height: 44,
-                              child: CustomPaint(painter: _SignaturePainter()),
-                            ),
-                            Positioned(
-                              bottom: 10,
-                              child: Text(
-                                'Signed by ${widget.task.name}',
-                                style: InsightTheme.jetBrains(10, c: InsightTheme.ink3),
-                              ),
-                            )
-                          ],
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -670,28 +648,4 @@ class _GlassBackButton extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Custom painter to replicate the HTML SVG signature curve
-class _SignaturePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = InsightTheme.blue1
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final path = Path();
-    path.moveTo(size.width * 0.07, size.height * 0.7);
-    path.quadraticBezierTo(size.width * 0.18, size.height * 0.2, size.width * 0.28, size.height * 0.64);
-    path.quadraticBezierTo(size.width * 0.38, size.height * 1.08, size.width * 0.50, size.height * 0.60);
-    path.quadraticBezierTo(size.width * 0.60, size.height * 0.3, size.width * 0.71, size.height * 0.64);
-    path.quadraticBezierTo(size.width * 0.82, size.height * 0.98, size.width * 0.92, size.height * 0.56);
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
