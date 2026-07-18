@@ -68,6 +68,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   List<Map<String, dynamic>> _recentActivity = [];
   bool _isLoadingActivity = true;
+  int _unreadCount = 0;
 
   bool _isOnline = true;
   late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
@@ -123,10 +124,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               'status': j['status'],
               'local_inspection_id': j['local_inspection_id'],
               'scheduled_date': j['scheduled_date'],
+              'deadline_date': j['deadline_date'],
+              'is_self_scheduled': j['is_self_scheduled'] == 1,
               'supabase_zoning_applications': {
                 'applicant_name': j['applicant_name'],
                 'barangay': j['barangay'],
                 'reference_number': j['reference_number'],
+                'application_type': j['application_type'],
               }
             })).toList();
       }
@@ -149,9 +153,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     setState(() => _isLoadingActivity = true);
     try {
       final activity = await SupabaseService.fetchRecentActivity(limit: 5);
+      final unread = await SupabaseService.fetchUnreadActivityCount();
       if (mounted) {
         setState(() {
           _recentActivity = activity;
+          _unreadCount = unread;
           _isLoadingActivity = false;
         });
       }
@@ -293,7 +299,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                       ),
                     ),
                     _NotificationBtn(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+                      hasUnread: _unreadCount > 0,
+                      onTap: () async {
+                        await Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                        // Notifications screen marks things read on its own
+                        // timeline — resync the badge once the inspector
+                        // backs out of it instead of leaving it stale.
+                        _loadRecentActivity();
+                      },
                     ),
                   ],
                 ),
@@ -497,7 +510,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
 class _NotificationBtn extends StatelessWidget {
   final VoidCallback onTap;
-  const _NotificationBtn({required this.onTap});
+  final bool hasUnread;
+  const _NotificationBtn({required this.onTap, this.hasUnread = false});
 
   @override
   Widget build(BuildContext context) {
@@ -515,13 +529,14 @@ class _NotificationBtn extends StatelessWidget {
           alignment: Alignment.center,
           children: [
             const Icon(Icons.notifications_outlined, color: InsightTheme.ink, size: 22),
-            Positioned(
-              right: 10, top: 10,
-              child: Container(
-                width: 7, height: 7,
-                decoration: BoxDecoration(color: InsightTheme.red, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5)),
-              ),
-            )
+            if (hasUnread)
+              Positioned(
+                right: 10, top: 10,
+                child: Container(
+                  width: 7, height: 7,
+                  decoration: BoxDecoration(color: InsightTheme.red, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5)),
+                ),
+              )
           ],
         ),
       ),

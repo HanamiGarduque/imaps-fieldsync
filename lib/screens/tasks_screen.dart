@@ -97,6 +97,14 @@ class TaskItem {
   final double? gpsAccuracyM;
   final String? gpsConfirmedAt;
 
+  // True once the inspector has explicitly used the Schedule action
+  // (SupabaseService.scheduleJob) for this job — as opposed to just having
+  // whatever scheduled_date the admin set at assignment time. This is what
+  // lets a task stay under "Scheduled" even after its booked date arrives
+  // or passes, instead of quietly falling back into "Pending" and losing
+  // the "this was planned" signal for both the inspector and admin.
+  final bool isSelfScheduled;
+
   TaskItem({
     required this.id, this.parcelId, required this.name, required this.location,
     required this.parcels, required this.status, required this.inspectionNo, 
@@ -106,7 +114,7 @@ class TaskItem {
     this.isCompliant, this.photoPaths = const [], this.photoCount = 0,
     this.checklistCompletedCount = 0, this.checklistTotalCount = 0, this.submittedAt,
     this.checklistData = const [], this.confirmedLatitude, this.confirmedLongitude,
-    this.gpsAccuracyM, this.gpsConfirmedAt,
+    this.gpsAccuracyM, this.gpsConfirmedAt, this.isSelfScheduled = false,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -144,6 +152,7 @@ class TaskItem {
       gpsAccuracyM: (job['gps_accuracy_m'] as num?)?.toDouble(),
       gpsConfirmedAt: job['gps_confirmed_at'] as String?,
       applicationType: application?['application_type'] as String?,
+      isSelfScheduled: job['is_self_scheduled'] as bool? ?? false,
     );
   }
 
@@ -151,12 +160,35 @@ class TaskItem {
     final s = status.toLowerCase();
     if (s.contains('complete') || s.contains('done')) return 'Completed';
     if (s.contains('progress') || s.contains('ongoing')) return 'Ongoing';
-    // "Scheduled" == the inspector has actively booked a future date for
-    // this job (via the Schedule action / long-press on a Pending card).
-    // "Pending" is the default: no future date locked in yet, so it can be
-    // done whenever there's a slot — due-today/overdue included.
-    if (_isScheduledAhead) return 'Scheduled';
+    // "Scheduled" == the inspector has actively booked a date for this job
+    // (via the Schedule action / long-press on a Pending card) — this is
+    // sticky (isSelfScheduled) so the task stays here even once that date
+    // arrives or passes, instead of disappearing back into Pending and
+    // losing the "this was planned" signal. A merely-future scheduled_date
+    // that was only ever the admin's default assignment date also counts,
+    // since that's still "not due yet."
+    // "Pending" is the default: no plan locked in, so it can be done
+    // whenever there's a slot — due-today/overdue included.
+    if (isSelfScheduled || _isScheduledAhead) return 'Scheduled';
     return 'Pending';
+  }
+
+  /// Null when a Scheduled task's date hasn't arrived yet. Otherwise flags
+  /// how urgent it now is, so it doesn't just quietly sit there once due —
+  /// used for the "Due today" / "Overdue" badge in the Scheduled tab.
+  String? get scheduleUrgency {
+    if (category != 'Scheduled' || scheduledDate.isEmpty) return null;
+    try {
+      final due = DateTime.parse(scheduledDate);
+      final today = DateTime.now();
+      final dueDay = DateTime(due.year, due.month, due.day);
+      final todayDay = DateTime(today.year, today.month, today.day);
+      if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
+      if (dueDay.isBefore(todayDay)) return 'Overdue';
+      return null; // still in the future — no urgency badge needed yet
+    } catch (_) {
+      return null;
+    }
   }
 
   IconData get typeIcon {
@@ -257,6 +289,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 'local_inspection_id': j['local_inspection_id'],
                 'scheduled_date': j['scheduled_date'],
                 'deadline_date': j['deadline_date'],
+                'is_self_scheduled': j['is_self_scheduled'] == 1,
                 'supabase_zoning_applications': {
                   'applicant_name': j['applicant_name'],
                   'barangay': j['barangay'],
@@ -1192,6 +1225,27 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   maxLines: 1, overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              if (widget.task.scheduleUrgency != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: widget.task.scheduleUrgency == 'Overdue'
+                                        ? const Color(0xFFFEE2E2)
+                                        : InsightTheme.orangeTint,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    widget.task.scheduleUrgency!,
+                                    style: InsightTheme.inter(
+                                      9.5, w: FontWeight.w700,
+                                      c: widget.task.scheduleUrgency == 'Overdue'
+                                          ? const Color(0xFFB91C1C)
+                                          : InsightTheme.orangeInk,
+                                    ),
+                                  ),
+                                ),
+                              ],
                               Icon(
                                 _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
                                 color: InsightTheme.ink3, size: 16,

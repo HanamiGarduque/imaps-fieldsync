@@ -83,6 +83,50 @@ class SupabaseService {
       return [];
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ACTIVITY READ TRACKING  (Notification bell)
+  //   activity_log.is_read didn't exist before — see
+  //   add_activity_log_read_tracking.sql. These back the bell's real
+  //   unread badge + the Notifications screen's Unread tab / Mark all read.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<int> fetchUnreadActivityCount() async {
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return 0;
+    try {
+      final response = await client
+          .from('activity_log')
+          .select('id')
+          .eq('inspector_id', userId)
+          .eq('is_read', false);
+      return (response as List).length;
+    } catch (e) {
+      debugPrint('Error fetching unread activity count: $e');
+      return 0;
+    }
+  }
+
+  static Future<void> markActivityRead(String activityId) async {
+    try {
+      await client.from('activity_log').update({'is_read': true}).eq('id', activityId);
+    } catch (e) {
+      debugPrint('Error marking activity read: $e');
+    }
+  }
+
+  static Future<void> markAllActivityRead() async {
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      await client
+          .from('activity_log')
+          .update({'is_read': true})
+          .eq('inspector_id', userId)
+          .eq('is_read', false);
+    } catch (e) {
+      debugPrint('Error marking all activity read: $e');
+    }
+  }
   // ─────────────────────────────────────────────────────────────────────────
   // FETCH JOBS  (Tasks screen)
   //   FK hint: field_jobs.supabase_application_id → supabase_zoning_applications
@@ -99,6 +143,7 @@ class SupabaseService {
           status,
           scheduled_date,
           deadline_date,
+          is_self_scheduled,
           supabase_parcel_id,
           supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
             reference_number,
@@ -152,6 +197,7 @@ class SupabaseService {
         '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     await client.from('field_jobs').update({
       'scheduled_date': dateStr,
+      'is_self_scheduled': true,
       if (note != null && note.trim().isNotEmpty) 'remarks': note.trim(),
     }).eq('id', jobId);
   }
@@ -433,9 +479,8 @@ class SupabaseService {
       return null;
     }
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
   // AVATAR UPLOAD  (Profile edit screen)
   // ─────────────────────────────────────────────────────────────────────────
   static Future<String?> uploadAvatar({
@@ -458,3 +503,4 @@ class SupabaseService {
       return null;
     }
   }
+}

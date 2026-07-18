@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -53,6 +54,16 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   double? _longitude;
   double? _bearingToParcel;
 
+  // Live tracking — replaces the old one-shot-only flow. The stream keeps
+  // emitting as the inspector walks toward/away from the site; _isLive just
+  // reflects whether it's currently active so the UI can show a "Live"
+  // badge instead of implying the reading is stale until manually rechecked.
+  StreamSubscription<Position>? _positionSub;
+  bool _isLive = false;
+  // Guards against overlapping distance-RPC calls if position updates
+  // arrive faster than a previous recompute finishes.
+  bool _recomputing = false;
+
   bool get _verified => _distance != null && _distance! <= _rangeThresholdMeters;
   String get _bearingLabel {
     if (_bearingToParcel == null) return 'Direction unknown';
@@ -65,6 +76,12 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   void initState() {
     super.initState();
     _checkLocation();
+  }
+
+  @override
+  void dispose() {
+    _positionSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _checkLocation() async {
@@ -80,9 +97,65 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
       }
       if (!mounted) return;
       setState(() { _latitude = pos.latitude; _longitude = pos.longitude; _accuracy = pos.accuracy; _distance = dist; _bearingToParcel = bearing; _loading = false; });
+      // First fix succeeded — switch over to continuous tracking so the
+      // reading keeps updating as the inspector moves, instead of going
+      // stale until they tap "Recheck" again.
+      _startLiveTracking();
     } catch (e) {
       if (!mounted) return;
       setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
+    }
+  }
+
+  /// Subscribes to a continuous position stream (~3–5m distanceFilter) and
+  /// recomputes distance/bearing on every emission. Manual "Recheck" still
+  /// works as a fallback (e.g. if the stream stalls or errors out) — it just
+  /// does a one-shot fetch and restarts the stream on success.
+  void _startLiveTracking() {
+    if (_isLive) return; // already subscribed, don't double-listen
+    _isLive = true;
+    _positionSub = LocationService.getPositionStream().listen(
+      _onPositionUpdate,
+      onError: (Object e) {
+        // A transient stream error shouldn't blank out a reading the
+        // inspector already has — just drop back to "not live" and let
+        // them fall back to manual Recheck.
+        if (!mounted) return;
+        setState(() => _isLive = false);
+      },
+      cancelOnError: true,
+    );
+  }
+
+  Future<void> _onPositionUpdate(Position pos) async {
+    if (widget.task.parcelId == null || _recomputing) return;
+    _recomputing = true;
+    try {
+      final dist = await SupabaseService.getDistanceToParcelBoundary(
+        parcelId: widget.task.parcelId!,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+      );
+      final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+      double? bearing;
+      if (parcel != null && parcel['latitude'] != null && parcel['longitude'] != null) {
+        bearing = _bearingBetween(pos.latitude, pos.longitude, parcel['latitude'], parcel['longitude']);
+      }
+      if (!mounted) return;
+      setState(() {
+        _latitude = pos.latitude;
+        _longitude = pos.longitude;
+        _accuracy = pos.accuracy;
+        _distance = dist;
+        _bearingToParcel = bearing;
+        _error = null;
+      });
+    } catch (_) {
+      // Skip this update rather than surfacing an error mid-stream — the
+      // next emission will likely succeed, and the last good reading is
+      // still shown on screen.
+    } finally {
+      _recomputing = false;
     }
   }
 
@@ -203,6 +276,23 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                   ),
                                   const SizedBox(height: 20),
                                   if (_bearingToParcel != null) Text(_bearingLabel, style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
+                                  const SizedBox(height: 10),
+                                  if (_isLive)
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          width: 8, height: 8,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: InsightTheme.greenInk,
+                                            boxShadow: [BoxShadow(color: InsightTheme.greenInk.withValues(alpha: 0.5), blurRadius: 6, spreadRadius: 1)],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text('LIVE TRACKING', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.greenInk, ls: 0.6)),
+                                      ],
+                                    ),
                                   if (!_verified) ...[
                                     const SizedBox(height: 16),
                                     TextButton.icon(onPressed: _checkLocation, icon: const Icon(Icons.refresh_rounded, size: 16, color: InsightTheme.blueInk), label: Text('Recheck Location', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk))),

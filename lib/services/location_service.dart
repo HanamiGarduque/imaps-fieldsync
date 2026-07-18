@@ -1,7 +1,7 @@
 import 'package:geolocator/geolocator.dart';
 
 class LocationService {
-  static Future<Position> getCurrentLocation() async {
+  static Future<void> _ensureReady() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       throw Exception('Location services are disabled. Please enable GPS.');
@@ -20,9 +20,23 @@ class LocationService {
         'Location permission permanently denied. Please enable it in device settings.',
       );
     }
+  }
 
+  static Future<Position> getCurrentLocation() async {
+    await _ensureReady();
     return await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+  }
+
+
+  static Stream<Position> getPositionStream({int distanceFilter = 4}) async* {
+    await _ensureReady();
+    yield* Geolocator.getPositionStream(
+      locationSettings: LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: distanceFilter,
+      ),
     );
   }
 }

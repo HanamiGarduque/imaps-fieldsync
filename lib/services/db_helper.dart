@@ -17,7 +17,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -25,6 +25,16 @@ class DBHelper {
           await db.execute(
             'ALTER TABLE local_inspections ADD COLUMN inspection_result TEXT',
           );
+        }
+        if (oldVersion < 3) {
+          // local_jobs was missing deadline_date, is_self_scheduled, and
+          // application_type — meaning offline mode silently fell back to
+          // default categorization/deadline-checking instead of reflecting
+          // what the online path already knows. Add them so cached jobs
+          // carry the same fields as a live fetch.
+          await db.execute('ALTER TABLE local_jobs ADD COLUMN deadline_date TEXT');
+          await db.execute('ALTER TABLE local_jobs ADD COLUMN is_self_scheduled INTEGER DEFAULT 0');
+          await db.execute('ALTER TABLE local_jobs ADD COLUMN application_type TEXT');
         }
       },
       onCreate: (db, version) async {
@@ -35,10 +45,13 @@ class DBHelper {
             local_inspection_id INTEGER,
             status TEXT,
             scheduled_date TEXT,
+            deadline_date TEXT,
+            is_self_scheduled INTEGER DEFAULT 0,
             supabase_parcel_id TEXT,
             applicant_name TEXT,
             barangay TEXT,
             reference_number TEXT,
+            application_type TEXT,
             parcel_lat REAL,
             parcel_lng REAL,
             lot_area_sqm REAL,
@@ -98,10 +111,13 @@ class DBHelper {
           'local_inspection_id': job['local_inspection_id'],
           'status': job['status'],
           'scheduled_date': job['scheduled_date'],
+          'deadline_date': job['deadline_date'],
+          'is_self_scheduled': (job['is_self_scheduled'] == true) ? 1 : 0,
           'supabase_parcel_id': job['supabase_parcel_id'],
           'applicant_name': app['applicant_name'] ?? 'Unknown Applicant',
           'barangay': app['barangay'] ?? 'No barangay listed',
           'reference_number': app['reference_number'] ?? '',
+          'application_type': app['application_type'],
           'parcel_lat': parcel['latitude'],
           'parcel_lng': parcel['longitude'],
           'lot_area_sqm': parcel['lot_area_sqm'],
