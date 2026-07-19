@@ -41,6 +41,7 @@ class FieldFindingsScreen extends StatefulWidget {
 }
 
 class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
+  bool _isSaving = false;
   late final TextEditingController _notesController;
   late final TextEditingController _discrepancyTitleController;
   late final TextEditingController _discrepancyDetailController;
@@ -198,24 +199,62 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                  child: ElevatedButton(
-                    onPressed: _handleContinue,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ).copyWith(elevation: WidgetStateProperty.all(0)),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
+                  child: Row(
+                    children: [
+                      if (context.watch<InspectionProvider>().isReworkMode) ...[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving ? null : () async {
+                              setState(() => _isSaving = true);
+                              final discrepancyTitle = _discrepancyTitleController.text.trim();
+                              final discrepancyDetail = _discrepancyDetailController.text.trim();
+                              final discrepancies = (discrepancyTitle.isEmpty && discrepancyDetail.isEmpty)
+                                  ? ''
+                                  : [discrepancyTitle, discrepancyDetail].where((s) => s.isNotEmpty).join(' — ');
+                              final provider = context.read<InspectionProvider>();
+                              provider.updateFindings(
+                                actualLandUse: widget.task.landUseClass,
+                                notes: _notesController.text.trim(),
+                                discrepancies: discrepancies,
+                                recommendations: _recommendationsController.text.trim(),
+                                boundaryStatus: provider.boundaryStatus,
+                              );
+                              final ok = await provider.saveStepFindings();
+                              if (mounted) {
+                                setState(() => _isSaving = false);
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Findings saved.' : 'Save failed.')));
+                              }
+                            },
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                            child: _isSaving
+                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                : Text('Save', style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.blue1)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _handleContinue,
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ).copyWith(elevation: WidgetStateProperty.all(0)),
+                          child: Ink(
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
+                            ),
+                            child: Container(
+                              alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
+                              child: Text('Continue to Review', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                            ),
+                          ),
+                        ),
                       ),
-                      child: Container(
-                        alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                        child: Text('Continue to Review', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
-                      ),
-                    ),
+                    ],
                   ),
                 ),
               ],

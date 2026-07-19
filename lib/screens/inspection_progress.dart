@@ -66,10 +66,12 @@ class InspectionProgress extends ChangeNotifier {
   /// Makes sure progress belongs to the task currently open. If the
   /// inspector opens a different task, progress starts fresh instead of
   /// carrying over from whatever they were last inspecting.
-  void ensureActiveInspection(String taskId, {String? label}) {
+  void ensureActiveInspection(String taskId, {String? label, int? initialStep}) {
     if (_activeTaskId != taskId) {
       _activeTaskId = taskId;
-      _highestCompleted = 0;
+      _highestCompleted = initialStep ?? 0;
+    } else if (initialStep != null) {
+      _highestCompleted = initialStep;
     }
     _activeTaskLabel = label ?? _activeTaskLabel;
   }

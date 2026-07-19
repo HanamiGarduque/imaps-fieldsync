@@ -54,6 +54,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   Position? _currentPosition;
   String? _capturedPhotoPath;
   bool _isCapturing = false;
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -212,24 +213,52 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                  child: ElevatedButton(
-                    onPressed: _finishAndContinue,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ).copyWith(elevation: WidgetStateProperty.all(0)),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
+                  child: Row(
+                    children: [
+                      if (context.watch<InspectionProvider>().isReworkMode) ...[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving ? null : () async {
+                              setState(() => _isSaving = true);
+                              final ok = await context.read<InspectionProvider>().saveStepPhotos();
+                              if (mounted) {
+                                setState(() => _isSaving = false);
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Photos saved.' : 'Save failed.')));
+                              }
+                            },
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            ),
+                            child: _isSaving
+                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                : Text('Save', style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.blue1)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _finishAndContinue,
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ).copyWith(elevation: WidgetStateProperty.all(0)),
+                          child: Ink(
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
+                            ),
+                            child: Container(
+                              alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
+                              child: Text('Continue to Checklist', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                            ),
+                          ),
+                        ),
                       ),
-                      child: Container(
-                        alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                        child: Text('Continue to Checklist', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
-                      ),
-                    ),
+                    ],
                   ),
                 ),
               ],
