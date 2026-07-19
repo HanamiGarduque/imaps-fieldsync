@@ -10,6 +10,7 @@ import '../services/sync_outbox_service.dart';
 import 'inspection_progress.dart';
 import 'tasks_screen.dart'; 
 import '../models/user_profile.dart';
+import '../widgets/exit_confirm_dialog.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -127,7 +128,16 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
     final effectiveTotal = checklistTotal > 0 ? checklistTotal : widget.checklistTotal;
     final effectiveDone = checklistTotal > 0 ? checklistDone : widget.checklistDone;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        // Findings/checklist/photos are already persisted by their own
+        // steps by the time an inspector reaches Review — nothing new to
+        // save here, just confirm and keep the task under Ongoing.
+        handleInspectionExit(context, onSaveProgress: () async => true);
+      },
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -141,7 +151,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
+                      _GlassBackButton(onTap: () => handleInspectionExit(context, onSaveProgress: () async => true)),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -230,6 +240,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

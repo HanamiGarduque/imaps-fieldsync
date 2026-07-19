@@ -150,7 +150,9 @@ class SupabaseService {
             applicant_name,
             barangay,
             application_type,
-            purpose
+            purpose,
+            contact_number,
+            email
           ),
           supabase_parcels!field_jobs_supabase_parcel_id_fkey (
             lot_area_sqm,
@@ -220,6 +222,26 @@ class SupabaseService {
       'lng': longitude,
     });
     return (result as num).toDouble();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MARK JOB ONGOING  (Exit-confirm gate → Step 1/2, before anything else
+  //   would naturally flip status). Only moves 'assigned' -> 'in_progress'
+  //   so the task shows under "Ongoing" once the inspector has opened it
+  //   and stepped away, without clobbering a status a later step already set.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<bool> markJobOngoing(String jobId) async {
+    try {
+      await client
+          .from('field_jobs')
+          .update({'status': 'in_progress'})
+          .eq('id', jobId)
+          .eq('status', 'assigned');
+      return true;
+    } catch (e) {
+      debugPrint('Error marking job ongoing: $e');
+      return false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -372,7 +394,9 @@ class SupabaseService {
             supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
               reference_number,
               applicant_name,
-              barangay
+              barangay,
+              contact_number,
+              email
             ),
             supabase_parcels!field_jobs_supabase_parcel_id_fkey (
               lot_area_sqm,

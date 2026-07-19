@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 import '../services/supabase_service.dart';
 import '../services/sync_outbox_service.dart';
+import '../widgets/exit_confirm_dialog.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -38,12 +39,31 @@ class InspectionChecklistScreen extends StatefulWidget {
 }
 
 class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
+  // BUG FIX #4C — Summary Sync Lock / Form Update Mismatch.
+  // These used to be hardcoded defaults that ignored whatever real state
+  // InspectionProvider already had (loaded via startInspection's local
+  // draft recovery, or hydrateForRework for a reopened job). That's why the
+  // screen always rendered the same "3/5" regardless of what was actually
+  // saved, and why edits made here didn't stick. Now they're seeded from
+  // the provider on first frame.
   final Map<String, bool> _siteCondition = {'Structure matches declared use': true, 'Setback distances compliant': true};
   bool _isSaving = false;
   final Map<String, bool> _zoningObservations = {'Accessibility & road frontage': true, 'Surrounding developments noted': false, 'Signage / commercial activity present': false};
 
   int get _doneCount => _siteCondition.values.where((v) => v).length + _zoningObservations.values.where((v) => v).length;
   int get _totalCount => _siteCondition.length + _zoningObservations.length;
+
+  @override
+  void initState() {
+    super.initState();
+    final provider = context.read<InspectionProvider>();
+    _siteCondition
+      ..clear()
+      ..addAll(provider.siteCondition);
+    _zoningObservations
+      ..clear()
+      ..addAll(provider.zoningObservations);
+  }
 
   // Guards against a burst of rapid taps piling up out-of-order requests —
   // only the latest call's result matters, so we don't need to await/queue
@@ -103,7 +123,16 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        handleInspectionExit(
+          context,
+          onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
+        );
+      },
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -117,7 +146,10 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
+                      _GlassBackButton(onTap: () => handleInspectionExit(
+                        context,
+                        onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
+                      )),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -243,6 +275,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

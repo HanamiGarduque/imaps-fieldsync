@@ -99,6 +99,12 @@ class TaskItem {
   final double? gpsAccuracyM;
   final String? gpsConfirmedAt;
 
+  // BUG FIX #1 — real applicant contact info, sourced from
+  // supabase_zoning_applications.contact_number / .email, so the SMS/Call/
+  // Gmail quick actions stop pointing at hardcoded placeholder values.
+  final String? applicantPhone;
+  final String? applicantEmail;
+
   // True once the inspector has explicitly used the Schedule action
   // (SupabaseService.scheduleJob) for this job — as opposed to just having
   // whatever scheduled_date the admin set at assignment time. This is what
@@ -117,6 +123,7 @@ class TaskItem {
     this.checklistCompletedCount = 0, this.checklistTotalCount = 0, this.submittedAt,
     this.checklistData = const [], this.confirmedLatitude, this.confirmedLongitude,
     this.gpsAccuracyM, this.gpsConfirmedAt, this.isSelfScheduled = false,
+    this.applicantPhone, this.applicantEmail,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -128,6 +135,12 @@ class TaskItem {
       parcelId: job['supabase_parcel_id'] as String?,
       name: application?['applicant_name'] as String? ?? 'Unknown Applicant',
       location: application?['barangay'] as String? ?? 'No barangay listed',
+      applicantPhone: (application?['contact_number'] as String?)?.trim().isNotEmpty == true
+          ? (application?['contact_number'] as String).trim()
+          : null,
+      applicantEmail: (application?['email'] as String?)?.trim().isNotEmpty == true
+          ? (application?['email'] as String).trim()
+          : null,
       parcels: scheduledDate.isNotEmpty ? scheduledDate : application?['reference_number'] as String? ?? 'No schedule',
       status: job['status'] as String? ?? 'Pending',
       inspectionNo: application?['reference_number'] as String? ?? job['local_inspection_id']?.toString() ?? 'N/A',
@@ -954,41 +967,61 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     return InsightTheme.blue1;
   }
 
+  // BUG FIX #1 (v2) — canLaunchUrl() itself was returning a null component
+  // on real devices even with a real number/email, because it depends on
+  // queryIntentActivities(), which Android 11+ package-visibility rules can
+  // block regardless of whether Phone/Messages/Gmail is actually installed.
+  // Fix: skip canLaunchUrl and just launchUrl() directly (externalApplication
+  // mode), same pattern already used in login_screen.dart's email flow —
+  // with a clipboard fallback if no app is available to handle it at all.
+  Future<void> _missingContact(String what) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('No $what on file for this applicant.')),
+    );
+  }
+
+  Future<void> _launchOrFallback(Uri uri, String value, String label) async {
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) throw Exception('No app handled $label');
+    } catch (e) {
+      debugPrint('Could not launch $label ($uri): $e');
+      if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: value));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No $label app found — $value copied to clipboard.')),
+      );
+    }
+  }
+
   Future<void> _handleCall() async {
     HapticFeedback.lightImpact();
-    final Uri phoneUri = Uri.parse('tel:+639123456789'); 
-    try {
-      if (await canLaunchUrl(phoneUri)) await launchUrl(phoneUri);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
+    final phone = widget.task.applicantPhone;
+    if (phone == null || phone.isEmpty) return _missingContact('phone number');
+    await _launchOrFallback(Uri.parse('tel:$phone'), phone, 'dialer');
   }
 
   Future<void> _handleSMS() async {
     HapticFeedback.lightImpact();
-    final Uri smsUri = Uri.parse('sms:+639123456789'); 
-    try {
-      if (await canLaunchUrl(smsUri)) await launchUrl(smsUri);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
+    final phone = widget.task.applicantPhone;
+    if (phone == null || phone.isEmpty) return _missingContact('phone number');
+    await _launchOrFallback(Uri.parse('sms:$phone'), phone, 'messaging');
   }
 
   Future<void> _handleEmail() async {
     HapticFeedback.lightImpact();
+    final email = widget.task.applicantEmail;
+    if (email == null || email.isEmpty) return _missingContact('email address');
     String? encodeQueryParameters(Map<String, String> params) {
       return params.entries.map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}').join('&');
     }
     final Uri emailUri = Uri(
       scheme: 'mailto',
-      path: 'applicant@example.com', 
+      path: email,
       query: encodeQueryParameters({'subject': 'Inspection Notification: ${widget.task.inspectionNo}'}),
     );
-    try {
-      if (await canLaunchUrl(emailUri)) await launchUrl(emailUri);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
+    await _launchOrFallback(emailUri, email, 'email');
   }
 
   // Long-press a Pending card -> pick a date (never past the admin's

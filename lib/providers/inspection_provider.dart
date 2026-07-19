@@ -444,6 +444,16 @@ void hydrateForRework(TaskItem task) {
 
     // 1. Sync Pending Photos first (needed for database metadata joins)
     final pendingPhotos = await DBHelper.getPendingPhotos();
+    // BUG FIX #4B — Image Presentation Bug.
+    // This used to only upsert into field_job_photos and never touch
+    // field_jobs.photo_paths, so that column kept whatever local device
+    // paths were written when the photo was first captured. Any screen
+    // that reads task.photoPaths (which comes straight from
+    // field_jobs.photo_paths) then tried Image.network() on a local
+    // filesystem path and fell straight into the gray/broken-image
+    // fallback — even though the photo really did make it to storage.
+    // Track uploaded public URLs per job here and patch field_jobs too.
+    final Map<String, List<String>> uploadedUrlsByJob = {};
     for (final photo in pendingPhotos) {
       final file = File(photo['photo_path']);
       if (!await file.exists()) {
@@ -471,7 +481,32 @@ void hydrateForRework(TaskItem task) {
         'captured_at': photo['captured_at'],
       });
 
+      uploadedUrlsByJob.putIfAbsent(photo['job_id'], () => []).add(publicUrl);
       await DBHelper.markPhotoSynced(photo['id']);
+    }
+
+    // Patch field_jobs.photo_paths / photo_count for every job that had a
+    // photo land in storage this pass — merging with whatever real (http)
+    // URLs were already there so re-syncs don't clobber earlier uploads.
+    for (final entry in uploadedUrlsByJob.entries) {
+      try {
+        final existing = await supabase
+            .from('field_jobs')
+            .select('photo_paths')
+            .eq('id', entry.key)
+            .maybeSingle();
+        final existingPaths = ((existing?['photo_paths'] as List?) ?? [])
+            .cast<String>()
+            .where((p) => p.startsWith('http'))
+            .toList();
+        final merged = {...existingPaths, ...entry.value}.toList();
+        await supabase.from('field_jobs').update({
+          'photo_paths': merged,
+          'photo_count': merged.length,
+        }).eq('id', entry.key);
+      } catch (e) {
+        debugPrint('Could not patch field_jobs.photo_paths for ${entry.key}: $e');
+      }
     }
 
     if (pendingPhotos.isNotEmpty) {

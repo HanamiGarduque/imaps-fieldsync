@@ -15,6 +15,7 @@ import 'inspection_progress.dart';
 import 'inspection_checklist_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
+import '../widgets/exit_confirm_dialog.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -145,7 +146,16 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Widget _buildGridMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        handleInspectionExit(
+          context,
+          onSaveProgress: () => context.read<InspectionProvider>().saveStepPhotos(),
+        );
+      },
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -159,7 +169,10 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
+                      _GlassBackButton(onTap: () => handleInspectionExit(
+                        context,
+                        onSaveProgress: () => context.read<InspectionProvider>().saveStepPhotos(),
+                      )),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -265,6 +278,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

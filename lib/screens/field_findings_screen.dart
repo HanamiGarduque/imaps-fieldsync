@@ -8,6 +8,7 @@ import 'tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
+import '../widgets/exit_confirm_dialog.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -50,16 +51,19 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
   @override
   void initState() {
     super.initState();
-    // Fields start EMPTY on purpose — these strings were previously set as
-    // the controllers' initial text (not hintText), which meant the sample
-    // wording (and, for Discrepancies, entirely fake sample findings) would
-    // get submitted as real data unless the inspector manually cleared it
-    // first. The hintText below already carries the guidance text; leaving
-    // the controllers empty lets that hintText actually show.
-    _notesController = TextEditingController();
+    // BUG FIX #4A — Global Data Persistence.
+    // Controllers used to always start empty, even when InspectionProvider
+    // already had real hydrated data (rework mode, or a resumed Ongoing
+    // task). That meant the inspector saw blank fields for findings that
+    // were already on file, and hitting "Continue" without retyping would
+    // silently overwrite that real data with empty strings. Prefill from
+    // the provider's current state instead — it's already correctly
+    // seeded via hydrateForRework() / startInspection()'s local draft load.
+    final provider = context.read<InspectionProvider>();
+    _notesController = TextEditingController(text: provider.notes);
     _discrepancyTitleController = TextEditingController();
-    _discrepancyDetailController = TextEditingController();
-    _recommendationsController = TextEditingController();
+    _discrepancyDetailController = TextEditingController(text: provider.discrepancies);
+    _recommendationsController = TextEditingController(text: provider.recommendations);
   }
 
   @override
@@ -93,10 +97,33 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)));
   }
 
+  Future<bool> _syncControllersAndSave() async {
+    final provider = context.read<InspectionProvider>();
+    final discrepancyTitle = _discrepancyTitleController.text.trim();
+    final discrepancyDetail = _discrepancyDetailController.text.trim();
+    final discrepancies = (discrepancyTitle.isEmpty && discrepancyDetail.isEmpty)
+        ? ''
+        : [discrepancyTitle, discrepancyDetail].where((s) => s.isNotEmpty).join(' — ');
+    provider.updateFindings(
+      actualLandUse: widget.task.landUseClass,
+      notes: _notesController.text.trim(),
+      discrepancies: discrepancies,
+      recommendations: _recommendationsController.text.trim(),
+      boundaryStatus: provider.boundaryStatus,
+    );
+    return provider.saveStepFindings();
+  }
+
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        handleInspectionExit(context, onSaveProgress: _syncControllersAndSave);
+      },
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -110,7 +137,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
+                      _GlassBackButton(onTap: () => handleInspectionExit(context, onSaveProgress: _syncControllersAndSave)),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -206,20 +233,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                           child: OutlinedButton(
                             onPressed: _isSaving ? null : () async {
                               setState(() => _isSaving = true);
-                              final discrepancyTitle = _discrepancyTitleController.text.trim();
-                              final discrepancyDetail = _discrepancyDetailController.text.trim();
-                              final discrepancies = (discrepancyTitle.isEmpty && discrepancyDetail.isEmpty)
-                                  ? ''
-                                  : [discrepancyTitle, discrepancyDetail].where((s) => s.isNotEmpty).join(' — ');
-                              final provider = context.read<InspectionProvider>();
-                              provider.updateFindings(
-                                actualLandUse: widget.task.landUseClass,
-                                notes: _notesController.text.trim(),
-                                discrepancies: discrepancies,
-                                recommendations: _recommendationsController.text.trim(),
-                                boundaryStatus: provider.boundaryStatus,
-                              );
-                              final ok = await provider.saveStepFindings();
+                              final ok = await _syncControllersAndSave();
                               if (mounted) {
                                 setState(() => _isSaving = false);
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Findings saved.' : 'Save failed.')));
@@ -261,6 +275,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

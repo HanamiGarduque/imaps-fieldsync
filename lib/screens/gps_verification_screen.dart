@@ -15,6 +15,7 @@ import '../providers/inspection_provider.dart';
 import 'capture_photo_screen.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
+import '../widgets/exit_confirm_dialog.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -267,7 +268,16 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        handleInspectionExit(
+          context,
+          onSaveProgress: () => SupabaseService.markJobOngoing(widget.task.id),
+        );
+      },
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -281,7 +291,10 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
+                      _GlassBackButton(onTap: () => handleInspectionExit(
+                        context,
+                        onSaveProgress: () => SupabaseService.markJobOngoing(widget.task.id),
+                      )),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -488,6 +501,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }
