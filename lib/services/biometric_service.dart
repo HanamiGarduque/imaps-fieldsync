@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:local_auth/local_auth.dart';
 import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_darwin/local_auth_darwin.dart';
@@ -19,7 +21,8 @@ class BiometricService {
       if (!supported || !canCheck) return false;
       final enrolled = await _auth.getAvailableBiometrics();
       return enrolled.isNotEmpty;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[BIOMETRIC] isAvailable() failed: $e');
       return false;
     }
   }
@@ -37,18 +40,21 @@ class BiometricService {
         return 'Fingerprint';
       }
       return 'Biometric';
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[BIOMETRIC] primaryBiometricLabel() failed: $e');
       return 'Biometric';
     }
   }
 
-  /// Shows the native OS biometric prompt. Returns true only on a
-  /// genuine successful match — never on error/cancel.
-  static Future<bool> authenticate({
+  /// Result of an authenticate() attempt: whether it succeeded, and — if
+  /// not — a short reason code so the UI can tell "no hardware"/"none
+  /// enrolled"/"platform not configured" apart from "user cancelled",
+  /// instead of every failure looking identical.
+  static Future<BiometricResult> authenticateDetailed({
     String reason = 'Verify your identity to continue',
   }) async {
     try {
-      return await _auth.authenticate(
+      final ok = await _auth.authenticate(
         localizedReason: reason,
         options: const AuthenticationOptions(
           biometricOnly: true, // don't fall back to device PIN — we have our own pattern lock for that
@@ -65,8 +71,53 @@ class BiometricService {
           ),
         ],
       );
-    } catch (_) {
-      return false;
+      return BiometricResult(success: ok, code: ok ? null : 'user_cancelled_or_failed_match');
+    } on PlatformException catch (e) {
+      // Most common real-world codes here:
+      //  - NotAvailable / NoHardware: device has no biometric sensor
+      //  - NotEnrolled: sensor exists but no fingerprint/face registered in OS settings
+      //  - PasscodeNotSet: device has no lock screen set up at all
+      //  - LockedOut / PermanentlyLockedOut: too many failed attempts, OS temporarily disabled it
+      //  - no_fragment_activity (Android): MainActivity doesn't extend
+      //    FlutterFragmentActivity — local_auth requires it. This is the
+      //    #1 cause of "nothing happens, no prompt at all" on Android.
+      debugPrint('[BIOMETRIC] authenticate() PlatformException: ${e.code} — ${e.message}');
+      return BiometricResult(success: false, code: e.code, message: e.message);
+    } catch (e) {
+      debugPrint('[BIOMETRIC] authenticate() failed: $e');
+      return BiometricResult(success: false, code: 'unknown', message: e.toString());
+    }
+  }
+
+  /// Back-compat shim for existing callers that just want a bool.
+  static Future<bool> authenticate({String reason = 'Verify your identity to continue'}) async {
+    final result = await authenticateDetailed(reason: reason);
+    return result.success;
+  }
+}
+
+class BiometricResult {
+  final bool success;
+  final String? code;
+  final String? message;
+  const BiometricResult({required this.success, this.code, this.message});
+
+  /// Short, user-safe message for the cases worth telling the inspector
+  /// about specifically (vs. a generic cancel).
+  String? get userFacingMessage {
+    switch (code) {
+      case 'NotAvailable':
+      case 'NoHardware':
+        return 'This device has no biometric sensor.';
+      case 'NotEnrolled':
+        return 'No fingerprint/face is registered on this device yet. Set one up in your phone\'s settings first.';
+      case 'PasscodeNotSet':
+        return 'Set up a screen lock on your device first.';
+      case 'LockedOut':
+      case 'PermanentlyLockedOut':
+        return 'Biometric unlock is temporarily disabled after too many failed attempts. Use your device passcode to reset it.';
+      default:
+        return null; // plain cancel/mismatch — no need to alarm the user
     }
   }
 }

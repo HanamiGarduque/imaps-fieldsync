@@ -22,6 +22,15 @@ class AuthService {
 
   static bool get isLoggedIn => _client.auth.currentUser != null; //[cite: 2]
 
+  /// Local-only check (no network call) — true if there's no session at
+  /// all, or its JWT expiry timestamp has already passed. Used to fail
+  /// fast right after biometric success, before spending a request on it.
+  static bool get isLocalSessionExpired {
+    final exp = _client.auth.currentSession?.expiresAt;
+    if (exp == null) return true;
+    return DateTime.fromMillisecondsSinceEpoch(exp * 1000).isBefore(DateTime.now());
+  }
+
   /// Tries to refresh the current session using the stored refresh token.
   /// A session can look "expired" simply because the access token's 1hr
   /// lifetime passed while the app was closed — that's still recoverable

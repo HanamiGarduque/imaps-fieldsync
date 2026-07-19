@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthException;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
@@ -254,8 +255,7 @@ class _LoginScreenState extends State<LoginScreen> {
   // Quick unlock only ever shows up here for the account it was set up
   // for on this device — never as a way to register a new one.
   Future<void> _checkQuickUnlock(String email) async {
-    final boundEmail = await QuickUnlockService.boundEmail();
-    if (boundEmail != email) return;
+    if (!await QuickUnlockService.isBoundTo(email)) return;
     // The manual login form is only ever reached when Splash's own
     // session check already failed (or "stay signed in" was off) — so
     // if there's no live Supabase session right now, quick unlock is
@@ -277,12 +277,51 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  /// Icon is always visible (per design). Tapping it is what gates on
+  /// setup status now, instead of hiding the button — unregistered/new
+  /// users get a clear one-time explanation instead of a dead control.
+  ///
+  /// Checks the *stored* bound email, not the email textfield — the
+  /// whole point of biometric unlock is that the inspector shouldn't
+  /// have to type anything first. Gating on textfield content was the
+  /// bug: an empty/unfilled field always looked "unregistered" even
+  /// with biometric fully configured.
+  Future<void> _onBiometricTap() async {
+    final boundEmail = await QuickUnlockService.boundEmail();
+    final registered = boundEmail != null && await QuickUnlockService.isAnyEnabled();
+    if (!registered) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Biometric login is not yet set up. Please log in using your credentials and configure it inside your Profile Settings.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+    // Pre-fill for display/consistency — getCurrentProfile() after a
+    // successful scan doesn't need this, it's purely cosmetic.
+    if (_emailController.text.trim().isEmpty) {
+      _emailController.text = boundEmail;
+    }
+    await _checkQuickUnlock(boundEmail);
+    await _handleQuickUnlock();
+  }
+
   Future<void> _handleQuickUnlock() async {
     setState(() => _errorMessage = null);
 
     bool verified = false;
     if (_bioEnabled) {
-      verified = await BiometricService.authenticate(reason: 'Unlock InSight');
+      final result = await BiometricService.authenticateDetailed(reason: 'Unlock InSight');
+      verified = result.success;
+      if (!verified && result.userFacingMessage != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.userFacingMessage!), duration: const Duration(seconds: 4)),
+        );
+      }
+      // Plain cancel/failed-match (no userFacingMessage) — fall through
+      // to pattern below, or just stop, without alarming the user.
     }
     if (!verified && _patEnabled && mounted) {
       verified = await _showPatternSheet();
@@ -291,40 +330,59 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
     try {
-      // Locally verified — now confirm the cached Supabase session (from a
-      // prior "stay signed in") is still valid. Quick unlock never issues
-      // a session by itself, it only gates the one already there.
-      var profile = await AuthService.getCurrentProfile();
-      if (profile == null) {
-        // The access token's ~1hr lifetime may have simply passed while
-        // the app was closed — that's still recoverable via the refresh
-        // token, not a genuine expiry. Try once before giving up.
+      // 1. SESSION TOKEN CHECK — cheap local check immediately after the
+      // hardware scan succeeds, before spending a network call on it.
+      if (AuthService.isLocalSessionExpired) {
         final refreshed = await AuthService.tryRefreshSession();
-        if (refreshed) profile = await AuthService.getCurrentProfile();
+        if (!refreshed) {
+          await _forceCredentialFallback();
+          return;
+        }
       }
+
+      // Local token looked valid (or was refreshed) — confirm against
+      // the server. This is where a revoked/invalidated token surfaces
+      // even if the local expiry timestamp hadn't passed yet.
+      final profile = await AuthService.getCurrentProfile();
       if (!mounted) return;
       if (profile == null) {
-        // Genuinely dead session — clear quick unlock so this button
-        // stops reappearing and guaranteeing the same failure next time.
-        await QuickUnlockService.clearAll();
-        setState(() {
-          _quickUnlockAvailable = false;
-          _errorMessage = 'Your session expired. Please sign in with email & passcode.';
-        });
+        await _forceCredentialFallback();
         return;
       }
+
       await NotificationService.registerCurrentDevice();
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile!)),
+        MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
       );
+    } on AuthException catch (e) {
+      // 2. GRACEFUL FALLBACK — explicit 401/invalid-token/refresh-token-
+      // expired cases from the server.
+      debugPrint('QUICK UNLOCK AUTH ERROR: ${e.statusCode} ${e.message}');
+      await _forceCredentialFallback();
     } catch (e) {
       debugPrint('QUICK UNLOCK ERROR: $e');
-      if (mounted) {
-        setState(() => _errorMessage = 'Your session expired. Please sign in with email & passcode.');
-      }
+      await _forceCredentialFallback();
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  /// 3 & 4. UI RESET + CLEAR STALE DATA — never leaves the inspector
+  /// stuck. Wipes the dead token/quick-unlock config from secure storage
+  /// and drops back to the same screen's plain email/passcode form
+  /// (already visible/enabled here — nothing extra to unhide), with the
+  /// expiry message left on screen so it's clear why they're re-entering
+  /// credentials.
+  Future<void> _forceCredentialFallback() async {
+    await AuthService.signOut();       // purge the dead access/refresh token
+    await QuickUnlockService.clearAll(); // purge local biometric/pattern config
+    if (!mounted) return;
+    setState(() {
+      _quickUnlockAvailable = false;
+      _bioEnabled = false;
+      _patEnabled = false;
+      _errorMessage = 'Your session expired. Please sign in with email & passcode.';
+    });
   }
 
   Future<bool> _showPatternSheet() async {
@@ -365,9 +423,9 @@ class _LoginScreenState extends State<LoginScreen> {
         // If quick unlock on this device is bound to a different
         // inspector's account, wipe it — it should never carry over
         // to whoever logs in next on a shared device.
-        final boundEmail = await QuickUnlockService.boundEmail();
         final thisEmail = _emailController.text.trim();
-        if (boundEmail != null && boundEmail != thisEmail) {
+        final boundEmail = await QuickUnlockService.boundEmail();
+        if (boundEmail != null && !await QuickUnlockService.isBoundTo(thisEmail)) {
           await QuickUnlockService.clearAll();
         }
 
@@ -593,21 +651,13 @@ class _LoginScreenState extends State<LoginScreen> {
                             icon: Icons.lock_outline,
                             obscureText: _obscurePassword,
                             isPassword: true,
-                            extraSuffix: _quickUnlockAvailable
-                                ? IconButton(
-                                    icon: Icon(
-                                      _bioEnabled ? Icons.fingerprint : Icons.pattern,
-                                      color: AppColors.blue1,
-                                      size: 20,
-                                    ),
-                                    tooltip: _bioEnabled && _patEnabled
-                                        ? 'Unlock with $_bioLabel or pattern'
-                                        : _bioEnabled
-                                            ? 'Unlock with $_bioLabel'
-                                            : 'Unlock with pattern',
-                                    onPressed: _isLoading ? null : _handleQuickUnlock,
-                                  )
-                                : null,
+                          ),
+
+                          const SizedBox(height: 14),
+                          _BiometricButton(
+                            label: _bioEnabled ? 'Unlock with $_bioLabel' : 'Unlock with Biometrics',
+                            enabled: !_isLoading,
+                            onTap: _onBiometricTap,
                           ),
                         ],
                       ),
@@ -951,6 +1001,34 @@ class _PatternVerifySheetState extends State<_PatternVerifySheet> {
             child: Text('Cancel', style: AppText.inter(13, w: FontWeight.w600, c: AppColors.ink2)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Permanently visible below the passcode field — visibility never
+/// depends on setup status, per design; setup status is only checked
+/// on tap (see _onBiometricTap).
+class _BiometricButton extends StatelessWidget {
+  final String label;
+  final bool enabled;
+  final VoidCallback onTap;
+  const _BiometricButton({required this.label, required this.enabled, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: enabled ? onTap : null,
+        icon: const Icon(Icons.fingerprint, size: 20),
+        label: Text(label, style: AppText.inter(13, w: FontWeight.w700)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.blue1,
+          side: BorderSide(color: AppColors.blue1.withValues(alpha: 0.35)),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
       ),
     );
   }

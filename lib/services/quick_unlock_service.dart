@@ -21,6 +21,14 @@ class QuickUnlockService {
   static const _kPatternSalt = 'qu_pattern_salt';
   static const _kBoundEmail = 'qu_bound_email'; // which account this device's quick unlock belongs to
 
+  /// Every email in/out of this service passes through here. Root cause
+  /// of the "biometric icon just never appears, no error" bug: the
+  /// profile screen binds using Supabase's currentUser.email (server-
+  /// normalized, lowercase), while the login form saves whatever casing
+  /// the inspector actually typed — an exact-string compare between the
+  /// two silently failed with zero error surfaced.
+  static String _norm(String email) => email.trim().toLowerCase();
+
   static Future<bool> isBiometricEnabled() async =>
       (await _storage.read(key: _kBiometricEnabled)) == 'true';
 
@@ -32,9 +40,18 @@ class QuickUnlockService {
 
   static Future<String?> boundEmail() => _storage.read(key: _kBoundEmail);
 
+  /// True if [email] (any casing/whitespace) matches the account this
+  /// device's quick unlock is bound to. Use this instead of comparing
+  /// boundEmail() directly.
+  static Future<bool> isBoundTo(String email) async {
+    final bound = await boundEmail();
+    if (bound == null) return false;
+    return bound == _norm(email);
+  }
+
   static Future<void> setBiometricEnabled(bool enabled, {required String email}) async {
     await _storage.write(key: _kBiometricEnabled, value: enabled.toString());
-    await _storage.write(key: _kBoundEmail, value: email);
+    await _storage.write(key: _kBoundEmail, value: _norm(email));
   }
 
   /// pattern = ordered list of dot indices, e.g. [0,1,2,5,8]
@@ -44,7 +61,7 @@ class QuickUnlockService {
     await _storage.write(key: _kPatternSalt, value: salt);
     await _storage.write(key: _kPatternHash, value: hash);
     await _storage.write(key: _kPatternEnabled, value: 'true');
-    await _storage.write(key: _kBoundEmail, value: email);
+    await _storage.write(key: _kBoundEmail, value: _norm(email));
   }
 
   static Future<bool> verifyPattern(List<int> pattern) async {
