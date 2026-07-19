@@ -8,7 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
+import '../services/quick_unlock_service.dart';
 import 'home_dashboard_screen.dart';
+import 'quick_unlock_screen.dart';
 
 /// ==================================================================
 /// EXACT MATCH DESIGN TOKENS
@@ -75,16 +77,24 @@ class _SplashScreenState extends State<SplashScreen> {
         final profile = await AuthService.getCurrentProfile();
         debugPrint('[STAY_SIGNED_IN] profile fetch result: ${profile?.fullName ?? "NULL"}');
         if (profile != null && mounted) {
-          // Valid session found, bypass login
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
-          );
+          final quickUnlockOn = await QuickUnlockService.isAnyEnabled();
+          if (quickUnlockOn) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => QuickUnlockScreen(profile: profile)),
+            );
+          } else {
+            // Valid session found, no quick unlock configured — go straight in
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
+            );
+          }
           return;
         }
       } else {
         // Force sign out to clear Supabase's auto-persisted local cache if user opted out
         if (AuthService.isLoggedIn) {
           await AuthService.signOut();
+          await QuickUnlockService.clearAll();
         }
       }
     } catch (e, st) {
@@ -253,6 +263,16 @@ class _LoginScreenState extends State<LoginScreen> {
           await prefs.remove('saved_email');
         }
 
+        // If quick unlock on this device is bound to a different
+        // inspector's account, wipe it — it should never carry over
+        // to whoever logs in next on a shared device.
+        final boundEmail = await QuickUnlockService.boundEmail();
+        final thisEmail = _emailController.text.trim();
+        if (boundEmail != null && boundEmail != thisEmail) {
+          await QuickUnlockService.clearAll();
+        }
+
+        if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
         );

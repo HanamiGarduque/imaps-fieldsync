@@ -57,6 +57,13 @@ dependencies:
   flutter_dotenv: ^5.2.1
   image_picker: ^1.1.2
 
+  # Biometrics / secure storage
+  local_auth: ^2.3.0
+  local_auth_android: ^1.0.44
+  local_auth_darwin: ^1.4.0
+  flutter_secure_storage: ^9.2.2
+  crypto: ^3.0.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -12,6 +12,7 @@ import 'tasks_screen.dart';
 import 'updates_screen.dart';
 import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
+import 'quick_unlock_setup_screen.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 
@@ -319,6 +320,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(builder: (_) => const AboutInsightScreen()),
+                          );
+                        },
+                      ),
+                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+                      _ActionTile(
+                        icon: Icons.fingerprint,
+                        title: 'Quick Unlock',
+                        subtitle: 'Biometric / pattern',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => QuickUnlockSetupScreen(userEmail: userEmail)),
                           );
                         },
                       ),
