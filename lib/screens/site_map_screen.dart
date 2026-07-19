@@ -2,7 +2,11 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as ll;
 
+import '../services/location_service.dart';
+import '../services/supabase_service.dart';
 import 'gps_verification_screen.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
@@ -19,33 +23,112 @@ class InsightTheme {
   static const Color blueInk = Color(0xFF1A3FC4);
   static const Color red = Color(0xFFE23B4E);
   static const Color redInk = Color(0xFFB72A3B);
-  static const Color line = Color(0x1A141628); 
-  
+  static const Color line = Color(0x1A141628);
+
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
   static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
   static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
 }
 
-class SiteMapScreen extends StatelessWidget {
+/// Site Verification (Step 1). Used to be two hardcoded dots on a gradient
+/// box — now a real map with the actual parcel location and the inspector's
+/// actual current position, both pulled from the same data sources Step 2
+/// (GPS Verification) already uses successfully:
+///   - Parcel coordinates: SupabaseService.fetchParcelDetails(parcelId)
+///   - Device position: LocationService.getCurrentLocation()
+///   - Distance: SupabaseService.getDistanceToParcelBoundary() (same RPC
+///     Step 2 uses, so the number here matches what Step 2 will show —
+///     no confusing discrepancy between the two screens).
+class SiteMapScreen extends StatefulWidget {
   final TaskItem task;
   const SiteMapScreen({super.key, required this.task});
 
   @override
+  State<SiteMapScreen> createState() => _SiteMapScreenState();
+}
+
+class _SiteMapScreenState extends State<SiteMapScreen> {
+  bool _loading = true;
+  String? _error;
+
+  ll.LatLng? _parcelLatLng;
+  ll.LatLng? _deviceLatLng;
+  double? _distanceMeters;
+  final MapController _mapController = MapController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMapData();
+  }
+
+  Future<void> _loadMapData() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      if (widget.task.parcelId == null) {
+        throw Exception('No parcel linked to this task.');
+      }
+
+      final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+      final lat = (parcel?['latitude'] as num?)?.toDouble();
+      final lng = (parcel?['longitude'] as num?)?.toDouble();
+      if (lat == null || lng == null) {
+        throw Exception('This parcel has no recorded coordinates yet.');
+      }
+      _parcelLatLng = ll.LatLng(lat, lng);
+
+      // Device position is best-effort here — Step 1 is about orientation,
+      // not verification, so a location error still lets the inspector see
+      // the target site on the map and proceed; only Step 2 hard-requires it.
+      try {
+        final pos = await LocationService.getCurrentLocation();
+        _deviceLatLng = ll.LatLng(pos.latitude, pos.longitude);
+        _distanceMeters = await SupabaseService.getDistanceToParcelBoundary(
+          parcelId: widget.task.parcelId!,
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+        );
+      } catch (_) {
+        _deviceLatLng = null;
+        _distanceMeters = null;
+      }
+
+      if (!mounted) return;
+      setState(() => _loading = false);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
+    }
+  }
+
+  void _fitBounds() {
+    if (_parcelLatLng == null) return;
+    if (_deviceLatLng == null) {
+      _mapController.move(_parcelLatLng!, 17);
+      return;
+    }
+    final bounds = LatLngBounds.fromPoints([_parcelLatLng!, _deviceLatLng!]);
+    _mapController.fitCamera(
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.fromLTRB(60, 60, 60, 60)),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final task = widget.task;
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
-          // Original Blurred Background Blobs
           Positioned(top: -60, right: -60, child: ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40), child: Container(width: 260, height: 260, decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.20))))),
           Positioned(bottom: -80, left: -80, child: ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40), child: Container(width: 220, height: 220, decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.10))))),
 
           SafeArea(
             child: Column(
               children: [
-                // Glass Header
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
@@ -64,8 +147,7 @@ class SiteMapScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-                
-                // Progress Bar
+
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
                   child: Column(
@@ -89,49 +171,112 @@ class SiteMapScreen extends StatelessWidget {
                   ),
                 ),
 
-                // Map Content
+                // Map content
                 Expanded(
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(22),
                       border: Border.all(color: InsightTheme.line),
-                      gradient: const LinearGradient(colors: [Color(0xFFEDEFFB), Color(0xFFDCE2F8)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                      color: InsightTheme.surface2,
                       boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))],
                     ),
                     clipBehavior: Clip.hardEdge,
-                    child: Stack(
-                      children: [
-                        Align(
-                          alignment: const Alignment(0.1, -0.16),
-                          child: Container(width: 16, height: 16, decoration: BoxDecoration(color: InsightTheme.red, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3))),
-                        ),
-                        Align(
-                          alignment: const Alignment(-0.24, 0.20),
-                          child: Container(width: 18, height: 18, decoration: BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.3), spreadRadius: 8)])),
-                        ),
-                        Positioned(
-                          bottom: 16, left: 16, right: 16,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withValues(alpha: 0.65))),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Row(children: [const Icon(Icons.circle, size: 10, color: InsightTheme.red), const SizedBox(width: 6), Text('Target Site', style: InsightTheme.inter(12, w: FontWeight.w600))]),
-                                    Row(children: [const Icon(Icons.circle, size: 10, color: InsightTheme.blue1), const SizedBox(width: 6), Text('You (210m)', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2))]),
-                                  ],
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
+                        : _error != null
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.location_off_rounded, size: 40, color: InsightTheme.ink3),
+                                      const SizedBox(height: 12),
+                                      Text(_error!, textAlign: TextAlign.center, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                                      const SizedBox(height: 16),
+                                      OutlinedButton(onPressed: _loadMapData, child: const Text('Try again')),
+                                    ],
+                                  ),
                                 ),
+                              )
+                            : Stack(
+                                children: [
+                                  FlutterMap(
+                                    mapController: _mapController,
+                                    options: MapOptions(
+                                      initialCenter: _parcelLatLng!,
+                                      initialZoom: 17,
+                                    ),
+                                    children: [
+                                      TileLayer(
+                                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                        userAgentPackageName: 'com.imaps.fieldsync',
+                                      ),
+                                      if (_deviceLatLng != null)
+                                        PolylineLayer(
+                                          polylines: [
+                                            Polyline(points: [_deviceLatLng!, _parcelLatLng!], strokeWidth: 3, color: InsightTheme.blue1.withValues(alpha: 0.6)),
+                                          ],
+                                        ),
+                                      MarkerLayer(
+                                        markers: [
+                                          Marker(
+                                            point: _parcelLatLng!,
+                                            width: 32, height: 32,
+                                            child: Container(
+                                              decoration: BoxDecoration(color: InsightTheme.red, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: [BoxShadow(color: InsightTheme.red.withValues(alpha: 0.4), blurRadius: 8)]),
+                                            ),
+                                          ),
+                                          if (_deviceLatLng != null)
+                                            Marker(
+                                              point: _deviceLatLng!,
+                                              width: 34, height: 34,
+                                              child: Container(
+                                                decoration: BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.4), blurRadius: 10, spreadRadius: 2)]),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  Positioned(
+                                    top: 12, right: 12,
+                                    child: _MapIconButton(icon: Icons.center_focus_strong_rounded, onTap: _fitBounds),
+                                  ),
+                                  Positioned(
+                                    bottom: 16, left: 16, right: 16,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: BackdropFilter(
+                                        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withValues(alpha: 0.65))),
+                                          child: Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Row(children: [const Icon(Icons.circle, size: 10, color: InsightTheme.red), const SizedBox(width: 6), Text('Target Site', style: InsightTheme.inter(12, w: FontWeight.w600))]),
+                                              Row(children: [
+                                                const Icon(Icons.circle, size: 10, color: InsightTheme.blue1),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  _deviceLatLng == null
+                                                      ? 'Location unavailable'
+                                                      : _distanceMeters != null
+                                                          ? 'You (${_distanceMeters!.round()}m)'
+                                                          : 'You',
+                                                  style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
+                                                ),
+                                              ]),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
 
@@ -166,6 +311,30 @@ class SiteMapScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MapIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _MapIconButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withValues(alpha: 0.65))),
+            child: Icon(icon, size: 18, color: InsightTheme.ink),
+          ),
+        ),
       ),
     );
   }

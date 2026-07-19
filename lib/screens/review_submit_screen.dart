@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/inspection_provider.dart';
 import '../services/supabase_service.dart';
+import '../services/sync_outbox_service.dart';
 import 'inspection_progress.dart';
 import 'tasks_screen.dart'; 
 import '../models/user_profile.dart';
@@ -66,31 +67,54 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
     setState(() => _submitting = true);
     final provider = context.read<InspectionProvider>();
 
-    try {
-      final checklist = <Map<String, dynamic>>[
-        ...provider.siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
-        ...provider.zoningObservations.entries.map((e) => {'item': e.key, 'checked': e.value}),
-      ];
-      final checklistCompleted = checklist.where((c) => c['checked'] == true).length;
-      final localPhotoPaths = provider.capturedPhotos.map((p) => (p['photoPath'] as String?) ?? '').where((p) => p.isNotEmpty).toList();
-      final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: widget.task.id, localPaths: localPhotoPaths);
+    final checklist = <Map<String, dynamic>>[
+      ...provider.siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
+      ...provider.zoningObservations.entries.map((e) => {'item': e.key, 'checked': e.value}),
+    ];
+    final checklistCompleted = checklist.where((c) => c['checked'] == true).length;
+    final localPhotoPaths = provider.capturedPhotos.map((p) => (p['photoPath'] as String?) ?? '').where((p) => p.isNotEmpty).toList();
+    final observations = 'Actual land use: ${provider.actualLandUse}. Boundary status: ${provider.boundaryStatus}.';
 
+    // Try the real thing first — unchanged happy path when online.
+    bool queuedOffline = false;
+    try {
+      final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: widget.task.id, localPaths: localPhotoPaths);
       await SupabaseService.submitInspection(
         jobId: widget.task.id, findings: provider.notes, isCompliant: _selectedStatus == 'Compliant', inspectionResult: _selectedStatus,
-        observations: 'Actual land use: ${provider.actualLandUse}. Boundary status: ${provider.boundaryStatus}.',
+        observations: observations,
         discrepancies: provider.discrepancies.isNotEmpty ? provider.discrepancies : null, recommendations: provider.recommendations.isNotEmpty ? provider.recommendations : null,
         inspectorNotes: provider.notes, checklistData: checklist, checklistCompletedCount: checklistCompleted, checklistTotalCount: checklist.length,
         photoPaths: photoPaths, photoCount: photoPaths.length, locationLabel: widget.task.location,
       );
-
-      InspectionProgress.instance.markStepComplete(6);
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => SubmissionSuccessScreen(referenceNo: widget.task.inspectionNo, finalStatus: _selectedStatus)));
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _submitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      // Couldn't reach Supabase (or a photo failed mid-upload) — rather
+      // than lose everything the inspector just entered, queue the whole
+      // submission (including the still-local photo paths) in the
+      // FieldSync outbox and let them finish. It'll upload the photos and
+      // submit for real once connectivity returns.
+      try {
+        await SyncOutboxService.enqueueSubmitInspection(
+          jobId: widget.task.id, findings: provider.notes, isCompliant: _selectedStatus == 'Compliant', inspectionResult: _selectedStatus,
+          observations: observations,
+          discrepancies: provider.discrepancies.isNotEmpty ? provider.discrepancies : null, recommendations: provider.recommendations.isNotEmpty ? provider.recommendations : null,
+          inspectorNotes: provider.notes, checklistData: checklist, checklistCompletedCount: checklistCompleted, checklistTotalCount: checklist.length,
+          localPhotoPaths: localPhotoPaths, locationLabel: widget.task.location,
+        );
+        queuedOffline = true;
+      } catch (_) {
+        // Couldn't even save it locally — nothing more we can do here.
+        if (!mounted) return;
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+        return;
+      }
     }
+
+    InspectionProgress.instance.markStepComplete(6);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(MaterialPageRoute(
+      builder: (_) => SubmissionSuccessScreen(referenceNo: widget.task.inspectionNo, finalStatus: _selectedStatus, queuedOffline: queuedOffline),
+    ));
   }
 
   @override
@@ -288,8 +312,8 @@ class _ResultOption extends StatelessWidget {
 }
 
 class SubmissionSuccessScreen extends StatelessWidget {
-  final String referenceNo; final String finalStatus;
-  const SubmissionSuccessScreen({super.key, required this.referenceNo, required this.finalStatus});
+  final String referenceNo; final String finalStatus; final bool queuedOffline;
+  const SubmissionSuccessScreen({super.key, required this.referenceNo, required this.finalStatus, this.queuedOffline = false});
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
@@ -307,11 +331,27 @@ class SubmissionSuccessScreen extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(width: 80, height: 80, decoration: BoxDecoration(shape: BoxShape.circle, gradient: const LinearGradient(colors: [InsightTheme.green, Color(0xFF0D7A3C)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: [BoxShadow(color: InsightTheme.green.withValues(alpha: 0.35), blurRadius: 28, offset: const Offset(0, 14))]), child: const Icon(Icons.check_rounded, color: Colors.white, size: 36)),
+                    Container(
+                      width: 80, height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: queuedOffline ? const [InsightTheme.blue1, InsightTheme.blue2] : const [InsightTheme.green, Color(0xFF0D7A3C)],
+                          begin: Alignment.topLeft, end: Alignment.bottomRight,
+                        ),
+                        boxShadow: [BoxShadow(color: (queuedOffline ? InsightTheme.blue1 : InsightTheme.green).withValues(alpha: 0.35), blurRadius: 28, offset: const Offset(0, 14))],
+                      ),
+                      child: Icon(queuedOffline ? Icons.cloud_off_rounded : Icons.check_rounded, color: Colors.white, size: 36),
+                    ),
                     const SizedBox(height: 24),
-                    Text('Inspection Submitted', style: InsightTheme.poppins(20, w: FontWeight.w700)),
+                    Text(queuedOffline ? 'Saved Offline' : 'Inspection Submitted', style: InsightTheme.poppins(20, w: FontWeight.w700)),
                     const SizedBox(height: 8),
-                    Text('ID $referenceNo recorded as "$finalStatus".', textAlign: TextAlign.center, style: InsightTheme.inter(14, c: InsightTheme.ink2)),
+                    Text(
+                      queuedOffline
+                          ? 'ID $referenceNo recorded as "$finalStatus" — no signal right now, will sync automatically once you\'re back online.'
+                          : 'ID $referenceNo recorded as "$finalStatus".',
+                      textAlign: TextAlign.center, style: InsightTheme.inter(14, c: InsightTheme.ink2),
+                    ),
                     const SizedBox(height: 36),
                     SizedBox(
                       width: 240,

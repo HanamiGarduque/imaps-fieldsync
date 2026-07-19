@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
+import '../services/sync_outbox_service.dart';
 import '../providers/inspection_provider.dart';
 import 'capture_photo_screen.dart';
 import 'tasks_screen.dart';
@@ -64,6 +66,15 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   // arrive faster than a previous recompute finishes.
   bool _recomputing = false;
 
+  // Real compass heading (device magnetometer), degrees 0-360 from magnetic
+  // north. Null until the first event arrives, and stays null forever on
+  // devices/emulators with no magnetometer — every place this is used has
+  // a fallback to the old static-dial behavior, so lacking a compass just
+  // means no rotation, never a crash or blank screen.
+  StreamSubscription<CompassEvent>? _compassSub;
+  double? _heading;
+  bool _compassUnavailable = false;
+
   bool get _verified => _distance != null && _distance! <= _rangeThresholdMeters;
   String get _bearingLabel {
     if (_bearingToParcel == null) return 'Direction unknown';
@@ -76,12 +87,32 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   void initState() {
     super.initState();
     _checkLocation();
+    _startCompass();
   }
 
   @override
   void dispose() {
     _positionSub?.cancel();
+    _compassSub?.cancel();
     super.dispose();
+  }
+
+  /// FlutterCompass.events is itself nullable — null means the platform
+  /// has no magnetometer support at all (some emulators, some low-end
+  /// devices). CompassEvent.heading can also individually be null on a
+  /// device that has the sensor but hasn't got a fix yet/needs calibration.
+  /// Both cases just leave _heading null and the dial stays static, same
+  /// as it always has.
+  void _startCompass() {
+    final events = FlutterCompass.events;
+    if (events == null) {
+      setState(() => _compassUnavailable = true);
+      return;
+    }
+    _compassSub = events.listen((event) {
+      if (!mounted || event.heading == null) return;
+      setState(() => _heading = event.heading);
+    });
   }
 
   Future<void> _checkLocation() async {
@@ -170,21 +201,49 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   Future<void> _startInspection() async {
     if (!_verified || _latitude == null || _submitting) return;
     setState(() => _submitting = true);
+
+    // GPS itself is satellite-based and already locked by this point (see
+    // _checkLocation above) — only *sending* the confirmation to Supabase
+    // needs signal. Try that first; if it fails, don't strand the
+    // inspector mid-flow while they're physically on-site — queue it in
+    // the FieldSync outbox and let them continue. It'll sync automatically
+    // once connectivity returns (SyncOutboxService, started in main.dart).
+    bool queuedOffline = false;
     try {
       await SupabaseService.confirmGpsOnSite(jobId: widget.task.id, latitude: _latitude!, longitude: _longitude!, accuracyMeters: _accuracy ?? 0, locationLabel: widget.task.location);
-      if (!mounted) return;
-      // Carries the real on-site result forward so Step 5 (Findings) shows
-      // the actual distance instead of a hardcoded "Verified"/placeholder.
-      context.read<InspectionProvider>().recordGpsVerification(distanceMeters: _distance ?? 0);
-      HapticFeedback.selectionClick();
-      InspectionProgress.instance.markStepComplete(2);
-      Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
-    } finally {
-      if (mounted) setState(() => _submitting = false);
+      try {
+        await SyncOutboxService.enqueueGpsConfirm(
+          jobId: widget.task.id,
+          latitude: _latitude!,
+          longitude: _longitude!,
+          accuracyMeters: _accuracy ?? 0,
+          locationLabel: widget.task.location,
+        );
+        queuedOffline = true;
+      } catch (_) {
+        // Couldn't even save it locally — genuinely nothing more we can
+        // do here, so this is the one case that still has to block.
+        if (!mounted) return;
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+        return;
+      }
     }
+
+    if (!mounted) return;
+    if (queuedOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No signal — GPS check-in saved offline, will sync automatically.')),
+      );
+    }
+    // Carries the real on-site result forward so Step 5 (Findings) shows
+    // the actual distance instead of a hardcoded "Verified"/placeholder.
+    context.read<InspectionProvider>().recordGpsVerification(distanceMeters: _distance ?? 0);
+    HapticFeedback.selectionClick();
+    InspectionProgress.instance.markStepComplete(2);
+    setState(() => _submitting = false);
+    Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));
   }
 
   @override
@@ -255,7 +314,24 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                     child: Stack(
                                       alignment: Alignment.center,
                                       children: [
-                                        CustomPaint(size: const Size(240, 240), painter: _DialTicksPainter()),
+                                        // Ticks rotate opposite the device heading so "up" on screen
+                                        // always means "true north-relative forward" — same trick a
+                                        // real compass rose uses. Duration is short enough to feel
+                                        // live but smooths out jittery magnetometer noise.
+                                        AnimatedRotation(
+                                          turns: _heading != null ? -(_heading! / 360) : 0,
+                                          duration: const Duration(milliseconds: 200),
+                                          curve: Curves.linear,
+                                          child: CustomPaint(size: const Size(240, 240), painter: _DialTicksPainter()),
+                                        ),
+                                        // Points toward the parcel relative to where the phone is
+                                        // currently facing — only meaningful once we have both a
+                                        // real heading and a computed bearing to the site.
+                                        if (_heading != null && _bearingToParcel != null)
+                                          Transform.rotate(
+                                            angle: ((_bearingToParcel! - _heading!) * math.pi / 180.0),
+                                            child: CustomPaint(size: const Size(240, 240), painter: _TargetArrowPainter()),
+                                          ),
                                         Positioned(
                                           top: 6,
                                           child: Container(width: 5, height: 16, decoration: BoxDecoration(gradient: LinearGradient(colors: _verified ? [InsightTheme.blue1, InsightTheme.blue2] : const [Color(0xFFE0A526), Color(0xFFB9821A)], begin: Alignment.topCenter, end: Alignment.bottomCenter), borderRadius: BorderRadius.circular(3), boxShadow: [BoxShadow(color: (_verified ? InsightTheme.blue1 : const Color(0xFFE0A526)).withValues(alpha: 0.6), blurRadius: 10)])),
@@ -277,22 +353,28 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                   const SizedBox(height: 20),
                                   if (_bearingToParcel != null) Text(_bearingLabel, style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
                                   const SizedBox(height: 10),
-                                  if (_isLive)
+                                  if (_isLive || _heading != null)
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Container(
-                                          width: 8, height: 8,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: InsightTheme.greenInk,
-                                            boxShadow: [BoxShadow(color: InsightTheme.greenInk.withValues(alpha: 0.5), blurRadius: 6, spreadRadius: 1)],
+                                        if (_isLive) ...[
+                                          Container(
+                                            width: 8, height: 8,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: InsightTheme.greenInk,
+                                              boxShadow: [BoxShadow(color: InsightTheme.greenInk.withValues(alpha: 0.5), blurRadius: 6, spreadRadius: 1)],
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text('LIVE TRACKING', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.greenInk, ls: 0.6)),
+                                          const SizedBox(width: 6),
+                                          Text('LIVE TRACKING', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.greenInk, ls: 0.6)),
+                                        ],
+                                        if (_isLive && _heading != null) Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text('•', style: InsightTheme.jetBrains(9.5, c: InsightTheme.ink3))),
+                                        if (_heading != null) Text('COMPASS ACTIVE', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.6)),
                                       ],
-                                    ),
+                                    )
+                                  else if (_compassUnavailable)
+                                    Text('Compass unavailable on this device', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
                                   if (!_verified) ...[
                                     const SizedBox(height: 16),
                                     TextButton.icon(onPressed: _checkLocation, icon: const Icon(Icons.refresh_rounded, size: 16, color: InsightTheme.blueInk), label: Text('Recheck Location', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk))),
@@ -400,6 +482,32 @@ class _DialTicksPainter extends CustomPainter {
     }
   }
   @override bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Draws a single arrowhead pointing outward from center toward the ring
+/// edge. Rotated by the caller (Transform.rotate) to the parcel's bearing
+/// relative to the device's current heading — so it visually says "turn
+/// this way" rather than just reporting a compass-point letter.
+class _TargetArrowPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    final tip = Offset(center.dx, center.dy - (radius - 20));
+    final paint = Paint()
+      ..color = InsightTheme.blueInk
+      ..style = PaintingStyle.fill;
+    final path = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(tip.dx - 7, tip.dy + 16)
+      ..lineTo(tip.dx + 7, tip.dy + 16)
+      ..close();
+    canvas.drawShadow(path, Colors.black.withValues(alpha: 0.25), 3, false);
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _GlassBackButton extends StatelessWidget {

@@ -272,6 +272,7 @@ class SupabaseService {
     required List<String> localPaths,
   }) async {
     final List<String> uploadedUrls = [];
+    final List<String> failedPaths = [];
     for (final path in localPaths) {
       try {
         final file = File(path);
@@ -289,7 +290,20 @@ class SupabaseService {
         uploadedUrls.add(client.storage.from('inspection-photos').getPublicUrl(storagePath));
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
+        failedPaths.add(path);
       }
+    }
+    // STOP-GAP (pending the offline photo-upload outbox): previously this
+    // swallowed every failure and returned whatever DID upload, so a
+    // fully-offline submit silently went through with photoPaths: [] —
+    // the job looked "Completed" with zero photos and no error anywhere.
+    // Until photo upload has its own queue/retry, fail loudly instead of
+    // lying about what was actually saved.
+    if (failedPaths.isNotEmpty) {
+      throw Exception(
+        '${failedPaths.length} of ${localPaths.length} photo(s) failed to upload. '
+        'Check your connection and try submitting again.',
+      );
     }
     return uploadedUrls;
   }

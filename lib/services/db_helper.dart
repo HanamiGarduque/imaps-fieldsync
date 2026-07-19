@@ -17,7 +17,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -35,6 +35,9 @@ class DBHelper {
           await db.execute('ALTER TABLE local_jobs ADD COLUMN deadline_date TEXT');
           await db.execute('ALTER TABLE local_jobs ADD COLUMN is_self_scheduled INTEGER DEFAULT 0');
           await db.execute('ALTER TABLE local_jobs ADD COLUMN application_type TEXT');
+        }
+        if (oldVersion < 4) {
+          await db.execute(_pendingActionsSchema);
         }
       },
       onCreate: (db, version) async {
@@ -88,9 +91,30 @@ class DBHelper {
             is_synced INTEGER DEFAULT 0
           )
         ''');
+
+        // Generic offline-action outbox (FieldSync). Every offline-capable
+        // write — GPS confirm, checklist update, photo upload, submit,
+        // status change — becomes one row here instead of each screen
+        // having its own bespoke offline logic. SyncOutboxService drains
+        // this in order once connectivity returns.
+        await db.execute(_pendingActionsSchema);
       },
     );
   }
+
+  static const String _pendingActionsSchema = '''
+    CREATE TABLE pending_actions(
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  ''';
 
   // --- LOCAL JOBS CACHING ---
 
@@ -238,6 +262,107 @@ class DBHelper {
       {'is_synced': 1},
       where: 'id = ?',
       whereArgs: [photoId],
+    );
+  }
+
+  // --- PENDING ACTIONS OUTBOX (FieldSync) ---
+  //
+  // One generic queue for every offline-capable write, instead of
+  // per-screen offline logic. `payload` is a JSON-encoded map — its shape
+  // depends on `type` (e.g. 'gps_confirm' payload has lat/lng/accuracy).
+
+  static Future<void> enqueueAction({
+    required String id,
+    required String type,
+    required String jobId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    await db.insert(
+      'pending_actions',
+      {
+        'id': id,
+        'type': type,
+        'job_id': jobId,
+        'payload': jsonEncode(payload),
+        'status': 'pending',
+        'retry_count': 0,
+        'last_error': null,
+        'created_at': now,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Rows ready to (re)try — pending or previously-failed, oldest first so
+  /// actions sync in the order they happened.
+  static Future<List<Map<String, dynamic>>> getActionableActions() async {
+    final db = await database;
+    return await db.query(
+      'pending_actions',
+      where: "status IN ('pending', 'failed')",
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  static Future<int> getPendingActionsCount() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM pending_actions WHERE status IN ('pending', 'failed')",
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  static Future<void> markActionSyncing(String id) async {
+    final db = await database;
+    await db.update(
+      'pending_actions',
+      {'status': 'syncing', 'updated_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  static Future<void> markActionSynced(String id) async {
+    final db = await database;
+    // Kept (not deleted) so the Sync Center has real completed-sync
+    // history instead of fabricating one. Capped below so the table
+    // doesn't grow forever.
+    await db.update(
+      'pending_actions',
+      {'status': 'synced', 'updated_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    await db.rawDelete('''
+      DELETE FROM pending_actions
+      WHERE status = 'synced' AND id NOT IN (
+        SELECT id FROM pending_actions WHERE status = 'synced'
+        ORDER BY updated_at DESC LIMIT 50
+      )
+    ''');
+  }
+
+  /// Real completed-sync history for the Sync Center's audit log —
+  /// replaces the old screen's hardcoded rows.
+  static Future<List<Map<String, dynamic>>> getRecentSyncedActions({int limit = 20}) async {
+    final db = await database;
+    return await db.query(
+      'pending_actions',
+      where: "status = 'synced'",
+      orderBy: 'updated_at DESC',
+      limit: limit,
+    );
+  }
+
+  static Future<void> markActionFailed(String id, String error) async {
+    final db = await database;
+    await db.rawUpdate(
+      "UPDATE pending_actions SET status = 'failed', retry_count = retry_count + 1, "
+      "last_error = ?, updated_at = ? WHERE id = ?",
+      [error, DateTime.now().toIso8601String(), id],
     );
   }
 }

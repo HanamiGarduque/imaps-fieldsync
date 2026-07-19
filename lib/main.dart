@@ -4,6 +4,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'services/supabase_service.dart';
 import 'services/notification_service.dart';
+import 'services/sync_outbox_service.dart';
 import 'providers/inspection_provider.dart';
 import 'screens/splash_screen.dart'; // draft screen 1 — new entry point
 
@@ -13,6 +14,10 @@ Future<void> main() async {
   await dotenv.load(fileName: ".env");
   await SupabaseService.initialize();
   await NotificationService.initialize();
+  // FieldSync: drains anything queued from a prior offline session, then
+  // listens for connectivity coming back so queued actions sync
+  // automatically without needing an app restart.
+  SyncOutboxService.start();
   runApp(
     ChangeNotifierProvider(
       create: (_) => InspectionProvider(),
