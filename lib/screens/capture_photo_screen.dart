@@ -44,6 +44,7 @@ class CapturePhotoScreen extends StatefulWidget {
 }
 
 class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
+  static const int maxPhotos = 10;
   final List<Map<String, dynamic>> _capturedPhotos = [];
   bool _isCameraMode = false; 
 
@@ -113,6 +114,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   void _retakePhoto() => setState(() => _capturedPhotoPath = null);
 
   void _savePhotoAndReturnToGrid() {
+    if (_capturedPhotos.length >= maxPhotos) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Max $maxPhotos photos reached.', style: InsightTheme.inter(13, c: Colors.white)), backgroundColor: InsightTheme.ink));
+      setState(() { _isCameraMode = false; _capturedPhotoPath = null; });
+      return;
+    }
     if (_capturedPhotoPath == null) return;
     context.read<InspectionProvider>().addPhoto(photoPath: _capturedPhotoPath!, photoNotes: _notesController.text, latitude: _currentPosition?.latitude, longitude: _currentPosition?.longitude);
     setState(() {
@@ -193,12 +199,16 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     physics: const BouncingScrollPhysics(),
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1),
-                    itemCount: _capturedPhotos.length + 1,
+                    itemCount: _capturedPhotos.length + (_capturedPhotos.length < maxPhotos ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index < _capturedPhotos.length) return _PhotoCell(photoPath: _capturedPhotos[index]['photoPath'] as String);
                       return _AddPhotoCell(onTap: () => setState(() => _isCameraMode = true));
                     },
                   ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                  child: Text('${_capturedPhotos.length} / $maxPhotos photos', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3)),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
