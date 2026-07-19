@@ -156,6 +156,24 @@ class TaskItem {
     );
   }
 
+  /// Highest step (0-6) verifiably done, based on what's ACTUALLY saved in
+  /// the DB — not client-side session memory. This is what makes progress
+  /// survive app restarts and stay correct when switching between tasks
+  /// (each task derives its own number from its own real data).
+  int get derivedHighestStep {
+    if (status.toLowerCase().contains('complete')) return 6;
+    final hasFindings = (observations?.isNotEmpty ?? false) ||
+        (discrepancies?.isNotEmpty ?? false) ||
+        (recommendations?.isNotEmpty ?? false) ||
+        (inspectorNotes?.isNotEmpty ?? false);
+    if (hasFindings) return 5;
+    if (checklistCompletedCount > 0) return 4;
+    if (photoCount > 0 || photoPaths.isNotEmpty) return 3;
+    if (confirmedLatitude != null && confirmedLongitude != null) return 2;
+    if (status.toLowerCase() != 'assigned') return 1;
+    return 0;
+  }
+
   String get category {
     final s = status.toLowerCase();
     if (s.contains('complete') || s.contains('done')) return 'Completed';
@@ -312,13 +330,14 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
-  void _openTask(BuildContext context, TaskItem task) {
+  void _openTask(BuildContext context, TaskItem task) async {
     HapticFeedback.selectionClick();
     if (task.category == 'Completed') {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => CompletedInspectionDetailScreen(task: task)));
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => CompletedInspectionDetailScreen(task: task)));
     } else {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task)));
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task)));
     }
+    if (mounted) _loadTasks();
   }
   
   void _showFilterBottomSheet() {

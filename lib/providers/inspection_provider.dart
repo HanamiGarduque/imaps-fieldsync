@@ -36,6 +36,7 @@ class InspectionProvider extends ChangeNotifier {
   String _inspectionResult = 'Compliant'; // Selected assessment result
 
   bool _isSyncing = false;
+  bool _isReworkMode = false;
 
   // Getters
   TaskItem? get activeTask => _activeTask;
@@ -50,12 +51,14 @@ class InspectionProvider extends ChangeNotifier {
   String get boundaryStatus => _boundaryStatus;
   String get inspectionResult => _inspectionResult;
   bool get isSyncing => _isSyncing;
+  bool get isReworkMode => _isReworkMode;
 
   // --- INITIALIZATION & NAVIGATION ---
 
   void startInspection(TaskItem task) {
     _activeTask = task;
     _currentStep = 1;
+    _isReworkMode = false;
     
     // Reset Checklist
     _siteCondition.updateAll((key, value) => key == 'Surrounding developments noted' || key == 'Signage / commercial activity present' ? false : true);
@@ -152,7 +155,9 @@ class InspectionProvider extends ChangeNotifier {
 /// inspector doesn't lose the other steps' answers.
 void hydrateForRework(TaskItem task) {
   _activeTask = task;
+  _isReworkMode = true;
   _currentStep = 1;
+  _isReworkMode = true;
 
   // Match stored checklist entries back onto the two known maps.
   // Expects each entry to look like {'label': ..., 'value': true/false} —
@@ -278,6 +283,142 @@ void hydrateForRework(TaskItem task) {
       return true;
     }
     return false; // Stored offline
+  }
+
+  // --- REWORK: PER-STEP SAVE (writes immediately, no need to reach Submit) ---
+
+  Future<bool> saveStepPhotos() async {
+    if (_activeTask == null) return false;
+    try {
+      final localPaths = _capturedPhotos
+          .map((p) => (p['photoPath'] as String?) ?? '')
+          .where((p) => p.isNotEmpty)
+          .toList();
+      final uploaded = await SupabaseService.uploadInspectionPhotos(
+        jobId: _activeTask!.id,
+        localPaths: localPaths,
+      );
+      await SupabaseService.updateJobInspectionProgress(
+        jobId: _activeTask!.id,
+        updateData: {
+          'photo_paths': uploaded,
+          'photo_count': uploaded.length,
+        },
+      );
+      return true;
+    } catch (e) {
+      debugPrint('saveStepPhotos failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> saveStepChecklist() async {
+    if (_activeTask == null) return false;
+    try {
+      final checklist = <Map<String, dynamic>>[
+        ..._siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
+        ..._zoningObservations.entries.map((e) => {'item': e.key, 'checked': e.value}),
+      ];
+      final done = checklist.where((c) => c['checked'] == true).length;
+      await SupabaseService.updateJobInspectionProgress(
+        jobId: _activeTask!.id,
+        updateData: {
+          'checklist_data': checklist,
+          'checklist_completed_count': done,
+          'checklist_total_count': checklist.length,
+        },
+      );
+      return true;
+    } catch (e) {
+      debugPrint('saveStepChecklist failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> saveStepFindings() async {
+    if (_activeTask == null) return false;
+    try {
+      await SupabaseService.updateJobInspectionProgress(
+        jobId: _activeTask!.id,
+        updateData: {
+          'observations': 'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.',
+          'discrepancies': _discrepancies.isNotEmpty ? _discrepancies : null,
+          'recommendations': _recommendations.isNotEmpty ? _recommendations : null,
+          'inspector_notes': _notes,
+        },
+      );
+      return true;
+    } catch (e) {
+      debugPrint('saveStepFindings failed: $e');
+      return false;
+    }
+  }
+
+  /// "Save All" — pushes everything currently in the provider back to the
+  /// job, and restores status to 'completed' so the rework session closes
+  /// cleanly instead of leaving the job stuck as in_progress.
+  Future<bool> saveAllAndClose() async {
+    if (_activeTask == null) return false;
+    try {
+      await saveStepPhotos();
+      await saveStepChecklist();
+      await saveStepFindings();
+      await SupabaseService.updateJobInspectionProgress(
+        jobId: _activeTask!.id,
+        updateData: {'status': 'completed'},
+      );
+      await SupabaseService.logActivity(
+        eventType: 'inspection_completed',
+        title: 'Rework saved',
+        subtitle: _activeTask!.location,
+        fieldJobId: _activeTask!.id,
+      );
+      _isReworkMode = false;
+      return true;
+    } catch (e) {
+      debugPrint('saveAllAndClose failed: $e');
+      return false;
+    }
+  }
+
+  /// Comprehensive save-all helper that persists the current inspection
+  /// snapshot and also preserves the current rework mode alongside the
+  /// task context for later resume/review flows.
+  Future<bool> saveAllInspectionState() async {
+    if (_activeTask == null) return false;
+
+    final Map<String, bool> combinedChecklist = {..._siteCondition, ..._zoningObservations};
+
+    await DBHelper.saveInspectionLocally(
+      jobId: _activeTask!.id,
+      actualLandUse: _actualLandUse,
+      notes: _notes,
+      isCompliant: _inspectionResult == 'Compliant',
+      inspectionResult: _inspectionResult,
+      checklist: combinedChecklist,
+      boundaryStatus: _boundaryStatus,
+    );
+
+    for (final photo in _capturedPhotos) {
+      final photoId = const Uuid().v4();
+      await DBHelper.savePhotoLocally(
+        photoId: photoId,
+        jobId: _activeTask!.id,
+        photoPath: photo.containsKey('photoPath') ? photo['photoPath'] : '',
+        notes: photo.containsKey('notes') ? photo['notes'] : '',
+        latitude: photo['latitude'],
+        longitude: photo['longitude'],
+      );
+    }
+
+    notifyListeners();
+
+    final isConnected = await _checkConnectivity();
+    if (isConnected) {
+      await syncToServer();
+      return true;
+    }
+    return false;
   }
 
   Future<bool> _checkConnectivity() async {

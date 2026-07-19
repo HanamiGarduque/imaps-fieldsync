@@ -51,17 +51,24 @@ class ParcelDetailScreen extends StatefulWidget {
 class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   TaskItem get task => widget.task;
   InspectionProgress get progress => InspectionProgress.instance;
+  bool _isSavingAll = false;
 
   @override
-void initState() {
-  super.initState();
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    final provider = context.read<InspectionProvider>();
-    if (provider.activeTask?.id != widget.task.id) {
-      provider.startInspection(widget.task);
-    }
-  });
-}
+  void initState() {
+    super.initState();
+    progress.ensureActiveInspection(
+      task.id,
+      label: task.location,
+      initialStep: task.derivedHighestStep,
+    );
+    progress.addListener(_onProgressChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<InspectionProvider>();
+      if (provider.activeTask?.id != widget.task.id) {
+        provider.startInspection(widget.task);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -73,13 +80,83 @@ void initState() {
     if (mounted) setState(() {});
   }
 
+  Widget _photoStepSection(TaskItem task) => _sectionShell(
+        step: 3,
+        title: 'Photos',
+        child: task.photoPaths.isEmpty
+            ? Text('No photos on file.', style: InsightTheme.inter(13))
+            : SizedBox(
+                height: 90,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: task.photoPaths.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) => GestureDetector(
+                    onTap: () => _openFullscreenPhoto(task.photoPaths, i),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        task.photoPaths[i],
+                        width: 90,
+                        height: 90,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (_, child, progress) {
+                          if (progress == null) return child;
+                          return Container(
+                            width: 90,
+                            height: 90,
+                            color: InsightTheme.surface2,
+                            child: const Center(
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ),
+                          );
+                        },
+                        errorBuilder: (_, __, ___) => Container(
+                          width: 90,
+                          height: 90,
+                          color: InsightTheme.surface2,
+                          child: const Icon(Icons.broken_image_outlined, size: 20, color: InsightTheme.ink3),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+      );
+
+  void _openFullscreenPhoto(List<String> photoPaths, int startIndex) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _FullscreenPhotoViewer(photoPaths: photoPaths, startIndex: startIndex),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
   void _goToStep(BuildContext context, int step, WidgetBuilder builder) {
-    // -------------------------------------------------------------
-    // BYPASS APPLIED: The lock constraint is removed so you can 
-    // click any step in the UI and test the screens freely.
-    // -------------------------------------------------------------
+    if (progress.isLocked(step)) {
+      HapticFeedback.selectionClick();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Complete "${progress.currentStepTitle}" first.')),
+      );
+      return;
+    }
     HapticFeedback.selectionClick();
     Navigator.push(context, MaterialPageRoute(builder: builder));
+  }
+
+  Future<void> _handleSaveAll() async {
+    setState(() => _isSavingAll = true);
+    final ok = await context.read<InspectionProvider>().saveAllAndClose();
+    if (!mounted) return;
+    setState(() => _isSavingAll = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'All changes saved.' : 'Save failed — try again.')));
+    if (ok) Navigator.pop(context);
   }
 
   void _showSupportSheet(BuildContext context) {
@@ -142,8 +219,32 @@ void initState() {
     int remainingSteps = progress.isComplete ? 0 : (InspectionProgress.totalSteps - currentStep + 1);
     int estTimeMinutes = remainingSteps * 5; 
 
+    final isReworkMode = context.watch<InspectionProvider>().isReworkMode;
+
     return Scaffold(
       backgroundColor: InsightTheme.bg,
+      bottomNavigationBar: isReworkMode
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: SizedBox(
+                  height: 52,
+                  child: FilledButton.icon(
+                    onPressed: _isSavingAll ? null : _handleSaveAll,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: InsightTheme.blue1,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    icon: _isSavingAll
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.save_rounded),
+                    label: Text(_isSavingAll ? 'Saving...' : 'Save All'),
+                  ),
+                ),
+              ),
+            )
+          : null,
       body: Stack(
         children: [
           Positioned(
@@ -285,6 +386,12 @@ void initState() {
                       const SizedBox(height: 16),
 
                       _GlassCard(
+                        child: _photoStepSection(task),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      _GlassCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -324,6 +431,30 @@ void initState() {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionShell({required int step, required String title, required Widget child}) {
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(title, style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.ink)),
+              ),
+              Text(
+                'Step $step',
+                style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.6),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
         ],
       ),
     );
@@ -620,6 +751,67 @@ class _GlassBackButton extends StatelessWidget {
               child: Padding(
                 padding: EdgeInsets.only(left: 4),
                 child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FullscreenPhotoViewer extends StatefulWidget {
+  final List<String> photoPaths;
+  final int startIndex;
+  const _FullscreenPhotoViewer({required this.photoPaths, required this.startIndex});
+
+  @override
+  State<_FullscreenPhotoViewer> createState() => _FullscreenPhotoViewerState();
+}
+
+class _FullscreenPhotoViewerState extends State<_FullscreenPhotoViewer> {
+  late final PageController _pageController;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.startIndex;
+    _pageController = PageController(initialPage: _index);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text('${_index + 1} / ${widget.photoPaths.length}'),
+      ),
+      body: PageView.builder(
+        controller: _pageController,
+        itemCount: widget.photoPaths.length,
+        onPageChanged: (i) => setState(() => _index = i),
+        itemBuilder: (_, i) => InteractiveViewer(
+          minScale: 0.8,
+          maxScale: 4.0,
+          child: Center(
+            child: Image.network(
+              widget.photoPaths[i],
+              fit: BoxFit.contain,
+              loadingBuilder: (_, child, progress) {
+                if (progress == null) return child;
+                return const Center(child: CircularProgressIndicator(color: Colors.white));
+              },
+              errorBuilder: (_, __, ___) => const Center(
+                child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
               ),
             ),
           ),
