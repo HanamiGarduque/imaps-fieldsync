@@ -46,8 +46,9 @@ dependencies:
   # Maps
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
+  flutter_compass: ^0.8.1
 
-# State management
+  # State management
   provider: ^6.1.2
 
   # Environment variables
@@ -66,11 +67,4 @@ flutter:
     - .env
 
 dependency_overrides:
-  path_provider_foundation: 2.4.2
-
-dependencies:
-  flutter_compass: ^0.8.1
-
-dependencies:
-  flutter_map: ^7.0.2
-  latlong2: ^0.9.1
+  path_provider_foundation: 2.4.2
