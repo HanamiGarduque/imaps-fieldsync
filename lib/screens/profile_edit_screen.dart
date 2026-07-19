@@ -148,7 +148,45 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
   }
 
+  /// Returns an error message if the form is invalid, or null if it's OK
+  /// to submit. Kept separate from _updateProfile so the check runs before
+  /// any network call and the user sees why nothing was saved.
+  String? _validate() {
+    final name = _nameCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
+
+    if (name.isEmpty) return 'Full name cannot be empty.';
+    if (name.length < 2) return 'Full name looks too short.';
+    if (!RegExp(r"^[a-zA-Z\u00C0-\u017F.'\- ]+$").hasMatch(name)) {
+      return 'Full name should only contain letters, spaces, and . - characters.';
+    }
+
+    // Phone is optional, but if the inspector typed something, it should
+    // look like a real PH mobile/landline number (digits, +, -, spaces only,
+    // 7-13 digits) rather than silently saving garbage to the profile row.
+    if (phone.isNotEmpty) {
+      final digitsOnly = phone.replaceAll(RegExp(r'[^0-9]'), '');
+      if (!RegExp(r'^[0-9+\-\s]+$').hasMatch(phone) || digitsOnly.length < 7 || digitsOnly.length > 13) {
+        return 'Enter a valid phone number (e.g. 09171234567).';
+      }
+    }
+
+    return null;
+  }
+
   Future<void> _updateProfile() async {
+    final validationError = _validate();
+    if (validationError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(validationError, style: InsightTheme.inter(13, c: Colors.white)),
+          backgroundColor: const Color(0xFFE23B4E),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {

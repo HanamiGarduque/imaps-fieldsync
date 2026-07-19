@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
+import '../models/dashboard_stats.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
 import 'login_screen.dart'; 
@@ -15,6 +16,7 @@ import 'about_insight_screen.dart';
 import 'quick_unlock_setup_screen.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
+import '../widgets/dashboard_widgets.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -65,44 +67,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _currentNavIndex = 3;
   late UserProfile _currentProfile;
 
-  int _tasksTodayCount = 0;
-  int _completedCount = 0;
+  InspectorDashboardStats _stats = InspectorDashboardStats.empty();
   bool _isLoadingStats = true;
+  bool _hasStatsError = false;
 
   @override
   void initState() {
     super.initState();
     _currentProfile = widget.profile;
+    _refreshProfileFromServer();
     _loadStats();
   }
 
+  /// Safety net: widget.profile is whatever the caller had in memory when
+  /// this screen was pushed, which can be a beat stale (e.g. right after
+  /// login, or if a prior screen held onto an older copy). This re-fetches
+  /// the row that's actually in Supabase right now so the header never
+  /// shows outdated name/role/avatar without needing an app reload.
+  Future<void> _refreshProfileFromServer() async {
+    final fresh = await SupabaseService.fetchMyProfile();
+    if (fresh != null && mounted) {
+      setState(() => _currentProfile = UserProfile.fromMap(fresh));
+    }
+  }
+
   Future<void> _loadStats() async {
+    setState(() {
+      _isLoadingStats = true;
+      _hasStatsError = false;
+    });
     try {
       final jobs = await SupabaseService.fetchMyJobs();
       final tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
-
-      final today = DateTime.now();
-      final dueToday = tasks.where((t) {
-        if (t.scheduledDate.isEmpty) return false;
-        try {
-          final d = DateTime.parse(t.scheduledDate);
-          return d.year == today.year && d.month == today.month && d.day == today.day;
-        } catch (_) {
-          return false;
-        }
-      }).length;
-
-      final completed = tasks.where((t) => t.category == 'Completed').length;
+      final stats = InspectorDashboardStats.fromTasks(tasks);
 
       if (mounted) {
         setState(() {
-          _tasksTodayCount = dueToday;
-          _completedCount = completed;
+          _stats = stats;
           _isLoadingStats = false;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingStats = false);
+      if (mounted) {
+        setState(() {
+          _isLoadingStats = false;
+          _hasStatsError = true;
+        });
+      }
     }
   }
 
@@ -191,10 +202,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SafeArea(
             bottom: false,
             // Removed the redundant Column and Padding header entirely
-            child: ListView(
+            child: RefreshIndicator(
+              color: InsightTheme.blue1,
+              onRefresh: () async {
+                await Future.wait([
+                  _refreshProfileFromServer(),
+                  _loadStats(),
+                ]);
+              },
+              child: ListView(
               // Added slightly more top padding so the card breathes below the status bar
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
-              physics: const BouncingScrollPhysics(),
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
               children: [
                 // 1. IDENTITY CARD
                 Container(
@@ -280,25 +299,92 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 
                 const SizedBox(height: 24),
 
-                // 2. FIELD STATS DASHBOARD
+                // 2. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
                 Row(
                   children: [
                     _buildStatCard(
-                      'Tasks Today',
-                      _isLoadingStats ? '—' : '$_tasksTodayCount',
+                      'Tasks Today / Pending',
+                      _isLoadingStats ? '—' : '${_stats.tasksTodayOrPendingCount}',
                       Icons.assignment_outlined,
                       InsightTheme.amber,
                     ),
                     const SizedBox(width: 16),
                     _buildStatCard(
-                      'Completed',
-                      _isLoadingStats ? '—' : '$_completedCount',
+                      'Completed Inspections',
+                      _isLoadingStats ? '—' : '${_stats.completedCount}',
                       Icons.check_circle_outline_rounded,
                       InsightTheme.green,
                     ),
                   ],
                 ),
-                
+
+                const SizedBox(height: 16),
+
+                // 3. ANALYTICS DASHBOARD GRID
+                if (_hasStatsError)
+                  _dashboardErrorCard()
+                else if (_isLoadingStats)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: Center(child: CircularProgressIndicator(strokeWidth: 2.4)),
+                  )
+                else ...[
+                  // Left: wide gauge card. Right: trend on top, heatmap +
+                  // zoning breakdown stacked below. On narrow phones this
+                  // just stacks vertically since each card is full-width.
+                  _dashboardCard(
+                    child: CompletionGaugeCard(
+                      rate: _stats.completionRate,
+                      totalApplications: _stats.totalAssigned,
+                      activeWorkload: _stats.activeWorkloadCount,
+                      trackColor: InsightTheme.surface2,
+                      fillColor: InsightTheme.blue1,
+                      textColor: InsightTheme.ink,
+                      mutedTextColor: InsightTheme.ink2,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _dashboardCard(
+                    child: WeeklyTrendCard(
+                      points: _stats.weeklyTrend,
+                      barColor: InsightTheme.blue1,
+                      textColor: InsightTheme.ink,
+                      mutedTextColor: InsightTheme.ink2,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: _dashboardCard(
+                          child: ActivityHeatmapCard(
+                            activeDays: _stats.activeDaysThisMonth,
+                            month: _stats.currentMonth,
+                            year: _stats.currentYear,
+                            activeColor: InsightTheme.green,
+                            inactiveColor: InsightTheme.surface2,
+                            textColor: InsightTheme.ink,
+                            mutedTextColor: InsightTheme.ink2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _dashboardCard(
+                          child: ZoningTypeBreakdownCard(
+                            entries: _stats.typeBreakdown,
+                            barColor: InsightTheme.blue1,
+                            trackColor: InsightTheme.surface2,
+                            textColor: InsightTheme.ink,
+                            mutedTextColor: InsightTheme.ink2,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+
                 const SizedBox(height: 24),
 
                 // 3. UNIFIED ACTION CARD
@@ -347,6 +433,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ],
+              ),
             ),
           ),
         ],
@@ -375,6 +462,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
               break;
           }
         },
+      ),
+    );
+  }
+
+  // WIDGET: Dashboard card shell (consistent padding/border/shadow around
+  // each analytics widget so the widgets themselves stay layout-agnostic).
+  Widget _dashboardCard({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: const [
+          BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _dashboardErrorCard() {
+    return _dashboardCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: InsightTheme.coral, size: 18),
+              const SizedBox(width: 8),
+              Text('Couldn\'t load your analytics', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: _loadStats,
+            child: Text('Tap to retry', style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
+          ),
+        ],
       ),
     );
   }
