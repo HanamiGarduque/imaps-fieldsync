@@ -250,7 +250,8 @@ class TasksScreen extends StatefulWidget {
   static const int tabScheduled = 2;
   static const int tabCompleted = 3;
 
-  const TasksScreen({super.key, required this.profile, this.initialTabIndex = tabOngoing});
+  const TasksScreen({super.key, required this.profile, this.initialTabIndex = tabOngoing, this.showBottomNav = true});
+  final bool showBottomNav;
 
   @override
   State<TasksScreen> createState() => _TasksScreenState();
@@ -821,7 +822,7 @@ class _TasksScreenState extends State<TasksScreen> {
                     ),
                   ),
       ),
-      bottomNavigationBar: InsightBottomNav(
+      bottomNavigationBar: !widget.showBottomNav ? null : InsightBottomNav(
         currentIndex: _currentNavIndex,
         items: const [
           InsightNavItem(icon: Icons.home_rounded, label: 'Home'),

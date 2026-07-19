@@ -14,6 +14,7 @@ import '../services/notification_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
 import 'home_dashboard_screen.dart';
+import 'main_shell_screen.dart';
 import 'quick_unlock_screen.dart';
 
 /// ==================================================================
@@ -89,7 +90,7 @@ class _SplashScreenState extends State<SplashScreen> {
           } else {
             // Valid session found, no quick unlock configured — go straight in
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
+              MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
             );
           }
           return;
@@ -352,7 +353,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       await NotificationService.registerCurrentDevice();
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
+        MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
       );
     } on AuthException catch (e) {
       // 2. GRACEFUL FALLBACK — explicit 401/invalid-token/refresh-token-
@@ -431,7 +432,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile)),
+          MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
         );
       } else {
         setState(() {

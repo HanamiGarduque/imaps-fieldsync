@@ -67,7 +67,8 @@ class InsightTheme {
 /// size — nothing is fabricated.
 class UpdatesScreen extends StatefulWidget {
   final UserProfile profile;
-  const UpdatesScreen({super.key, required this.profile});
+  final bool showBottomNav;
+  const UpdatesScreen({super.key, required this.profile, this.showBottomNav = true});
 
   @override
   State<UpdatesScreen> createState() => _UpdatesScreenState();
@@ -538,7 +539,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
       ),
 
       // 4. FLOATING BOTTOM NAVIGATION
-      bottomNavigationBar: InsightBottomNav(
+      bottomNavigationBar: !widget.showBottomNav ? null : InsightBottomNav(
         currentIndex: _currentNavIndex,
         items: const [
           InsightNavItem(icon: Icons.home_rounded, label: 'Home'),

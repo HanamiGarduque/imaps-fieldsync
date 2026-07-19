@@ -54,7 +54,8 @@ class InsightTheme {
 /// ==================================================================
 class ProfileScreen extends StatefulWidget {
   final UserProfile profile;
-  const ProfileScreen({super.key, required this.profile});
+  final bool showBottomNav;
+  const ProfileScreen({super.key, required this.profile, this.showBottomNav = true});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -351,7 +352,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
 
-      bottomNavigationBar: InsightBottomNav(
+      bottomNavigationBar: !widget.showBottomNav ? null : InsightBottomNav(
         currentIndex: _currentNavIndex,
         items: const [
           InsightNavItem(icon: Icons.home_rounded, label: 'Home'),

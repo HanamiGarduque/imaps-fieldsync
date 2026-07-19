@@ -53,7 +53,8 @@ class InsightTheme {
 /// ==================================================================
 class HomeDashboardScreen extends StatefulWidget {
   final UserProfile profile;
-  const HomeDashboardScreen({super.key, required this.profile});
+  final bool showBottomNav;
+  const HomeDashboardScreen({super.key, required this.profile, this.showBottomNav = true});
 
   @override
   State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
@@ -471,7 +472,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       // ----------------------------------------------------
       // 5. FLOATING BOTTOM NAVIGATION 
       // ----------------------------------------------------
-      bottomNavigationBar: InsightBottomNav(
+      bottomNavigationBar: !widget.showBottomNav ? null : InsightBottomNav(
         currentIndex: _currentNavIndex,
         items: const [
           InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
