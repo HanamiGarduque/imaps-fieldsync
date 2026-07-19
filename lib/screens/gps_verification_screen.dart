@@ -76,6 +76,12 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   bool _compassUnavailable = false;
 
   bool get _verified => _distance != null && _distance! <= _rangeThresholdMeters;
+
+  static const _cardinals = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  String get _headingCardinal {
+    if (_heading == null) return '--';
+    return _cardinals[(((_heading! + 11.25) ~/ 22.5) % 16)];
+  }
   String get _bearingLabel {
     if (_bearingToParcel == null) return 'Direction unknown';
     final bearing = _bearingToParcel!;
@@ -188,6 +194,18 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     } finally {
       _recomputing = false;
     }
+  }
+
+  /// Degrees-minutes-seconds display, e.g. 14°12'29"N — matches the
+  /// coordinate readout style under the compass dial.
+  String _formatCoord(double value, String posNegLetters) {
+    final letter = value >= 0 ? posNegLetters[0] : posNegLetters[1];
+    final abs = value.abs();
+    final deg = abs.floor();
+    final minFloat = (abs - deg) * 60;
+    final min = minFloat.floor();
+    final sec = ((minFloat - min) * 60).round();
+    return "$deg°$min'$sec\"$letter";
   }
 
   double _bearingBetween(double lat1, double lon1, double lat2, double lon2) {
@@ -310,19 +328,28 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   SizedBox(
-                                    width: 240, height: 240,
+                                    width: 268, height: 268,
                                     child: Stack(
                                       alignment: Alignment.center,
                                       children: [
-                                        // Ticks rotate opposite the device heading so "up" on screen
-                                        // always means "true north-relative forward" — same trick a
-                                        // real compass rose uses. Duration is short enough to feel
-                                        // live but smooths out jittery magnetometer noise.
+                                        // Soft glow behind the whole dial for depth.
+                                        Container(
+                                          width: 250, height: 250,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            boxShadow: [
+                                              BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.22), blurRadius: 46, spreadRadius: 4),
+                                            ],
+                                          ),
+                                        ),
+                                        // Ticks + cardinal/degree labels rotate opposite the device
+                                        // heading so the dial visually tracks true bearing as the
+                                        // inspector turns — same trick a real compass rose uses.
                                         AnimatedRotation(
                                           turns: _heading != null ? -(_heading! / 360) : 0,
-                                          duration: const Duration(milliseconds: 200),
+                                          duration: const Duration(milliseconds: 180),
                                           curve: Curves.linear,
-                                          child: CustomPaint(size: const Size(240, 240), painter: _DialTicksPainter()),
+                                          child: CustomPaint(size: const Size(250, 250), painter: _CompassRingPainter(verified: _verified)),
                                         ),
                                         // Points toward the parcel relative to where the phone is
                                         // currently facing — only meaningful once we have both a
@@ -330,27 +357,51 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                         if (_heading != null && _bearingToParcel != null)
                                           Transform.rotate(
                                             angle: ((_bearingToParcel! - _heading!) * math.pi / 180.0),
-                                            child: CustomPaint(size: const Size(240, 240), painter: _TargetArrowPainter()),
+                                            child: CustomPaint(size: const Size(250, 250), painter: _TargetArrowPainter(verified: _verified)),
                                           ),
+                                        // Fixed "forward" marker — always up, represents the phone's
+                                        // own facing direction (screen-locked, does not rotate).
                                         Positioned(
-                                          top: 6,
-                                          child: Container(width: 5, height: 16, decoration: BoxDecoration(gradient: LinearGradient(colors: _verified ? [InsightTheme.blue1, InsightTheme.blue2] : const [Color(0xFFE0A526), Color(0xFFB9821A)], begin: Alignment.topCenter, end: Alignment.bottomCenter), borderRadius: BorderRadius.circular(3), boxShadow: [BoxShadow(color: (_verified ? InsightTheme.blue1 : const Color(0xFFE0A526)).withValues(alpha: 0.6), blurRadius: 10)])),
+                                          top: 2,
+                                          child: CustomPaint(size: const Size(18, 14), painter: _ForwardMarkerPainter(verified: _verified)),
                                         ),
+                                        // Center readout — heading cardinal + live degree number.
                                         Container(
-                                          width: 140, height: 140,
-                                          decoration: const BoxDecoration(color: InsightTheme.surface, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x1A141628), blurRadius: 30, offset: Offset(0, 15))]),
+                                          width: 148, height: 148,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: LinearGradient(
+                                              colors: _verified ? const [InsightTheme.blue1, InsightTheme.blue2] : [InsightTheme.blue1.withValues(alpha: 0.85), InsightTheme.blue2],
+                                              begin: Alignment.topLeft, end: Alignment.bottomRight,
+                                            ),
+                                            boxShadow: [BoxShadow(color: InsightTheme.blue2.withValues(alpha: 0.35), blurRadius: 26, offset: const Offset(0, 12))],
+                                            border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
+                                          ),
                                           child: Column(
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
-                                              Text(_distance != null ? '${_distance!.round()}m' : '--', style: InsightTheme.poppins(32, w: FontWeight.w800)),
-                                              Text('from site', style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2)),
+                                              Text(_headingCardinal, style: InsightTheme.poppins(15, w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.9), ls: 1.5)),
+                                              const SizedBox(height: 2),
+                                              Text(_heading != null ? '${_heading!.round()}°' : '--°', style: InsightTheme.poppins(34, w: FontWeight.w800, c: Colors.white)),
+                                              const SizedBox(height: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
+                                                child: Text(_distance != null ? '${_distance!.round()}m from site' : '-- from site', style: InsightTheme.inter(10.5, w: FontWeight.w600, c: Colors.white)),
+                                              ),
                                             ],
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(height: 20),
+                                  const SizedBox(height: 18),
+                                  if (_latitude != null && _longitude != null)
+                                    Text(
+                                      "${_formatCoord(_latitude!, 'NS')}   ${_formatCoord(_longitude!, 'EW')}",
+                                      style: InsightTheme.jetBrains(11.5, w: FontWeight.w600, c: InsightTheme.ink2, ls: 0.4),
+                                    ),
+                                  const SizedBox(height: 8),
                                   if (_bearingToParcel != null) Text(_bearingLabel, style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
                                   const SizedBox(height: 10),
                                   if (_isLive || _heading != null)
@@ -466,48 +517,118 @@ class _ReadoutItem extends StatelessWidget {
   }
 }
 
-class _DialTicksPainter extends CustomPainter {
+/// Full compass rose: gradient ring track, 10°-interval tick marks (30°
+/// major with N/E/S/W letters swapped in at the cardinal points, matching
+/// how physical compass dials read), all rotating live with device heading.
+class _CompassRingPainter extends CustomPainter {
+  final bool verified;
+  _CompassRingPainter({required this.verified});
+
+  static const _cardinalAt = {0: 'N', 90: 'E', 180: 'S', 270: 'W'};
+
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
-    canvas.drawCircle(center, radius - 2, Paint()..color = InsightTheme.lineStrong.withValues(alpha: 0.3)..style = PaintingStyle.stroke..strokeWidth = 1.2);
-    for (int i = 0; i < 40; i++) {
-      if (i == 30) continue;
-      final angle = (i * 2 * math.pi) / 40;
-      final isCard = i % 10 == 0;
-      final tStart = Offset(center.dx + (radius - 14 - (isCard ? 4 : 0)) * math.cos(angle), center.dy + (radius - 14 - (isCard ? 4 : 0)) * math.sin(angle));
-      final tEnd = Offset(center.dx + radius * math.cos(angle), center.dy + radius * math.sin(angle));
-      canvas.drawLine(tStart, tEnd, Paint()..color = InsightTheme.lineStrong.withValues(alpha: 0.4)..strokeWidth = isCard ? 4 : 3..strokeCap = StrokeCap.round);
+    final accent = verified ? InsightTheme.blue1 : const Color(0xFFE0A526);
+
+    // Gradient ring track.
+    final ringPaint = Paint()
+      ..shader = SweepGradient(
+        colors: [accent.withValues(alpha: 0.05), accent.withValues(alpha: 0.35), accent.withValues(alpha: 0.05)],
+        stops: const [0.0, 0.5, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: radius))
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+    canvas.drawCircle(center, radius - 4, ringPaint);
+
+    for (int deg = 0; deg < 360; deg += 10) {
+      final isMajor = deg % 30 == 0;
+      final isCardinal = _cardinalAt.containsKey(deg);
+      final angle = (deg - 90) * math.pi / 180.0; // 0° at top
+      final tickLen = isCardinal ? 16.0 : (isMajor ? 11.0 : 6.0);
+      final outer = Offset(center.dx + (radius - 6) * math.cos(angle), center.dy + (radius - 6) * math.sin(angle));
+      final inner = Offset(center.dx + (radius - 6 - tickLen) * math.cos(angle), center.dy + (radius - 6 - tickLen) * math.sin(angle));
+      canvas.drawLine(
+        inner, outer,
+        Paint()
+          ..color = isCardinal ? accent : InsightTheme.ink3.withValues(alpha: isMajor ? 0.55 : 0.3)
+          ..strokeWidth = isCardinal ? 3 : (isMajor ? 2 : 1.2)
+          ..strokeCap = StrokeCap.round,
+      );
+
+      if (isMajor) {
+        final label = _cardinalAt[deg] ?? '$deg';
+        final labelRadius = radius - 30;
+        final pos = Offset(center.dx + labelRadius * math.cos(angle), center.dy + labelRadius * math.sin(angle));
+        final tp = TextPainter(
+          text: TextSpan(
+            text: label,
+            style: isCardinal
+                ? InsightTheme.poppins(15, w: FontWeight.w800, c: accent)
+                : InsightTheme.jetBrains(10, w: FontWeight.w600, c: InsightTheme.ink3),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, pos - Offset(tp.width / 2, tp.height / 2));
+      }
     }
   }
-  @override bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+
+  @override
+  bool shouldRepaint(covariant _CompassRingPainter oldDelegate) => oldDelegate.verified != verified;
 }
 
-/// Draws a single arrowhead pointing outward from center toward the ring
-/// edge. Rotated by the caller (Transform.rotate) to the parcel's bearing
+/// Screen-locked triangle above the dial — represents the phone's own
+/// forward-facing direction. Doesn't rotate; the ring rotates under it.
+class _ForwardMarkerPainter extends CustomPainter {
+  final bool verified;
+  _ForwardMarkerPainter({required this.verified});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final color = verified ? InsightTheme.blue1 : const Color(0xFFE0A526);
+    final path = Path()
+      ..moveTo(size.width / 2, 0)
+      ..lineTo(0, size.height)
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawShadow(path, Colors.black.withValues(alpha: 0.2), 2, false);
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ForwardMarkerPainter oldDelegate) => oldDelegate.verified != verified;
+}
+
+/// Beacon-style marker pointing outward from center toward the ring edge.
+/// Rotated by the caller (Transform.rotate) to the parcel's bearing
 /// relative to the device's current heading — so it visually says "turn
 /// this way" rather than just reporting a compass-point letter.
 class _TargetArrowPainter extends CustomPainter {
+  final bool verified;
+  _TargetArrowPainter({required this.verified});
+
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
-    final tip = Offset(center.dx, center.dy - (radius - 20));
-    final paint = Paint()
-      ..color = InsightTheme.blueInk
-      ..style = PaintingStyle.fill;
+    final color = verified ? InsightTheme.greenInk : InsightTheme.blueInk;
+    final tip = Offset(center.dx, center.dy - (radius - 16));
+
     final path = Path()
       ..moveTo(tip.dx, tip.dy)
-      ..lineTo(tip.dx - 7, tip.dy + 16)
-      ..lineTo(tip.dx + 7, tip.dy + 16)
+      ..lineTo(tip.dx - 8, tip.dy + 18)
+      ..lineTo(tip.dx, tip.dy + 11)
+      ..lineTo(tip.dx + 8, tip.dy + 18)
       ..close();
-    canvas.drawShadow(path, Colors.black.withValues(alpha: 0.25), 3, false);
-    canvas.drawPath(path, paint);
+    canvas.drawShadow(path, Colors.black.withValues(alpha: 0.25), 4, false);
+    canvas.drawPath(path, Paint()..color = color);
+    canvas.drawCircle(tip.translate(0, 6), 3, Paint()..color = Colors.white.withValues(alpha: 0.9));
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _TargetArrowPainter oldDelegate) => oldDelegate.verified != verified;
 }
 
 class _GlassBackButton extends StatelessWidget {

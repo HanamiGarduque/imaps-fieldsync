@@ -14,6 +14,8 @@ import 'completed_inspection_detail_screen.dart';
 import 'home_dashboard_screen.dart';
 import 'updates_screen.dart';
 import 'profile_screen.dart';
+import '../widgets/insight_bottom_nav.dart';
+import '../widgets/insight_page_transition.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (Strict Enterprise Theme)
@@ -807,66 +809,29 @@ class _TasksScreenState extends State<TasksScreen> {
                     ),
                   ),
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.8)),
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2)),
-                    BoxShadow(color: Color(0x15000000), blurRadius: 24, offset: Offset(0, 12)),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    Expanded(
-                      child: _BottomNavItem(
-                        icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0,
-                        onTap: () {
-                          setState(() => _currentNavIndex = 0);
-                          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile)));
-                        }
-                      ),
-                    ),
-                    Expanded(
-                      child: _BottomNavItem(
-                        icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1,
-                        onTap: () => setState(() => _currentNavIndex = 1)
-                      ),
-                    ),
-                    Expanded(
-                      child: _BottomNavItem(
-                        icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3,
-                        onTap: () {
-                          setState(() => _currentNavIndex = 3);
-                          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)));
-                        }
-                      ),
-                    ),
-                    Expanded(
-                      child: _BottomNavItem(
-                        icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4,
-                        onTap: () {
-                          setState(() => _currentNavIndex = 4);
-                          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)));
-                        }
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
+      bottomNavigationBar: InsightBottomNav(
+        currentIndex: _currentNavIndex,
+        items: const [
+          InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
+          InsightNavItem(icon: Icons.assignment_outlined, label: 'Tasks'),
+          InsightNavItem(icon: Icons.sync_rounded, label: 'Updates'),
+          InsightNavItem(icon: Icons.person_outline_rounded, label: 'Profile'),
+        ],
+        onTap: (i) {
+          if (i == _currentNavIndex) return;
+          setState(() => _currentNavIndex = i);
+          switch (i) {
+            case 0:
+              Navigator.of(context).pushReplacement(insightTabRoute(HomeDashboardScreen(profile: widget.profile)));
+              break;
+            case 2:
+              Navigator.of(context).pushReplacement(insightTabRoute(UpdatesScreen(profile: widget.profile)));
+              break;
+            case 3:
+              Navigator.of(context).pushReplacement(insightTabRoute(ProfileScreen(profile: widget.profile)));
+              break;
+          }
+        },
       ),
     );
   }

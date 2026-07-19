@@ -13,6 +13,8 @@ import '../services/sync_outbox_service.dart';
 import 'home_dashboard_screen.dart';
 import 'tasks_screen.dart';
 import 'profile_screen.dart';
+import '../widgets/insight_bottom_nav.dart';
+import '../widgets/insight_page_transition.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -72,7 +74,7 @@ class UpdatesScreen extends StatefulWidget {
 }
 
 class _UpdatesScreenState extends State<UpdatesScreen> {
-  final int _currentNavIndex = 3;
+  final int _currentNavIndex = 2;
 
   bool _loading = true;
   bool _isOnline = true;
@@ -536,49 +538,28 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
       ),
 
       // 4. FLOATING BOTTOM NAVIGATION
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)),
-                    BoxShadow(color: Color(0x1A000000), blurRadius: 24, offset: Offset(0, 12)),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _BottomNavItem(
-                      icon: Icons.home_rounded, label: 'Home', isActive: _currentNavIndex == 0,
-                      onTap: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: widget.profile))),
-                    ),
-                    _BottomNavItem(
-                      icon: Icons.assignment_outlined, label: 'Tasks', isActive: _currentNavIndex == 1,
-                      onTap: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile))),
-                    ),
-                    _BottomNavItem(
-                      icon: Icons.sync_rounded, label: 'Updates', isActive: _currentNavIndex == 3,
-                      onTap: () {},
-                    ),
-                    _BottomNavItem(
-                      icon: Icons.person_outline_rounded, label: 'Profile', isActive: _currentNavIndex == 4,
-                      onTap: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile))),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
+      bottomNavigationBar: InsightBottomNav(
+        currentIndex: _currentNavIndex,
+        items: const [
+          InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
+          InsightNavItem(icon: Icons.assignment_outlined, label: 'Tasks'),
+          InsightNavItem(icon: Icons.sync_rounded, label: 'Updates'),
+          InsightNavItem(icon: Icons.person_outline_rounded, label: 'Profile'),
+        ],
+        onTap: (i) {
+          if (i == _currentNavIndex) return;
+          switch (i) {
+            case 0:
+              Navigator.of(context).pushReplacement(insightTabRoute(HomeDashboardScreen(profile: widget.profile)));
+              break;
+            case 1:
+              Navigator.of(context).pushReplacement(insightTabRoute(TasksScreen(profile: widget.profile)));
+              break;
+            case 3:
+              Navigator.of(context).pushReplacement(insightTabRoute(ProfileScreen(profile: widget.profile)));
+              break;
+          }
+        },
       ),
     );
   }
