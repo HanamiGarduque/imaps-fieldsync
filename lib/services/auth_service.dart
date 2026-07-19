@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
 import 'supabase_service.dart';
@@ -20,6 +21,22 @@ class AuthService {
   }
 
   static bool get isLoggedIn => _client.auth.currentUser != null; //[cite: 2]
+
+  /// Tries to refresh the current session using the stored refresh token.
+  /// A session can look "expired" simply because the access token's 1hr
+  /// lifetime passed while the app was closed — that's still recoverable
+  /// as long as the refresh token itself hasn't been revoked. Returns
+  /// true only on a genuine successful refresh.
+  static Future<bool> tryRefreshSession() async {
+    try {
+      if (_client.auth.currentSession == null) return false;
+      final res = await _client.auth.refreshSession();
+      return res.session != null;
+    } catch (e) {
+      debugPrint('[AUTH] Session refresh failed: $e');
+      return false;
+    }
+  }
 
   // Debug-only: prints in _checkSession() to reveal exactly why stay-signed-in
   // does or doesn't work on a given device. Remove once confirmed working.

@@ -418,8 +418,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _QuickActionBtn(icon: Icons.play_arrow_rounded, label: 'Inspect', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile)))),
-                    _QuickActionBtn(icon: Icons.calendar_month_rounded, label: 'Schedule', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile)))),
+                    _QuickActionBtn(icon: Icons.play_arrow_rounded, label: 'Inspect', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabPending)))),
+                    _QuickActionBtn(icon: Icons.calendar_month_rounded, label: 'Schedule', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabScheduled)))),
                     _QuickActionBtn(icon: Icons.cloud_sync_rounded, label: 'Sync', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)))),
                     _QuickActionBtn(icon: Icons.badge_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)))),
                   ],
@@ -456,6 +456,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                     title: _recentActivity[i]['title'] as String? ?? 'Update',
                                     subtitle: _recentActivity[i]['subtitle'] as String? ?? '',
                                     time: _timeAgo(_recentActivity[i]['occurred_at'] as String?),
+                                    occurredAtIso: _recentActivity[i]['occurred_at'] as String?,
                                   );
                                 }),
                               ),
@@ -676,16 +677,39 @@ class _QuickActionBtn extends StatelessWidget {
   }
 }
 
-class _TimelineActivityTile extends StatelessWidget {
+class _TimelineActivityTile extends StatefulWidget {
   final IconData icon;
   final Color color;
   final String title;
   final String subtitle;
   final String time;
+  final String? occurredAtIso;
 
   const _TimelineActivityTile({
     required this.icon, required this.color, required this.title, required this.subtitle, required this.time,
+    this.occurredAtIso,
   });
+
+  @override
+  State<_TimelineActivityTile> createState() => _TimelineActivityTileState();
+}
+
+class _TimelineActivityTileState extends State<_TimelineActivityTile> {
+  bool _expanded = false;
+
+  String get _exactTimestamp {
+    final iso = widget.occurredAtIso;
+    if (iso == null) return '';
+    try {
+      final d = DateTime.parse(iso).toLocal();
+      final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
+      final period = d.hour < 12 ? 'AM' : 'PM';
+      final minute = d.minute.toString().padLeft(2, '0');
+      return '${_HomeDashboardScreenState._monthNames[d.month - 1]} ${d.day}, ${d.year} · $hour12:$minute $period';
+    } catch (_) {
+      return '';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -703,40 +727,66 @@ class _TimelineActivityTile extends StatelessWidget {
             child: Container(
               width: 28, height: 28, 
               decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: widget.color.withOpacity(0.12),
                 shape: BoxShape.circle,
-                border: Border.all(color: color.withOpacity(0.3), width: 1.5),
+                border: Border.all(color: widget.color.withOpacity(0.3), width: 1.5),
               ),
-              child: Icon(icon, size: 14, color: color), 
+              child: Icon(widget.icon, size: 14, color: widget.color), 
             ),
           ),
           const SizedBox(width: 12),
           
-          // Activity Card Content
+          // Activity Card Content — tappable, animates open/closed
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), 
-              decoration: BoxDecoration(
-                color: InsightTheme.surface,
-                borderRadius: BorderRadius.circular(12), 
-                border: Border.all(color: InsightTheme.line, width: 1.5),
-                boxShadow: const [BoxShadow(color: Color(0x05000000), blurRadius: 8, offset: Offset(0, 2))],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: InsightTheme.line, width: 1.5),
+                  boxShadow: _expanded
+                      ? [const BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, 6))]
+                      : const [BoxShadow(color: Color(0x05000000), blurRadius: 8, offset: Offset(0, 2))],
+                ),
+                child: AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Expanded(
-                        child: Text(title, style: InsightTheme.poppins(12, w: FontWeight.w600, c: InsightTheme.ink), maxLines: 1, overflow: TextOverflow.ellipsis), 
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(widget.title, style: InsightTheme.poppins(12, w: FontWeight.w600, c: InsightTheme.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ),
+                          Text(widget.time, style: InsightTheme.jetBrains(10, w: FontWeight.w600, c: InsightTheme.ink3)),
+                        ],
                       ),
-                      Text(time, style: InsightTheme.jetBrains(10, w: FontWeight.w600, c: InsightTheme.ink3)),
+                      const SizedBox(height: 2),
+                      Text(widget.subtitle, style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink2)),
+                      if (_expanded && _exactTimestamp.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Container(height: 1, color: InsightTheme.line),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(Icons.schedule_rounded, size: 12, color: InsightTheme.ink3),
+                            const SizedBox(width: 6),
+                            Text(_exactTimestamp, style: InsightTheme.jetBrains(10.5, w: FontWeight.w500, c: InsightTheme.ink2)),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink2)), 
-                ],
+                ),
               ),
             ),
           ),

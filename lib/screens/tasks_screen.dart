@@ -239,7 +239,18 @@ class TaskItem {
 /// ==================================================================
 class TasksScreen extends StatefulWidget {
   final UserProfile profile;
-  const TasksScreen({super.key, required this.profile});
+
+  /// Which segment tab to land on when this screen mounts.
+  /// Use the `TasksScreen.tab*` constants instead of raw ints so
+  /// callers stay readable and in sync with `_tabOrder`.
+  final int initialTabIndex;
+
+  static const int tabPending = 0;
+  static const int tabOngoing = 1;
+  static const int tabScheduled = 2;
+  static const int tabCompleted = 3;
+
+  const TasksScreen({super.key, required this.profile, this.initialTabIndex = tabOngoing});
 
   @override
   State<TasksScreen> createState() => _TasksScreenState();
@@ -247,7 +258,7 @@ class TasksScreen extends StatefulWidget {
 
 class _TasksScreenState extends State<TasksScreen> {
   int _currentNavIndex = 1; 
-  int _currentTabIndex = 1; 
+  late int _currentTabIndex;
 
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -263,6 +274,7 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   void initState() {
     super.initState();
+    _currentTabIndex = widget.initialTabIndex;
     _loadTasks();
     _searchController.addListener(() {
       setState(() {

@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:ui'; 
+import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,8 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
+import '../services/biometric_service.dart';
 import '../services/notification_service.dart';
 import '../services/quick_unlock_service.dart';
+import '../widgets/pattern_lock_pad.dart';
 import 'home_dashboard_screen.dart';
 import 'quick_unlock_screen.dart';
 
@@ -221,6 +224,11 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _staySignedIn = false;
   String? _errorMessage;
 
+  bool _quickUnlockAvailable = false;
+  bool _bioEnabled = false;
+  bool _patEnabled = false;
+  String _bioLabel = 'Fingerprint';
+
   @override
   void initState() {
     super.initState();
@@ -230,12 +238,103 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _loadSavedEmail() async {
     final prefs = await SharedPreferences.getInstance();
     final savedEmail = prefs.getString('saved_email');
+    debugPrint('[QUICK_UNLOCK] saved_email: $savedEmail');
+    debugPrint('[QUICK_UNLOCK] isLoggedIn: ${AuthService.isLoggedIn}');
+    debugPrint('[QUICK_UNLOCK] currentUser: ${AuthService.currentUserDebug}');
+    debugPrint('[QUICK_UNLOCK] session expiry: ${AuthService.sessionExpiryDebug}');
     if (savedEmail != null && mounted) {
       setState(() {
         _emailController.text = savedEmail;
         _staySignedIn = prefs.getBool('stay_signed_in') ?? false;
       });
+      await _checkQuickUnlock(savedEmail);
     }
+  }
+
+  // Quick unlock only ever shows up here for the account it was set up
+  // for on this device — never as a way to register a new one.
+  Future<void> _checkQuickUnlock(String email) async {
+    final boundEmail = await QuickUnlockService.boundEmail();
+    if (boundEmail != email) return;
+    // The manual login form is only ever reached when Splash's own
+    // session check already failed (or "stay signed in" was off) — so
+    // if there's no live Supabase session right now, quick unlock is
+    // guaranteed to fail with "session expired" no matter what. Showing
+    // the button anyway was the actual bug users were hitting.
+    if (!AuthService.isLoggedIn) {
+      if (mounted) setState(() => _quickUnlockAvailable = false);
+      return;
+    }
+    final bio = await QuickUnlockService.isBiometricEnabled();
+    final pat = await QuickUnlockService.isPatternEnabled();
+    final label = bio ? await BiometricService.primaryBiometricLabel() : 'Fingerprint';
+    if (!mounted) return;
+    setState(() {
+      _bioEnabled = bio;
+      _patEnabled = pat;
+      _bioLabel = label;
+      _quickUnlockAvailable = bio || pat;
+    });
+  }
+
+  Future<void> _handleQuickUnlock() async {
+    setState(() => _errorMessage = null);
+
+    bool verified = false;
+    if (_bioEnabled) {
+      verified = await BiometricService.authenticate(reason: 'Unlock InSight');
+    }
+    if (!verified && _patEnabled && mounted) {
+      verified = await _showPatternSheet();
+    }
+    if (!verified || !mounted) return;
+
+    setState(() => _isLoading = true);
+    try {
+      // Locally verified — now confirm the cached Supabase session (from a
+      // prior "stay signed in") is still valid. Quick unlock never issues
+      // a session by itself, it only gates the one already there.
+      var profile = await AuthService.getCurrentProfile();
+      if (profile == null) {
+        // The access token's ~1hr lifetime may have simply passed while
+        // the app was closed — that's still recoverable via the refresh
+        // token, not a genuine expiry. Try once before giving up.
+        final refreshed = await AuthService.tryRefreshSession();
+        if (refreshed) profile = await AuthService.getCurrentProfile();
+      }
+      if (!mounted) return;
+      if (profile == null) {
+        // Genuinely dead session — clear quick unlock so this button
+        // stops reappearing and guaranteeing the same failure next time.
+        await QuickUnlockService.clearAll();
+        setState(() {
+          _quickUnlockAvailable = false;
+          _errorMessage = 'Your session expired. Please sign in with email & passcode.';
+        });
+        return;
+      }
+      await NotificationService.registerCurrentDevice();
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => HomeDashboardScreen(profile: profile!)),
+      );
+    } catch (e) {
+      debugPrint('QUICK UNLOCK ERROR: $e');
+      if (mounted) {
+        setState(() => _errorMessage = 'Your session expired. Please sign in with email & passcode.');
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<bool> _showPatternSheet() async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _PatternVerifySheet(),
+    );
+    return result ?? false;
   }
 
   Future<void> _handleLogin() async {
@@ -494,6 +593,21 @@ class _LoginScreenState extends State<LoginScreen> {
                             icon: Icons.lock_outline,
                             obscureText: _obscurePassword,
                             isPassword: true,
+                            extraSuffix: _quickUnlockAvailable
+                                ? IconButton(
+                                    icon: Icon(
+                                      _bioEnabled ? Icons.fingerprint : Icons.pattern,
+                                      color: AppColors.blue1,
+                                      size: 20,
+                                    ),
+                                    tooltip: _bioEnabled && _patEnabled
+                                        ? 'Unlock with $_bioLabel or pattern'
+                                        : _bioEnabled
+                                            ? 'Unlock with $_bioLabel'
+                                            : 'Unlock with pattern',
+                                    onPressed: _isLoading ? null : _handleQuickUnlock,
+                                  )
+                                : null,
                           ),
                         ],
                       ),
@@ -619,6 +733,7 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData icon,
     required bool obscureText,
     bool isPassword = false,
+    Widget? extraSuffix,
   }) {
     return TextFormField(
       controller: controller,
@@ -633,15 +748,22 @@ class _LoginScreenState extends State<LoginScreen> {
         fillColor: AppColors.bg.withValues(alpha: 0.6),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         prefixIcon: Icon(icon, color: AppColors.ink3, size: 18),
-        suffixIcon: isPassword 
-          ? IconButton(
-              icon: Icon(
-                obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                color: AppColors.ink3,
-                size: 18,
-              ),
-              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-            ) 
+        suffixIcon: (isPassword || extraSuffix != null)
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (extraSuffix != null) extraSuffix,
+                if (isPassword)
+                  IconButton(
+                    icon: Icon(
+                      obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      color: AppColors.ink3,
+                      size: 18,
+                    ),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+              ],
+            )
           : null,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -749,6 +871,84 @@ class _ExactLogoSVG extends StatelessWidget {
               color: color,
               shape: BoxShape.circle,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+/// ------------------------------------------------------------------
+/// PATTERN VERIFY SHEET — used by the Login page's "Unlock with
+/// pattern" shortcut. Verify-only: one attempt at a time against the
+/// pattern hash already stored on this device, nothing is registered
+/// or changed here.
+/// ------------------------------------------------------------------
+class _PatternVerifySheet extends StatefulWidget {
+  const _PatternVerifySheet();
+
+  @override
+  State<_PatternVerifySheet> createState() => _PatternVerifySheetState();
+}
+
+class _PatternVerifySheetState extends State<_PatternVerifySheet> {
+  bool _error = false;
+  bool _checking = false;
+
+  Future<void> _onPattern(List<int> pattern) async {
+    setState(() => _checking = true);
+    final ok = await QuickUnlockService.verifyPattern(pattern);
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop(true);
+      return;
+    }
+    setState(() {
+      _checking = false;
+      _error = true;
+    });
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _error = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        left: 28,
+        right: 28,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+      ),
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(color: AppColors.lineStrong, borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            _error ? 'Wrong pattern, try again' : 'Draw your pattern',
+            style: AppText.inter(14, w: FontWeight.w700, c: _error ? const Color(0xFFE23B4E) : AppColors.ink),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: 220,
+            height: 220,
+            child: _checking
+                ? const Center(child: CircularProgressIndicator())
+                : PatternLockPad(onComplete: _onPattern, showError: _error),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: AppText.inter(13, w: FontWeight.w600, c: AppColors.ink2)),
           ),
         ],
       ),
