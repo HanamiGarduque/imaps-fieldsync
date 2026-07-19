@@ -67,4 +67,6 @@ flutter:
     - .env
 
 dependency_overrides:
-  path_provider_foundation: 2.4.2
+  path_provider_foundation: 2.4.2
+
+app_links: ^6.0.0.

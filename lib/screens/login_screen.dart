@@ -67,9 +67,13 @@ class _SplashScreenState extends State<SplashScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final staySignedIn = prefs.getBool('stay_signed_in') ?? false;
+      debugPrint('[STAY_SIGNED_IN] pref value: $staySignedIn');
+      debugPrint('[STAY_SIGNED_IN] currentUser: ${AuthService.currentUserDebug}');
+      debugPrint('[STAY_SIGNED_IN] session expiry: ${AuthService.sessionExpiryDebug}');
 
       if (staySignedIn) {
         final profile = await AuthService.getCurrentProfile();
+        debugPrint('[STAY_SIGNED_IN] profile fetch result: ${profile?.fullName ?? "NULL"}');
         if (profile != null && mounted) {
           // Valid session found, bypass login
           Navigator.of(context).pushReplacement(
@@ -83,8 +87,9 @@ class _SplashScreenState extends State<SplashScreen> {
           await AuthService.signOut();
         }
       }
-    } catch (e) {
-      debugPrint('Session verification failed: $e');
+    } catch (e, st) {
+      debugPrint('[STAY_SIGNED_IN] Session verification failed: $e');
+      debugPrint('[STAY_SIGNED_IN] Stack: $st');
     }
 
     // If no valid session or user opted out of stay signed in, route to Login
@@ -253,7 +258,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       } else {
         setState(() {
-          _errorMessage = 'Login succeeded, but no profile found. Contact Administrator.';
+          _errorMessage = 'Login succeeded, but no profile found. Contact your MPDO office administrator.';
         });
       }
     } catch (e) {
@@ -313,18 +318,24 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _contactAdministrator() async {
-    const adminEmail = 'admin@mpdo-rosario.gov.ph';
-    final String subject = Uri.encodeComponent('Passcode Reset Request');
-    final String body = Uri.encodeComponent('Please assist with resetting my passcode.');
-    
-    final Uri emailLaunchUri = Uri.parse('mailto:$adminEmail?subject=$subject&body=$body');
+    // No admin exists inside this app — account management happens on the
+    // intranet (MPDO web portal). This just opens an email to the office,
+    // it is NOT an in-app admin action.
+    const officeEmail = 'mpdo@rosario.gov.ph';
+    final String subject = Uri.encodeComponent('Passcode Reset Request — FieldSync');
+    final String body = Uri.encodeComponent(
+      'Hi MPDO,\n\nI am unable to reset my FieldSync passcode using the automated '
+      'email link. Please assist.\n\nInspector email: ${_emailController.text.trim()}',
+    );
+
+    final Uri emailLaunchUri = Uri.parse('mailto:$officeEmail?subject=$subject&body=$body');
 
     try {
       final bool launched = await launchUrl(emailLaunchUri);
       if (!launched) throw Exception('No default mail client found.');
     } catch (e) {
       debugPrint('Could not launch email client: $e');
-      await Clipboard.setData(const ClipboardData(text: adminEmail));
+      await Clipboard.setData(const ClipboardData(text: officeEmail));
       
       if (mounted) {
         setState(() => _errorMessage = null);
