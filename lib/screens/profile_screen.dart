@@ -15,6 +15,7 @@ import 'updates_screen.dart';
 import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
 import 'quick_unlock_setup_screen.dart';
+import 'terms_privacy_screen.dart'; // Restored import for Terms & Privacy
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/dashboard_widgets.dart';
@@ -388,7 +389,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 24),
 
-                // 3. UNIFIED ACTION CARD
+                // 4. UNIFIED ACTION CARD
                 Container(
                   decoration: BoxDecoration(
                     color: InsightTheme.surface,
@@ -412,6 +413,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         },
                       ),
                       const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+                      
+                      // RESTORED: Terms and Privacy Policy Action Tile
+                      _ActionTile(
+                        icon: Icons.shield_outlined,
+                        title: 'Privacy Policy',
+                        subtitle: 'Legal information & policies',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const TermsPrivacyScreen()),
+                          );
+                        },
+                      ),
+                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+                      
                       if (kQuickUnlockEnabled) ...[
                         _ActionTile(
                           icon: Icons.fingerprint,
@@ -426,6 +442,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
                       ],
+
                       _ActionTile(
                         icon: Icons.logout_rounded,
                         title: 'Sign out',
