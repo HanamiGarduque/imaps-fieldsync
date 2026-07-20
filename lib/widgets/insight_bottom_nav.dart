@@ -10,6 +10,12 @@ import 'package:google_fonts/google_fonts.dart';
 /// duplicated _BottomNavItem (icon + label always stacked underneath).
 /// ==================================================================
 
+/// Bottom scroll-padding reserve so list content isn't hidden behind the
+/// floating pill bottom nav (nav vertical padding + pill height + a
+/// small buffer). Used by scrollable tab screens as
+/// `padding: EdgeInsets.only(bottom: kInsightBottomNavReserve)`.
+const double kInsightBottomNavReserve = 100.0;
+
 class InsightNavItem {
   final IconData icon;
   final String label;

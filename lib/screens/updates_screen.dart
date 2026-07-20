@@ -15,6 +15,8 @@ import 'tasks_screen.dart';
 import 'profile_screen.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
+import '../widgets/motion/spring_entrance.dart';
+import '../widgets/motion/updating_tile.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -74,7 +76,7 @@ class UpdatesScreen extends StatefulWidget {
   State<UpdatesScreen> createState() => _UpdatesScreenState();
 }
 
-class _UpdatesScreenState extends State<UpdatesScreen> {
+class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateMixin, SpringEntrance {
   final int _currentNavIndex = 2;
 
   bool _loading = true;
@@ -113,6 +115,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
   void dispose() {
     _pollTimer?.cancel();
     _connSub?.cancel();
+    disposeSpringEntrance();
     super.dispose();
   }
 
@@ -305,7 +308,10 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // 1. TOP UTILITY HEADER
-                        Padding(
+                        SpringSlide(
+                          animation: springFor(0),
+                          beginOffset: const Offset(0, -28),
+                          child: Padding(
                           padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -353,12 +359,16 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                             ],
                           ),
                         ),
+                        ),
 
                         const SizedBox(height: 24),
 
                         // 2. STATUS CARD — real pending state
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: SpringScale(
+                          animation: springFor(1),
+                          beginScale: 0.92,
                           child: Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
@@ -396,7 +406,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                                   children: [
                                     Expanded(
                                       child: _MetricItem(
-                                        label: 'GPS WAITING', value: '$_gpsWaiting',
+                                        label: 'GPS WAITING', value: '$_gpsWaiting', numericValue: _gpsWaiting,
                                         labelColor: Colors.white.withValues(alpha: 0.5),
                                       ),
                                     ),
@@ -405,7 +415,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                                       child: Padding(
                                         padding: const EdgeInsets.only(left: 16),
                                         child: _MetricItem(
-                                          label: 'PHOTOS WAITING', value: '$_photosWaiting',
+                                          label: 'PHOTOS WAITING', value: '$_photosWaiting', numericValue: _photosWaiting,
                                           labelColor: Colors.white.withValues(alpha: 0.5),
                                         ),
                                       ),
@@ -427,7 +437,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                                   children: [
                                     Expanded(
                                       child: _MetricItem(
-                                        label: 'CHECKLIST UPDATES', value: '$_checklistWaiting',
+                                        label: 'CHECKLIST UPDATES', value: '$_checklistWaiting', numericValue: _checklistWaiting,
                                         labelColor: Colors.white.withValues(alpha: 0.5),
                                       ),
                                     ),
@@ -447,6 +457,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                               ],
                             ),
                           ),
+                          ),
                         ),
 
                         const SizedBox(height: 32),
@@ -454,7 +465,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                         // 3. REAL DATA LOG
                         Expanded(
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 140),
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, kInsightBottomNavReserve),
                             physics: const AlwaysScrollableScrollPhysics(),
                             children: [
                               if (hasPending) ...[
@@ -466,18 +477,30 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 12),
-                                ..._pendingRows.map((row) => Padding(
+                                ..._pendingRows.asMap().entries.map((entry) {
+                                  final i = entry.key;
+                                  final row = entry.value;
+                                  return SpringSlide(
+                                    animation: springForKey('pending-${row['id']}', 2 + (i % 8)),
+                                    beginOffset: const Offset(0, 24),
+                                    child: Padding(
                                       padding: const EdgeInsets.only(bottom: 10),
-                                      child: _LogDataRow(
-                                        icon: _iconFor(row['type'] as String),
-                                        title: _jobLabel(row['job_id'] as String),
-                                        dataType: _typeLabel(row),
-                                        dataSize: _dataSizeFor(row),
-                                        statusText: _statusTextFor(row),
-                                        isPending: true,
-                                        isFailed: row['status'] == 'failed',
+                                      child: UpdatingTile(
+                                        itemKey: row['id'] ?? i,
+                                        signature: Object.hash(row['status'], row['type']),
+                                        child: _LogDataRow(
+                                          icon: _iconFor(row['type'] as String),
+                                          title: _jobLabel(row['job_id'] as String),
+                                          dataType: _typeLabel(row),
+                                          dataSize: _dataSizeFor(row),
+                                          statusText: _statusTextFor(row),
+                                          isPending: true,
+                                          isFailed: row['status'] == 'failed',
+                                        ),
                                       ),
-                                    )),
+                                    ),
+                                  );
+                                }),
                                 const SizedBox(height: 18),
                               ],
 
@@ -514,13 +537,21 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
                                   child: Column(
                                     children: [
                                       for (int i = 0; i < _syncedRows.length; i++) ...[
-                                        _LogDataRow(
-                                          icon: _iconFor(_syncedRows[i]['type'] as String),
-                                          title: _jobLabel(_syncedRows[i]['job_id'] as String),
-                                          dataType: _typeLabel(_syncedRows[i]),
-                                          dataSize: _dataSizeFor(_syncedRows[i]),
-                                          statusText: _relativeTime(DateTime.tryParse(_syncedRows[i]['updated_at'] as String? ?? '')),
-                                          isPending: false,
+                                        SpringSlide(
+                                          animation: springForKey('synced-${_syncedRows[i]['id']}', 10 + (i % 8)),
+                                          beginOffset: const Offset(0, 22),
+                                          child: UpdatingTile(
+                                            itemKey: _syncedRows[i]['id'] ?? i,
+                                            signature: Object.hash(_syncedRows[i]['updated_at'], _syncedRows[i]['status']),
+                                            child: _LogDataRow(
+                                              icon: _iconFor(_syncedRows[i]['type'] as String),
+                                              title: _jobLabel(_syncedRows[i]['job_id'] as String),
+                                              dataType: _typeLabel(_syncedRows[i]),
+                                              dataSize: _dataSizeFor(_syncedRows[i]),
+                                              statusText: _relativeTime(DateTime.tryParse(_syncedRows[i]['updated_at'] as String? ?? '')),
+                                              isPending: false,
+                                            ),
+                                          ),
                                         ),
                                         if (i != _syncedRows.length - 1)
                                           const Divider(height: 1, color: InsightTheme.line, indent: 56),
@@ -573,19 +604,23 @@ class _UpdatesScreenState extends State<UpdatesScreen> {
 class _MetricItem extends StatelessWidget {
   final String label;
   final String value;
+  final num? numericValue;
   final Color? valueColor;
   final Color labelColor;
 
-  const _MetricItem({required this.label, required this.value, this.valueColor, required this.labelColor});
+  const _MetricItem({required this.label, required this.value, this.numericValue, this.valueColor, required this.labelColor});
 
   @override
   Widget build(BuildContext context) {
+    final valueStyle = InsightTheme.poppins(14, w: FontWeight.w700, c: valueColor ?? Colors.white);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: InsightTheme.jetBrains(8.5, c: labelColor, ls: 0.3)),
         const SizedBox(height: 4),
-        Text(value, style: InsightTheme.poppins(14, w: FontWeight.w700, c: valueColor ?? Colors.white)),
+        numericValue != null
+            ? CountUpText(value: numericValue!, style: valueStyle)
+            : Text(value, style: valueStyle),
       ],
     );
   }

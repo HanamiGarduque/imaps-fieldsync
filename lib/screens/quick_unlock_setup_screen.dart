@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/biometric_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
 
@@ -29,9 +28,6 @@ class QuickUnlockSetupScreen extends StatefulWidget {
 
 class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
   bool _loading = true;
-  bool _biometricAvailable = false;
-  String _biometricLabel = 'Biometric';
-  bool _biometricEnabled = false;
   bool _patternEnabled = false;
 
   @override
@@ -41,15 +37,9 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
   }
 
   Future<void> _load() async {
-    final available = await BiometricService.isAvailable();
-    final label = available ? await BiometricService.primaryBiometricLabel() : 'Biometric';
-    final bioEnabled = await QuickUnlockService.isBiometricEnabled();
     final patEnabled = await QuickUnlockService.isPatternEnabled();
     if (!mounted) return;
     setState(() {
-      _biometricAvailable = available;
-      _biometricLabel = label;
-      _biometricEnabled = bioEnabled;
       _patternEnabled = patEnabled;
       _loading = false;
     });
@@ -58,28 +48,12 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
   /// Quick unlock only ever runs from SplashScreen's "stay signed in" gate —
   /// if that pref is false, SplashScreen force-signs-out and wipes this
   /// exact config on the very next app launch, before the inspector ever
-  /// sees the prompt. Enabling biometric/pattern here is an explicit
-  /// signal the inspector wants to stay signed in on this device, so we
-  /// set it alongside — this was the actual reason the biometric icon
-  /// never appeared at Login even after being turned on here.
+  /// sees the prompt. Enabling pattern unlock here is an explicit signal
+  /// the inspector wants to stay signed in on this device, so we set it
+  /// alongside.
   Future<void> _ensureStaySignedIn() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('stay_signed_in', true);
-  }
-
-  Future<void> _toggleBiometric(bool value) async {
-    if (value) {
-      final ok = await BiometricService.authenticate(
-        reason: 'Confirm your $_biometricLabel to enable quick unlock',
-      );
-      if (!ok) return;
-      await QuickUnlockService.setBiometricEnabled(true, email: widget.userEmail);
-      await _ensureStaySignedIn();
-    } else {
-      await QuickUnlockService.disableBiometric();
-    }
-    setState(() => _biometricEnabled = value);
-    _showSnack(value ? '$_biometricLabel unlock enabled' : '$_biometricLabel unlock turned off');
   }
 
   Future<void> _setupPattern() async {
@@ -134,23 +108,6 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
                 const SizedBox(height: 20),
 
                 _card([
-                  _switchTile(
-                    icon: _biometricLabel == 'Face'
-                        ? Icons.face_retouching_natural
-                        : Icons.fingerprint,
-                    title: _biometricAvailable ? '$_biometricLabel Unlock' : 'Biometric Unlock',
-                    subtitle: _biometricAvailable
-                        ? 'Use your device\'s $_biometricLabel sensor'
-                        : 'Not available on this device (no fingerprint/face enrolled)',
-                    value: _biometricEnabled,
-                    enabled: _biometricAvailable,
-                    onChanged: _toggleBiometric,
-                  ),
-                ]),
-
-                const SizedBox(height: 14),
-
-                _card([
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: const Icon(Icons.pattern, color: _Colors.blue1),
@@ -190,7 +147,7 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'You can enable both — InSight will ask for whichever is on when you open the app. Your email + passcode always still works as a fallback.',
+                        'Your email + passcode always still works as a fallback, even with pattern unlock turned on.',
                         style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink3, height: 1.5),
                       ),
                     ),
@@ -212,24 +169,6 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
     );
   }
 
-  Widget _switchTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required bool enabled,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return SwitchListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      secondary: Icon(icon, color: enabled ? _Colors.blue1 : _Colors.ink3),
-      title: Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: enabled ? _Colors.ink : _Colors.ink3)),
-      subtitle: Text(subtitle, style: GoogleFonts.inter(fontSize: 12, color: _Colors.ink2)),
-      value: value,
-      activeColor: _Colors.blue1,
-      onChanged: enabled ? onChanged : null,
-    );
-  }
 }
 
 /// Draw-twice-to-confirm flow, pushed as its own route so it can be

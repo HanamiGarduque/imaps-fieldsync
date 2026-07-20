@@ -15,6 +15,8 @@ import 'updates_screen.dart';
 import 'profile_edit_screen.dart'; 
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
+import '../widgets/motion/spring_entrance.dart';
+import '../widgets/motion/updating_tile.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS 
@@ -60,7 +62,8 @@ class HomeDashboardScreen extends StatefulWidget {
   State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
 }
 
-class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
+class _HomeDashboardScreenState extends State<HomeDashboardScreen>
+    with TickerProviderStateMixin, SpringEntrance {
   int _currentNavIndex = 0;
 
   late PageController _pageController;
@@ -97,6 +100,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   void dispose() {
     _pageController.dispose();
     _connectivitySubscription.cancel();
+    disposeSpringEntrance();
     super.dispose();
   }
 
@@ -241,14 +245,17 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
       body: SafeArea(
         bottom: false,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.only(top: 12, bottom: 200),
+          padding: const EdgeInsets.only(top: 12, bottom: kInsightBottomNavReserve),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ----------------------------------------------------
               // 1. TOP BAR
               // ----------------------------------------------------
-              Padding(
+              SpringSlide(
+                animation: springFor(0),
+                beginOffset: const Offset(0, -32),
+                child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
@@ -314,6 +321,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   ],
                 ),
               ),
+              ),
               const SizedBox(height: 36), 
 
               // ----------------------------------------------------
@@ -321,17 +329,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               // ----------------------------------------------------
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _SectionLabel(
-                  title: "ACTIVE ASSIGNMENTS",
-                  trailing: GestureDetector(
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile))),
-                    child: Text('See All', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.blue1)),
+                child: SpringSlide(
+                  animation: springFor(1),
+                  beginOffset: const Offset(0, 20),
+                  child: _SectionLabel(
+                    title: "ACTIVE ASSIGNMENTS",
+                    trailing: GestureDetector(
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile))),
+                      child: Text('See All', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.blue1)),
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 16),
               
-              SizedBox(
+              SpringSlide(
+                animation: springFor(2),
+                beginOffset: const Offset(70, 0),
+                child: SizedBox(
                 height: 170, // Shrunk to perfectly match the removed bottom elements 
                 child: _isLoadingTasks
                     ? const Center(child: CircularProgressIndicator())
@@ -369,22 +384,32 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                                 },
                                 child: Container(
                                   margin: const EdgeInsets.symmetric(horizontal: 6),
-                                  child: _ActiveAssignmentCard(
-                                    inspectionId: _formatShortId(_upcomingTasks[index].id),
-                                    date: _upcomingTasks[index].scheduledDate.isNotEmpty
-                                        ? _formatScheduledDate(_upcomingTasks[index].scheduledDate)
-                                        : _upcomingTasks[index].category,
-                                    location: _upcomingTasks[index].location,
-                                    description: _upcomingTasks[index].applicationType?.isNotEmpty == true
-                                        ? _upcomingTasks[index].applicationType!
-                                        : _upcomingTasks[index].landUseClass,
-                                    onTap: () => Navigator.of(context).push(
-                                        MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: _upcomingTasks[index]))),
+                                  child: UpdatingTile(
+                                    itemKey: _upcomingTasks[index].id,
+                                    signature: Object.hash(
+                                      _upcomingTasks[index].scheduledDate,
+                                      _upcomingTasks[index].location,
+                                      _upcomingTasks[index].applicationType,
+                                      _upcomingTasks[index].landUseClass,
+                                    ),
+                                    child: _ActiveAssignmentCard(
+                                      inspectionId: _formatShortId(_upcomingTasks[index].id),
+                                      date: _upcomingTasks[index].scheduledDate.isNotEmpty
+                                          ? _formatScheduledDate(_upcomingTasks[index].scheduledDate)
+                                          : _upcomingTasks[index].category,
+                                      location: _upcomingTasks[index].location,
+                                      description: _upcomingTasks[index].applicationType?.isNotEmpty == true
+                                          ? _upcomingTasks[index].applicationType!
+                                          : _upcomingTasks[index].landUseClass,
+                                      onTap: () => Navigator.of(context).push(
+                                          MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: _upcomingTasks[index]))),
+                                    ),
                                   ),
                                 ),
                               );
                             },
                           ),
+              ),
               ),
               const SizedBox(height: 24),
 
@@ -409,9 +434,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               // ----------------------------------------------------
               // 3. QUICK ACTIONS
               // ----------------------------------------------------
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: _SectionLabel(title: "QUICK ACTIONS"),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SpringSlide(
+                  animation: springFor(3),
+                  beginOffset: const Offset(0, 20),
+                  child: const _SectionLabel(title: "QUICK ACTIONS"),
+                ),
               ),
               const SizedBox(height: 16),
               Padding(
@@ -419,10 +448,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _QuickActionBtn(icon: Icons.play_arrow_rounded, label: 'Inspect', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabPending)))),
-                    _QuickActionBtn(icon: Icons.calendar_month_rounded, label: 'Schedule', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabScheduled)))),
-                    _QuickActionBtn(icon: Icons.cloud_sync_rounded, label: 'Sync', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)))),
-                    _QuickActionBtn(icon: Icons.badge_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)))),
+                    SpringSlide(
+                      animation: springFor(4),
+                      beginOffset: const Offset(0, 36),
+                      child: _QuickActionBtn(icon: Icons.play_arrow_rounded, label: 'Inspect', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabPending)))),
+                    ),
+                    SpringSlide(
+                      animation: springFor(5),
+                      beginOffset: const Offset(0, 36),
+                      child: _QuickActionBtn(icon: Icons.calendar_month_rounded, label: 'Schedule', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabScheduled)))),
+                    ),
+                    SpringSlide(
+                      animation: springFor(6),
+                      beginOffset: const Offset(0, 36),
+                      child: _QuickActionBtn(icon: Icons.cloud_sync_rounded, label: 'Sync', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)))),
+                    ),
+                    SpringSlide(
+                      animation: springFor(7),
+                      beginOffset: const Offset(0, 36),
+                      child: _QuickActionBtn(icon: Icons.badge_rounded, label: 'Profile', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProfileScreen(profile: widget.profile)))),
+                    ),
                   ],
                 ),
               ),
@@ -431,9 +476,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               // ----------------------------------------------------
               // 4. RECENT ACTIVITY
               // ----------------------------------------------------
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: _SectionLabel(title: "RECENT ACTIVITY"),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SpringSlide(
+                  animation: springFor(8),
+                  beginOffset: const Offset(0, 20),
+                  child: const _SectionLabel(title: "RECENT ACTIVITY"),
+                ),
               ),
               const SizedBox(height: 16),
               Padding(
@@ -451,13 +500,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                               Column(
                                 children: List.generate(_recentActivity.length, (i) {
                                   final themeInfo = _eventTheme(_recentActivity[i]['event_type'] as String? ?? '');
-                                  return _TimelineActivityTile(
-                                    icon: themeInfo['icon'],
-                                    color: themeInfo['color'],
-                                    title: _recentActivity[i]['title'] as String? ?? 'Update',
-                                    subtitle: _recentActivity[i]['subtitle'] as String? ?? '',
-                                    time: _timeAgo(_recentActivity[i]['occurred_at'] as String?),
-                                    occurredAtIso: _recentActivity[i]['occurred_at'] as String?,
+                                  final activityId = _recentActivity[i]['id'] ?? i;
+                                  return SpringSlide(
+                                    animation: springFor(9 + i),
+                                    beginOffset: const Offset(0, 28),
+                                    child: UpdatingTile(
+                                      itemKey: activityId,
+                                      signature: Object.hash(
+                                        _recentActivity[i]['title'],
+                                        _recentActivity[i]['subtitle'],
+                                        _recentActivity[i]['occurred_at'],
+                                      ),
+                                      child: _TimelineActivityTile(
+                                        icon: themeInfo['icon'],
+                                        color: themeInfo['color'],
+                                        title: _recentActivity[i]['title'] as String? ?? 'Update',
+                                        subtitle: _recentActivity[i]['subtitle'] as String? ?? '',
+                                        time: _timeAgo(_recentActivity[i]['occurred_at'] as String?),
+                                        occurredAtIso: _recentActivity[i]['occurred_at'] as String?,
+                                      ),
+                                    ),
                                   );
                                 }),
                               ),

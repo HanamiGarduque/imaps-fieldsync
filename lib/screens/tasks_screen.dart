@@ -16,6 +16,8 @@ import 'updates_screen.dart';
 import 'profile_screen.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
+import '../widgets/motion/spring_entrance.dart';
+import '../widgets/motion/updating_tile.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (Strict Enterprise Theme)
@@ -270,7 +272,7 @@ class TasksScreen extends StatefulWidget {
   State<TasksScreen> createState() => _TasksScreenState();
 }
 
-class _TasksScreenState extends State<TasksScreen> {
+class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin, SpringEntrance {
   int _currentNavIndex = 1; 
   late int _currentTabIndex;
 
@@ -300,6 +302,7 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    disposeSpringEntrance();
     super.dispose();
   }
 
@@ -637,7 +640,10 @@ class _TasksScreenState extends State<TasksScreen> {
         automaticallyImplyLeading: false, 
         surfaceTintColor: Colors.transparent,
         toolbarHeight: 85,
-        title: Padding(
+        title: SpringSlide(
+          animation: springFor(0),
+          beginOffset: const Offset(0, -24),
+          child: Padding(
           padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -660,8 +666,8 @@ class _TasksScreenState extends State<TasksScreen> {
                 ),
                 child: Column(
                   children: [
-                    Text(
-                      '${_allTasks.length}',
+                    CountUpText(
+                      value: _allTasks.length,
                       style: InsightTheme.poppins(16, w: FontWeight.w700, c: InsightTheme.blue1, h: 1.0),
                     ),
                     const SizedBox(height: 2),
@@ -673,6 +679,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 ),
               ),
             ],
+          ),
           ),
         ),
         centerTitle: false,
@@ -706,7 +713,10 @@ class _TasksScreenState extends State<TasksScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 // SEARCH & FILTER COMPONENT
-                                Row(
+                                SpringSlide(
+                                  animation: springFor(1),
+                                  beginOffset: const Offset(0, 22),
+                                  child: Row(
                                   children: [
                                     Expanded(
                                       child: Container(
@@ -769,11 +779,15 @@ class _TasksScreenState extends State<TasksScreen> {
                                       ),
                                     ),
                                   ],
+                                  ),
                                 ),
                                 const SizedBox(height: 20),
                                 
                                 // SEGMENTED ROW UNDERLINE CONTROLS
-                                SingleChildScrollView(
+                                SpringSlide(
+                                  animation: springFor(2),
+                                  beginOffset: const Offset(0, 22),
+                                  child: SingleChildScrollView(
                                   scrollDirection: Axis.horizontal,
                                   physics: const BouncingScrollPhysics(),
                                   child: Row(
@@ -783,6 +797,7 @@ class _TasksScreenState extends State<TasksScreen> {
                                       _SegmentTab(text: "Scheduled", count: scheduled.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
                                       _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
                                     ],
+                                  ),
                                   ),
                                 ),
                               ],
@@ -812,18 +827,26 @@ class _TasksScreenState extends State<TasksScreen> {
                           )
                         else
                           SliverPadding(
-                            padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 120),
+                            padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 140),
                             sliver: SliverList(
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
                                   final task = selectedTasks[index];
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: _CompactTaskCard(
-                                      key: ValueKey(task.id), 
-                                      task: task,
-                                      onTapDetail: () => _openTask(context, task),
-                                      onScheduled: _loadTasks,
+                                  return SpringSlide(
+                                    animation: springForKey(task.id, 3 + (index % 8)),
+                                    beginOffset: const Offset(0, -26),
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: UpdatingTile(
+                                        itemKey: task.id,
+                                        signature: Object.hash(task.status, task.scheduledDate, task.deadlineDate),
+                                        child: _CompactTaskCard(
+                                          key: ValueKey(task.id), 
+                                          task: task,
+                                          onTapDetail: () => _openTask(context, task),
+                                          onScheduled: _loadTasks,
+                                        ),
+                                      ),
                                     ),
                                   );
                                 },

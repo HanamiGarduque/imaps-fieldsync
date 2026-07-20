@@ -24,7 +24,7 @@ class AuthService {
 
   /// Local-only check (no network call) — true if there's no session at
   /// all, or its JWT expiry timestamp has already passed. Used to fail
-  /// fast right after biometric success, before spending a request on it.
+  /// fast right after quick-unlock success, before spending a request on it.
   static bool get isLocalSessionExpired {
     final exp = _client.auth.currentSession?.expiresAt;
     if (exp == null) return true;

@@ -321,110 +321,89 @@ final online = connectivityResult is List
                 ),
 
                 Expanded(
-                  child: Center(
-                    child: _loading
-                        ? Column(mainAxisSize: MainAxisSize.min, children: [const CircularProgressIndicator(color: InsightTheme.blue1), const SizedBox(height: 16), Text('Acquiring satellite lock...', style: InsightTheme.inter(13, c: InsightTheme.ink2))])
-                        : _error != null
-                            ? Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.location_off_rounded, size: 40, color: InsightTheme.ink3), const SizedBox(height: 12), Text(_error!, textAlign: TextAlign.center, style: InsightTheme.inter(13, c: InsightTheme.ink2)), const SizedBox(height: 16), OutlinedButton(onPressed: _checkLocation, child: const Text('Try again'))])
-                            : Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  SizedBox(
-                                    width: 268, height: 268,
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        Container(
-                                          width: 250, height: 250,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            boxShadow: [
-                                              BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.22), blurRadius: 46, spreadRadius: 4),
-                                            ],
+                  child: _loading
+                      ? const Center(child: _LoadingState())
+                      : _error != null
+                          ? Center(child: _ErrorState(message: _error!, onRetry: _checkLocation))
+                          : LayoutBuilder(
+                              builder: (context, constraints) {
+                                // Compass scales with the smaller of available width/height so it
+                                // never forces the column below it off-screen (landscape, small
+                                // devices) while staying a true circle.
+                                final compassSize = math.min(
+                                  constraints.maxWidth * 0.72,
+                                  math.min(constraints.maxHeight * 0.62, 268.0),
+                                ).clamp(160.0, 268.0).toDouble();
+
+                                return SingleChildScrollView(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                                    child: Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          _Compass(
+                                            size: compassSize,
+                                            heading: _heading,
+                                            bearingToParcel: _bearingToParcel,
+                                            headingCardinal: _headingCardinal,
+                                            verified: _verified,
                                           ),
-                                        ),
-                                        AnimatedRotation(
-                                          turns: _heading != null ? -(_heading! / 360) : 0,
-                                          duration: const Duration(milliseconds: 180),
-                                          curve: Curves.linear,
-                                          child: CustomPaint(size: const Size(250, 250), painter: _CompassRingPainter(verified: _verified)),
-                                        ),
-                                        if (_heading != null && _bearingToParcel != null)
-                                          Transform.rotate(
-                                            angle: ((_bearingToParcel! - _heading!) * math.pi / 180.0),
-                                            child: CustomPaint(size: const Size(250, 250), painter: _TargetArrowPainter(verified: _verified)),
-                                          ),
-                                        Positioned(
-                                          top: 2,
-                                          child: CustomPaint(size: const Size(18, 14), painter: _ForwardMarkerPainter(verified: _verified)),
-                                        ),
-                                        Container(
-                                          width: 148, height: 148,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            gradient: LinearGradient(
-                                              colors: _verified ? const [InsightTheme.blue1, InsightTheme.blue2] : [InsightTheme.blue1.withValues(alpha: 0.85), InsightTheme.blue2],
-                                              begin: Alignment.topLeft, end: Alignment.bottomRight,
-                                            ),
-                                            boxShadow: [BoxShadow(color: InsightTheme.blue2.withValues(alpha: 0.35), blurRadius: 26, offset: const Offset(0, 12))],
-                                            border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
-                                          ),
-                                          child: Column(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              Text(_headingCardinal, style: InsightTheme.poppins(15, w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.9), ls: 1.5)),
-                                              const SizedBox(height: 2),
-                                              Text(_heading != null ? '${_heading!.round()}°' : '--°', style: InsightTheme.poppins(34, w: FontWeight.w800, c: Colors.white)),
-                                              const SizedBox(height: 6),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                                                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
-                                                child: Text(_distance != null ? '${_distance!.round()}m from site' : '-- from site', style: InsightTheme.inter(10.5, w: FontWeight.w600, c: Colors.white)),
+                                          const SizedBox(height: 14),
+                                          _DistanceBadge(distance: _distance, verified: _verified),
+                                          const SizedBox(height: 14),
+                                          if (_latitude != null && _longitude != null)
+                                            Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                                              child: Text(
+                                                "${_formatCoord(_latitude!, 'NS')}   ${_formatCoord(_longitude!, 'EW')}",
+                                                textAlign: TextAlign.center,
+                                                softWrap: true,
+                                                style: InsightTheme.jetBrains(11.5, w: FontWeight.w600, c: InsightTheme.ink2, ls: 0.4),
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
+                                            ),
+                                          const SizedBox(height: 8),
+                                          if (_bearingToParcel != null)
+                                            Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                                              child: Text(_bearingLabel, textAlign: TextAlign.center, softWrap: true, style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
+                                            ),
+                                          const SizedBox(height: 10),
+                                          if (_isLive || _heading != null)
+                                            Wrap(
+                                              alignment: WrapAlignment.center,
+                                              crossAxisAlignment: WrapCrossAlignment.center,
+                                              children: [
+                                                if (_isLive) ...[
+                                                  Container(
+                                                    width: 8, height: 8,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: InsightTheme.greenInk,
+                                                      boxShadow: [BoxShadow(color: InsightTheme.greenInk.withValues(alpha: 0.5), blurRadius: 6, spreadRadius: 1)],
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Text('LIVE TRACKING', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.greenInk, ls: 0.6)),
+                                                ],
+                                                if (_isLive && _heading != null) Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text('•', style: InsightTheme.jetBrains(9.5, c: InsightTheme.ink3))),
+                                                if (_heading != null) Text('COMPASS ACTIVE', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.6)),
+                                              ],
+                                            )
+                                          else if (_compassUnavailable)
+                                            Text('Compass unavailable on this device', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
+                                          if (!_verified) ...[
+                                            const SizedBox(height: 16),
+                                            TextButton.icon(onPressed: _checkLocation, icon: const Icon(Icons.refresh_rounded, size: 16, color: InsightTheme.blueInk), label: Text('Recheck Location', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk))),
+                                          ],
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                  const SizedBox(height: 18),
-                                  if (_latitude != null && _longitude != null)
-                                    Text(
-                                      "${_formatCoord(_latitude!, 'NS')}   ${_formatCoord(_longitude!, 'EW')}",
-                                      style: InsightTheme.jetBrains(11.5, w: FontWeight.w600, c: InsightTheme.ink2, ls: 0.4),
-                                    ),
-                                  const SizedBox(height: 8),
-                                  if (_bearingToParcel != null) Text(_bearingLabel, style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
-                                  const SizedBox(height: 10),
-                                  if (_isLive || _heading != null)
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (_isLive) ...[
-                                          Container(
-                                            width: 8, height: 8,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: InsightTheme.greenInk,
-                                              boxShadow: [BoxShadow(color: InsightTheme.greenInk.withValues(alpha: 0.5), blurRadius: 6, spreadRadius: 1)],
-                                            ),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text('LIVE TRACKING', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.greenInk, ls: 0.6)),
-                                        ],
-                                        if (_isLive && _heading != null) Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text('•', style: InsightTheme.jetBrains(9.5, c: InsightTheme.ink3))),
-                                        if (_heading != null) Text('COMPASS ACTIVE', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.6)),
-                                      ],
-                                    )
-                                  else if (_compassUnavailable)
-                                    Text('Compass unavailable on this device', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
-                                  if (!_verified) ...[
-                                    const SizedBox(height: 16),
-                                    TextButton.icon(onPressed: _checkLocation, icon: const Icon(Icons.refresh_rounded, size: 16, color: InsightTheme.blueInk), label: Text('Recheck Location', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk))),
-                                  ],
-                                ],
-                              ),
-                  ),
+                                );
+                              },
+                            ),
                 ),
                 
                 if (!_loading && _error == null)
@@ -437,15 +416,38 @@ final online = connectivityResult is List
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                           decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(18), border: Border.all(color: Colors.white.withValues(alpha: 0.65)), boxShadow: const [BoxShadow(color: Color(0x14141628), blurRadius: 26, offset: Offset(0, 10))]),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _ReadoutItem(icon: Icons.map_outlined, value: '${_distance?.round() ?? '--'}m', label: 'DISTANCE', isGreen: false),
-                              Container(width: 1, height: 36, color: InsightTheme.lineStrong),
-                              _ReadoutItem(icon: Icons.gps_fixed_rounded, value: '±${_accuracy?.round() ?? '--'}m', label: 'ACCURACY', isGreen: false),
-                              Container(width: 1, height: 36, color: InsightTheme.lineStrong),
-                              _ReadoutItem(icon: _verified ? Icons.check_rounded : Icons.error_outline_rounded, value: _verified ? 'Verified' : 'Too far', label: 'STATUS', isGreen: _verified),
-                            ],
+                          child: LayoutBuilder(
+                            builder: (context, statsConstraints) {
+                              final items = [
+                                _ReadoutItem(icon: Icons.map_outlined, value: '${_distance?.round() ?? '--'}m', label: 'DISTANCE', isGreen: false),
+                                _ReadoutItem(icon: Icons.gps_fixed_rounded, value: '±${_accuracy?.round() ?? '--'}m', label: 'ACCURACY', isGreen: false),
+                                _ReadoutItem(icon: _verified ? Icons.check_rounded : Icons.error_outline_rounded, value: _verified ? 'Verified' : 'Too far', label: 'STATUS', isGreen: _verified),
+                              ];
+                              // Below ~300px available width three columns get too cramped for
+                              // long values (e.g. 5-digit distances) — wrap into a grid instead
+                              // of forcing everything into one row.
+                              if (statsConstraints.maxWidth < 300) {
+                                return Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 12,
+                                  runSpacing: 16,
+                                  children: items.map((w) => SizedBox(width: (statsConstraints.maxWidth - 12) / 2, child: w)).toList(),
+                                );
+                              }
+                              return IntrinsicHeight(
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    _FlexibleReadout(child: items[0]),
+                                    const VerticalDivider(width: 1, thickness: 1, color: InsightTheme.lineStrong),
+                                    _FlexibleReadout(child: items[1]),
+                                    const VerticalDivider(width: 1, thickness: 1, color: InsightTheme.lineStrong),
+                                    _FlexibleReadout(child: items[2]),
+                                  ],
+                                ),
+                              );
+                            },
                           ),
                         ),
                       ),
@@ -491,20 +493,189 @@ class _ReadoutItem extends StatelessWidget {
   const _ReadoutItem({required this.icon, required this.value, required this.label, required this.isGreen});
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    // No Expanded/fixed width here — the parent (Row+Expanded, or a sized Wrap
+    // cell) decides how much horizontal room this gets, so the same widget
+    // works in either layout.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 32, height: 32,
+          decoration: BoxDecoration(color: isGreen ? InsightTheme.greenTint : InsightTheme.blueTint, borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, size: 16, color: isGreen ? InsightTheme.greenInk : InsightTheme.blueInk),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          textAlign: TextAlign.center,
+          softWrap: true,
+          style: InsightTheme.poppins(14, w: FontWeight.w700, c: isGreen ? InsightTheme.greenInk : InsightTheme.ink),
+        ),
+        const SizedBox(height: 2),
+        Text(label, textAlign: TextAlign.center, softWrap: true, style: InsightTheme.jetBrains(9, c: InsightTheme.ink2)),
+      ],
+    );
+  }
+}
+
+/// Small helper so [_ReadoutItem] can still flex to fill a Row while
+/// remaining reusable inside a plain [Wrap] on narrow screens.
+class _FlexibleReadout extends StatelessWidget {
+  final Widget child;
+  const _FlexibleReadout({required this.child});
+  @override
+  Widget build(BuildContext context) => Expanded(child: child);
+}
+
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+  @override
+  Widget build(BuildContext context) {
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      const CircularProgressIndicator(color: InsightTheme.blue1),
+      const SizedBox(height: 16),
+      Text('Acquiring satellite lock...', style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+    ]);
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorState({required this.message, required this.onRetry});
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.location_off_rounded, size: 40, color: InsightTheme.ink3),
+        const SizedBox(height: 12),
+        Text(message, textAlign: TextAlign.center, softWrap: true, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+        const SizedBox(height: 16),
+        OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+      ]),
+    );
+  }
+}
+
+/// The circular compass ring + heading readout.
+///
+/// Only fixed-length content (cardinal letters, "NNW"; degrees, "0°"–"360°")
+/// lives inside the fixed circle, so its size never needs to react to
+/// variable-length data. [size] itself is computed responsively by the
+/// caller via LayoutBuilder, so the compass shrinks gracefully on small
+/// screens instead of relying on one hardcoded constant.
+class _Compass extends StatelessWidget {
+  final double size;
+  final double? heading;
+  final double? bearingToParcel;
+  final String headingCardinal;
+  final bool verified;
+
+  const _Compass({
+    required this.size,
+    required this.heading,
+    required this.bearingToParcel,
+    required this.headingCardinal,
+    required this.verified,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Proportions preserved from the original fixed-size design (250/268 and
+    // 148/268) but derived from [size] so they scale together.
+    final ringSize = size * (250 / 268);
+    final innerSize = size * (148 / 268);
+    final headingFontSize = (size / 268) * 34;
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
           Container(
-            width: 32, height: 32,
-            decoration: BoxDecoration(color: isGreen ? InsightTheme.greenTint : InsightTheme.blueTint, borderRadius: BorderRadius.circular(10)),
-            child: Icon(icon, size: 16, color: isGreen ? InsightTheme.greenInk : InsightTheme.blueInk),
+            width: ringSize,
+            height: ringSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.22), blurRadius: 46, spreadRadius: 4)],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(value, style: InsightTheme.poppins(14, w: FontWeight.w700, c: isGreen ? InsightTheme.greenInk : InsightTheme.ink)),
-          const SizedBox(height: 2),
-          Text(label, style: InsightTheme.jetBrains(9, c: InsightTheme.ink2)),
+          AnimatedRotation(
+            turns: heading != null ? -(heading! / 360) : 0,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.linear,
+            child: CustomPaint(size: Size(ringSize, ringSize), painter: _CompassRingPainter(verified: verified)),
+          ),
+          if (heading != null && bearingToParcel != null)
+            Transform.rotate(
+              angle: ((bearingToParcel! - heading!) * math.pi / 180.0),
+              child: CustomPaint(size: Size(ringSize, ringSize), painter: _TargetArrowPainter(verified: verified)),
+            ),
+          Positioned(
+            top: size * (2 / 268),
+            child: CustomPaint(size: Size(18 * size / 268, 14 * size / 268), painter: _ForwardMarkerPainter(verified: verified)),
+          ),
+          Container(
+            width: innerSize,
+            height: innerSize,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: verified ? const [InsightTheme.blue1, InsightTheme.blue2] : [InsightTheme.blue1.withValues(alpha: 0.85), InsightTheme.blue2],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+              boxShadow: [BoxShadow(color: InsightTheme.blue2.withValues(alpha: 0.35), blurRadius: 26, offset: const Offset(0, 12))],
+              border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
+            ),
+            // Fixed-length content only ("N"/"NNW", "0°"-"360°") — its font
+            // size already scales with [size] above, so it never needs to
+            // fight a fixed diameter the way the old variable-length
+            // distance text did.
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(headingCardinal, style: InsightTheme.poppins(math.max(12.0, headingFontSize * 15 / 34), w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.9), ls: 1.5)),
+                const SizedBox(height: 2),
+                Text(heading != null ? '${heading!.round()}°' : '--°', style: InsightTheme.poppins(headingFontSize, w: FontWeight.w800, c: Colors.white)),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// Distance readout pill. Lives outside the fixed compass circle in the
+/// normally-flowing part of the column, so a value with any number of
+/// digits (15 m ... 12345 m) simply grows the pill's intrinsic width and
+/// wraps to a second line on very narrow screens instead of overflowing.
+class _DistanceBadge extends StatelessWidget {
+  final double? distance;
+  final bool verified;
+  const _DistanceBadge({required this.distance, required this.verified});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = distance != null ? '${distance!.round()}m from site' : '-- from site';
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 40),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: verified ? InsightTheme.greenTint : InsightTheme.blueTint,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          softWrap: true,
+          style: InsightTheme.inter(12, w: FontWeight.w600, c: verified ? InsightTheme.greenInk : InsightTheme.blueInk),
+        ),
       ),
     );
   }

@@ -19,6 +19,7 @@ import 'terms_privacy_screen.dart'; // Restored import for Terms & Privacy
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/dashboard_widgets.dart';
+import '../widgets/motion/spring_entrance.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -65,7 +66,7 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateMixin, SpringEntrance {
   int _currentNavIndex = 3;
   late UserProfile _currentProfile;
 
@@ -73,12 +74,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoadingStats = true;
   bool _hasStatsError = false;
 
+  // Horizontally-swipeable analytics pager — replaces the old vertically
+  // stacked cards. viewportFraction < 1 leaves a sliver of the neighboring
+  // card peeking in on each side, which is what gives the snap gesture a
+  // visible target instead of feeling like a full-screen page flip.
+  final PageController _analyticsPageController = PageController(viewportFraction: 0.9);
+  int _analyticsPageIndex = 0;
+
   @override
   void initState() {
     super.initState();
     _currentProfile = widget.profile;
     _refreshProfileFromServer();
     _loadStats();
+  }
+
+  @override
+  void dispose() {
+    _analyticsPageController.dispose();
+    disposeSpringEntrance();
+    super.dispose();
   }
 
   /// Safety net: widget.profile is whatever the caller had in memory when
@@ -214,11 +229,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
               child: ListView(
               // Added slightly more top padding so the card breathes below the status bar
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 140),
               physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
               children: [
                 // 1. IDENTITY CARD
-                Container(
+                SpringSlide(
+                  animation: springFor(0),
+                  beginOffset: const Offset(0, -30),
+                  child: Container(
                   padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
                   decoration: BoxDecoration(
                     color: InsightTheme.surface.withOpacity(0.75),
@@ -298,31 +316,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
+                ),
                 
                 const SizedBox(height: 24),
 
                 // 2. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
                 Row(
                   children: [
-                    _buildStatCard(
+                    SpringSlide(
+                      animation: springFor(1),
+                      beginOffset: const Offset(0, 34),
+                      child: _buildStatCard(
                       'Tasks Today / Pending',
                       _isLoadingStats ? '—' : '${_stats.tasksTodayOrPendingCount}',
                       Icons.assignment_outlined,
                       InsightTheme.amber,
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    _buildStatCard(
+                    SpringSlide(
+                      animation: springFor(2),
+                      beginOffset: const Offset(0, 34),
+                      child: _buildStatCard(
                       'Completed Inspections',
                       _isLoadingStats ? '—' : '${_stats.completedCount}',
                       Icons.check_circle_outline_rounded,
                       InsightTheme.green,
+                      ),
                     ),
                   ],
                 ),
 
                 const SizedBox(height: 16),
 
-                // 3. ANALYTICS DASHBOARD GRID
+                // 3. ANALYTICS DASHBOARD — horizontally swipeable, one focus
+                // chart at a time instead of four squeezed into a vertical
+                // stack. Each page is a full-size version of the same card
+                // (_dashboardCard), so the visual identity is unchanged —
+                // only the layout direction and card size are.
                 if (_hasStatsError)
                   _dashboardErrorCard()
                 else if (_isLoadingStats)
@@ -331,58 +362,111 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: Center(child: CircularProgressIndicator(strokeWidth: 2.4)),
                   )
                 else ...[
-                  // Left: wide gauge card. Right: trend on top, heatmap +
-                  // zoning breakdown stacked below. On narrow phones this
-                  // just stacks vertically since each card is full-width.
-                  _dashboardCard(
-                    child: CompletionGaugeCard(
-                      rate: _stats.completionRate,
-                      totalApplications: _stats.totalAssigned,
-                      activeWorkload: _stats.activeWorkloadCount,
-                      trackColor: InsightTheme.surface2,
-                      fillColor: InsightTheme.blue1,
-                      textColor: InsightTheme.ink,
-                      mutedTextColor: InsightTheme.ink2,
+                  SpringSlide(
+                    animation: springFor(3),
+                    beginOffset: const Offset(46, 0),
+                    child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('ANALYTICS OVERVIEW',
+                            style: InsightTheme.jetBrains(11, w: FontWeight.w600, c: InsightTheme.ink2, ls: 0.8)),
+                        Row(
+                          children: [
+                            Icon(Icons.swipe_rounded, size: 14, color: InsightTheme.ink3),
+                            const SizedBox(width: 4),
+                            Text('Swipe', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
+                          ],
+                        ),
+                      ],
+                    ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  _dashboardCard(
-                    child: WeeklyTrendCard(
-                      points: _stats.weeklyTrend,
-                      barColor: InsightTheme.blue1,
-                      textColor: InsightTheme.ink,
-                      mutedTextColor: InsightTheme.ink2,
+                  const SizedBox(height: 12),
+                  SpringSlide(
+                    animation: springFor(4),
+                    beginOffset: const Offset(60, 0),
+                    child: SizedBox(
+                    // Relative to screen height rather than a fixed pixel
+                    // value, clamped to a sensible range so it stays
+                    // comfortable on both small phones and tablets.
+                    height: (MediaQuery.of(context).size.height * 0.46).clamp(380.0, 480.0),
+                    child: PageView(
+                      controller: _analyticsPageController,
+                      onPageChanged: (i) => setState(() => _analyticsPageIndex = i),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: _dashboardCard(
+                            child: CompletionGaugeCard(
+                              rate: _stats.completionRate,
+                              totalApplications: _stats.totalAssigned,
+                              activeWorkload: _stats.activeWorkloadCount,
+                              trackColor: InsightTheme.surface2,
+                              fillColor: InsightTheme.blue1,
+                              textColor: InsightTheme.ink,
+                              mutedTextColor: InsightTheme.ink2,
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: _dashboardCard(
+                            child: WeeklyTrendCard(
+                              points: _stats.weeklyTrend,
+                              barColor: InsightTheme.blue1,
+                              textColor: InsightTheme.ink,
+                              mutedTextColor: InsightTheme.ink2,
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: _dashboardCard(
+                            child: ActivityHeatmapCard(
+                              activeDays: _stats.activeDaysThisMonth,
+                              month: _stats.currentMonth,
+                              year: _stats.currentYear,
+                              activeColor: InsightTheme.green,
+                              inactiveColor: InsightTheme.surface2,
+                              textColor: InsightTheme.ink,
+                              mutedTextColor: InsightTheme.ink2,
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: _dashboardCard(
+                            child: ZoningTypeBreakdownCard(
+                              entries: _stats.typeBreakdown,
+                              barColor: InsightTheme.blue1,
+                              trackColor: InsightTheme.surface2,
+                              textColor: InsightTheme.ink,
+                              mutedTextColor: InsightTheme.ink2,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  ),
+                  const SizedBox(height: 14),
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Expanded(
-                        child: _dashboardCard(
-                          child: ActivityHeatmapCard(
-                            activeDays: _stats.activeDaysThisMonth,
-                            month: _stats.currentMonth,
-                            year: _stats.currentYear,
-                            activeColor: InsightTheme.green,
-                            inactiveColor: InsightTheme.surface2,
-                            textColor: InsightTheme.ink,
-                            mutedTextColor: InsightTheme.ink2,
+                      for (int i = 0; i < 4; i++)
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 260),
+                          curve: Curves.easeOutCubic,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          height: 7,
+                          width: i == _analyticsPageIndex ? 22 : 7,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(4),
+                            color: i == _analyticsPageIndex ? InsightTheme.blue1 : InsightTheme.line,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _dashboardCard(
-                          child: ZoningTypeBreakdownCard(
-                            entries: _stats.typeBreakdown,
-                            barColor: InsightTheme.blue1,
-                            trackColor: InsightTheme.surface2,
-                            textColor: InsightTheme.ink,
-                            mutedTextColor: InsightTheme.ink2,
-                          ),
-                        ),
-                      ),
                     ],
                   ),
                 ],
@@ -430,9 +514,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       
                       if (kQuickUnlockEnabled) ...[
                         _ActionTile(
-                          icon: Icons.fingerprint,
+                          icon: Icons.pattern,
                           title: 'Quick Unlock',
-                          subtitle: 'Biometric / pattern',
+                          subtitle: 'Pattern unlock',
                           onTap: () {
                             Navigator.push(
                               context,

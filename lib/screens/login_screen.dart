@@ -10,7 +10,6 @@ import 'package:supabase_flutter/supabase_flutter.dart' show AuthException;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
-import '../services/biometric_service.dart';
 import '../services/notification_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
@@ -228,9 +227,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _errorMessage;
 
   bool _quickUnlockAvailable = false;
-  bool _bioEnabled = false;
   bool _patEnabled = false;
-  String _bioLabel = 'Fingerprint';
 
   @override
   void initState() {
@@ -268,15 +265,11 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) setState(() => _quickUnlockAvailable = false);
       return;
     }
-    final bio = await QuickUnlockService.isBiometricEnabled();
     final pat = await QuickUnlockService.isPatternEnabled();
-    final label = bio ? await BiometricService.primaryBiometricLabel() : 'Fingerprint';
     if (!mounted) return;
     setState(() {
-      _bioEnabled = bio;
       _patEnabled = pat;
-      _bioLabel = label;
-      _quickUnlockAvailable = bio || pat;
+      _quickUnlockAvailable = pat;
     });
   }
 
@@ -285,18 +278,18 @@ class _LoginScreenState extends State<LoginScreen> {
   /// users get a clear one-time explanation instead of a dead control.
   ///
   /// Checks the *stored* bound email, not the email textfield — the
-  /// whole point of biometric unlock is that the inspector shouldn't
-  /// have to type anything first. Gating on textfield content was the
-  /// bug: an empty/unfilled field always looked "unregistered" even
-  /// with biometric fully configured.
-  Future<void> _onBiometricTap() async {
+  /// whole point of quick unlock is that the inspector shouldn't have to
+  /// type anything first. Gating on textfield content was the bug: an
+  /// empty/unfilled field always looked "unregistered" even with pattern
+  /// unlock fully configured.
+  Future<void> _onQuickUnlockTap() async {
     final boundEmail = await QuickUnlockService.boundEmail();
     final registered = boundEmail != null && await QuickUnlockService.isAnyEnabled();
     if (!registered) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Biometric login is not yet set up. Please log in using your credentials and configure it inside your Profile Settings.'),
+          content: Text('Quick unlock is not yet set up. Please log in using your credentials and configure it inside your Profile Settings.'),
           duration: Duration(seconds: 4),
         ),
       );
@@ -315,18 +308,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _errorMessage = null);
 
     bool verified = false;
-    if (_bioEnabled) {
-      final result = await BiometricService.authenticateDetailed(reason: 'Unlock InSight');
-      verified = result.success;
-      if (!verified && result.userFacingMessage != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.userFacingMessage!), duration: const Duration(seconds: 4)),
-        );
-      }
-      // Plain cancel/failed-match (no userFacingMessage) — fall through
-      // to pattern below, or just stop, without alarming the user.
-    }
-    if (!verified && _patEnabled && mounted) {
+    if (_patEnabled && mounted) {
       verified = await _showPatternSheet();
     }
     if (!verified || !mounted) return;
@@ -378,11 +360,10 @@ class _LoginScreenState extends State<LoginScreen> {
   /// credentials.
   Future<void> _forceCredentialFallback() async {
     await AuthService.signOut();       // purge the dead access/refresh token
-    await QuickUnlockService.clearAll(); // purge local biometric/pattern config
+    await QuickUnlockService.clearAll(); // purge local pattern-unlock config
     if (!mounted) return;
     setState(() {
       _quickUnlockAvailable = false;
-      _bioEnabled = false;
       _patEnabled = false;
       _errorMessage = 'Your session expired. Please sign in with email & passcode.';
     });
@@ -658,10 +639,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
                           if (kQuickUnlockEnabled) ...[
                             const SizedBox(height: 14),
-                            _BiometricButton(
-                              label: _bioEnabled ? 'Unlock with $_bioLabel' : 'Unlock with Biometrics',
+                            _QuickUnlockButton(
+                              label: 'Unlock with pattern',
                               enabled: !_isLoading,
-                              onTap: _onBiometricTap,
+                              onTap: _onQuickUnlockTap,
                             ),
                           ],
                         ],
@@ -1013,12 +994,12 @@ class _PatternVerifySheetState extends State<_PatternVerifySheet> {
 
 /// Permanently visible below the passcode field — visibility never
 /// depends on setup status, per design; setup status is only checked
-/// on tap (see _onBiometricTap).
-class _BiometricButton extends StatelessWidget {
+/// on tap (see _onQuickUnlockTap).
+class _QuickUnlockButton extends StatelessWidget {
   final String label;
   final bool enabled;
   final VoidCallback onTap;
-  const _BiometricButton({required this.label, required this.enabled, required this.onTap});
+  const _QuickUnlockButton({required this.label, required this.enabled, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1026,7 +1007,7 @@ class _BiometricButton extends StatelessWidget {
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: enabled ? onTap : null,
-        icon: const Icon(Icons.fingerprint, size: 20),
+        icon: const Icon(Icons.pattern, size: 20),
         label: Text(label, style: AppText.inter(13, w: FontWeight.w700)),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.blue1,

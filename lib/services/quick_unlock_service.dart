@@ -3,8 +3,8 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Manages the device-local "quick unlock" configuration: whether
-/// biometric and/or pattern unlock are enabled, and the salted hash of
-/// the pattern (the raw pattern itself is never stored or transmitted).
+/// pattern unlock is enabled, and the salted hash of the pattern (the
+/// raw pattern itself is never stored or transmitted).
 ///
 /// IMPORTANT: this only gates the *locally cached* Supabase session
 /// (the "stay signed in" auto-login). The inspector's real credential
@@ -15,28 +15,27 @@ class QuickUnlockService {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
-  static const _kBiometricEnabled = 'qu_biometric_enabled';
   static const _kPatternEnabled = 'qu_pattern_enabled';
   static const _kPatternHash = 'qu_pattern_hash';
   static const _kPatternSalt = 'qu_pattern_salt';
   static const _kBoundEmail = 'qu_bound_email'; // which account this device's quick unlock belongs to
 
   /// Every email in/out of this service passes through here. Root cause
-  /// of the "biometric icon just never appears, no error" bug: the
+  /// of a past "quick unlock icon just never appears, no error" bug: the
   /// profile screen binds using Supabase's currentUser.email (server-
   /// normalized, lowercase), while the login form saves whatever casing
   /// the inspector actually typed — an exact-string compare between the
   /// two silently failed with zero error surfaced.
   static String _norm(String email) => email.trim().toLowerCase();
 
-  static Future<bool> isBiometricEnabled() async =>
-      (await _storage.read(key: _kBiometricEnabled)) == 'true';
-
   static Future<bool> isPatternEnabled() async =>
       (await _storage.read(key: _kPatternEnabled)) == 'true';
 
-  static Future<bool> isAnyEnabled() async =>
-      (await isBiometricEnabled()) || (await isPatternEnabled());
+  /// Kept as its own method (rather than inlining isPatternEnabled directly
+  /// at call sites) so callers asking "is *any* quick-unlock method
+  /// configured" have one stable entry point if another method is added
+  /// later.
+  static Future<bool> isAnyEnabled() async => isPatternEnabled();
 
   static Future<String?> boundEmail() => _storage.read(key: _kBoundEmail);
 
@@ -47,11 +46,6 @@ class QuickUnlockService {
     final bound = await boundEmail();
     if (bound == null) return false;
     return bound == _norm(email);
-  }
-
-  static Future<void> setBiometricEnabled(bool enabled, {required String email}) async {
-    await _storage.write(key: _kBiometricEnabled, value: enabled.toString());
-    await _storage.write(key: _kBoundEmail, value: _norm(email));
   }
 
   /// pattern = ordered list of dot indices, e.g. [0,1,2,5,8]
@@ -77,14 +71,9 @@ class QuickUnlockService {
     await _storage.delete(key: _kPatternSalt);
   }
 
-  static Future<void> disableBiometric() async {
-    await _storage.delete(key: _kBiometricEnabled);
-  }
-
   /// Wipe everything — call this on sign-out / switch-account so the
   /// next inspector on a shared device doesn't inherit a quick unlock.
   static Future<void> clearAll() async {
-    await _storage.delete(key: _kBiometricEnabled);
     await _storage.delete(key: _kPatternEnabled);
     await _storage.delete(key: _kPatternHash);
     await _storage.delete(key: _kPatternSalt);

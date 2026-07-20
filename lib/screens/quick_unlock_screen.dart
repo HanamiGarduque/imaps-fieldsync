@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
-import '../services/biometric_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
 import 'home_dashboard_screen.dart';
@@ -33,7 +32,6 @@ class QuickUnlockScreen extends StatefulWidget {
 }
 
 class _QuickUnlockScreenState extends State<QuickUnlockScreen> with WidgetsBindingObserver {
-  bool _biometricEnabled = false;
   bool _patternEnabled = false;
   bool _checking = true;
   bool _patternError = false;
@@ -53,26 +51,12 @@ class _QuickUnlockScreenState extends State<QuickUnlockScreen> with WidgetsBindi
   }
 
   Future<void> _init() async {
-    final bio = await QuickUnlockService.isBiometricEnabled();
     final pat = await QuickUnlockService.isPatternEnabled();
     if (!mounted) return;
     setState(() {
-      _biometricEnabled = bio;
       _patternEnabled = pat;
       _checking = false;
     });
-    if (bio) _attemptBiometric();
-  }
-
-  Future<void> _attemptBiometric() async {
-    final ok = await BiometricService.authenticate(
-      reason: 'Unlock InSight',
-    );
-    if (ok) {
-      _goHome();
-    }
-    // On failure/cancel we just stay on this screen — pattern (if set)
-    // or the "Use email & passcode" fallback are still visible below.
   }
 
   void _onPatternDrawn(List<int> pattern) async {
@@ -154,13 +138,6 @@ class _QuickUnlockScreenState extends State<QuickUnlockScreen> with WidgetsBindi
                 ),
                 const SizedBox(height: 16),
               ],
-
-              if (_biometricEnabled)
-                TextButton.icon(
-                  onPressed: _attemptBiometric,
-                  icon: const Icon(Icons.fingerprint, color: _Colors.blue1),
-                  label: Text('Try biometric again', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: _Colors.blue1)),
-                ),
 
               const Spacer(),
               TextButton(

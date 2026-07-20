@@ -171,7 +171,7 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
         _PolicySection(
           icon: Icons.lock_person_rounded,
           title: '4. Account Security',
-          body: 'You are responsible for maintaining the confidentiality of your account credentials. Do not share your Quick Unlock pattern or biometric data access with unverified individuals. Report any operational blockers or security breaches immediately to the MPDO.',
+          body: 'You are responsible for maintaining the confidentiality of your account credentials. Do not share your Quick Unlock pattern with unverified individuals. Report any operational blockers or security breaches immediately to the MPDO.',
           isLast: true,
         ),
       ],
@@ -205,9 +205,9 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
           body: 'The collected data is utilized strictly for evaluating zoning applications, verifying inspection sites, and syncing accurate field findings to the main database via Supabase.',
         ),
         _PolicySection(
-          icon: Icons.fingerprint_rounded,
-          title: '3. Biometrics & Quick Unlock',
-          body: 'If you opt-in to use the Quick Unlock feature, your biometric data (fingerprint or face recognition) remains stored securely and locally on your device. It is never transmitted to our servers.',
+          icon: Icons.lock_outline_rounded,
+          title: '3. Quick Unlock',
+          body: 'If you opt-in to use the Quick Unlock feature, your pattern is stored as a salted hash, securely and locally on your device. The raw pattern is never stored or transmitted, and none of this data is sent to our servers.',
         ),
         _PolicySection(
           icon: Icons.shield_rounded,
