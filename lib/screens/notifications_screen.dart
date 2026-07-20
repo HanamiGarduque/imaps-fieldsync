@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../services/supabase_service.dart';
+import '../widgets/motion/spring_entrance.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -43,6 +44,8 @@ class InsightTheme {
 /// SCREEN 4 — NOTIFICATIONS
 /// Real data from activity_log (via fetchRecentActivity), with real
 /// unread tracking (activity_log.is_read) instead of hardcoded rows.
+/// Now with spring entrance animations, Clear All button, and
+/// swipe-to-dismiss.
 /// ==================================================================
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -51,7 +54,8 @@ class NotificationsScreen extends StatefulWidget {
   State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
 
-class _NotificationsScreenState extends State<NotificationsScreen> {
+class _NotificationsScreenState extends State<NotificationsScreen>
+    with TickerProviderStateMixin, SpringEntrance {
   int _currentTabIndex = 0; // 0 = All, 1 = Unread
   bool _isLoading = true;
   String? _error;
@@ -63,10 +67,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    disposeSpringEntrance();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     setState(() { _isLoading = true; _error = null; });
     try {
-      // Pull more than the dashboard's preview needs — this is the full feed.
       final activity = await SupabaseService.fetchRecentActivity(limit: 50);
       if (!mounted) return;
       setState(() { _activity = activity; _isLoading = false; });
@@ -84,8 +93,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Future<void> _markAllRead() async {
     if (_unreadCount == 0) return;
     HapticFeedback.lightImpact();
-    // Update UI immediately, then sync — a failed sync isn't worth
-    // blocking on since this is a best-effort read receipt, not data loss.
     setState(() {
       _activity = _activity.map((a) => {...a, 'is_read': true}).toList();
     });
@@ -100,6 +107,85 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       _activity = _activity.map((a) => a['id'] == item['id'] ? {...a, 'is_read': true} : a).toList();
     });
     await SupabaseService.markActivityRead(id);
+  }
+
+  Future<void> _deleteOne(Map<String, dynamic> item) async {
+    final id = item['id']?.toString();
+    if (id == null) return;
+
+    // Optimistically remove from UI first
+    setState(() {
+      _activity.removeWhere((a) => a['id'] == item['id']);
+    });
+    HapticFeedback.mediumImpact();
+
+    try {
+      await SupabaseService.deleteActivity(id);
+    } catch (e) {
+      // Revert on failure and show error
+      if (mounted) {
+        setState(() {
+          _activity.insert(0, item);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete notification: $e'),
+            backgroundColor: InsightTheme.redInk,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _clearAll() async {
+    if (_activity.isEmpty) return;
+    HapticFeedback.mediumImpact();
+    final count = _activity.length;
+    if (!mounted) return;
+    
+    // Show confirmation
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: InsightTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Clear all notifications?', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+        content: Text(
+          'This will permanently remove all $count notification(s).',
+          style: InsightTheme.inter(13, c: InsightTheme.ink2),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Clear All', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.redInk)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _activity.clear();
+    });
+    try {
+      await SupabaseService.clearAllActivity();
+    } catch (e) {
+      if (mounted) {
+        // Reload from server to undo optimistic clear
+        _load();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to clear all: $e'),
+            backgroundColor: InsightTheme.redInk,
+          ),
+        );
+      }
+    }
   }
 
   Map<String, dynamic> _eventTheme(String eventType) {
@@ -166,43 +252,68 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Row(
-                    children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text('Notifications', style: InsightTheme.poppins(17, w: FontWeight.w700)),
-                      ),
-                      GestureDetector(
-                        onTap: _markAllRead,
-                        child: Text(
-                          'Mark all read',
-                          style: InsightTheme.inter(
-                            13.5, w: FontWeight.w600,
-                            c: _unreadCount == 0 ? InsightTheme.ink3 : InsightTheme.blueInk,
-                          ),
+                // ── Header ──
+                SpringSlide(
+                  animation: springFor(0),
+                  beginOffset: const Offset(0, -30),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    child: Row(
+                      children: [
+                        _GlassBackButton(onTap: () => Navigator.pop(context)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text('Notifications', style: InsightTheme.poppins(17, w: FontWeight.w700)),
                         ),
-                      ),
-                    ],
+                        if (_activity.isNotEmpty)
+                          GestureDetector(
+                            onTap: _clearAll,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: InsightTheme.redTint,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.delete_outline_rounded, size: 16, color: InsightTheme.redInk),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Clear All',
+                                    style: InsightTheme.inter(
+                                      12, w: FontWeight.w600,
+                                      c: InsightTheme.redInk,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
 
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      _TabPill(text: "All", isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
-                      const SizedBox(width: 8),
-                      _TabPill(text: "Unread · $_unreadCount", isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
-                    ],
+                // ── Tab pills ──
+                SpringSlide(
+                  animation: springFor(1),
+                  beginOffset: const Offset(0, 20),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        _TabPill(text: "All · ${_activity.length}", isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                        const SizedBox(width: 8),
+                        _TabPill(text: "Unread · $_unreadCount", isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
+                      ],
+                    ),
                   ),
                 ),
-
                 const SizedBox(height: 14),
 
+                // ── Notification list ──
                 Expanded(
                   child: _isLoading
                       ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
@@ -243,16 +354,45 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                     itemBuilder: (context, i) {
                                       final item = visible[i];
                                       final theme = _eventTheme(item['event_type'] as String? ?? '');
-                                      return _NotificationRow(
-                                        icon: theme['icon'] as IconData,
-                                        iconBgColor: theme['bg'] as Color,
-                                        iconColor: theme['fg'] as Color,
-                                        title: item['title'] as String? ?? 'Update',
-                                        subtitle: item['subtitle'] as String? ?? '',
-                                        time: _timeAgo(item['occurred_at'] as String?),
-                                        isUnread: item['is_read'] != true,
-                                        isLast: i == visible.length - 1,
-                                        onTap: () => _markOneRead(item),
+                                      return SpringSlide(
+                                        animation: springForKey(
+                                          item['id'] ?? i,
+                                          2 + (i % 6),
+                                        ),
+                                        beginOffset: const Offset(40, 0),
+                                        child: Dismissible(
+                                          key: ValueKey(item['id'] ?? i),
+                                          direction: DismissDirection.endToStart,
+                                          background: Container(
+                                            alignment: Alignment.centerRight,
+                                            padding: const EdgeInsets.only(right: 24),
+                                            margin: const EdgeInsets.only(bottom: 1),
+                                            decoration: BoxDecoration(
+                                              color: InsightTheme.redInk.withOpacity(0.1),
+                                              borderRadius: BorderRadius.circular(16),
+                                            ),
+                                            child: const Icon(
+                                              Icons.delete_outline_rounded,
+                                              color: InsightTheme.redInk,
+                                              size: 24,
+                                            ),
+                                          ),
+                                          confirmDismiss: (direction) async {
+                                            return true;
+                                          },
+                                          onDismissed: (_) => _deleteOne(item),
+                                          child: _NotificationRow(
+                                            icon: theme['icon'] as IconData,
+                                            iconBgColor: theme['bg'] as Color,
+                                            iconColor: theme['fg'] as Color,
+                                            title: item['title'] as String? ?? 'Update',
+                                            subtitle: item['subtitle'] as String? ?? '',
+                                            time: _timeAgo(item['occurred_at'] as String?),
+                                            isUnread: item['is_read'] != true,
+                                            isLast: i == visible.length - 1,
+                                            onTap: () => _markOneRead(item),
+                                          ),
+                                        ),
                                       );
                                     },
                                   ),
@@ -301,8 +441,9 @@ class _NotificationRow extends StatelessWidget {
         HapticFeedback.lightImpact();
         onTap();
       },
+      borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
         decoration: BoxDecoration(
           border: isLast ? null : const Border(bottom: BorderSide(color: InsightTheme.line)),
         ),
@@ -359,7 +500,9 @@ class _TabPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
         decoration: BoxDecoration(
           gradient: isActive ? const LinearGradient(
@@ -413,3 +556,4 @@ class _GlassBackButton extends StatelessWidget {
     );
   }
 }
+

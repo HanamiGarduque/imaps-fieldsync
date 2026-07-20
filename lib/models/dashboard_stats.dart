@@ -82,14 +82,7 @@ class InspectorDashboardStats {
     final activeWorkload = tasks.where((t) => t.category != 'Completed').length;
 
     final tasksTodayOrPending = tasks.where((t) {
-      if (t.category == 'Pending') return true;
-      if (t.scheduledDate.isEmpty) return false;
-      try {
-        final d = DateTime.parse(t.scheduledDate);
-        return DateTime(d.year, d.month, d.day) == today;
-      } catch (_) {
-        return false;
-      }
+      return t.category == 'Pending' || t.category == 'Ongoing';
     }).length;
 
     final completionRate = total == 0 ? 0.0 : completed / total;

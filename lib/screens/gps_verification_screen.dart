@@ -363,7 +363,13 @@ final online = connectivityResult is List
                                                 style: InsightTheme.jetBrains(11.5, w: FontWeight.w600, c: InsightTheme.ink2, ls: 0.4),
                                               ),
                                             ),
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 18),
+                                          _MetricsRow(
+                                            distance: _distance,
+                                            accuracy: _accuracy,
+                                            verified: _verified,
+                                          ),
+                                          const SizedBox(height: 10),
                                           if (_bearingToParcel != null)
                                             Padding(
                                               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -406,54 +412,6 @@ final online = connectivityResult is List
                             ),
                 ),
                 
-                if (!_loading && _error == null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(18), border: Border.all(color: Colors.white.withValues(alpha: 0.65)), boxShadow: const [BoxShadow(color: Color(0x14141628), blurRadius: 26, offset: Offset(0, 10))]),
-                          child: LayoutBuilder(
-                            builder: (context, statsConstraints) {
-                              final items = [
-                                _ReadoutItem(icon: Icons.map_outlined, value: '${_distance?.round() ?? '--'}m', label: 'DISTANCE', isGreen: false),
-                                _ReadoutItem(icon: Icons.gps_fixed_rounded, value: '±${_accuracy?.round() ?? '--'}m', label: 'ACCURACY', isGreen: false),
-                                _ReadoutItem(icon: _verified ? Icons.check_rounded : Icons.error_outline_rounded, value: _verified ? 'Verified' : 'Too far', label: 'STATUS', isGreen: _verified),
-                              ];
-                              // Below ~300px available width three columns get too cramped for
-                              // long values (e.g. 5-digit distances) — wrap into a grid instead
-                              // of forcing everything into one row.
-                              if (statsConstraints.maxWidth < 300) {
-                                return Wrap(
-                                  alignment: WrapAlignment.center,
-                                  spacing: 12,
-                                  runSpacing: 16,
-                                  children: items.map((w) => SizedBox(width: (statsConstraints.maxWidth - 12) / 2, child: w)).toList(),
-                                );
-                              }
-                              return IntrinsicHeight(
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    _FlexibleReadout(child: items[0]),
-                                    const VerticalDivider(width: 1, thickness: 1, color: InsightTheme.lineStrong),
-                                    _FlexibleReadout(child: items[1]),
-                                    const VerticalDivider(width: 1, thickness: 1, color: InsightTheme.lineStrong),
-                                    _FlexibleReadout(child: items[2]),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
                   child: ElevatedButton(
@@ -488,43 +446,97 @@ final online = connectivityResult is List
   }
 }
 
-class _ReadoutItem extends StatelessWidget {
-  final IconData icon; final String value; final String label; final bool isGreen;
-  const _ReadoutItem({required this.icon, required this.value, required this.label, required this.isGreen});
+/// Three compact, borderless metrics (Distance / Accuracy / Status) laid out
+/// as a single responsive row directly beneath the coordinates — no card,
+/// no background container. Each item is [Expanded] so the three share the
+/// row equally, and the value line uses [FittedBox] so arbitrarily long
+/// readings (e.g. "99999 m") scale down to fit instead of overflowing.
+class _MetricsRow extends StatelessWidget {
+  final double? distance;
+  final double? accuracy;
+  final bool verified;
+  const _MetricsRow({required this.distance, required this.accuracy, required this.verified});
+
   @override
   Widget build(BuildContext context) {
-    // No Expanded/fixed width here — the parent (Row+Expanded, or a sized Wrap
-    // cell) decides how much horizontal room this gets, so the same widget
-    // works in either layout.
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 32, height: 32,
-          decoration: BoxDecoration(color: isGreen ? InsightTheme.greenTint : InsightTheme.blueTint, borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, size: 16, color: isGreen ? InsightTheme.greenInk : InsightTheme.blueInk),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          textAlign: TextAlign.center,
-          softWrap: true,
-          style: InsightTheme.poppins(14, w: FontWeight.w700, c: isGreen ? InsightTheme.greenInk : InsightTheme.ink),
-        ),
-        const SizedBox(height: 2),
-        Text(label, textAlign: TextAlign.center, softWrap: true, style: InsightTheme.jetBrains(9, c: InsightTheme.ink2)),
-      ],
+    final items = [
+      _MetricData(
+        icon: Icons.map_outlined,
+        value: distance != null ? '${distance!.round()} m' : '-- m',
+        label: 'Distance',
+        color: InsightTheme.blueInk,
+      ),
+      _MetricData(
+        icon: Icons.gps_fixed_rounded,
+        value: accuracy != null ? '±${accuracy!.round()} m' : '± -- m',
+        label: 'Accuracy',
+        color: InsightTheme.blueInk,
+      ),
+      _MetricData(
+        icon: verified ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+        value: verified ? 'Verified' : 'Too far',
+        label: 'Status',
+        color: verified ? InsightTheme.greenInk : InsightTheme.ink2,
+      ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < items.length; i++) ...[
+            if (i != 0) const SizedBox(width: 4),
+            Expanded(child: _MetricItem(data: items[i])),
+          ],
+        ],
+      ),
     );
   }
 }
 
-/// Small helper so [_ReadoutItem] can still flex to fill a Row while
-/// remaining reusable inside a plain [Wrap] on narrow screens.
-class _FlexibleReadout extends StatelessWidget {
-  final Widget child;
-  const _FlexibleReadout({required this.child});
+class _MetricData {
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+  const _MetricData({required this.icon, required this.value, required this.label, required this.color});
+}
+
+class _MetricItem extends StatelessWidget {
+  final _MetricData data;
+  const _MetricItem({required this.data});
+
   @override
-  Widget build(BuildContext context) => Expanded(child: child);
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // FittedBox lets the icon+value line shrink as a unit rather than
+        // wrapping or overflowing when the value is unusually long
+        // (e.g. "12000 m", "99999 m").
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(data.icon, size: 15, color: data.color),
+              const SizedBox(width: 4),
+              Text(data.value, style: InsightTheme.poppins(14, w: FontWeight.w700, c: data.color)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          data.label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: InsightTheme.jetBrains(9.5, c: InsightTheme.ink2, ls: 0.4),
+        ),
+      ],
+    );
+  }
 }
 
 class _LoadingState extends StatelessWidget {

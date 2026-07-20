@@ -323,18 +323,21 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                 // 2. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
                 Row(
                   children: [
-                    SpringSlide(
+                    Expanded(
+                      child: SpringSlide(
                       animation: springFor(1),
                       beginOffset: const Offset(0, 34),
                       child: _buildStatCard(
-                      'Tasks Today / Pending',
+                      'Pending/Ongoing',
                       _isLoadingStats ? '—' : '${_stats.tasksTodayOrPendingCount}',
                       Icons.assignment_outlined,
                       InsightTheme.amber,
                       ),
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    SpringSlide(
+                    Expanded(
+                      child: SpringSlide(
                       animation: springFor(2),
                       beginOffset: const Offset(0, 34),
                       child: _buildStatCard(
@@ -342,6 +345,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                       _isLoadingStats ? '—' : '${_stats.completedCount}',
                       Icons.check_circle_outline_rounded,
                       InsightTheme.green,
+                      ),
                       ),
                     ),
                   ],
@@ -612,34 +616,32 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
   // WIDGET: Stat Card
   Widget _buildStatCard(String title, String count, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: InsightTheme.surface.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: InsightTheme.line),
-          boxShadow: const [
-            BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 20),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: const [
+          BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              shape: BoxShape.circle,
             ),
-            const SizedBox(height: 16),
-            Text(count, style: InsightTheme.poppins(24, w: FontWeight.w700)),
-            const SizedBox(height: 2),
-            Text(title, style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink2)),
-          ],
-        ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(height: 16),
+          Text(count, style: InsightTheme.poppins(24, w: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(title, style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink2), overflow: TextOverflow.ellipsis, maxLines: 2),
+        ],
       ),
     );
   }

@@ -127,6 +127,42 @@ class SupabaseService {
       debugPrint('Error marking all activity read: $e');
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DELETE ACTIVITY  (Notifications screen → swipe to delete)
+  // Uses security-definer RPC to bypass RLS so the delete actually works.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<void> deleteActivity(String activityId) async {
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) throw Exception('No authenticated user');
+    try {
+      // Prefer RPC call (bypasses RLS)
+      await client.rpc('delete_own_activity', params: {'p_id': activityId});
+    } catch (e) {
+      // Fallback: direct delete with inspector_id filter (respects RLS)
+      debugPrint('RPC delete_own_activity failed, trying fallback: $e');
+      await client.from('activity_log').delete()
+          .eq('id', activityId)
+          .eq('inspector_id', userId);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CLEAR ALL ACTIVITY  (Notifications screen → Clear All button)
+  // Uses security-definer RPC to bypass RLS so the delete actually works.
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<void> clearAllActivity() async {
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) throw Exception('No authenticated user');
+    try {
+      // Prefer RPC call (bypasses RLS)
+      await client.rpc('clear_own_activity');
+    } catch (e) {
+      // Fallback: direct delete with inspector_id filter (respects RLS)
+      debugPrint('RPC clear_own_activity failed, trying fallback: $e');
+      await client.from('activity_log').delete().eq('inspector_id', userId);
+    }
+  }
   // ─────────────────────────────────────────────────────────────────────────
   // FETCH JOBS  (Tasks screen)
   //   FK hint: field_jobs.supabase_application_id → supabase_zoning_applications
