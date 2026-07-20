@@ -157,7 +157,9 @@ class SupabaseService {
           supabase_parcels!field_jobs_supabase_parcel_id_fkey (
             lot_area_sqm,
             land_use_class,
-            property_index_number
+            property_index_number,
+            latitude,
+            longitude
           )
         ''')
         .eq('assigned_inspector_id', userId)
