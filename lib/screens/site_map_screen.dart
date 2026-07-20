@@ -11,6 +11,10 @@ import 'gps_verification_screen.dart';
 import 'tasks_screen.dart';
 import 'inspection_progress.dart';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
+import '../services/db_helper.dart';
+import '../services/spatial_offline_service.dart';
+
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
   static const Color surface = Colors.white;
@@ -69,11 +73,34 @@ class _SiteMapScreenState extends State<SiteMapScreen> {
         throw Exception('No parcel linked to this task.');
       }
 
-      final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
-      final lat = (parcel?['latitude'] as num?)?.toDouble();
-      final lng = (parcel?['longitude'] as num?)?.toDouble();
+      final connectivityResult = await Connectivity().checkConnectivity();
+final online = connectivityResult is List
+    ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+    : connectivityResult != ConnectivityResult.none;
+      double? lat;
+      double? lng;
+
+      if (online) {
+        final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+        lat = (parcel?['latitude'] as num?)?.toDouble();
+        lng = (parcel?['longitude'] as num?)?.toDouble();
+      } else {
+        // Offline — read the coordinates DBHelper.cacheJobs() already saved
+        // locally last time this list was fetched online, instead of
+        // silently failing the network call and showing a misleading
+        // "no coordinates" message.
+        final cached = await DBHelper.getCachedJobs();
+        final match = cached.where((j) => j['id'] == widget.task.id).toList();
+        if (match.isNotEmpty) {
+          lat = (match.first['parcel_lat'] as num?)?.toDouble();
+          lng = (match.first['parcel_lng'] as num?)?.toDouble();
+        }
+      }
+
       if (lat == null || lng == null) {
-        throw Exception('This parcel has no recorded coordinates yet.');
+        throw Exception(online
+            ? 'This parcel has no recorded coordinates yet.'
+            : 'No cached coordinates for this site yet — connect to the internet once so it can be saved for offline use.');
       }
       _parcelLatLng = ll.LatLng(lat, lng);
 
@@ -83,11 +110,13 @@ class _SiteMapScreenState extends State<SiteMapScreen> {
       try {
         final pos = await LocationService.getCurrentLocation();
         _deviceLatLng = ll.LatLng(pos.latitude, pos.longitude);
-        _distanceMeters = await SupabaseService.getDistanceToParcelBoundary(
-          parcelId: widget.task.parcelId!,
-          latitude: pos.latitude,
-          longitude: pos.longitude,
-        );
+        _distanceMeters = online
+            ? await SupabaseService.getDistanceToParcelBoundary(
+                parcelId: widget.task.parcelId!,
+                latitude: pos.latitude,
+                longitude: pos.longitude,
+              )
+            : SpatialOfflineService.haversineMeters(pos.latitude, pos.longitude, lat, lng);
       } catch (_) {
         _deviceLatLng = null;
         _distanceMeters = null;
