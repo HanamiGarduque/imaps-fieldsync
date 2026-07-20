@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../config/feature_flags.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
@@ -411,18 +412,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         },
                       ),
                       const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
-                      _ActionTile(
-                        icon: Icons.fingerprint,
-                        title: 'Quick Unlock',
-                        subtitle: 'Biometric / pattern',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => QuickUnlockSetupScreen(userEmail: userEmail)),
-                          );
-                        },
-                      ),
-                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+                      if (kQuickUnlockEnabled) ...[
+                        _ActionTile(
+                          icon: Icons.fingerprint,
+                          title: 'Quick Unlock',
+                          subtitle: 'Biometric / pattern',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => QuickUnlockSetupScreen(userEmail: userEmail)),
+                            );
+                          },
+                        ),
+                        const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+                      ],
                       _ActionTile(
                         icon: Icons.logout_rounded,
                         title: 'Sign out',

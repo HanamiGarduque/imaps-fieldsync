@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
+import '../config/feature_flags.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -82,7 +83,7 @@ class _SplashScreenState extends State<SplashScreen> {
         final profile = await AuthService.getCurrentProfile();
         debugPrint('[STAY_SIGNED_IN] profile fetch result: ${profile?.fullName ?? "NULL"}');
         if (profile != null && mounted) {
-          final quickUnlockOn = await QuickUnlockService.isAnyEnabled();
+          final quickUnlockOn = kQuickUnlockEnabled && await QuickUnlockService.isAnyEnabled();
           if (quickUnlockOn) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (_) => QuickUnlockScreen(profile: profile)),
@@ -256,6 +257,7 @@ class _LoginScreenState extends State<LoginScreen> {
   // Quick unlock only ever shows up here for the account it was set up
   // for on this device — never as a way to register a new one.
   Future<void> _checkQuickUnlock(String email) async {
+    if (!kQuickUnlockEnabled) return;
     if (!await QuickUnlockService.isBoundTo(email)) return;
     // The manual login form is only ever reached when Splash's own
     // session check already failed (or "stay signed in" was off) — so
@@ -654,12 +656,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             isPassword: true,
                           ),
 
-                          const SizedBox(height: 14),
-                          _BiometricButton(
-                            label: _bioEnabled ? 'Unlock with $_bioLabel' : 'Unlock with Biometrics',
-                            enabled: !_isLoading,
-                            onTap: _onBiometricTap,
-                          ),
+                          if (kQuickUnlockEnabled) ...[
+                            const SizedBox(height: 14),
+                            _BiometricButton(
+                              label: _bioEnabled ? 'Unlock with $_bioLabel' : 'Unlock with Biometrics',
+                              enabled: !_isLoading,
+                              onTap: _onBiometricTap,
+                            ),
+                          ],
                         ],
                       ),
                     ),
