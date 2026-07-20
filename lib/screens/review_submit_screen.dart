@@ -73,13 +73,17 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       ...provider.zoningObservations.entries.map((e) => {'item': e.key, 'checked': e.value}),
     ];
     final checklistCompleted = checklist.where((c) => c['checked'] == true).length;
-    final localPhotoPaths = provider.capturedPhotos.map((p) => (p['photoPath'] as String?) ?? '').where((p) => p.isNotEmpty).toList();
+    
+    // UPDATED: Pass the full Map so SupabaseService has access to coordinates & timestamps
+    final photosData = provider.capturedPhotos.where((p) => (p['photoPath'] as String?)?.isNotEmpty == true).toList();
+    
     final observations = 'Actual land use: ${provider.actualLandUse}. Boundary status: ${provider.boundaryStatus}.';
 
     // Try the real thing first — unchanged happy path when online.
     bool queuedOffline = false;
     try {
-      final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: widget.task.id, localPaths: localPhotoPaths);
+      final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: widget.task.id, photosData: photosData);      
+      
       await SupabaseService.submitInspection(
         jobId: widget.task.id, findings: provider.notes, isCompliant: _selectedStatus == 'Compliant', inspectionResult: _selectedStatus,
         observations: observations,
@@ -99,7 +103,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
           observations: observations,
           discrepancies: provider.discrepancies.isNotEmpty ? provider.discrepancies : null, recommendations: provider.recommendations.isNotEmpty ? provider.recommendations : null,
           inspectorNotes: provider.notes, checklistData: checklist, checklistCompletedCount: checklistCompleted, checklistTotalCount: checklist.length,
-          localPhotoPaths: localPhotoPaths, locationLabel: widget.task.location,
+          photosData: photosData, locationLabel: widget.task.location, // UPDATED: Passing photosData
         );
         queuedOffline = true;
       } catch (_) {

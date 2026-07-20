@@ -289,13 +289,18 @@ class SupabaseService {
   //   ng device. Parehong bucket/path convention gaya ng
   //   InspectionProvider.syncToServer para compatible ang dalawang path.
   // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // UPLOAD INSPECTION PHOTOS & STORE METADATA
+  // ─────────────────────────────────────────────────────────────────────────
   static Future<List<String>> uploadInspectionPhotos({
     required String jobId,
-    required List<String> localPaths,
+    required List<Map<String, dynamic>> photosData, // Changed from List<String> localPaths
   }) async {
     final List<String> uploadedUrls = [];
     final List<String> failedPaths = [];
-    for (final path in localPaths) {
+
+    for (final photo in photosData) {
+      final path = photo['photoPath'] as String; // Extract path from the map
       try {
         final file = File(path);
         if (!await file.exists()) continue;
@@ -303,33 +308,39 @@ class SupabaseService {
         final fileName = 'photo_${const Uuid().v4()}.jpg';
         final storagePath = 'inspections/$jobId/$fileName';
 
+        // 1. Upload to Supabase Storage
         await client.storage.from('inspection-photos').upload(
           storagePath,
           file,
           fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
         );
 
-        uploadedUrls.add(client.storage.from('inspection-photos').getPublicUrl(storagePath));
+        final publicUrl = client.storage.from('inspection-photos').getPublicUrl(storagePath);
+        uploadedUrls.add(publicUrl);
+
+        // 2. Insert metadata into the new field_job_photos table
+        await client.from('field_job_photos').insert({
+          'field_job_id': jobId,
+          'photo_url': publicUrl,
+          'latitude': photo['latitude'],
+          'longitude': photo['longitude'],
+          'captured_at': photo['capturedAt'],
+        });
+
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
         failedPaths.add(path);
       }
     }
-    // STOP-GAP (pending the offline photo-upload outbox): previously this
-    // swallowed every failure and returned whatever DID upload, so a
-    // fully-offline submit silently went through with photoPaths: [] —
-    // the job looked "Completed" with zero photos and no error anywhere.
-    // Until photo upload has its own queue/retry, fail loudly instead of
-    // lying about what was actually saved.
+
     if (failedPaths.isNotEmpty) {
       throw Exception(
-        '${failedPaths.length} of ${localPaths.length} photo(s) failed to upload. '
+        '${failedPaths.length} of ${photosData.length} photo(s) failed to upload. '
         'Check your connection and try submitting again.',
       );
     }
     return uploadedUrls;
   }
-
   // ─────────────────────────────────────────────────────────────────────────
   // SUBMIT INSPECTION  (Review & submit screen → marks job completed)
   // ─────────────────────────────────────────────────────────────────────────
@@ -385,6 +396,9 @@ class SupabaseService {
   //   recommendations, checklist_data, photo_paths, GPS confirmation, etc.)
   //   for the one job the inspector is actually opening.
   // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // FETCH FULL JOB DETAIL 
+  // ─────────────────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>?> fetchJobDetail(String jobId) async {
     try {
       final response = await client
@@ -402,8 +416,15 @@ class SupabaseService {
               lot_area_sqm,
               land_use_class,
               property_index_number
+            ),
+            field_job_photos (
+              id,
+              photo_url,
+              latitude,
+              longitude,
+              captured_at
             )
-          ''')
+          ''') // Added field_job_photos to the select query
           .eq('id', jobId)
           .single();
       return response;
@@ -412,7 +433,6 @@ class SupabaseService {
       return null;
     }
   }
-
   // ─────────────────────────────────────────────────────────────────────────
   // REOPEN A COMPLETED JOB FOR REWORK  (Completed detail screen → "Rework")
   //   Moves the job back to in_progress (so it shows under Ongoing again)

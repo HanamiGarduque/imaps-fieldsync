@@ -538,7 +538,7 @@ class _GlassCard extends StatelessWidget {
         border: Border.all(color: Colors.white),
         boxShadow: const [
           BoxShadow(color: Color(0x04141628), blurRadius: 8, offset: Offset(0, 2)),
-          BoxShadow(color: Color(0x08141628), blurRadius: 16, offset: Offset(0, 6)),
+          BoxShadow(color: Color(0x081416928), blurRadius: 16, offset: Offset(0, 6)),
         ],
       ),
       child: ClipRRect(

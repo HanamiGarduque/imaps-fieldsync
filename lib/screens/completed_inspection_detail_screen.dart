@@ -13,6 +13,7 @@ import 'inspection_checklist_screen.dart' hide InsightTheme;
 import 'capture_photo_screen.dart' hide InsightTheme;
 import 'field_findings_screen.dart' hide InsightTheme;
 import 'review_submit_screen.dart' hide InsightTheme;
+
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
   const CompletedInspectionDetailScreen({super.key, required this.task});
@@ -22,8 +23,7 @@ class CompletedInspectionDetailScreen extends StatefulWidget {
       _CompletedInspectionDetailScreenState();
 }
 
-class _CompletedInspectionDetailScreenState
-    extends State<CompletedInspectionDetailScreen> {
+class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDetailScreen> {
   TaskItem? _fullTask;
   bool _isLoading = true;
   String? _error;
@@ -34,9 +34,6 @@ class _CompletedInspectionDetailScreenState
     _loadFullDetail();
   }
 
-  // The task passed in comes from the Tasks list (fetchMyJobs), which
-  // doesn't select findings/observations/checklist_data/photo_paths/GPS
-  // fields. Re-fetch the full row before showing anything.
   Future<void> _loadFullDetail() async {
     try {
       final job = await SupabaseService.fetchJobDetail(widget.task.id);
@@ -66,19 +63,29 @@ class _CompletedInspectionDetailScreenState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Rework this step?'),
+        backgroundColor: InsightTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Rework this step?', style: InsightTheme.poppins(18, w: FontWeight.w600)),
         content: Text(
           'Only "${InspectionProgress.stepTitles[step - 1]}" needs to be '
           'redone. The rest of the submitted inspection stays as-is until '
           'you resubmit.',
+          style: InsightTheme.inter(14, c: InsightTheme.ink2),
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Rework')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink3)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: InsightTheme.blue1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              elevation: 0,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Rework', style: InsightTheme.inter(14, w: FontWeight.w600, c: Colors.white)),
+          ),
         ],
       ),
     );
@@ -87,32 +94,21 @@ class _CompletedInspectionDetailScreenState
     HapticFeedback.mediumImpact();
 
     try {
-      // 1. Flip status back to in_progress — keeps existing submitted data.
       await SupabaseService.reopenForRework(jobId: task.id, locationLabel: task.location);
-
-      // 2. Load real submitted data into the provider (not blanks).
+      
+      // FIXED: Moved mounted check above the context usage across the async gap
+      if (!mounted) return;
+      
       context.read<InspectionProvider>().hydrateForRework(task);
-
-      // 3. Unlock every step, keyed by task.id — not inspectionNo, since
-      //    two jobs can share a reference_number (see notes above).
       InspectionProgress.instance.unlockAllForReview(task.id, label: task.location);
 
-      if (!mounted) return;
       _navigateToStep(step, task);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not reopen: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not reopen: $e')));
     }
   }
 
-  // ⚠️ I don't have the source for the individual step screens
-  // (GPS verification, capture photo, checklist, findings, review/submit)
-  // or ParcelDetailScreen, so I can't safely fill in real class names and
-  // constructors here — guessing would break the build. Placeholder below;
-  // swap in the real screens. Important: whichever screen you land on must
-  // NOT call `startInspection()`, since that resets everything
-  // `hydrateForRework()` just loaded.
   void _navigateToStep(int step, TaskItem task) {
     final Widget target;
     switch (step) {
@@ -124,35 +120,41 @@ class _CompletedInspectionDetailScreenState
         break;
       case 3:
         target = CapturePhotoScreen(task: task);
-      break;
-    case 4:
-      target = InspectionChecklistScreen(task: task);
-      break;
-    case 5:
-      target = FieldFindingsScreen(task: task);
-      break;
-    default:
-      target = ReviewSubmitScreen(task: task);
+        break;
+      case 4:
+        target = InspectionChecklistScreen(task: task);
+        break;
+      case 5:
+        target = FieldFindingsScreen(task: task);
+        break;
+      default:
+        target = ReviewSubmitScreen(task: task);
+    }
+    Navigator.push(context, MaterialPageRoute(builder: (_) => target));
   }
-  Navigator.push(context, MaterialPageRoute(builder: (_) => target));
-}
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: InsightTheme.bg,
       appBar: AppBar(
-        backgroundColor: InsightTheme.bg,
+        backgroundColor: InsightTheme.surface,
         elevation: 0,
-        title: Text('Inspection summary', style: InsightTheme.poppins(16)),
+        surfaceTintColor: Colors.transparent,
+        iconTheme: const IconThemeData(color: InsightTheme.ink),
+        title: Text('Inspection Summary', style: InsightTheme.poppins(16, w: FontWeight.w600)),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1.0),
+          child: Container(color: InsightTheme.line, height: 1.0),
+        ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
           : _error != null
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(_error!),
+                    child: Text(_error!, style: InsightTheme.inter(14, c: InsightTheme.ink2)),
                   ),
                 )
               : _buildBody(_fullTask!),
@@ -161,168 +163,299 @@ class _CompletedInspectionDetailScreenState
 
   Widget _buildBody(TaskItem task) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
       children: [
-        _headerCard(task),
-        const SizedBox(height: 20),
-        _stepSection(
+        _buildHeaderCard(task),
+        const SizedBox(height: 24),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 12),
+          child: Text('INSPECTION DATA', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.2)),
+        ),
+        _CollapsibleStepCard(
           step: 1,
-          title: 'Site verification',
-          rows: {
+          title: 'Site Verification',
+          icon: Icons.location_on_outlined,
+          onRework: () => _reworkStep(1),
+          content: _buildDetailRows({
             'Land use class': task.landUseClass,
             'Lot area (sqm)': task.lotAreaSqm?.toStringAsFixed(2) ?? '—',
             'Property index no.': task.propertyIndexNumber ?? '—',
-          },
+          }),
         ),
-        _stepSection(
+        _CollapsibleStepCard(
           step: 2,
-          title: 'GPS verification',
-          rows: {
+          title: 'GPS Verification',
+          icon: Icons.satellite_alt_outlined,
+          onRework: () => _reworkStep(2),
+          content: _buildDetailRows({
             'Confirmed latitude': task.confirmedLatitude?.toStringAsFixed(6) ?? '—',
             'Confirmed longitude': task.confirmedLongitude?.toStringAsFixed(6) ?? '—',
             'Accuracy (m)': task.gpsAccuracyM?.toStringAsFixed(1) ?? '—',
             'Confirmed at': task.gpsConfirmedAt ?? '—',
-          },
+          }),
         ),
-        _photoStepSection(task),
-        _stepSection(
+        _CollapsibleStepCard(
+          step: 3,
+          title: 'Photographic Evidence',
+          icon: Icons.camera_alt_outlined,
+          onRework: () => _reworkStep(3),
+          content: _buildPhotoGrid(task),
+        ),
+        _CollapsibleStepCard(
           step: 4,
           title: 'Checklist',
-          rows: {
-            'Completed': '${task.checklistCompletedCount} of ${task.checklistTotalCount}',
-          },
+          icon: Icons.checklist_rtl_rounded,
+          onRework: () => _reworkStep(4),
+          content: _buildDetailRows({
+            'Completed': '${task.checklistCompletedCount} of ${task.checklistTotalCount} verified',
+          }),
         ),
-        _stepSection(
+        _CollapsibleStepCard(
           step: 5,
-          title: 'Findings',
-          rows: {
-            'Observations': task.observations ?? '—',
-            'Discrepancies': task.discrepancies ?? '—',
-            'Recommendations': task.recommendations ?? '—',
-            'Inspector notes': task.inspectorNotes ?? '—',
-          },
+          title: 'Field Findings',
+          icon: Icons.edit_document,
+          onRework: () => _reworkStep(5),
+          content: _buildDetailRows({
+            'Observations': task.observations?.isNotEmpty == true ? task.observations! : 'None recorded',
+            'Discrepancies': task.discrepancies?.isNotEmpty == true ? task.discrepancies! : 'None recorded',
+            'Recommendations': task.recommendations?.isNotEmpty == true ? task.recommendations! : 'None recorded',
+            'Inspector notes': task.inspectorNotes?.isNotEmpty == true ? task.inspectorNotes! : 'None recorded',
+          }),
         ),
-        _stepSection(
+        _CollapsibleStepCard(
           step: 6,
-          title: 'Review & submit',
-          rows: {
+          title: 'Review & Submit',
+          icon: Icons.verified_outlined,
+          onRework: () => _reworkStep(6),
+          content: _buildDetailRows({
             'Result': task.inspectionResult ?? '—',
-            'Compliant': task.isCompliant == null
-                ? '—'
-                : (task.isCompliant! ? 'Yes' : 'No'),
+            'Compliant': task.isCompliant == null ? '—' : (task.isCompliant! ? 'Yes' : 'No (Discrepancy Found)'),
             'Submitted at': task.submittedAt ?? '—',
-          },
+          }),
         ),
       ],
     );
   }
 
-  Widget _headerCard(TaskItem task) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: InsightTheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: InsightTheme.line),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(task.location, style: InsightTheme.poppins(16)),
-            const SizedBox(height: 4),
-            Text(task.inspectionNo, style: InsightTheme.inter(12)),
-          ],
-        ),
-      );
-
-  Widget _photoStepSection(TaskItem task) => _sectionShell(
-        step: 3,
-        title: 'Photos',
-        child: task.photoPaths.isEmpty
-            ? Text('No photos on file.', style: InsightTheme.inter(13))
-            : SizedBox(
-                height: 90,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: task.photoPaths.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  // photo_paths may be remote URLs OR leftover local device
-                  // paths depending on which submit path wrote them (see
-                  // note above about submitInspection vs syncToServer) —
-                  // errorBuilder covers the case Image.network can't load it.
-                  itemBuilder: (_, i) => ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      task.photoPaths[i],
-                      width: 90,
-                      height: 90,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 90,
-                        height: 90,
-                        color: InsightTheme.surface2,
-                        child: const Icon(Icons.broken_image_outlined, size: 20),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-      );
-
-  Widget _stepSection({
-    required int step,
-    required String title,
-    required Map<String, String> rows,
-  }) =>
-      _sectionShell(
-        step: step,
-        title: title,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: rows.entries
-              .map((e) => Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: RichText(
-                      text: TextSpan(children: [
-                        TextSpan(
-                          text: '${e.key}: ',
-                          style: InsightTheme.inter(13,
-                              w: FontWeight.w600, c: InsightTheme.ink),
-                        ),
-                        TextSpan(text: e.value, style: InsightTheme.inter(13)),
-                      ]),
-                    ),
-                  ))
-              .toList(),
-        ),
-      );
-
-  Widget _sectionShell({required int step, required String title, required Widget child}) {
+  Widget _buildHeaderCard(TaskItem task) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: InsightTheme.line),
+        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: InsightTheme.greenTint,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.check_circle_rounded, color: InsightTheme.green, size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  task.inspectionNo,
+                  style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  task.location,
+                  style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.ink),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  task.name,
+                  style: InsightTheme.inter(13, c: InsightTheme.ink2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRows(Map<String, String> rows) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: rows.entries.map((e) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: InsightTheme.poppins(14)),
-              TextButton.icon(
-                onPressed: () => _reworkStep(step),
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Rework this step'),
-              ),
+              Text(e.key.toUpperCase(), style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.5)),
+              const SizedBox(height: 4),
+              Text(e.value, style: InsightTheme.inter(13, w: FontWeight.w500, c: InsightTheme.ink)),
             ],
           ),
-          const SizedBox(height: 10),
-          child,
-        ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildPhotoGrid(TaskItem task) {
+    if (task.photoPaths.isEmpty) {
+      return Text('No photos attached to this report.', style: InsightTheme.inter(13, c: InsightTheme.ink2));
+    }
+    return SizedBox(
+      height: 100,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: task.photoPaths.length,
+        // FIXED: Added identifiers context and index
+        separatorBuilder: (context, index) => const SizedBox(width: 10),
+        itemBuilder: (_, i) => ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.network(
+            task.photoPaths[i],
+            width: 100,
+            height: 100,
+            fit: BoxFit.cover,
+            // FIXED: Added identifiers context, error, and stackTrace
+            errorBuilder: (context, error, stackTrace) => Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: InsightTheme.surface2,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: InsightTheme.line),
+              ),
+              child: const Icon(Icons.broken_image_outlined, size: 24, color: InsightTheme.ink3),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A collapsible card mimicking the _CompactTaskCard from tasks_screen.dart
+class _CollapsibleStepCard extends StatefulWidget {
+  final int step;
+  final String title;
+  final IconData icon;
+  final Widget content;
+  final VoidCallback onRework;
+
+  const _CollapsibleStepCard({
+    required this.step,
+    required this.title,
+    required this.icon,
+    required this.content,
+    required this.onRework,
+  });
+
+  @override
+  State<_CollapsibleStepCard> createState() => _CollapsibleStepCardState();
+}
+
+class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
+  bool _isExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            GestureDetector(
+              onTap: () {
+                setState(() => _isExpanded = !_isExpanded);
+                HapticFeedback.selectionClick();
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: InsightTheme.bg,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: InsightTheme.line),
+                      ),
+                      child: Center(
+                        child: Text('${widget.step}', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink),
+                      ),
+                    ),
+                    Icon(
+                      _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                      color: InsightTheme.ink3,
+                      size: 20,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_isExpanded) ...[
+              Container(color: InsightTheme.line, height: 1),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    widget.content,
+                    const SizedBox(height: 16),
+                    GestureDetector(
+                      onTap: widget.onRework,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.blueTint,
+                          // FIXED: Replaced 😎 with 8)
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.2)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.refresh_rounded, color: InsightTheme.blue2, size: 16),
+                            // FIXED: Replaced 😎 with 8)
+                            const SizedBox(width: 8),
+                            Text('Rework this step', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blue2)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ]
+          ],
+        ),
       ),
     );
   }

@@ -59,10 +59,18 @@ class InspectionProvider extends ChangeNotifier {
     _activeTask = task;
     _currentStep = 1;
     _isReworkMode = false;
-    
+
     // Reset Checklist
-    _siteCondition.updateAll((key, value) => key == 'Surrounding developments noted' || key == 'Signage / commercial activity present' ? false : true);
-    _zoningObservations.updateAll((key, value) => key == 'Accessibility & road frontage' ? true : false);
+    _siteCondition.updateAll(
+      (key, value) =>
+          key == 'Surrounding developments noted' ||
+              key == 'Signage / commercial activity present'
+          ? false
+          : true,
+    );
+    _zoningObservations.updateAll(
+      (key, value) => key == 'Accessibility & road frontage' ? true : false,
+    );
 
     // Reset Photos
     _capturedPhotos.clear();
@@ -74,7 +82,7 @@ class InspectionProvider extends ChangeNotifier {
     _recommendations = '';
     _boundaryStatus = 'Compliant';
     _inspectionResult = 'Compliant';
-    
+
     _loadLocalDraftIfExists(task.id);
     notifyListeners();
   }
@@ -140,7 +148,8 @@ class InspectionProvider extends ChangeNotifier {
   // confirmation, so Step 5 (Findings) reflects the real GPS result
   // instead of a hardcoded placeholder string.
   void recordGpsVerification({required double distanceMeters}) {
-    _boundaryStatus = 'Verified on-site — ${distanceMeters.round()}m from declared location';
+    _boundaryStatus =
+        'Verified on-site — ${distanceMeters.round()}m from declared location';
     notifyListeners();
   }
 
@@ -150,58 +159,63 @@ class InspectionProvider extends ChangeNotifier {
   }
 
   /// Rebuilds in-memory state from a completed job's real submitted data,
-/// instead of the blanks `startInspection` uses. Called on "Rework this
-/// step" — unlike startInspection, this does NOT reset anything, so the
-/// inspector doesn't lose the other steps' answers.
-void hydrateForRework(TaskItem task) {
-  _activeTask = task;
-  _isReworkMode = true;
-  _currentStep = 1;
-  _isReworkMode = true;
+  /// instead of the blanks `startInspection` uses. Called on "Rework this
+  /// step" — unlike startInspection, this does NOT reset anything, so the
+  /// inspector doesn't lose the other steps' answers.
+  void hydrateForRework(TaskItem task) {
+    _activeTask = task;
+    _isReworkMode = true;
+    _currentStep = 1;
+    _isReworkMode = true;
 
-  // Match stored checklist entries back onto the two known maps.
-  // Expects each entry to look like {'label': ..., 'value': true/false} —
-  // adjust the keys below if your actual checklist_data shape differs.
-  for (final entry in task.checklistData) {
-    final key = entry['label'] ?? entry['key'];
-    final value = entry['value'] ?? entry['checked'];
-    if (key == null) continue;
-    if (_siteCondition.containsKey(key)) {
-      _siteCondition[key] = value == true;
-    } else if (_zoningObservations.containsKey(key)) {
-      _zoningObservations[key] = value == true;
+    // Match stored checklist entries back onto the two known maps.
+    // Expects each entry to look like {'label': ..., 'value': true/false} —
+    // adjust the keys below if your actual checklist_data shape differs.
+    for (final entry in task.checklistData) {
+      final key = entry['label'] ?? entry['key'];
+      final value = entry['value'] ?? entry['checked'];
+      if (key == null) continue;
+      if (_siteCondition.containsKey(key)) {
+        _siteCondition[key] = value == true;
+      } else if (_zoningObservations.containsKey(key)) {
+        _zoningObservations[key] = value == true;
+      }
     }
+
+    // Photos — only paths were persisted on field_jobs.photo_paths (no
+    // notes/lat/lng), so those come back empty. If you want that metadata
+    // to survive a rework round-trip, pull from field_job_photos instead,
+    // which DOES have latitude/longitude/captured_at.
+    _capturedPhotos
+      ..clear()
+      ..addAll(
+        task.photoPaths.map(
+          (path) => {
+            'photoPath': path,
+            'notes': '',
+            'latitude': null,
+            'longitude': null,
+            'capturedAt': task.submittedAt,
+          },
+        ),
+      );
+
+    _notes = task.inspectorNotes ?? '';
+    _discrepancies = task.discrepancies ?? '';
+    _recommendations = task.recommendations ?? '';
+    _inspectionResult =
+        task.inspectionResult ??
+        (task.isCompliant == true ? 'Compliant' : 'With Discrepancy');
+    _boundaryStatus = task.isCompliant == false ? 'Non-compliant' : 'Compliant';
+    // NOTE: `observations` was historically written as one freeform
+    // sentence (e.g. "Actual land use: X. Boundary status: Y.") rather than
+    // matching `_actualLandUse` 1:1 — I'm not auto-parsing that back apart
+    // since it'd be guesswork. If you want exact round-trip, the fix is
+    // upstream: store actualLandUse as its own column instead of folding
+    // it into `observations`.
+
+    notifyListeners();
   }
-
-  // Photos — only paths were persisted on field_jobs.photo_paths (no
-  // notes/lat/lng), so those come back empty. If you want that metadata
-  // to survive a rework round-trip, pull from field_job_photos instead,
-  // which DOES have latitude/longitude/captured_at.
-  _capturedPhotos
-    ..clear()
-    ..addAll(task.photoPaths.map((path) => {
-          'photoPath': path,
-          'notes': '',
-          'latitude': null,
-          'longitude': null,
-          'capturedAt': task.submittedAt,
-        }));
-
-  _notes = task.inspectorNotes ?? '';
-  _discrepancies = task.discrepancies ?? '';
-  _recommendations = task.recommendations ?? '';
-  _inspectionResult = task.inspectionResult ??
-      (task.isCompliant == true ? 'Compliant' : 'With Discrepancy');
-  _boundaryStatus = task.isCompliant == false ? 'Non-compliant' : 'Compliant';
-  // NOTE: `observations` was historically written as one freeform
-  // sentence (e.g. "Actual land use: X. Boundary status: Y.") rather than
-  // matching `_actualLandUse` 1:1 — I'm not auto-parsing that back apart
-  // since it'd be guesswork. If you want exact round-trip, the fix is
-  // upstream: store actualLandUse as its own column instead of folding
-  // it into `observations`.
-
-  notifyListeners();
-}
   // --- LOCAL SQLite DRAFT RECOVERY ---
 
   Future<void> _loadLocalDraftIfExists(String jobId) async {
@@ -210,15 +224,20 @@ void hydrateForRework(TaskItem task) {
       _actualLandUse = draft['actual_land_use'] ?? _actualLandUse;
       _notes = draft['notes'] ?? _notes;
       _boundaryStatus = draft['boundary_status'] ?? _boundaryStatus;
-      _inspectionResult = draft['inspection_result'] as String? ??
+      _inspectionResult =
+          draft['inspection_result'] as String? ??
           (draft['is_compliant'] == 1 ? 'Compliant' : 'With Discrepancy');
-      
+
       if (draft['checklist_json'] != null) {
         try {
-          final Map<String, dynamic> checklist = jsonDecode(draft['checklist_json']);
+          final Map<String, dynamic> checklist = jsonDecode(
+            draft['checklist_json'],
+          );
           checklist.forEach((key, value) {
-            if (_siteCondition.containsKey(key)) _siteCondition[key] = value == true;
-            if (_zoningObservations.containsKey(key)) _zoningObservations[key] = value == true;
+            if (_siteCondition.containsKey(key))
+              _siteCondition[key] = value == true;
+            if (_zoningObservations.containsKey(key))
+              _zoningObservations[key] = value == true;
           });
         } catch (e) {
           debugPrint('Error decoding local checklist: $e');
@@ -248,7 +267,10 @@ void hydrateForRework(TaskItem task) {
     if (_activeTask == null) return false;
 
     // Save Checklist observations
-    final Map<String, bool> combinedChecklist = {..._siteCondition, ..._zoningObservations};
+    final Map<String, bool> combinedChecklist = {
+      ..._siteCondition,
+      ..._zoningObservations,
+    };
 
     // 1. Save main inspection details to local sqlite
     await DBHelper.saveInspectionLocally(
@@ -285,24 +307,29 @@ void hydrateForRework(TaskItem task) {
     return false; // Stored offline
   }
 
+
   // --- REWORK: PER-STEP SAVE (writes immediately, no need to reach Submit) ---
 
   Future<bool> saveStepPhotos() async {
     if (_activeTask == null) return false;
     try {
-      final localPaths = _capturedPhotos
-          .map((p) => (p['photoPath'] as String?) ?? '')
-          .where((p) => p.isNotEmpty)
+      // Filter out any entries without a valid photo path, but keep the full Map structure
+      final photosToUpload = _capturedPhotos
+          .where((p) => (p['photoPath'] as String?)?.isNotEmpty == true)
           .toList();
-      final uploaded = await SupabaseService.uploadInspectionPhotos(
+
+      // Pass the full list of maps as photosData
+      final uploadedUrls = await SupabaseService.uploadInspectionPhotos(
         jobId: _activeTask!.id,
-        localPaths: localPaths,
+        photosData: photosToUpload,
       );
+
+      // Update the main field_jobs table to maintain the array of URLs for quick access
       await SupabaseService.updateJobInspectionProgress(
         jobId: _activeTask!.id,
         updateData: {
-          'photo_paths': uploaded,
-          'photo_count': uploaded.length,
+          'photo_paths': uploadedUrls,
+          'photo_count': uploadedUrls.length,
         },
       );
       return true;
@@ -316,8 +343,12 @@ void hydrateForRework(TaskItem task) {
     if (_activeTask == null) return false;
     try {
       final checklist = <Map<String, dynamic>>[
-        ..._siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
-        ..._zoningObservations.entries.map((e) => {'item': e.key, 'checked': e.value}),
+        ..._siteCondition.entries.map(
+          (e) => {'item': e.key, 'checked': e.value},
+        ),
+        ..._zoningObservations.entries.map(
+          (e) => {'item': e.key, 'checked': e.value},
+        ),
       ];
       final done = checklist.where((c) => c['checked'] == true).length;
       await SupabaseService.updateJobInspectionProgress(
@@ -341,9 +372,12 @@ void hydrateForRework(TaskItem task) {
       await SupabaseService.updateJobInspectionProgress(
         jobId: _activeTask!.id,
         updateData: {
-          'observations': 'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.',
+          'observations':
+              'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.',
           'discrepancies': _discrepancies.isNotEmpty ? _discrepancies : null,
-          'recommendations': _recommendations.isNotEmpty ? _recommendations : null,
+          'recommendations': _recommendations.isNotEmpty
+              ? _recommendations
+              : null,
           'inspector_notes': _notes,
         },
       );
@@ -387,7 +421,10 @@ void hydrateForRework(TaskItem task) {
   Future<bool> saveAllInspectionState() async {
     if (_activeTask == null) return false;
 
-    final Map<String, bool> combinedChecklist = {..._siteCondition, ..._zoningObservations};
+    final Map<String, bool> combinedChecklist = {
+      ..._siteCondition,
+      ..._zoningObservations,
+    };
 
     await DBHelper.saveInspectionLocally(
       jobId: _activeTask!.id,
@@ -427,129 +464,146 @@ void hydrateForRework(TaskItem task) {
       return result != ConnectivityResult.none;
     }
     if (result is List) {
-      return result
-          .cast<ConnectivityResult>()
-          .any((status) => status != ConnectivityResult.none);
+      return result.cast<ConnectivityResult>().any(
+        (status) => status != ConnectivityResult.none,
+      );
     }
     return false;
   }
 
   Future<void> syncToServer() async {
-  if (_isSyncing) return;
-  _isSyncing = true;
-  notifyListeners();
-
-  try {
-    final supabase = SupabaseService.client;
-
-    // 1. Sync Pending Photos first (needed for database metadata joins)
-    final pendingPhotos = await DBHelper.getPendingPhotos();
-    // BUG FIX #4B — Image Presentation Bug.
-    // This used to only upsert into field_job_photos and never touch
-    // field_jobs.photo_paths, so that column kept whatever local device
-    // paths were written when the photo was first captured. Any screen
-    // that reads task.photoPaths (which comes straight from
-    // field_jobs.photo_paths) then tried Image.network() on a local
-    // filesystem path and fell straight into the gray/broken-image
-    // fallback — even though the photo really did make it to storage.
-    // Track uploaded public URLs per job here and patch field_jobs too.
-    final Map<String, List<String>> uploadedUrlsByJob = {};
-    for (final photo in pendingPhotos) {
-      final file = File(photo['photo_path']);
-      if (!await file.exists()) {
-        await DBHelper.markPhotoSynced(photo['id']);
-        continue;
-      }
-
-      final fileName = 'photo_${photo['id']}.jpg';
-      final storagePath = 'inspections/${photo['job_id']}/$fileName';
-
-      await supabase.storage.from('inspection-photos').upload(
-        storagePath,
-        file,
-        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
-      );
-
-      final publicUrl = supabase.storage.from('inspection-photos').getPublicUrl(storagePath);
-
-      await supabase.from('field_job_photos').upsert({
-        'id': photo['id'],
-        'field_job_id': photo['job_id'],
-        'photo_url': publicUrl,
-        'latitude': photo['latitude'],
-        'longitude': photo['longitude'],
-        'captured_at': photo['captured_at'],
-      });
-
-      uploadedUrlsByJob.putIfAbsent(photo['job_id'], () => []).add(publicUrl);
-      await DBHelper.markPhotoSynced(photo['id']);
-    }
-
-    // Patch field_jobs.photo_paths / photo_count for every job that had a
-    // photo land in storage this pass — merging with whatever real (http)
-    // URLs were already there so re-syncs don't clobber earlier uploads.
-    for (final entry in uploadedUrlsByJob.entries) {
-      try {
-        final existing = await supabase
-            .from('field_jobs')
-            .select('photo_paths')
-            .eq('id', entry.key)
-            .maybeSingle();
-        final existingPaths = ((existing?['photo_paths'] as List?) ?? [])
-            .cast<String>()
-            .where((p) => p.startsWith('http'))
-            .toList();
-        final merged = {...existingPaths, ...entry.value}.toList();
-        await supabase.from('field_jobs').update({
-          'photo_paths': merged,
-          'photo_count': merged.length,
-        }).eq('id', entry.key);
-      } catch (e) {
-        debugPrint('Could not patch field_jobs.photo_paths for ${entry.key}: $e');
-      }
-    }
-
-    if (pendingPhotos.isNotEmpty) {
-      await SupabaseService.logActivity(
-        eventType: 'photos_synced',
-        title: 'Offline photos synced',
-        subtitle: '${pendingPhotos.length} photo(s) uploaded',
-      );
-    }
-
-    // 2. Sync Pending Inspections
-    final pendingInspections = await DBHelper.getPendingInspections();
-    for (final insp in pendingInspections) {
-      final Map<String, dynamic> checklist = jsonDecode(insp['checklist_json']);
-      final checklistSummary = checklist.entries
-          .map((e) => '${e.key}: ${e.value == true ? "Yes" : "No"}')
-          .join('; ');
-
-      await supabase.from('field_jobs').update({
-        'status': 'completed',
-        'findings': '${insp['notes']}\n\nChecklist: $checklistSummary',
-        'is_compliant': insp['is_compliant'] == 1,
-        'inspection_result': insp['inspection_result'] as String? ??
-            (insp['is_compliant'] == 1 ? 'Compliant' : 'With Discrepancy'),
-        'remarks': insp['boundary_status'],
-        'updated_at': insp['updated_at'],
-      }).eq('id', insp['id']);
-
-      await DBHelper.markInspectionSynced(insp['id']);
-    }
-
-    if (pendingInspections.isNotEmpty) {
-      await SupabaseService.logActivity(
-        eventType: 'inspection_completed',
-        title: 'Offline inspection synced',
-        subtitle: '${pendingInspections.length} report(s) uploaded',
-      );
-    }
-  } catch (e) {
-    debugPrint('Sync failed: $e');
-  } finally {
-    _isSyncing = false;
+    if (_isSyncing) return;
+    _isSyncing = true;
     notifyListeners();
+
+    try {
+      final supabase = SupabaseService.client;
+
+      // 1. Sync Pending Photos first (needed for database metadata joins)
+      final pendingPhotos = await DBHelper.getPendingPhotos();
+      // BUG FIX #4B — Image Presentation Bug.
+      // This used to only upsert into field_job_photos and never touch
+      // field_jobs.photo_paths, so that column kept whatever local device
+      // paths were written when the photo was first captured. Any screen
+      // that reads task.photoPaths (which comes straight from
+      // field_jobs.photo_paths) then tried Image.network() on a local
+      // filesystem path and fell straight into the gray/broken-image
+      // fallback — even though the photo really did make it to storage.
+      // Track uploaded public URLs per job here and patch field_jobs too.
+      final Map<String, List<String>> uploadedUrlsByJob = {};
+      for (final photo in pendingPhotos) {
+        final file = File(photo['photo_path']);
+        if (!await file.exists()) {
+          await DBHelper.markPhotoSynced(photo['id']);
+          continue;
+        }
+
+        final fileName = 'photo_${photo['id']}.jpg';
+        final storagePath = 'inspections/${photo['job_id']}/$fileName';
+
+        await supabase.storage
+            .from('inspection-photos')
+            .upload(
+              storagePath,
+              file,
+              fileOptions: const FileOptions(
+                cacheControl: '3600',
+                upsert: true,
+              ),
+            );
+
+        final publicUrl = supabase.storage
+            .from('inspection-photos')
+            .getPublicUrl(storagePath);
+
+        await supabase.from('field_job_photos').upsert({
+          'id': photo['id'],
+          'field_job_id': photo['job_id'],
+          'photo_url': publicUrl,
+          'latitude': photo['latitude'],
+          'longitude': photo['longitude'],
+          'captured_at': photo['captured_at'],
+        });
+
+        uploadedUrlsByJob.putIfAbsent(photo['job_id'], () => []).add(publicUrl);
+        await DBHelper.markPhotoSynced(photo['id']);
+      }
+
+      // Patch field_jobs.photo_paths / photo_count for every job that had a
+      // photo land in storage this pass — merging with whatever real (http)
+      // URLs were already there so re-syncs don't clobber earlier uploads.
+      for (final entry in uploadedUrlsByJob.entries) {
+        try {
+          final existing = await supabase
+              .from('field_jobs')
+              .select('photo_paths')
+              .eq('id', entry.key)
+              .maybeSingle();
+          final existingPaths = ((existing?['photo_paths'] as List?) ?? [])
+              .cast<String>()
+              .where((p) => p.startsWith('http'))
+              .toList();
+          final merged = {...existingPaths, ...entry.value}.toList();
+          await supabase
+              .from('field_jobs')
+              .update({'photo_paths': merged, 'photo_count': merged.length})
+              .eq('id', entry.key);
+        } catch (e) {
+          debugPrint(
+            'Could not patch field_jobs.photo_paths for ${entry.key}: $e',
+          );
+        }
+      }
+
+      if (pendingPhotos.isNotEmpty) {
+        await SupabaseService.logActivity(
+          eventType: 'photos_synced',
+          title: 'Offline photos synced',
+          subtitle: '${pendingPhotos.length} photo(s) uploaded',
+        );
+      }
+
+      // 2. Sync Pending Inspections
+      final pendingInspections = await DBHelper.getPendingInspections();
+      for (final insp in pendingInspections) {
+        final Map<String, dynamic> checklist = jsonDecode(
+          insp['checklist_json'],
+        );
+        final checklistSummary = checklist.entries
+            .map((e) => '${e.key}: ${e.value == true ? "Yes" : "No"}')
+            .join('; ');
+
+        await supabase
+            .from('field_jobs')
+            .update({
+              'status': 'completed',
+              'findings': '${insp['notes']}\n\nChecklist: $checklistSummary',
+              'is_compliant': insp['is_compliant'] == 1,
+              'inspection_result':
+                  insp['inspection_result'] as String? ??
+                  (insp['is_compliant'] == 1
+                      ? 'Compliant'
+                      : 'With Discrepancy'),
+              'remarks': insp['boundary_status'],
+              'updated_at': insp['updated_at'],
+            })
+            .eq('id', insp['id']);
+
+        await DBHelper.markInspectionSynced(insp['id']);
+      }
+
+      if (pendingInspections.isNotEmpty) {
+        await SupabaseService.logActivity(
+          eventType: 'inspection_completed',
+          title: 'Offline inspection synced',
+          subtitle: '${pendingInspections.length} report(s) uploaded',
+        );
+      }
+    } catch (e) {
+      debugPrint('Sync failed: $e');
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
+    }
   }
-}
 }

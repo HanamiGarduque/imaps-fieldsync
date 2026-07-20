@@ -95,8 +95,9 @@ class SyncOutboxService {
       },
     );
   }
+  
   /// Queues the whole final submission — findings, checklist, and the
-  /// *local* photo paths (not yet uploaded; that happens at drain time,
+  /// *local* photo map data (not yet uploaded; that happens at drain time,
   /// since it needs a connection too). Carries everything ReviewSubmit
   /// already has so nothing the inspector typed gets lost to a bad signal.
   static Future<void> enqueueSubmitInspection({
@@ -111,7 +112,7 @@ class SyncOutboxService {
     required List<Map<String, dynamic>> checklistData,
     required int checklistCompletedCount,
     required int checklistTotalCount,
-    required List<String> localPhotoPaths,
+    required List<Map<String, dynamic>> photosData, // UPDATED: Changed to expect Map data
     String? locationLabel,
   }) {
     return DBHelper.enqueueAction(
@@ -129,7 +130,7 @@ class SyncOutboxService {
         'checklistData': checklistData,
         'checklistCompletedCount': checklistCompletedCount,
         'checklistTotalCount': checklistTotalCount,
-        'localPhotoPaths': localPhotoPaths,
+        'photosData': photosData, // UPDATED: Storing photosData instead
         'locationLabel': locationLabel,
       },
     );
@@ -183,14 +184,22 @@ class SyncOutboxService {
       case 'submit_inspection':
         // Photos couldn't be uploaded while this was queued (that needs a
         // connection too) — do it now, at drain time, using the local
-        // paths captured back on Step 3. If a photo file no longer exists
+        // paths/metadata captured back on Step 3. If a photo file no longer exists
         // (e.g. cleared cache), uploadInspectionPhotos already skips it
         // rather than failing the whole action.
-        final localPaths = (payload['localPhotoPaths'] as List).map((e) => e.toString()).toList();
-        final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: jobId, localPaths: localPaths);
+        
+        // UPDATED: Cast the dynamic list back into List<Map<String, dynamic>>
+        final photosData = (payload['photosData'] as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+            
+        // UPDATED: Pass photosData instead of localPaths
+        final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: jobId, photosData: photosData);
+        
         final checklistData = (payload['checklistData'] as List)
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
+            
         await SupabaseService.submitInspection(
           jobId: jobId,
           findings: payload['findings'] as String,
