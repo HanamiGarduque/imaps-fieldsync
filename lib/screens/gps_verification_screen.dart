@@ -17,6 +17,10 @@ import 'tasks_screen.dart';
 import 'inspection_progress.dart';
 import '../widgets/exit_confirm_dialog.dart';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
+import '../services/db_helper.dart';
+import '../services/spatial_offline_service.dart';
+
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
   static const Color surface = Colors.white;
@@ -57,21 +61,10 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   double? _longitude;
   double? _bearingToParcel;
 
-  // Live tracking — replaces the old one-shot-only flow. The stream keeps
-  // emitting as the inspector walks toward/away from the site; _isLive just
-  // reflects whether it's currently active so the UI can show a "Live"
-  // badge instead of implying the reading is stale until manually rechecked.
   StreamSubscription<Position>? _positionSub;
   bool _isLive = false;
-  // Guards against overlapping distance-RPC calls if position updates
-  // arrive faster than a previous recompute finishes.
   bool _recomputing = false;
 
-  // Real compass heading (device magnetometer), degrees 0-360 from magnetic
-  // north. Null until the first event arrives, and stays null forever on
-  // devices/emulators with no magnetometer — every place this is used has
-  // a fallback to the old static-dial behavior, so lacking a compass just
-  // means no rotation, never a crash or blank screen.
   StreamSubscription<CompassEvent>? _compassSub;
   double? _heading;
   bool _compassUnavailable = false;
@@ -104,12 +97,6 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     super.dispose();
   }
 
-  /// FlutterCompass.events is itself nullable — null means the platform
-  /// has no magnetometer support at all (some emulators, some low-end
-  /// devices). CompassEvent.heading can also individually be null on a
-  /// device that has the sensor but hasn't got a fix yet/needs calibration.
-  /// Both cases just leave _heading null and the dial stays static, same
-  /// as it always has.
   void _startCompass() {
     final events = FlutterCompass.events;
     if (events == null) {
@@ -127,17 +114,38 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     try {
       if (widget.task.parcelId == null) throw Exception('No parcel linked.');
       final pos = await LocationService.getCurrentLocation();
-      final dist = await SupabaseService.getDistanceToParcelBoundary(parcelId: widget.task.parcelId!, latitude: pos.latitude, longitude: pos.longitude);
-      final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+      final connectivityResult = await Connectivity().checkConnectivity();
+final online = connectivityResult is List
+    ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+    : connectivityResult != ConnectivityResult.none;
+
+      double? dist;
+      double? parcelLat;
+      double? parcelLng;
+
+      if (online) {
+        dist = await SupabaseService.getDistanceToParcelBoundary(parcelId: widget.task.parcelId!, latitude: pos.latitude, longitude: pos.longitude);
+        final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+        parcelLat = (parcel?['latitude'] as num?)?.toDouble();
+        parcelLng = (parcel?['longitude'] as num?)?.toDouble();
+      } else {
+        final cached = await DBHelper.getCachedJobs();
+        final match = cached.where((j) => j['id'] == widget.task.id).toList();
+        if (match.isNotEmpty) {
+          parcelLat = (match.first['parcel_lat'] as num?)?.toDouble();
+          parcelLng = (match.first['parcel_lng'] as num?)?.toDouble();
+        }
+        if (parcelLat != null && parcelLng != null) {
+          dist = SpatialOfflineService.haversineMeters(pos.latitude, pos.longitude, parcelLat, parcelLng);
+        }
+      }
+
       double? bearing;
-      if (parcel != null && parcel['latitude'] != null && parcel['longitude'] != null) {
-        bearing = _bearingBetween(pos.latitude, pos.longitude, parcel['latitude'], parcel['longitude']);
+      if (parcelLat != null && parcelLng != null) {
+        bearing = _bearingBetween(pos.latitude, pos.longitude, parcelLat, parcelLng);
       }
       if (!mounted) return;
       setState(() { _latitude = pos.latitude; _longitude = pos.longitude; _accuracy = pos.accuracy; _distance = dist; _bearingToParcel = bearing; _loading = false; });
-      // First fix succeeded — switch over to continuous tracking so the
-      // reading keeps updating as the inspector moves, instead of going
-      // stale until they tap "Recheck" again.
       _startLiveTracking();
     } catch (e) {
       if (!mounted) return;
@@ -145,19 +153,12 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     }
   }
 
-  /// Subscribes to a continuous position stream (~3–5m distanceFilter) and
-  /// recomputes distance/bearing on every emission. Manual "Recheck" still
-  /// works as a fallback (e.g. if the stream stalls or errors out) — it just
-  /// does a one-shot fetch and restarts the stream on success.
   void _startLiveTracking() {
-    if (_isLive) return; // already subscribed, don't double-listen
+    if (_isLive) return;
     _isLive = true;
     _positionSub = LocationService.getPositionStream().listen(
       _onPositionUpdate,
       onError: (Object e) {
-        // A transient stream error shouldn't blank out a reading the
-        // inspector already has — just drop back to "not live" and let
-        // them fall back to manual Recheck.
         if (!mounted) return;
         setState(() => _isLive = false);
       },
@@ -189,16 +190,11 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
         _error = null;
       });
     } catch (_) {
-      // Skip this update rather than surfacing an error mid-stream — the
-      // next emission will likely succeed, and the last good reading is
-      // still shown on screen.
     } finally {
       _recomputing = false;
     }
   }
 
-  /// Degrees-minutes-seconds display, e.g. 14°12'29"N — matches the
-  /// coordinate readout style under the compass dial.
   String _formatCoord(double value, String posNegLetters) {
     final letter = value >= 0 ? posNegLetters[0] : posNegLetters[1];
     final abs = value.abs();
@@ -221,12 +217,6 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     if (!_verified || _latitude == null || _submitting) return;
     setState(() => _submitting = true);
 
-    // GPS itself is satellite-based and already locked by this point (see
-    // _checkLocation above) — only *sending* the confirmation to Supabase
-    // needs signal. Try that first; if it fails, don't strand the
-    // inspector mid-flow while they're physically on-site — queue it in
-    // the FieldSync outbox and let them continue. It'll sync automatically
-    // once connectivity returns (SyncOutboxService, started in main.dart).
     bool queuedOffline = false;
     try {
       await SupabaseService.confirmGpsOnSite(jobId: widget.task.id, latitude: _latitude!, longitude: _longitude!, accuracyMeters: _accuracy ?? 0, locationLabel: widget.task.location);
@@ -241,8 +231,6 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
         );
         queuedOffline = true;
       } catch (_) {
-        // Couldn't even save it locally — genuinely nothing more we can
-        // do here, so this is the one case that still has to block.
         if (!mounted) return;
         setState(() => _submitting = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
@@ -256,8 +244,6 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
         const SnackBar(content: Text('No signal — GPS check-in saved offline, will sync automatically.')),
       );
     }
-    // Carries the real on-site result forward so Step 5 (Findings) shows
-    // the actual distance instead of a hardcoded "Verified"/placeholder.
     context.read<InspectionProvider>().recordGpsVerification(distanceMeters: _distance ?? 0);
     HapticFeedback.selectionClick();
     InspectionProgress.instance.markStepComplete(2);
@@ -345,7 +331,6 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                     child: Stack(
                                       alignment: Alignment.center,
                                       children: [
-                                        // Soft glow behind the whole dial for depth.
                                         Container(
                                           width: 250, height: 250,
                                           decoration: BoxDecoration(
@@ -355,30 +340,21 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                                             ],
                                           ),
                                         ),
-                                        // Ticks + cardinal/degree labels rotate opposite the device
-                                        // heading so the dial visually tracks true bearing as the
-                                        // inspector turns — same trick a real compass rose uses.
                                         AnimatedRotation(
                                           turns: _heading != null ? -(_heading! / 360) : 0,
                                           duration: const Duration(milliseconds: 180),
                                           curve: Curves.linear,
                                           child: CustomPaint(size: const Size(250, 250), painter: _CompassRingPainter(verified: _verified)),
                                         ),
-                                        // Points toward the parcel relative to where the phone is
-                                        // currently facing — only meaningful once we have both a
-                                        // real heading and a computed bearing to the site.
                                         if (_heading != null && _bearingToParcel != null)
                                           Transform.rotate(
                                             angle: ((_bearingToParcel! - _heading!) * math.pi / 180.0),
                                             child: CustomPaint(size: const Size(250, 250), painter: _TargetArrowPainter(verified: _verified)),
                                           ),
-                                        // Fixed "forward" marker — always up, represents the phone's
-                                        // own facing direction (screen-locked, does not rotate).
                                         Positioned(
                                           top: 2,
                                           child: CustomPaint(size: const Size(18, 14), painter: _ForwardMarkerPainter(verified: _verified)),
                                         ),
-                                        // Center readout — heading cardinal + live degree number.
                                         Container(
                                           width: 148, height: 148,
                                           decoration: BoxDecoration(
@@ -531,9 +507,6 @@ class _ReadoutItem extends StatelessWidget {
   }
 }
 
-/// Full compass rose: gradient ring track, 10°-interval tick marks (30°
-/// major with N/E/S/W letters swapped in at the cardinal points, matching
-/// how physical compass dials read), all rotating live with device heading.
 class _CompassRingPainter extends CustomPainter {
   final bool verified;
   _CompassRingPainter({required this.verified});
@@ -546,7 +519,6 @@ class _CompassRingPainter extends CustomPainter {
     final radius = size.width / 2;
     final accent = verified ? InsightTheme.blue1 : const Color(0xFFE0A526);
 
-    // Gradient ring track.
     final ringPaint = Paint()
       ..shader = SweepGradient(
         colors: [accent.withValues(alpha: 0.05), accent.withValues(alpha: 0.35), accent.withValues(alpha: 0.05)],
@@ -559,7 +531,7 @@ class _CompassRingPainter extends CustomPainter {
     for (int deg = 0; deg < 360; deg += 10) {
       final isMajor = deg % 30 == 0;
       final isCardinal = _cardinalAt.containsKey(deg);
-      final angle = (deg - 90) * math.pi / 180.0; // 0° at top
+      final angle = (deg - 90) * math.pi / 180.0;
       final tickLen = isCardinal ? 16.0 : (isMajor ? 11.0 : 6.0);
       final outer = Offset(center.dx + (radius - 6) * math.cos(angle), center.dy + (radius - 6) * math.sin(angle));
       final inner = Offset(center.dx + (radius - 6 - tickLen) * math.cos(angle), center.dy + (radius - 6 - tickLen) * math.sin(angle));
@@ -593,8 +565,6 @@ class _CompassRingPainter extends CustomPainter {
   bool shouldRepaint(covariant _CompassRingPainter oldDelegate) => oldDelegate.verified != verified;
 }
 
-/// Screen-locked triangle above the dial — represents the phone's own
-/// forward-facing direction. Doesn't rotate; the ring rotates under it.
 class _ForwardMarkerPainter extends CustomPainter {
   final bool verified;
   _ForwardMarkerPainter({required this.verified});
@@ -615,10 +585,6 @@ class _ForwardMarkerPainter extends CustomPainter {
   bool shouldRepaint(covariant _ForwardMarkerPainter oldDelegate) => oldDelegate.verified != verified;
 }
 
-/// Beacon-style marker pointing outward from center toward the ring edge.
-/// Rotated by the caller (Transform.rotate) to the parcel's bearing
-/// relative to the device's current heading — so it visually says "turn
-/// this way" rather than just reporting a compass-point letter.
 class _TargetArrowPainter extends CustomPainter {
   final bool verified;
   _TargetArrowPainter({required this.verified});
