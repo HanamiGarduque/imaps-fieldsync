@@ -118,9 +118,12 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return PopScope(
-      canPop: false,
+      canPop: InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
+        if (didPop) {
+          _syncControllersAndSave();
+          return;
+        }
         handleInspectionExit(context, onSaveProgress: _syncControllersAndSave);
       },
       child: Scaffold(

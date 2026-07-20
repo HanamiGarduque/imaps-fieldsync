@@ -147,9 +147,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   Widget _buildGridMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return PopScope(
-      canPop: false,
+      canPop: InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
+        if (didPop) {
+          context.read<InspectionProvider>().saveStepPhotos();
+          return;
+        }
         handleInspectionExit(
           context,
           onSaveProgress: () => context.read<InspectionProvider>().saveStepPhotos(),

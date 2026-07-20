@@ -124,9 +124,14 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return PopScope(
-      canPop: false,
+      canPop: InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
+        if (didPop) {
+          // Already popped natively (smooth swipe/hardware-back animation) —
+          // fire the save in the background, nothing to block on here.
+          context.read<InspectionProvider>().saveStepChecklist();
+          return;
+        }
         handleInspectionExit(
           context,
           onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),

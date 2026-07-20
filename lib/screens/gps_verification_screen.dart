@@ -255,9 +255,12 @@ final online = connectivityResult is List
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return PopScope(
-      canPop: false,
+      canPop: InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
+        if (didPop) {
+          SupabaseService.markJobOngoing(widget.task.id);
+          return;
+        }
         handleInspectionExit(
           context,
           onSaveProgress: () => SupabaseService.markJobOngoing(widget.task.id),

@@ -1,12 +1,23 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+
+import '../screens/inspection_progress.dart';
 
 /// BUG FIX #2 — Defective Tab Lifecycle State Machine & Missing Exit
 /// Confirmation Gate.
 ///
 /// Every inspection step screen (GPS, Photos, Checklist, Findings, Review)
 /// must call this instead of `Navigator.pop(context)` directly, and must
-/// wrap its Scaffold in `PopScope(canPop: false, onPopInvokedWithResult: ...)`
+/// wrap its Scaffold in `PopScope(canPop: ..., onPopInvokedWithResult: ...)`
 /// so the hardware/gesture back action goes through the same gate.
+///
+/// Only step 1 shows the confirm dialog. From step 2 onward, "back" has
+/// a real previous step to land on — that screen is still alive further
+/// down the Navigator stack with all its state intact, so popping isn't
+/// destructive and doesn't need a prompt. We still fire [onSaveProgress]
+/// in the background on the way out so nothing typed on the step being
+/// left is lost, but we don't block the transition on it or show any UI
+/// for it — that's what made intermediate steps feel interrupted.
 ///
 /// [onSaveProgress] must push whatever is unsaved on that step to Supabase
 /// (e.g. `provider.saveStepChecklist`) and return true/false for success.
@@ -17,6 +28,12 @@ Future<void> handleInspectionExit(
   BuildContext context, {
   required Future<bool> Function() onSaveProgress,
 }) async {
+  if (InspectionProgress.instance.currentStep > 1) {
+    unawaited(onSaveProgress());
+    if (context.mounted) Navigator.pop(context);
+    return;
+  }
+
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(

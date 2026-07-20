@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/biometric_service.dart';
 import '../services/quick_unlock_service.dart';
@@ -54,6 +55,18 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
     });
   }
 
+  /// Quick unlock only ever runs from SplashScreen's "stay signed in" gate —
+  /// if that pref is false, SplashScreen force-signs-out and wipes this
+  /// exact config on the very next app launch, before the inspector ever
+  /// sees the prompt. Enabling biometric/pattern here is an explicit
+  /// signal the inspector wants to stay signed in on this device, so we
+  /// set it alongside — this was the actual reason the biometric icon
+  /// never appeared at Login even after being turned on here.
+  Future<void> _ensureStaySignedIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('stay_signed_in', true);
+  }
+
   Future<void> _toggleBiometric(bool value) async {
     if (value) {
       final ok = await BiometricService.authenticate(
@@ -61,6 +74,7 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
       );
       if (!ok) return;
       await QuickUnlockService.setBiometricEnabled(true, email: widget.userEmail);
+      await _ensureStaySignedIn();
     } else {
       await QuickUnlockService.disableBiometric();
     }
@@ -74,6 +88,7 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
     );
     if (pattern == null) return;
     await QuickUnlockService.setPattern(pattern, email: widget.userEmail);
+    await _ensureStaySignedIn();
     setState(() => _patternEnabled = true);
     _showSnack('Pattern unlock enabled');
   }
