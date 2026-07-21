@@ -37,13 +37,15 @@ class Spring {
 
   static final SpringDescription physics = SpringDescription.withDampingRatio(
     mass: 1.0,
-    stiffness: 430,
-    ratio: 0.55,
+    stiffness: 350,
+    ratio: 0.65,
   );
 
-  /// Gap between one section/item starting and the next one starting.
-  /// Kept inside the 40-70ms band from the brief.
-  static const Duration step = Duration(milliseconds: 55);
+  /// Gap between staggered list items (50ms).
+  static const Duration step = Duration(milliseconds: 50);
+
+
+
 }
 
 /// Mix into a screen's State (alongside TickerProviderStateMixin) to get
@@ -68,7 +70,11 @@ mixin SpringEntrance<T extends StatefulWidget> on State<T>, TickerProviderStateM
   /// sibling that happens to land on the same stagger slot. For a fixed
   /// small set of named sections on a screen, the section index alone is
   /// a fine key (see [springFor]).
-  Animation<double> springForKey(Object key, int delayIndex) {
+  Animation<double> springForKey(Object key, int delayIndex, {bool forceReset = false}) {
+    if (forceReset && _springs.containsKey(key)) {
+      _springs[key]?.dispose();
+      _springs.remove(key);
+    }
     return _springs.putIfAbsent(key, () {
       final controller = AnimationController(vsync: this);
       Future.delayed(Spring.step * delayIndex, () {
@@ -82,7 +88,18 @@ mixin SpringEntrance<T extends StatefulWidget> on State<T>, TickerProviderStateM
   /// Convenience for a screen's fixed top-level sections, where the
   /// section's position in the layout and its stagger slot are the same
   /// number.
-  Animation<double> springFor(int index) => springForKey(index, index);
+  Animation<double> springFor(int index, {bool forceReset = false}) =>
+      springForKey(index, index, forceReset: forceReset);
+
+  /// Resets all cached springs so that a tab change, list filter, or refresh
+  /// smoothly re-animates the entrance of visible items.
+  void resetSprings() {
+    for (final c in _springs.values) {
+      c.dispose();
+    }
+    _springs.clear();
+  }
+
 
   @mustCallSuper
   void disposeSpringEntrance() {

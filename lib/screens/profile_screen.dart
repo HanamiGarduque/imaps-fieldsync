@@ -8,6 +8,9 @@ import '../models/user_profile.dart';
 import '../models/dashboard_stats.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
+import '../services/quick_unlock_service.dart';
+import '../services/biometric_service.dart';
+import '../services/secure_prefs_service.dart';
 import 'login_screen.dart'; 
 import 'home_dashboard_screen.dart';
 import 'tasks_screen.dart';
@@ -15,12 +18,13 @@ import 'updates_screen.dart';
 import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
 import 'quick_unlock_setup_screen.dart';
-import 'terms_privacy_screen.dart'; // Restored import for Terms & Privacy
+import 'security_settings_screen.dart';
+import 'terms_privacy_screen.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../widgets/motion/spring_entrance.dart';
-import '../widgets/imaps_loading_indicator.dart';
+
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
@@ -152,14 +156,22 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
   Future<void> _handleSignOut(BuildContext context) async {
     HapticFeedback.mediumImpact();
-    await AuthService.signOut();
+    
+    // 1. Immediate UI navigation (0ms instant response)
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (route) => false,
       );
     }
+
+    // 2. Fire-and-forget background session sign-out
+    // Note: We preserve biometric enrollment settings on the device so that
+    // when the user logs back in, their Security & Protection settings remain active.
+    AuthService.signOut().catchError((e) => debugPrint('[SIGNOUT] AuthService.signOut error: $e'));
   }
+
+
 
   String _getInitials(String name) {
     if (name.trim().isEmpty) return "JR";
@@ -491,6 +503,21 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                   child: Column(
                     children: [
                       _ActionTile(
+                        icon: Icons.fingerprint_rounded,
+                        title: 'Security & Biometrics',
+                        subtitle: 'Biometric login, auto-lock & protection',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => SecuritySettingsScreen(profile: _currentProfile),
+                            ),
+                          );
+                        },
+                      ),
+                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+
+                      _ActionTile(
                         icon: Icons.info_outline_rounded,
                         title: 'About InSight',
                         subtitle: 'Version 1.0.0',
@@ -516,6 +543,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                         },
                       ),
                       const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+
                       
                       if (kQuickUnlockEnabled) ...[
                         _ActionTile(

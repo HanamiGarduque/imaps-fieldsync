@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
-import 'login_screen.dart';
+import '../services/quick_unlock_service.dart';
+import '../services/biometric_service.dart';
+import '../services/secure_prefs_service.dart';
+import 'splash_screen.dart' show LoginScreen;
 
 /// Lands here after the inspector taps the reset link from their email.
 /// A valid recovery session must already exist by the time this screen
@@ -45,7 +48,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Passcode updated. Please sign in again.')),
       );
+      // Full auth teardown after password reset
       await AuthService.signOut();
+      await QuickUnlockService.clearAll();
+      await BiometricService.clearEnrollment();
+      await SecurePrefsService.clearAll();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),

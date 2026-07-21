@@ -6,24 +6,24 @@ import 'tasks_screen.dart';
 import 'updates_screen.dart';
 import 'profile_screen.dart';
 
-/// Single persistent shell for the 4 primary tabs. Replaces the old
-/// pattern where every tab screen called Navigator.pushReplacement on
-/// every tap — that destroyed and rebuilt the entire page each time
-/// (visible flash/lag, lost scroll position, refetched data).
-///
-/// IndexedStack keeps all 4 pages mounted simultaneously; switching tabs
-/// is just an index change, so state, scroll position, and in-flight
-/// data are preserved instantly with zero rebuild.
+/// Single shell for the 4 primary tabs with fluid tab transitions
+/// and per-visit spring entrance animations.
 class MainShellScreen extends StatefulWidget {
   final UserProfile profile;
-  const MainShellScreen({super.key, required this.profile});
+  final int initialIndex;
+
+  const MainShellScreen({
+    super.key,
+    required this.profile,
+    this.initialIndex = 0,
+  });
 
   @override
   State<MainShellScreen> createState() => _MainShellScreenState();
 }
 
 class _MainShellScreenState extends State<MainShellScreen> {
-  int _currentIndex = 0;
+  late int _currentIndex;
 
   static const _items = [
     InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
@@ -32,18 +32,70 @@ class _MainShellScreenState extends State<MainShellScreen> {
     InsightNavItem(icon: Icons.person_outline_rounded, label: 'Profile'),
   ];
 
-  late final List<Widget> _pages = [
-    HomeDashboardScreen(profile: widget.profile, showBottomNav: false),
-    TasksScreen(profile: widget.profile, showBottomNav: false),
-    UpdatesScreen(profile: widget.profile, showBottomNav: false),
-    ProfileScreen(profile: widget.profile, showBottomNav: false),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+  }
+
+  Widget _buildPage(int index) {
+    switch (index) {
+      case 0:
+        return HomeDashboardScreen(
+          key: ValueKey('home_tab_$index'),
+          profile: widget.profile,
+          showBottomNav: false,
+        );
+      case 1:
+        return TasksScreen(
+          key: ValueKey('tasks_tab_$index'),
+          profile: widget.profile,
+          showBottomNav: false,
+        );
+      case 2:
+        return UpdatesScreen(
+          key: ValueKey('updates_tab_$index'),
+          profile: widget.profile,
+          showBottomNav: false,
+        );
+      case 3:
+        return ProfileScreen(
+          key: ValueKey('profile_tab_$index'),
+          profile: widget.profile,
+          showBottomNav: false,
+        );
+      default:
+        return HomeDashboardScreen(
+          key: ValueKey('home_tab_$index'),
+          profile: widget.profile,
+          showBottomNav: false,
+        );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
-      body: IndexedStack(index: _currentIndex, children: _pages),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 450),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.05),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
+          );
+        },
+        child: _buildPage(_currentIndex),
+      ),
+
       bottomNavigationBar: InsightBottomNav(
         currentIndex: _currentIndex,
         items: _items,

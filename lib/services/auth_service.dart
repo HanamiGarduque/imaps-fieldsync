@@ -79,6 +79,6 @@ class AuthService {
         .eq('id', user.id)
         .single();
 
-    return UserProfile.fromMap(data); //[cite: 2]
+    return UserProfile.fromMap(data, email: user.email);
   }
 }

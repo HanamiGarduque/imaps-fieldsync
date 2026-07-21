@@ -18,7 +18,9 @@ import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
+import '../widgets/motion/linked_list_motion.dart';
 import '../widgets/imaps_loading_indicator.dart';
+
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (Strict Enterprise Theme)
@@ -928,15 +930,28 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 80, horizontal: 20),
                               child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.feed_outlined, size: 48, color: InsightTheme.ink3.withValues(alpha: 0.3)),
+                                  Container(
+                                    width: 60, height: 60,
+                                    decoration: BoxDecoration(
+                                      color: InsightTheme.surface2,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.assignment_late_outlined, size: 28, color: InsightTheme.ink3),
+                                  ),
                                   const SizedBox(height: 16),
                                   Text(
-                                    _searchQuery.isNotEmpty || hasActiveFilters 
-                                        ? 'No records match active query parameters.' 
-                                        : 'No operational tasks assigned.', 
+                                    'No ${_tabOrder[_currentTabIndex].toLowerCase()} tasks found',
+                                    style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.ink),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _searchQuery.isNotEmpty || hasActiveFilters
+                                        ? 'Try adjusting your search query or filter presets.'
+                                        : 'You are all caught up for this category.',
+                                    style: InsightTheme.inter(13, c: InsightTheme.ink3),
                                     textAlign: TextAlign.center,
-                                    style: InsightTheme.inter(14, c: InsightTheme.ink2)
                                   ),
                                 ],
                               ),
@@ -949,9 +964,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
                                   final task = selectedTasks[index];
-                                  return SpringSlide(
-                                    animation: springForKey(task.id, 3 + (index % 8)),
-                                    beginOffset: const Offset(0, -26),
+                                  return LinkedListSlide(
+                                    key: ValueKey('linked_tab_${_currentTabIndex}_${task.id}'),
+                                    index: index,
                                     child: Padding(
                                       padding: const EdgeInsets.only(bottom: 8),
                                       child: UpdatingTile(
@@ -1175,9 +1190,11 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       debugPrint('Could not launch $label ($uri): $e');
       if (!mounted) return;
       await Clipboard.setData(ClipboardData(text: value));
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No $label app found — $value copied to clipboard.')),
       );
+
     }
   }
 
@@ -1466,9 +1483,14 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   ),
                                 ),
                               ],
-                              Icon(
-                                _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                                color: InsightTheme.ink3, size: 16,
+                              AnimatedRotation(
+                                turns: _isExpanded ? 0.5 : 0.0,
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeOutCubic,
+                                child: const Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: InsightTheme.ink3, size: 18,
+                                ),
                               ),
                             ],
                           ),
@@ -1479,83 +1501,95 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                 ),
               ),
             ),
-            if (_isExpanded) ...[
-              Container(color: InsightTheme.line, height: 1),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+            AnimatedCrossFade(
+              firstChild: const SizedBox(width: double.infinity, height: 0),
+              secondChild: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(color: InsightTheme.line, height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(child: _ActionBtn(icon: Icons.phone_rounded, label: 'Call', onTap: _handleCall)),
-                        const SizedBox(width: 6),
-                        Expanded(child: _ActionBtn(icon: Icons.chat_bubble_outline_rounded, label: 'SMS', onTap: _handleSMS)),
-                        const SizedBox(width: 6),
-                        Expanded(child: _ActionBtn(icon: Icons.mail_outline_rounded, label: 'Email', onTap: _handleEmail)),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    GestureDetector(
-                      onTap: widget.onTapDetail,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: InsightTheme.bg,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: InsightTheme.line),
-                        ),
-                        child: Row(
+                        Row(
                           children: [
-                            Icon(widget.task.typeIcon, color: InsightTheme.blue1, size: 16),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                            Expanded(child: _ActionBtn(icon: Icons.phone_rounded, label: 'Call', onTap: _handleCall)),
+                            const SizedBox(width: 6),
+                            Expanded(child: _ActionBtn(icon: Icons.chat_bubble_outline_rounded, label: 'SMS', onTap: _handleSMS)),
+                            const SizedBox(width: 6),
+                            Expanded(child: _ActionBtn(icon: Icons.mail_outline_rounded, label: 'Email', onTap: _handleEmail)),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        GestureDetector(
+                          onTap: widget.onTapDetail,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.bg,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: InsightTheme.line),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(widget.task.typeIcon, color: InsightTheme.blue1, size: 16),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Application Details', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink)), 
+                                      const SizedBox(height: 1),
+                                      Text(
+                                        '${widget.task.applicationType ?? 'General'} • ${widget.task.landUseClass}',
+                                        style: InsightTheme.inter(10, c: InsightTheme.ink2),
+                                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.arrow_forward_ios_rounded, color: InsightTheme.ink3, size: 10),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (widget.task.category == 'Pending') ...[
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: () => _scheduleTask(context),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: InsightTheme.orangeTint,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: InsightTheme.orange.withValues(alpha: 0.3)),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Text('Application Details', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink)), 
-                                  const SizedBox(height: 1),
+                                  const Icon(Icons.calendar_today_rounded, color: InsightTheme.orange, size: 14),
+                                  const SizedBox(width: 6),
                                   Text(
-                                    '${widget.task.applicationType ?? 'General'} • ${widget.task.landUseClass}',
-                                    style: InsightTheme.inter(10, c: InsightTheme.ink2),
-                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                    'Schedule Inspection Date',
+                                    style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.orangeInk),
                                   ),
                                 ],
                               ),
                             ),
-                            const Icon(Icons.arrow_forward_ios_rounded, color: InsightTheme.ink3, size: 10),
-                          ],
-                        ),
-                      ),
+                          ),
+                        ],
+                      ],
                     ),
-                    if (widget.task.category == 'Pending') ...[
-                      const SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: () => _scheduleTask(context),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: InsightTheme.orangeTint,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: InsightTheme.orange.withValues(alpha: 0.3)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.event_available_rounded, color: InsightTheme.orangeInk, size: 16),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text('Schedule this task', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.orangeInk)),
-                              ),
-                              const Icon(Icons.arrow_forward_ios_rounded, color: InsightTheme.orangeInk, size: 10),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ]
+              crossFadeState: _isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 260),
+              firstCurve: Curves.easeOutCubic,
+              secondCurve: Curves.easeOutCubic,
+              sizeCurve: Curves.easeOutCubic,
+            ),
           ],
         ),
       ),

@@ -52,18 +52,12 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
   /// sees the prompt. Enabling pattern unlock here is an explicit signal
   /// the inspector wants to stay signed in on this device, so we set it
   /// alongside.
-  Future<void> _ensureStaySignedIn() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('stay_signed_in', true);
-  }
-
   Future<void> _setupPattern() async {
     final pattern = await Navigator.of(context).push<List<int>>(
       MaterialPageRoute(builder: (_) => const _PatternSetupFlow()),
     );
     if (pattern == null) return;
     await QuickUnlockService.setPattern(pattern, email: widget.userEmail);
-    await _ensureStaySignedIn();
     setState(() => _patternEnabled = true);
     _showSnack('Pattern unlock enabled');
   }

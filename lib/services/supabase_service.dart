@@ -1,10 +1,10 @@
+
 import 'dart:io';
 import 'dart:convert';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// idagdag sa taas ng supabase_service.dart
 
 class SupabaseService {
   static Future<void> initialize() async {
@@ -39,6 +39,57 @@ class SupabaseService {
       );
     } catch (e) {
       debugPrint('Failed to save notification subscription: $e');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BIOMETRIC & SECURITY DEVICE SYNC
+  // ─────────────────────────────────────────────────────────────────────────
+  static Future<void> syncInspectorDevice({
+    required String deviceId,
+    required bool biometricEnabled,
+    String? biometricType,
+  }) async {
+    final user = client.auth.currentUser;
+    if (user == null) return;
+    try {
+      await client.from('inspector_devices').upsert(
+        {
+          'inspector_id': user.id,
+          'device_id': deviceId,
+          'platform': Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : 'desktop'),
+          'biometric_enabled': biometricEnabled,
+          'biometric_type': biometricType,
+          'last_login_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        onConflict: 'inspector_id,device_id',
+      );
+    } catch (e) {
+      debugPrint('[SUPABASE] syncInspectorDevice error: $e');
+    }
+  }
+
+  static Future<void> logSecurityEvent({
+    required String eventType,
+    String? deviceId,
+    String severity = 'info',
+    Map<String, dynamic>? metadata,
+  }) async {
+    final user = client.auth.currentUser;
+    if (user == null) return;
+    try {
+      await client.rpc(
+        'log_security_event',
+        params: {
+          'p_event_type': eventType,
+          'p_device_id': deviceId,
+          'p_severity': severity,
+          'p_metadata': metadata ?? {},
+        },
+      );
+    } catch (e) {
+      debugPrint('[SUPABASE] logSecurityEvent error: $e');
     }
   }
 
@@ -87,9 +138,6 @@ class SupabaseService {
 
   // ─────────────────────────────────────────────────────────────────────────
   // ACTIVITY READ TRACKING  (Notification bell)
-  //   activity_log.is_read didn't exist before — see
-  //   add_activity_log_read_tracking.sql. These back the bell's real
-  //   unread badge + the Notifications screen's Unread tab / Mark all read.
   // ─────────────────────────────────────────────────────────────────────────
   static Future<int> fetchUnreadActivityCount() async {
     final userId = client.auth.currentUser?.id;
@@ -108,6 +156,7 @@ class SupabaseService {
   }
 
   static Future<void> markActivityRead(String activityId) async {
+
     try {
       await client.from('activity_log').update({'is_read': true}).eq('id', activityId);
     } catch (e) {

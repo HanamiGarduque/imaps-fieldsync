@@ -17,7 +17,9 @@ import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
+import '../widgets/motion/linked_list_motion.dart';
 import '../widgets/imaps_loading_indicator.dart';
+
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -155,9 +157,11 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
     }
 
     if (!mounted) return;
+    resetSprings();
     setState(() {
       _isOnline = online;
       _pendingRows = pending;
+
       _syncedRows = synced;
       _jobLookup = {for (final j in cachedJobs) (j['id'] as String): j};
       _gpsWaiting = gps;
@@ -481,9 +485,9 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
                                 ..._pendingRows.asMap().entries.map((entry) {
                                   final i = entry.key;
                                   final row = entry.value;
-                                  return SpringSlide(
-                                    animation: springForKey('pending-${row['id']}', 2 + (i % 8)),
-                                    beginOffset: const Offset(0, 24),
+                                  return LinkedListSlide(
+                                    key: ValueKey('linked_pending_${row['id']}'),
+                                    index: i,
                                     child: Padding(
                                       padding: const EdgeInsets.only(bottom: 10),
                                       child: UpdatingTile(
