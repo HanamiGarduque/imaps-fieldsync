@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 class _Colors {
   static const bg = Color(0xFFF2F4FB);

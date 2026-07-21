@@ -16,6 +16,7 @@ import 'inspection_checklist_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 import '../widgets/exit_confirm_dialog.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);

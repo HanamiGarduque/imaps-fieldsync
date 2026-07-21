@@ -886,23 +886,35 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                   ],
                                   ),
                                 ),
-                                const SizedBox(height: 20),
+                                const SizedBox(height: 0),
                                 
-                                // SEGMENTED ROW UNDERLINE CONTROLS
+                                // CATEGORY CHIP SLIDER
                                 SpringSlide(
                                   animation: springFor(2),
                                   beginOffset: const Offset(0, 22),
-                                  child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  physics: const BouncingScrollPhysics(),
-                                  child: Row(
-                                    children: [
-                                      _SegmentTab(text: "Pending", count: pending.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
-                                      _SegmentTab(text: "Ongoing", count: ongoing.length, isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
-                                      _SegmentTab(text: "Scheduled", count: scheduled.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
-                                      _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
-                                    ],
-                                  ),
+                                  child: Container(
+                                    decoration: const BoxDecoration(
+                                      color: InsightTheme.surface,
+                                      border: Border(
+                                        bottom: BorderSide(
+                                          color: InsightTheme.line,
+                                          width: 1.0,
+                                        ),
+                                      ),
+                                    ),
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      physics: const BouncingScrollPhysics(),
+                                      padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
+                                      child: Row(
+                                        children: [
+                                          _SegmentTab(text: "Pending", count: pending.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                                          _SegmentTab(text: "Ongoing", count: ongoing.length, isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
+                                          _SegmentTab(text: "Scheduled", count: scheduled.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
+                                          _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1067,28 +1079,44 @@ class _SegmentTab extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.only(bottom: 14, right: 24),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        margin: const EdgeInsets.only(right: 6),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: isActive ? InsightTheme.blue1 : Colors.transparent,
-              width: 2.0,
-            ),
-          ),
+          color: isActive ? InsightTheme.blue1 : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(text, style: InsightTheme.inter(14, w: isActive ? FontWeight.w600 : FontWeight.w500, c: isActive ? InsightTheme.ink : InsightTheme.ink3)),
-            const SizedBox(width: 8),
-            Container(
+            Text(
+              text,
+              style: InsightTheme.inter(
+                13,
+                w: isActive ? FontWeight.w600 : FontWeight.w500,
+                c: isActive ? Colors.white : InsightTheme.ink3,
+              ),
+            ),
+            const SizedBox(width: 6),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: isActive ? InsightTheme.blue1 : InsightTheme.surface2,
-                borderRadius: BorderRadius.circular(6),
+                color: isActive
+                    ? Colors.white.withValues(alpha: 0.25)
+                    : InsightTheme.surface2,
+                borderRadius: BorderRadius.circular(5),
               ),
-              child: Text(count.toString(), style: InsightTheme.inter(11, w: FontWeight.w600, c: isActive ? Colors.white : InsightTheme.ink2)),
+              child: Text(
+                count.toString(),
+                style: InsightTheme.inter(
+                  11,
+                  w: FontWeight.w600,
+                  c: isActive ? Colors.white : InsightTheme.ink2,
+                ),
+              ),
             ),
           ],
         ),

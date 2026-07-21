@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
+import '../widgets/imaps_loading_indicator.dart';
 import 'home_dashboard_screen.dart';
 
 /// ==================================================================
@@ -117,36 +117,28 @@ class _SplashScreenState extends State<SplashScreen> {
                     mainAxisSize: MainAxisSize.min, //[cite: 1]
                     children: [
                       ClipRRect( //[cite: 1]
-                        borderRadius: BorderRadius.circular(24), //[cite: 1]
-                        child: BackdropFilter( //[cite: 1]
-                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), //[cite: 1]
-                          child: Container( //[cite: 1]
-                            width: 76, //[cite: 1]
-                            height: 76, //[cite: 1]
-                            decoration: BoxDecoration( //[cite: 1]
-                              color: Colors.white.withOpacity(0.18), //[cite: 1]
-                              borderRadius: BorderRadius.circular(24), //[cite: 1]
-                              border: Border.all(color: Colors.white.withOpacity(0.35)), //[cite: 1]
-                            ),
-                            child: const Center( //[cite: 1]
-                              child: _ExactLogoSVG(size: 36, color: Colors.white), //[cite: 1]
+                        borderRadius: BorderRadius.circular(28),
+                        child: SizedBox(
+                          width: 96,
+                          height: 96,
+                          child: Transform.scale(
+                            scale: 1.45,
+                            child: Image.asset(
+                              'assets/icon/app_icon.png',
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
                             ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 18), //[cite: 1]
                       
-                      RichText( //[cite: 1]
-                        text: TextSpan(children: [ //[cite: 1]
-                          TextSpan( //[cite: 1]
-                            text: 'InSight',  //[cite: 1]
-                            style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white, ls: -0.01) //[cite: 1]
-                          ),
-                          TextSpan( //[cite: 1]
-                            text: '.',  //[cite: 1]
-                            style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white.withOpacity(0.7), ls: -0.01) //[cite: 1]
-                          ),
-                        ]),
+                      Column( //[cite: 1]
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('iMAPS', style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white, ls: -0.01)),
+                          Text('inSight', style: AppText.poppins(14, w: FontWeight.w600, c: Colors.white.withOpacity(0.72), ls: 0.02)),
+                        ],
                       ),
                       const SizedBox(height: 8), //[cite: 1]
                       
@@ -159,14 +151,7 @@ class _SplashScreenState extends State<SplashScreen> {
                 ),
               ),
               
-              const SizedBox( //[cite: 1]
-                width: 18, //[cite: 1]
-                height: 18, //[cite: 1]
-                child: CircularProgressIndicator( //[cite: 1]
-                  strokeWidth: 1.5, //[cite: 1]
-                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.amber), //[cite: 1]
-                ),
-              ),
+              const ImapsLoadingIndicator(size: 54), //[cite: 1]
               const SizedBox(height: 24), //[cite: 1]
               
               Padding( //[cite: 1]
@@ -362,34 +347,27 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     Column( //[cite: 1]
                       children: [
-                        Container( //[cite: 1]
-                          width: 52, //[cite: 1]
-                          height: 52, //[cite: 1]
-                          decoration: BoxDecoration( //[cite: 1]
-                            borderRadius: BorderRadius.circular(16), //[cite: 1]
-                            gradient: const LinearGradient( //[cite: 1]
-                              colors: [AppColors.blue1, AppColors.blue2], //[cite: 1]
-                              begin: Alignment.topLeft, //[cite: 1]
-                              end: Alignment.bottomRight, //[cite: 1]
+                        ClipRRect( //[cite: 1]
+                          borderRadius: BorderRadius.circular(20),
+                          child: SizedBox(
+                            width: 68,
+                            height: 68,
+                            child: Transform.scale(
+                              scale: 1.45,
+                              child: Image.asset(
+                                'assets/icon/app_icon.png',
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.high,
+                              ),
                             ),
-                            boxShadow: [ //[cite: 1]
-                              BoxShadow( //[cite: 1]
-                                color: AppColors.blue1.withOpacity(0.35), //[cite: 1]
-                                blurRadius: 20, //[cite: 1]
-                                offset: const Offset(0, 10), //[cite: 1]
-                              )
-                            ],
-                          ),
-                          child: const Center( //[cite: 1]
-                            child: _ExactLogoSVG(size: 26, color: Colors.white), //[cite: 1]
                           ),
                         ),
                         const SizedBox(height: 16), //[cite: 1]
-                        Row( //[cite: 1]
-                          mainAxisAlignment: MainAxisAlignment.center, //[cite: 1]
+                        Column( //[cite: 1]
+                          mainAxisSize: MainAxisSize.min, //[cite: 1]
                           children: [
-                            Text('InSight', style: AppText.poppins(24, w: FontWeight.w800, ls: -0.01)), //[cite: 1]
-                            Text('.', style: AppText.poppins(24, w: FontWeight.w800, c: AppColors.blue1, ls: -0.01)), //[cite: 1]
+                            Text('iMAPS', style: AppText.poppins(24, w: FontWeight.w800, ls: -0.01)), //[cite: 1]
+                            Text('inSight', style: AppText.poppins(12, w: FontWeight.w600, c: AppColors.blueInk, ls: 0.02)), //[cite: 1]
                           ],
                         ),
                         const SizedBox(height: 8), //[cite: 1]

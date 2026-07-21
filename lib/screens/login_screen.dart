@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import '../config/feature_flags.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +15,7 @@ import '../widgets/pattern_lock_pad.dart';
 import 'home_dashboard_screen.dart';
 import 'main_shell_screen.dart';
 import 'quick_unlock_screen.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 /// ==================================================================
 /// EXACT MATCH DESIGN TOKENS
@@ -140,36 +140,28 @@ class _SplashScreenState extends State<SplashScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(24),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                          child: Container(
-                            width: 76,
-                            height: 76,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.18),
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
-                            ),
-                            child: const Center(
-                              child: _ExactLogoSVG(size: 36, color: Colors.white),
+                        borderRadius: BorderRadius.circular(28),
+                        child: SizedBox(
+                          width: 96,
+                          height: 96,
+                          child: Transform.scale(
+                            scale: 1.45,
+                            child: Image.asset(
+                              'assets/icon/app_icon.png',
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
                             ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 18),
                       
-                      RichText(
-                        text: TextSpan(children: [
-                          TextSpan(
-                            text: 'InSight', 
-                            style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white, ls: -0.01)
-                          ),
-                          TextSpan(
-                            text: '.', 
-                            style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white.withValues(alpha: 0.7), ls: -0.01)
-                          ),
-                        ]),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('iMAPS', style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white, ls: -0.01)),
+                          Text('inSight', style: AppText.poppins(14, w: FontWeight.w600, c: Colors.white.withValues(alpha: 0.72), ls: 0.02)),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       
@@ -537,34 +529,27 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     Column(
                       children: [
-                        Container(
-                          width: 52,
-                          height: 52,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            gradient: const LinearGradient(
-                              colors: [AppColors.blue1, AppColors.blue2],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(20),
+                          child: SizedBox(
+                            width: 68,
+                            height: 68,
+                            child: Transform.scale(
+                              scale: 1.45,
+                              child: Image.asset(
+                                'assets/icon/app_icon.png',
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.high,
+                              ),
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.blue1.withValues(alpha: 0.35),
-                                blurRadius: 20,
-                                offset: const Offset(0, 10),
-                              )
-                            ],
-                          ),
-                          child: const Center(
-                            child: _ExactLogoSVG(size: 26, color: Colors.white),
                           ),
                         ),
                         const SizedBox(height: 16),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text('InSight', style: AppText.poppins(24, w: FontWeight.w800, ls: -0.01)),
-                            Text('.', style: AppText.poppins(24, w: FontWeight.w800, c: AppColors.blue1, ls: -0.01)),
+                            Text('iMAPS', style: AppText.poppins(24, w: FontWeight.w800, ls: -0.01)),
+                            Text('inSight', style: AppText.poppins(12, w: FontWeight.w600, c: AppColors.blueInk, ls: 0.02)),
                           ],
                         ),
                         const SizedBox(height: 8),

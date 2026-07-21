@@ -136,15 +136,17 @@ class SupabaseService {
   static Future<void> deleteActivity(String activityId) async {
     final userId = client.auth.currentUser?.id;
     if (userId == null) throw Exception('No authenticated user');
+    // Direct delete scoped to this inspector — safe even with RLS
     try {
-      // Prefer RPC call (bypasses RLS)
-      await client.rpc('delete_own_activity', params: {'p_id': activityId});
-    } catch (e) {
-      // Fallback: direct delete with inspector_id filter (respects RLS)
-      debugPrint('RPC delete_own_activity failed, trying fallback: $e');
-      await client.from('activity_log').delete()
+      await client
+          .from('activity_log')
+          .delete()
           .eq('id', activityId)
           .eq('inspector_id', userId);
+    } catch (e) {
+      // Fallback: try RPC if direct delete failed
+      debugPrint('Direct delete failed, trying RPC fallback: $e');
+      await client.rpc('delete_own_activity', params: {'p_id': activityId});
     }
   }
 
@@ -155,13 +157,16 @@ class SupabaseService {
   static Future<void> clearAllActivity() async {
     final userId = client.auth.currentUser?.id;
     if (userId == null) throw Exception('No authenticated user');
+    // Direct delete scoped to this inspector — safe even with RLS
     try {
-      // Prefer RPC call (bypasses RLS)
-      await client.rpc('clear_own_activity');
+      await client
+          .from('activity_log')
+          .delete()
+          .eq('inspector_id', userId);
     } catch (e) {
-      // Fallback: direct delete with inspector_id filter (respects RLS)
-      debugPrint('RPC clear_own_activity failed, trying fallback: $e');
-      await client.from('activity_log').delete().eq('inspector_id', userId);
+      // Fallback: try RPC if direct delete failed
+      debugPrint('Direct clear failed, trying RPC fallback: $e');
+      await client.rpc('clear_own_activity');
     }
   }
   // ─────────────────────────────────────────────────────────────────────────
@@ -184,6 +189,7 @@ class SupabaseService {
       current_step,
       created_at,
       started_at,
+      submitted_at,
       supabase_parcel_id,
       supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
         reference_number,

@@ -36,7 +36,7 @@ class _StatRow extends StatelessWidget {
     final children = <Widget>[];
     for (int i = 0; i < items.length; i++) {
       if (i > 0) {
-        children.add(Container(width: 1, height: 28, color: dividerColor, margin: const EdgeInsets.symmetric(horizontal: 12)));
+        children.add(Container(width: 1, height: 38, color: dividerColor, margin: const EdgeInsets.symmetric(horizontal: 10)));
       }
       final (label, value) = items[i];
       children.add(
@@ -47,7 +47,7 @@ class _StatRow extends StatelessWidget {
             children: [
               Text(value, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textColor)),
               const SizedBox(height: 2),
-              Text(label, style: _kCaptionStyle.copyWith(color: mutedTextColor), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(label, style: _kCaptionStyle.copyWith(color: mutedTextColor), maxLines: 2, overflow: TextOverflow.clip),
             ],
           ),
         ),
@@ -117,28 +117,24 @@ class CompletionGaugeCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return CustomPaint(
-                size: Size(constraints.maxWidth, constraints.maxHeight),
-                painter: _GaugePainter(progress: clamped, track: trackColor, fill: fillColor),
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: fillColor)),
-                        const SizedBox(width: 6),
-                        Text(_status, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: textColor)),
-                      ],
-                    ),
-                  ),
+        SizedBox(
+          height: 148,
+          width: double.infinity,
+          child: CustomPaint(
+            painter: _GaugePainter(progress: clamped, track: trackColor, fill: fillColor),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 28),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: fillColor)),
+                    const SizedBox(width: 7),
+                    Text(_status, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: textColor)),
+                  ],
                 ),
-              );
-            },
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -167,9 +163,9 @@ class _GaugePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final strokeWidth = math.max(14.0, size.height * 0.16);
-    final radius = math.min(size.width / 2, size.height) - strokeWidth / 2;
-    final center = Offset(size.width / 2, size.height);
+    final strokeWidth = math.max(14.0, size.height * 0.14);
+    final radius = math.min(size.width / 2 - 18, size.height - 42) - strokeWidth / 2;
+    final center = Offset(size.width / 2, size.height - strokeWidth / 2 - 8);
     final rect = Rect.fromCircle(center: center, radius: radius);
 
     final trackPaint = Paint()

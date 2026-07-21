@@ -14,6 +14,7 @@ import 'inspection_progress.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);

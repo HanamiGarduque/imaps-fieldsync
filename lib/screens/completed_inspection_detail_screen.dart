@@ -13,6 +13,7 @@ import 'inspection_checklist_screen.dart' hide InsightTheme;
 import 'capture_photo_screen.dart' hide InsightTheme;
 import 'field_findings_screen.dart' hide InsightTheme;
 import 'review_submit_screen.dart' hide InsightTheme;
+import '../widgets/imaps_loading_indicator.dart';
 
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;

@@ -83,7 +83,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(viewportFraction: 0.85); 
+    _pageController = PageController(viewportFraction: 0.88);
     
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
       if (mounted) {
@@ -348,14 +348,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 animation: springFor(2),
                 beginOffset: const Offset(70, 0),
                 child: SizedBox(
-                height: 170, // Shrunk to perfectly match the removed bottom elements 
+                height: 248,
                 child: _isLoadingTasks
                     ? const Center(child: ImapsLoadingIndicator(size: 50))
                     : _upcomingTasks.isEmpty
                         ? Center(
-                            child: Text(
-                              'No active assignments.',
-                              style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.assignment_outlined, size: 36, color: InsightTheme.ink3),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'No active assignments.',
+                                  style: InsightTheme.inter(13, c: InsightTheme.ink2),
+                                ),
+                              ],
                             ),
                           )
                         : PageView.builder(
@@ -370,14 +377,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   double value = 1.0;
                                   if (_pageController.position.haveDimensions) {
                                     value = _pageController.page! - index;
-                                    value = (1 - (value.abs() * 0.1)).clamp(0.9, 1.0);
+                                    value = (1 - (value.abs() * 0.08)).clamp(0.92, 1.0);
                                   } else {
-                                    value = (index == 0) ? 1.0 : 0.9;
+                                    value = (index == 0) ? 1.0 : 0.92;
                                   }
-                                  
                                   return Center(
                                     child: SizedBox(
-                                      height: Curves.easeOut.transform(value) * 170,
+                                      height: Curves.easeOut.transform(value) * 220,
                                       width: double.infinity,
                                       child: child,
                                     ),
@@ -392,16 +398,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       _upcomingTasks[index].location,
                                       _upcomingTasks[index].applicationType,
                                       _upcomingTasks[index].landUseClass,
+                                      _upcomingTasks[index].status,
                                     ),
                                     child: _ActiveAssignmentCard(
                                       inspectionId: _formatShortId(_upcomingTasks[index].id),
+                                      referenceNo: _upcomingTasks[index].inspectionNo,
                                       date: _upcomingTasks[index].scheduledDate.isNotEmpty
                                           ? _formatScheduledDate(_upcomingTasks[index].scheduledDate)
-                                          : _upcomingTasks[index].category,
+                                          : '—',
                                       location: _upcomingTasks[index].location,
-                                      description: _upcomingTasks[index].applicationType?.isNotEmpty == true
+                                      applicantName: _upcomingTasks[index].name,
+                                      applicationType: _upcomingTasks[index].applicationType?.isNotEmpty == true
                                           ? _upcomingTasks[index].applicationType!
                                           : _upcomingTasks[index].landUseClass,
+                                      status: _upcomingTasks[index].category,
                                       onTap: () => Navigator.of(context).push(
                                           MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: _upcomingTasks[index]))),
                                     ),
@@ -623,93 +633,288 @@ class _SectionLabel extends StatelessWidget {
 
 class _ActiveAssignmentCard extends StatelessWidget {
   final String inspectionId;
+  final String referenceNo;
   final String date;
   final String location;
-  final String description;
+  final String applicantName;
+  final String applicationType;
+  final String status;
   final VoidCallback onTap;
 
   const _ActiveAssignmentCard({
-    required this.inspectionId, required this.date, required this.location, required this.description, required this.onTap
+    required this.inspectionId,
+    required this.referenceNo,
+    required this.date,
+    required this.location,
+    required this.applicantName,
+    required this.applicationType,
+    required this.status,
+    required this.onTap,
   });
+
+  /// Accent colour for the back-card peek strip — driven by status.
+  Color get _accentColor {
+    switch (status) {
+      case 'Ongoing':   return const Color(0xFF5B8DFF);
+      case 'Scheduled': return const Color(0xFF9B72F0);
+      case 'Completed': return const Color(0xFF34D399);
+      default:          return const Color(0xFFFBBF24); // Pending = amber
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(
-            colors: [InsightTheme.blue1, InsightTheme.blue2],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+
+          // ─── BACK-CARD PEEK ─────────────────────────────────────────────
+          // Taller, fully opaque so the reference number is clearly readable.
+          Positioned(
+            top: 0, left: 12, right: 16,
+            child: Container(
+              height: 30,
+              decoration: BoxDecoration(
+                color: _accentColor,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+              ),
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 14),
+              child: Text(
+                referenceNo,
+                style: InsightTheme.jetBrains(11, w: FontWeight.w700,
+                    c: Colors.white, ls: 0.8),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ),
-          boxShadow: [
-            BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 8))
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            // Top Row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text('INSPECTION ID: $inspectionId', style: InsightTheme.jetBrains(11, w: FontWeight.w700, c: Colors.white, ls: 0.5)),
+
+          // ─── MAIN CARD SHELL (white bg, hard-clipped rounded corners) ─────
+          Container(
+            margin: const EdgeInsets.only(top: 11, right: 4),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF2554EE).withValues(alpha: 0.14),
+                  blurRadius: 22,
+                  offset: const Offset(0, 10),
                 ),
-                Text(date, style: InsightTheme.jetBrains(11, w: FontWeight.w600, c: Colors.white.withOpacity(0.8))),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
               ],
             ),
-            const SizedBox(height: 18), 
-            
-            // Site Data
-            Text('INSPECTION SITE', style: InsightTheme.inter(10, w: FontWeight.w600, c: Colors.white.withOpacity(0.6), h: 1.0)),
-            const SizedBox(height: 4),
-            Text(location, style: InsightTheme.poppins(15, w: FontWeight.w700, c: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
-            
-            const SizedBox(height: 12), 
-            
-            // Type Data with right-aligned Arrow
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end,
+            clipBehavior: Clip.hardEdge,
+            child: Stack(
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('APPLICATION TYPE', style: InsightTheme.inter(10, w: FontWeight.w600, c: Colors.white.withOpacity(0.6), h: 1.0)),
-                      const SizedBox(height: 4),
-                      Text(description, style: InsightTheme.inter(12, w: FontWeight.w500, c: Colors.white.withOpacity(0.95)), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ],
+
+                // ── FOLDER COVER / DOCUMENT LABEL HEADER ─────────────────
+                Positioned(
+                  top: 0, left: 0, right: 0, height: 96,
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF1C3CAA), Color(0xFF2B5EF8)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(16, 14, 14, 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+
+                        // LEFT: Folder document info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Category label — looks like a folder tab label
+                              Row(
+                                children: [
+                                  Icon(Icons.folder_open_rounded, size: 13,
+                                      color: Colors.white.withValues(alpha: 0.70)),
+                                  const SizedBox(width: 5),
+                                  Text('INSPECTION FOLDER',
+                                      style: InsightTheme.inter(9.5, w: FontWeight.w700,
+                                          c: Colors.white.withValues(alpha: 0.70), h: 1.0)),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              // Reference number — large, like a document serial/code
+                              Text(
+                                referenceNo,
+                                style: InsightTheme.jetBrains(13.5, w: FontWeight.w700,
+                                    c: Colors.white, ls: 0.6),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              // Inspection ID below
+                              Text(
+                                'ID: $inspectionId',
+                                style: InsightTheme.inter(10, w: FontWeight.w500,
+                                    c: Colors.white.withValues(alpha: 0.60)),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // RIGHT: Status pill (keep — matches reference "Add Card" style)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF060E22),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 16, height: 16,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.14),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.arrow_forward_rounded,
+                                        size: 10, color: Colors.white),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(status,
+                                      style: InsightTheme.inter(11, w: FontWeight.w700,
+                                          c: Colors.white, h: 1.0)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              applicationType,
+                              style: InsightTheme.inter(10, w: FontWeight.w500,
+                                  c: Colors.white.withValues(alpha: 0.75)),
+                              textAlign: TextAlign.right,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                Container(
-                  width: 26, height: 26,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8), 
+
+                // ── WHITE CONTENT AREA (overlaps header with diagonal clip) ──
+                Positioned(
+                  top: 76, left: 0, right: 0, bottom: 0,
+                  child: ClipPath(
+                    clipper: _PortfolioCardClip(),
+                    child: Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+
+                          // Title — like "Daily memo" in reference (big bold)
+                          Text(
+                            location,
+                            style: InsightTheme.poppins(16, w: FontWeight.w800,
+                                c: InsightTheme.ink, ls: -0.4),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          // Subtitle — like "Notes & Journaling"
+                          Text(
+                            applicantName,
+                            style: InsightTheme.inter(12, w: FontWeight.w400,
+                                c: InsightTheme.ink3),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+
+                          const Spacer(),
+
+                          // Bottom row — like "05 Doc    1270 Notes"
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              // Left: big ID + "Field Job" label
+                              RichText(
+                                text: TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: inspectionId,
+                                      style: InsightTheme.poppins(20, w: FontWeight.w800,
+                                          c: InsightTheme.ink),
+                                    ),
+                                    TextSpan(
+                                      text: '  Insp',
+                                      style: InsightTheme.inter(13, w: FontWeight.w400,
+                                          c: InsightTheme.ink3),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Spacer(),
+                              // Right: scheduled date
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text('SCHEDULED',
+                                      style: InsightTheme.inter(8.5, w: FontWeight.w600,
+                                          c: InsightTheme.ink3, h: 1.0)),
+                                  const SizedBox(height: 2),
+                                  Text(date,
+                                      style: InsightTheme.jetBrains(11, w: FontWeight.w700,
+                                          c: InsightTheme.ink)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  child: const Icon(Icons.chevron_right_rounded, size: 16, color: InsightTheme.blue2),
-                )
+                ),
               ],
-            )
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _QuickActionBtn extends StatelessWidget {
+/// Diagonal clip for the white content area.
+/// Left side starts 28px from the top of the clipped region;
+/// right side starts flush at 0px — creating the portfolio diagonal.
+class _PortfolioCardClip extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    return Path()
+      ..moveTo(0, 28)                         // left: 28px from top
+      ..lineTo(size.width * 0.52, 0)          // diagonal up to ~52% width
+      ..lineTo(size.width, 0)                 // flat to right
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+}
+
+class _QuickActionBtn extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
@@ -717,25 +922,56 @@ class _QuickActionBtn extends StatelessWidget {
   const _QuickActionBtn({required this.icon, required this.label, required this.onTap});
 
   @override
+  State<_QuickActionBtn> createState() => _QuickActionBtnState();
+}
+
+class _QuickActionBtnState extends State<_QuickActionBtn> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 60, height: 60,
-            decoration: BoxDecoration(
-              color: InsightTheme.surface,
-              borderRadius: BorderRadius.circular(18), 
-              border: Border.all(color: InsightTheme.line, width: 1.5),
-              boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 12, offset: Offset(0, 6))],
+      onTap: widget.onTap,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      child: AnimatedScale(
+        scale: _pressed ? 0.92 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 68, height: 68,
+              decoration: BoxDecoration(
+                color: InsightTheme.surface,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: InsightTheme.line, width: 1.0),
+                boxShadow: [
+                  BoxShadow(
+                    color: InsightTheme.blue1.withValues(alpha: _pressed ? 0.06 : 0.10),
+                    blurRadius: _pressed ? 8 : 18,
+                    offset: const Offset(0, 6),
+                  ),
+                  const BoxShadow(
+                    color: Color(0x06000000),
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Icon(widget.icon, size: 26, color: InsightTheme.blueInk),
+              ),
             ),
-            child: Center(child: Icon(icon, size: 26, color: InsightTheme.blueInk)),
-          ),
-          const SizedBox(height: 8),
-          Text(label, style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink2)),
-        ],
+            const SizedBox(height: 9),
+            Text(
+              widget.label,
+              style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink2),
+            ),
+          ],
+        ),
       ),
     );
   }
