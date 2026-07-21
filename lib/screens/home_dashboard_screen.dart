@@ -17,6 +17,7 @@ import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS 
@@ -349,7 +350,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 child: SizedBox(
                 height: 170, // Shrunk to perfectly match the removed bottom elements 
                 child: _isLoadingTasks
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Center(child: ImapsLoadingIndicator(size: 50))
                     : _upcomingTasks.isEmpty
                         ? Center(
                             child: Text(
@@ -488,7 +489,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: _isLoadingActivity
-                    ? const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: CircularProgressIndicator()))
+                    ? const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: ImapsLoadingIndicator(size: 50)))
                     : _recentActivity.isEmpty
                         ? Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text('No recent activity yet.', style: InsightTheme.inter(12, c: InsightTheme.ink2)))
                         : Stack(

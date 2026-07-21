@@ -978,7 +978,7 @@ class _PatternVerifySheetState extends State<_PatternVerifySheet> {
             width: 220,
             height: 220,
             child: _checking
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: ImapsLoadingIndicator(size: 50))
                 : PatternLockPad(onComplete: _onPattern, showError: _error),
           ),
           const SizedBox(height: 12),

@@ -97,7 +97,7 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
         iconTheme: const IconThemeData(color: _Colors.ink),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: ImapsLoadingIndicator(size: 50))
           : ListView(
               padding: const EdgeInsets.all(20),
               children: [

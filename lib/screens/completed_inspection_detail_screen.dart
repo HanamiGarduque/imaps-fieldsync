@@ -149,7 +149,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
+          ? const Center(child: ImapsLoadingIndicator(size: 60))
           : _error != null
               ? Center(
                   child: Padding(

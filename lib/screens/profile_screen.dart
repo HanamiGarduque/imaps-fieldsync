@@ -20,6 +20,7 @@ import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../widgets/motion/spring_entrance.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)

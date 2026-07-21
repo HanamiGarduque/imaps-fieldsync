@@ -18,6 +18,7 @@ import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS (Strict Enterprise Theme)
@@ -795,7 +796,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
       body: SafeArea(
         bottom: false,
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
+            ? const Center(child: ImapsLoadingIndicator(size: 60))
             : _errorMessage != null
                 ? Center(
                     child: Padding(

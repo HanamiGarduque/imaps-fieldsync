@@ -212,7 +212,7 @@ final online = connectivityResult is List
                     ),
                     clipBehavior: Clip.hardEdge,
                     child: _loading
-                        ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
+                        ? const Center(child: ImapsLoadingIndicator(size: 60))
                         : _error != null
                             ? Center(
                                 child: Padding(

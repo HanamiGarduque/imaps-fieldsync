@@ -316,7 +316,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 // ── Notification list ──
                 Expanded(
                   child: _isLoading
-                      ? const Center(child: CircularProgressIndicator(color: InsightTheme.blue1))
+                      ? const Center(child: ImapsLoadingIndicator(size: 60))
                       : _error != null
                           ? Center(
                               child: Padding(

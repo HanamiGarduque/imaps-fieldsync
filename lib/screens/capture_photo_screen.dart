@@ -374,11 +374,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
         ],
       );
     }
-    if (_cameraController == null || _initializeControllerFuture == null) return const Center(child: CircularProgressIndicator(color: InsightTheme.blue1));
+    if (_cameraController == null || _initializeControllerFuture == null) return const Center(child: ImapsLoadingIndicator(size: 60));
     return FutureBuilder<void>(
       future: _initializeControllerFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator(color: InsightTheme.blue1));
+        if (snapshot.connectionState != ConnectionState.done) return const Center(child: ImapsLoadingIndicator(size: 60));
         return Stack(
           fit: StackFit.expand,
           children: [

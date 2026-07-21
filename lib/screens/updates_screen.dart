@@ -17,6 +17,7 @@ import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
+import '../widgets/imaps_loading_indicator.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -301,7 +302,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
           SafeArea(
             bottom: false,
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: ImapsLoadingIndicator(size: 60, label: "Syncing data..."))
                 : RefreshIndicator(
                     onRefresh: _refresh,
                     child: Column(
