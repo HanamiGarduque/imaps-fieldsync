@@ -172,34 +172,37 @@ class SupabaseService {
     if (userId == null) return [];
 
     final response = await client
-        .from('field_jobs')
-        .select('''
-          id,
-          local_inspection_id,
-          status,
-          scheduled_date,
-          deadline_date,
-          is_self_scheduled,
-          supabase_parcel_id,
-          supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
-            reference_number,
-            applicant_name,
-            barangay,
-            application_type,
-            purpose,
-            contact_number,
-            email
-          ),
-          supabase_parcels!field_jobs_supabase_parcel_id_fkey (
-            lot_area_sqm,
-            land_use_class,
-            property_index_number,
-            latitude,
-            longitude
-          )
-        ''')
-        .eq('assigned_inspector_id', userId)
-        .order('scheduled_date', ascending: true);
+    .from('field_jobs')
+    .select('''
+      id,
+      local_inspection_id,
+      status,
+      scheduled_date,
+      deadline_date,
+      is_self_scheduled,
+      current_step,
+      created_at,
+      started_at,
+      supabase_parcel_id,
+      supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
+        reference_number,
+        applicant_name,
+        barangay,
+        application_type,
+        purpose,
+        contact_number,
+        email
+      ),
+      supabase_parcels!field_jobs_supabase_parcel_id_fkey (
+        lot_area_sqm,
+        land_use_class,
+        property_index_number,
+        latitude,
+        longitude
+      )
+    ''')
+    .eq('assigned_inspector_id', userId)
+    .order('scheduled_date', ascending: true);
 
   return List<Map<String, dynamic>>.from(response);
 }
@@ -269,18 +272,23 @@ class SupabaseService {
   //   and stepped away, without clobbering a status a later step already set.
   // ─────────────────────────────────────────────────────────────────────────
   static Future<bool> markJobOngoing(String jobId) async {
-    try {
-      await client
-          .from('field_jobs')
-          .update({'status': 'in_progress'})
-          .eq('id', jobId)
-          .eq('status', 'assigned');
-      return true;
-    } catch (e) {
-      debugPrint('Error marking job ongoing: $e');
-      return false;
-    }
+  try {
+    await client
+        .from('field_jobs')
+        .update({'status': 'in_progress'})
+        .eq('id', jobId)
+        .not('status', 'ilike', 'completed'); 
+        await client
+        .from('field_jobs')
+        .update({'started_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', jobId)
+        .filter('started_at', 'is', null); // huwag lang i-touch kung completed na
+    return true;
+  } catch (e) {
+    debugPrint('Error marking job ongoing: $e');
+    return false;
   }
+}
 
   // ─────────────────────────────────────────────────────────────────────────
   // CONFIRM GPS ON-SITE  (GPS verification screen → marks job in_progress)
@@ -300,6 +308,11 @@ class SupabaseService {
         'gps_accuracy_m': accuracyMeters,
         'gps_confirmed_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', jobId);
+      await client
+        .from('field_jobs')
+        .update({'started_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', jobId)
+        .filter('started_at', 'is', null); // only sets it the first time
       await logActivity(
         eventType: 'gps_confirmed',
         title: 'GPS verified on-site',
@@ -551,7 +564,7 @@ class SupabaseService {
           )
         ''')
         .eq('assigned_inspector_id', userId)
-        .eq('status', 'completed')
+        .ilike('status', 'completed')
         .order('submitted_at', ascending: false);
 
     return List<Map<String, dynamic>>.from(response);

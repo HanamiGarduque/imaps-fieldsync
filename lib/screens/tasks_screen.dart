@@ -100,20 +100,12 @@ class TaskItem {
   final double? confirmedLongitude;
   final double? gpsAccuracyM;
   final String? gpsConfirmedAt;
-
-  // BUG FIX #1 — real applicant contact info, sourced from
-  // supabase_zoning_applications.contact_number / .email, so the SMS/Call/
-  // Gmail quick actions stop pointing at hardcoded placeholder values.
   final String? applicantPhone;
   final String? applicantEmail;
-
-  // True once the inspector has explicitly used the Schedule action
-  // (SupabaseService.scheduleJob) for this job — as opposed to just having
-  // whatever scheduled_date the admin set at assignment time. This is what
-  // lets a task stay under "Scheduled" even after its booked date arrives
-  // or passes, instead of quietly falling back into "Pending" and losing
-  // the "this was planned" signal for both the inspector and admin.
+  final int currentStep;
   final bool isSelfScheduled;
+  final String createdAt;
+  final String? startedAt;
 
   TaskItem({
     required this.id, this.parcelId, required this.name, required this.location,
@@ -126,6 +118,9 @@ class TaskItem {
     this.checklistData = const [], this.confirmedLatitude, this.confirmedLongitude,
     this.gpsAccuracyM, this.gpsConfirmedAt, this.isSelfScheduled = false,
     this.applicantPhone, this.applicantEmail,
+    this.currentStep = 0,
+    this.createdAt = '',
+    this.startedAt,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -170,6 +165,9 @@ class TaskItem {
       gpsConfirmedAt: job['gps_confirmed_at'] as String?,
       applicationType: application?['application_type'] as String?,
       isSelfScheduled: job['is_self_scheduled'] as bool? ?? false,
+      currentStep: (job['current_step'] as num?)?.toInt() ?? 0,
+      createdAt: job['created_at'] as String? ?? '',
+      startedAt: job['started_at'] as String?,
     );
   }
 
@@ -243,7 +241,23 @@ class TaskItem {
       final today = DateTime.now();
       final dueDay = DateTime(due.year, due.month, due.day);
       final todayDay = DateTime(today.year, today.month, today.day);
-      return dueDay.isAfter(todayDay); // booked for a future date
+      return dueDay.isAfter(todayDay);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// True when the deadline is tomorrow, today, or already past — used to
+  /// visually flag a Scheduled card as urgent so the inspector can spot it
+  /// at a glance, like a filling-up warning.
+  bool get isUrgentDeadline {
+    if (deadlineDate == null || deadlineDate!.isEmpty) return false;
+    try {
+      final due = DateTime.parse(deadlineDate!);
+      final today = DateTime.now();
+      final dueDay = DateTime(due.year, due.month, due.day);
+      final todayDay = DateTime(today.year, today.month, today.day);
+      return dueDay.difference(todayDay).inDays <= 1;
     } catch (_) {
       return false;
     }
@@ -605,17 +619,27 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     }
 
     for (final category in map.keys) {
-      map[category]!.sort((a, b) {
-        final dateA = a.scheduledDate.isEmpty ? '1970-01-01' : a.scheduledDate;
-        final dateB = b.scheduledDate.isEmpty ? '1970-01-01' : b.scheduledDate;
-        
-        if (_sortBy == 'Recent') {
-          return dateB.compareTo(dateA); 
-        } else {
-          return dateA.compareTo(dateB); 
-        }
-      });
+  map[category]!.sort((a, b) {
+    switch (category) {
+      case 'Pending':
+        return a.createdAt.compareTo(b.createdAt);
+      case 'Ongoing':
+        final sa = a.startedAt ?? a.createdAt;
+        final sb = b.startedAt ?? b.createdAt;
+        return sa.compareTo(sb);
+      case 'Scheduled':
+        final da = a.deadlineDate?.isNotEmpty == true ? a.deadlineDate! : '9999-12-31';
+        final db = b.deadlineDate?.isNotEmpty == true ? b.deadlineDate! : '9999-12-31';
+        return da.compareTo(db);
+      case 'Completed':
+        final sa = a.submittedAt ?? '';
+        final sb = b.submittedAt ?? '';
+        return sa.compareTo(sb);
+      default:
+        return 0;
     }
+  });
+}
     return map;
   }
 
@@ -1206,12 +1230,16 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   @override
   Widget build(BuildContext context) {
     final statusColor = _getStatusColor();
-    
+    final isUrgent = widget.task.category == 'Scheduled' && widget.task.isUrgentDeadline;
+
     return Container(
       decoration: BoxDecoration(
-        color: InsightTheme.surface,
+        color: isUrgent ? const Color(0xFFFEF2F2) : InsightTheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: InsightTheme.line),
+        border: Border.all(
+          color: isUrgent ? const Color(0xFFEF4444) : InsightTheme.line,
+          width: isUrgent ? 1.4 : 1,
+        ),
         boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
       ),
       child: ClipRRect(

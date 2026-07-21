@@ -59,7 +59,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     progress.ensureActiveInspection(
       task.id,
       label: task.location,
-      initialStep: task.derivedHighestStep,
+      initialStep: task.currentStep > 0 ? task.currentStep : task.derivedHighestStep,
     );
     progress.addListener(_onProgressChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
