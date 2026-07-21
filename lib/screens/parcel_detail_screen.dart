@@ -62,10 +62,9 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       initialStep: task.derivedHighestStep,
     );
     progress.addListener(_onProgressChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final provider = context.read<InspectionProvider>();
-      if (provider.activeTask?.id != widget.task.id) {
-        provider.startInspection(widget.task);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (context.read<InspectionProvider>().activeTask?.id != widget.task.id) {
+        await context.read<InspectionProvider>().startInspection(widget.task);
       }
     });
   }
@@ -766,57 +765,6 @@ class _FullscreenPhotoViewer extends StatefulWidget {
   const _FullscreenPhotoViewer({required this.photoPaths, required this.startIndex});
 
   @override
-  State<_FullscreenPhotoViewer> createState() => _FullscreenPhotoViewerState();
-}
-
-class _FullscreenPhotoViewerState extends State<_FullscreenPhotoViewer> {
-  late final PageController _pageController;
-  late int _index;
-
-  @override
-  void initState() {
-    super.initState();
-    _index = widget.startIndex;
-    _pageController = PageController(initialPage: _index);
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text('${_index + 1} / ${widget.photoPaths.length}'),
-      ),
-      body: PageView.builder(
-        controller: _pageController,
-        itemCount: widget.photoPaths.length,
-        onPageChanged: (i) => setState(() => _index = i),
-        itemBuilder: (_, i) => InteractiveViewer(
-          minScale: 0.8,
-          maxScale: 4.0,
-          child: Center(
-            child: Image.network(
-              widget.photoPaths[i],
-              fit: BoxFit.contain,
-              loadingBuilder: (_, child, progress) {
-                if (progress == null) return child;
-                return const Center(child: CircularProgressIndicator(color: Colors.white));
-              },
-              errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+  State<_FullscreenPhotoViewer> createState<read_file>
+<path>c:/Users/Ralph Lauren/imaps_fieldsync/lib/screens/parcel_detail_screen.dart</path>
+</read_file>

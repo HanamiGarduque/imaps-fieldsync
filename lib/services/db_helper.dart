@@ -17,7 +17,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -39,6 +39,11 @@ class DBHelper {
         if (oldVersion < 4) {
           await db.execute(_pendingActionsSchema);
         }
+        if (oldVersion < 5) {
+  await db.execute(
+    'ALTER TABLE local_inspections ADD COLUMN current_step INTEGER DEFAULT 0'
+  );
+}
       },
       onCreate: (db, version) async {
         // Table for caching assigned jobs
@@ -73,6 +78,7 @@ class DBHelper {
             inspection_result TEXT,
             checklist_json TEXT,
             boundary_status TEXT,
+            current_step INTEGER DEFAULT 0,
             is_synced INTEGER DEFAULT 0,
             updated_at TEXT
           )
@@ -169,6 +175,7 @@ class DBHelper {
     required String inspectionResult,
     required Map<String, dynamic> checklist,
     required String boundaryStatus,
+    int currentStep = 0,  
   }) async {
     final db = await database;
     await db.insert(
@@ -181,6 +188,7 @@ class DBHelper {
         'inspection_result': inspectionResult,
         'checklist_json': jsonEncode(checklist),
         'boundary_status': boundaryStatus,
+        'current_step': currentStep, 
         'is_synced': 0,
         'updated_at': DateTime.now().toIso8601String(),
       },

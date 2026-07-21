@@ -55,42 +55,75 @@ class InspectionProvider extends ChangeNotifier {
 
   // --- INITIALIZATION & NAVIGATION ---
 
-  void startInspection(TaskItem task) {
-    _activeTask = task;
-    _currentStep = 1;
-    _isReworkMode = false;
+  Future<void> startInspection(TaskItem task) async {
+  _activeTask = task;
+  _isReworkMode = false;
 
-    // Reset Checklist
-    _siteCondition.updateAll(
-      (key, value) =>
-          key == 'Surrounding developments noted' ||
-              key == 'Signage / commercial activity present'
-          ? false
-          : true,
+  // Reset defaults first
+  _siteCondition.updateAll(
+    (key, value) =>
+        key == 'Surrounding developments noted' ||
+            key == 'Signage / commercial activity present'
+        ? false
+        : true,
+  );
+  _zoningObservations.updateAll(
+    (key, value) => key == 'Accessibility & road frontage' ? true : false,
+  );
+  _capturedPhotos.clear();
+  _actualLandUse = 'Single-detached residential';
+  _notes = '';
+  _discrepancies = '';
+  _recommendations = '';
+  _boundaryStatus = 'Compliant';
+  _inspectionResult = 'Compliant';
+
+  // Load persisted draft AFTER reset — this restores checklist, findings,
+  // photos, AND current_step from the task's own SQLite row.
+  // Each task has its own row so step can never bleed across tasks.
+  final draft = await DBHelper.getLocalInspection(task.id);
+  _currentStep = (draft?['current_step'] as int?) ?? 1;
+  if (_currentStep < 1) _currentStep = 1;
+
+  await _loadLocalDraftIfExists(task.id);
+  notifyListeners();
+}
+
+  Future<void> updateStep(int step) async {
+  _currentStep = step;
+  notifyListeners();
+
+  if (_activeTask == null) return;
+
+  // Persist to SQLite immediately — survives app restart, task switching,
+  // and internet loss. This is the core fix for Bug 1.
+  final draft = await DBHelper.getLocalInspection(_activeTask!.id);
+  if (draft != null) {
+    final db = await DBHelper.database;
+    await db.update(
+      'local_inspections',
+      {
+        'current_step': step,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [_activeTask!.id],
     );
-    _zoningObservations.updateAll(
-      (key, value) => key == 'Accessibility & road frontage' ? true : false,
-    );
-
-    // Reset Photos
-    _capturedPhotos.clear();
-
-    // Reset Findings
-    _actualLandUse = 'Single-detached residential';
-    _notes = '';
-    _discrepancies = '';
-    _recommendations = '';
-    _boundaryStatus = 'Compliant';
-    _inspectionResult = 'Compliant';
-
-    _loadLocalDraftIfExists(task.id);
-    notifyListeners();
   }
 
-  void updateStep(int step) {
-    _currentStep = step;
-    notifyListeners();
+  // Also push to Supabase if online — best-effort, no throw on failure.
+  try {
+    final isConnected = await _checkConnectivity();
+    if (isConnected) {
+      await SupabaseService.updateJobInspectionProgress(
+        jobId: _activeTask!.id,
+        updateData: {'current_step': step},
+      );
+    }
+  } catch (e) {
+    debugPrint('updateStep: Supabase sync skipped — $e');
   }
+}
 
   // --- CHECKLIST UPDATE METHODS ---
 
@@ -281,6 +314,7 @@ class InspectionProvider extends ChangeNotifier {
       inspectionResult: _inspectionResult,
       checklist: combinedChecklist,
       boundaryStatus: _boundaryStatus,
+      currentStep: _currentStep,
     );
 
     // 2. Save photos to local sqlite
@@ -434,6 +468,7 @@ class InspectionProvider extends ChangeNotifier {
       inspectionResult: _inspectionResult,
       checklist: combinedChecklist,
       boundaryStatus: _boundaryStatus,
+      currentStep: _currentStep,
     );
 
     for (final photo in _capturedPhotos) {
