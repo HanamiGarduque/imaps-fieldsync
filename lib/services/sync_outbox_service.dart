@@ -96,6 +96,28 @@ class SyncOutboxService {
     );
   }
   
+  /// Queues a `current_step` update. Deterministic id per job (same
+  /// pattern as `enqueueChecklistUpdate`) — if the inspector advances
+  /// steps several times while offline, each call overwrites the same
+  /// queued row with the latest step instead of piling up stale ones.
+  ///
+  /// Added as the Phase 1 audit fix for item #9 (Data Consistency):
+  /// `InspectionProvider.updateStep()` used to push `current_step` to
+  /// Supabase best-effort only, with no outbox fallback — a failed push
+  /// while offline was silently lost forever, which is why a sample row
+  /// was found with `current_step: 0` despite real checklist progress.
+  static Future<void> enqueueCurrentStepUpdate({
+    required String jobId,
+    required int step,
+  }) {
+    return DBHelper.enqueueAction(
+      id: 'current_step_update_$jobId',
+      type: 'current_step_update',
+      jobId: jobId,
+      payload: {'currentStep': step},
+    );
+  }
+
   /// Queues the whole final submission — findings, checklist, and the
   /// *local* photo map data (not yet uploaded; that happens at drain time,
   /// since it needs a connection too). Carries everything ReviewSubmit
@@ -228,6 +250,12 @@ class SyncOutboxService {
             'checklist_completed_count': payload['checklistCompletedCount'],
             'checklist_total_count': payload['checklistTotalCount'],
           },
+        );
+        break;
+      case 'current_step_update':
+        await SupabaseService.updateJobInspectionProgress(
+          jobId: jobId,
+          updateData: {'current_step': payload['currentStep']},
         );
         break;
       // 'photo_upload' as its own standalone action (outside of submit)

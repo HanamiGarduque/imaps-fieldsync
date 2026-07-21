@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -343,6 +344,31 @@ class SupabaseService {
   // ─────────────────────────────────────────────────────────────────────────
   // UPLOAD INSPECTION PHOTOS & STORE METADATA
   // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // IDEMPOTENCY FIX (Phase 1, Bahagi A — Sync Center audit)
+  //   Dating bug: bagong random UUID filename bawat tawag → kapag na-retry
+  //   ang isang na-fail na submit_inspection action, muling na-a-upload ang
+  //   mga photo na successful na dati (duplicate sa Storage bucket AT sa
+  //   field_job_photos table).
+  //
+  //   Fix: kunin ang storage path/photo-id mula sa LOCAL FILE PATH mismo
+  //   (deterministic — parehong path, parehong id, sa bawat retry) sa
+  //   halip na bagong Uuid().v4() bawat call. Storage upload gamit ang
+  //   upsert:true (overwrite, hindi duplicate object), at field_job_photos
+  //   row gamit ang .upsert() sa deterministic id (hindi .insert()) kaya
+  //   parehong row lang ang ma-a-apektuhan sa bawat retry — walang bagong
+  //   duplicate row. Kapareho ito ng pattern na ginagamit na sa
+  //   InspectionProvider.syncToServer() (photo_${photo['id']}.jpg +
+  //   upsert), para consistent ang dalawang code path.
+  // ─────────────────────────────────────────────────────────────────────────
+  static String _stablePhotoKey(String localPath) {
+    // Deterministic, filesystem/URL-safe key derived from the photo's own
+    // local path — same file will always produce the same key, kahit
+    // ilang beses pang ma-retry ang parehong submit_inspection action.
+    final bytes = utf8.encode(localPath);
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
   static Future<List<String>> uploadInspectionPhotos({
     required String jobId,
     required List<Map<String, dynamic>> photosData, // Changed from List<String> localPaths
@@ -356,10 +382,20 @@ class SupabaseService {
         final file = File(path);
         if (!await file.exists()) continue;
 
-        final fileName = 'photo_${const Uuid().v4()}.jpg';
+        // Deterministic filename/id — parehong path, parehong result sa
+        // bawat retry, kaya hindi na dumadami ang naka-upload kapag
+        // na-retry ang action. `field_job_photos.id` ay uuid column sa
+        // Supabase, kaya kailangang valid UUID format ang gamitin — v5
+        // (namespace + stable name) ang ginagamit dito para deterministic
+        // pa rin pero tama ang format.
+        final photoKey = _stablePhotoKey(path);
+        final fileName = 'photo_$photoKey.jpg';
         final storagePath = 'inspections/$jobId/$fileName';
+        final rowId = const Uuid().v5(Uuid.NAMESPACE_URL, storagePath);
 
-        // 1. Upload to Supabase Storage
+        // 1. Upload to Supabase Storage — upsert:true means a retry
+        //    overwrites the SAME storage object instead of creating a new
+        //    one under a new random name.
         await client.storage.from('inspection-photos').upload(
           storagePath,
           file,
@@ -369,14 +405,21 @@ class SupabaseService {
         final publicUrl = client.storage.from('inspection-photos').getPublicUrl(storagePath);
         uploadedUrls.add(publicUrl);
 
-        // 2. Insert metadata into the new field_job_photos table
-        await client.from('field_job_photos').insert({
-          'field_job_id': jobId,
-          'photo_url': publicUrl,
-          'latitude': photo['latitude'],
-          'longitude': photo['longitude'],
-          'captured_at': photo['capturedAt'],
-        });
+        // 2. Upsert (not insert) metadata into field_job_photos, keyed by
+        //    the same deterministic id derived from the photo's storage
+        //    path. A retry updates this one row in place — it never adds
+        //    a second row for a photo that already synced.
+        await client.from('field_job_photos').upsert(
+          {
+            'id': rowId,
+            'field_job_id': jobId,
+            'photo_url': publicUrl,
+            'latitude': photo['latitude'],
+            'longitude': photo['longitude'],
+            'captured_at': photo['capturedAt'],
+          },
+          onConflict: 'id',
+        );
 
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');

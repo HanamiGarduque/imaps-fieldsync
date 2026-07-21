@@ -170,15 +170,45 @@ final online = connectivityResult is List
     if (widget.task.parcelId == null || _recomputing) return;
     _recomputing = true;
     try {
-      final dist = await SupabaseService.getDistanceToParcelBoundary(
-        parcelId: widget.task.parcelId!,
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-      );
-      final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+      // Phase 1 audit fix (item #2 — Offline Inspection Audit): this used
+      // to call the online-only Supabase RPC/fetch unconditionally, so
+      // live tracking silently stopped updating the compass/distance the
+      // moment the device went offline (every tick threw and got
+      // swallowed below). Now it mirrors the same online/offline branch
+      // that _checkLocation() already uses.
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final online = connectivityResult is List
+          ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+          : connectivityResult != ConnectivityResult.none;
+
+      double? dist;
+      double? parcelLat;
+      double? parcelLng;
+
+      if (online) {
+        dist = await SupabaseService.getDistanceToParcelBoundary(
+          parcelId: widget.task.parcelId!,
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+        );
+        final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+        parcelLat = (parcel?['latitude'] as num?)?.toDouble();
+        parcelLng = (parcel?['longitude'] as num?)?.toDouble();
+      } else {
+        final cached = await DBHelper.getCachedJobs();
+        final match = cached.where((j) => j['id'] == widget.task.id).toList();
+        if (match.isNotEmpty) {
+          parcelLat = (match.first['parcel_lat'] as num?)?.toDouble();
+          parcelLng = (match.first['parcel_lng'] as num?)?.toDouble();
+        }
+        if (parcelLat != null && parcelLng != null) {
+          dist = SpatialOfflineService.haversineMeters(pos.latitude, pos.longitude, parcelLat, parcelLng);
+        }
+      }
+
       double? bearing;
-      if (parcel != null && parcel['latitude'] != null && parcel['longitude'] != null) {
-        bearing = _bearingBetween(pos.latitude, pos.longitude, parcel['latitude'], parcel['longitude']);
+      if (parcelLat != null && parcelLng != null) {
+        bearing = _bearingBetween(pos.latitude, pos.longitude, parcelLat, parcelLng);
       }
       if (!mounted) return;
       setState(() {
