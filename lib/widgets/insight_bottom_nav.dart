@@ -58,19 +58,58 @@ class InsightBottomNav extends StatelessWidget {
                   BoxShadow(color: Color(0x15000000), blurRadius: 24, offset: Offset(0, 12)),
                 ],
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  for (int i = 0; i < items.length; i++)
-                    _NavPillItem(
-                      item: items[i],
-                      isActive: i == currentIndex,
-                      onTap: () {
-                        if (i != currentIndex) HapticFeedback.selectionClick();
-                        onTap(i);
-                      },
+              // Equal-width slots (like the Date Range sliding control) so the
+              // highlight's exact x-position at every index is known ahead of
+              // time — that's what lets it glide continuously between taps
+              // instead of each icon growing/shrinking in its own place.
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final slotWidth = constraints.maxWidth / items.length;
+                  return SizedBox(
+                    height: 46,
+                    child: Stack(
+                      children: [
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 380),
+                          curve: Curves.easeOutCubic,
+                          left: slotWidth * currentIndex,
+                          top: 0,
+                          bottom: 0,
+                          width: slotWidth,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [InsightBottomNav._blue1, InsightBottomNav._blue2],
+                                  begin: Alignment.topLeft, end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: [BoxShadow(color: InsightBottomNav._blue1.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 6))],
+                              ),
+                            ),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            for (int i = 0; i < items.length; i++)
+                              SizedBox(
+                                width: slotWidth,
+                                child: _NavPillItem(
+                                  item: items[i],
+                                  isActive: i == currentIndex,
+                                  onTap: () {
+                                    if (i != currentIndex) HapticFeedback.selectionClick();
+                                    onTap(i);
+                                  },
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
-                ],
+                  );
+                },
               ),
             ),
           ),
@@ -89,26 +128,22 @@ class _NavPillItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // No background/shadow here anymore — the shared sliding pill in the
+    // Stack behind this handles that now. This layer only fades the icon
+    // and label color, and reveals the label, once the highlight has
+    // glided underneath it.
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 320),
-        curve: Curves.easeOutCubic,
-        padding: EdgeInsets.symmetric(horizontal: isActive ? 16 : 12, vertical: 11),
-        decoration: BoxDecoration(
-          gradient: isActive
-              ? const LinearGradient(colors: [InsightBottomNav._blue1, InsightBottomNav._blue2], begin: Alignment.topLeft, end: Alignment.bottomRight)
-              : null,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: isActive
-              ? [BoxShadow(color: InsightBottomNav._blue1.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 6))]
-              : [],
-        ),
+      child: Center(
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(item.icon, color: isActive ? Colors.white : const Color.fromARGB(255, 136, 139, 145), size: 21),
+            Icon(
+              item.icon,
+              color: isActive ? Colors.white : const Color.fromARGB(255, 136, 139, 145),
+              size: 21,
+            ),
             AnimatedSize(
               duration: const Duration(milliseconds: 260),
               curve: Curves.easeOutCubic,
@@ -118,6 +153,8 @@ class _NavPillItem extends StatelessWidget {
                       child: Text(
                         item.label,
                         style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.white),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     )
                   : const SizedBox(width: 0, height: 0),
