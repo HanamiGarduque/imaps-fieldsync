@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../services/supabase_service.dart';
+import '../services/db_helper.dart';
 /// ==================================================================
 /// INSPECTION PROGRESS TRACKER
 /// ==================================================================
@@ -48,20 +49,60 @@ class InspectionProgress extends ChangeNotifier {
   /// Call when a step's "Continue" action fires, right before navigating
   /// forward. Steps can only be completed in order.
   void markStepComplete(int step) {
-    if (step == _highestCompleted + 1) {
-      _highestCompleted = step;
-      notifyListeners();
+  if (step == _highestCompleted + 1) {
+    _highestCompleted = step;
+    notifyListeners();
 
-      if (step < totalSteps && _activeTaskId != null) {
-        SupabaseService.logActivity(
-          eventType: 'step_completed',
-          title: 'Completed Step $step: ${stepTitles[step - 1]}',
-          subtitle: _activeTaskLabel,
-          fieldJobId: _activeTaskId,
-        );
-      }
+    if (_activeTaskId != null) {
+      _persistCurrentStep(_activeTaskId!, step);
+    }
+
+    if (step < totalSteps && _activeTaskId != null) {
+      SupabaseService.logActivity(
+        eventType: 'step_completed',
+        title: 'Completed Step $step: ${stepTitles[step - 1]}',
+        subtitle: _activeTaskLabel,
+        fieldJobId: _activeTaskId,
+      );
     }
   }
+}
+
+/// Saves the exact step number to SQLite (always) and Supabase (best-
+/// effort, if online). This gives us a real stored value alongside the
+/// derivedHighestStep heuristic — belt-and-suspenders, doesn't replace it.
+Future<void> _persistCurrentStep(String taskId, int step) async {
+  try {
+    final db = await DBHelper.database;
+    final existing = await DBHelper.getLocalInspection(taskId);
+    if (existing != null) {
+      await db.update(
+        'local_inspections',
+        {'current_step': step, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [taskId],
+      );
+    } else {
+      await db.insert('local_inspections', {
+        'id': taskId,
+        'current_step': step,
+        'is_synced': 0,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    }
+  } catch (e) {
+    debugPrint('_persistCurrentStep (SQLite) failed: $e');
+  }
+
+  try {
+    await SupabaseService.updateJobInspectionProgress(
+      jobId: taskId,
+      updateData: {'current_step': step},
+    );
+  } catch (e) {
+    debugPrint('_persistCurrentStep (Supabase) failed: $e');
+  }
+}
 
   /// Makes sure progress belongs to the task currently open. If the
   /// inspector opens a different task, progress starts fresh instead of
@@ -70,8 +111,6 @@ class InspectionProgress extends ChangeNotifier {
     if (_activeTaskId != taskId) {
       _activeTaskId = taskId;
       _highestCompleted = initialStep ?? 0;
-    } else if (initialStep != null) {
-      _highestCompleted = initialStep;
     }
     _activeTaskLabel = label ?? _activeTaskLabel;
   }

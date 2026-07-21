@@ -178,18 +178,19 @@ class TaskItem {
   /// survive app restarts and stay correct when switching between tasks
   /// (each task derives its own number from its own real data).
   int get derivedHighestStep {
-    if (status.toLowerCase().contains('complete')) return 6;
-    final hasFindings = (observations?.isNotEmpty ?? false) ||
-        (discrepancies?.isNotEmpty ?? false) ||
-        (recommendations?.isNotEmpty ?? false) ||
-        (inspectorNotes?.isNotEmpty ?? false);
-    if (hasFindings) return 5;
-    if (checklistCompletedCount > 0) return 4;
-    if (photoCount > 0 || photoPaths.isNotEmpty) return 3;
-    if (confirmedLatitude != null && confirmedLongitude != null) return 2;
-    if (status.toLowerCase() != 'assigned') return 1;
-    return 0;
-  }
+  if (status.toLowerCase().contains('complete')) return 6;
+  final hasFindings = (observations?.isNotEmpty ?? false) ||
+      (discrepancies?.isNotEmpty ?? false) ||
+      (recommendations?.isNotEmpty ?? false) ||
+      (inspectorNotes?.isNotEmpty ?? false);
+  if (hasFindings) return 5;
+  if (checklistCompletedCount > 0) return 4;
+  if (photoCount > 0 || photoPaths.isNotEmpty) return 3;
+  if (confirmedLatitude != null && confirmedLongitude != null) return 2;
+  final s = status.toLowerCase();
+  if (s.contains('progress') || s.contains('ongoing')) return 1;
+  return 0;
+}
 
   String get category {
     final s = status.toLowerCase();

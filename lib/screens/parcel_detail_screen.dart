@@ -765,6 +765,54 @@ class _FullscreenPhotoViewer extends StatefulWidget {
   const _FullscreenPhotoViewer({required this.photoPaths, required this.startIndex});
 
   @override
-  State<_FullscreenPhotoViewer> createState<read_file>
-<path>c:/Users/Ralph Lauren/imaps_fieldsync/lib/screens/parcel_detail_screen.dart</path>
-</read_file>
+  State<_FullscreenPhotoViewer> createState() => _FullscreenPhotoViewerState();
+}
+
+class _FullscreenPhotoViewerState extends State<_FullscreenPhotoViewer> {
+  late PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.startIndex;
+    _pageController = PageController(initialPage: widget.startIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text('${_currentIndex + 1} / ${widget.photoPaths.length}'),
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: PageView.builder(
+        controller: _pageController,
+        itemCount: widget.photoPaths.length,
+        onPageChanged: (i) => setState(() => _currentIndex = i),
+        itemBuilder: (context, i) => InteractiveViewer(
+          child: Center(
+            child: Image.network(
+              widget.photoPaths[i],
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.broken_image_outlined,
+                color: Colors.white38,
+                size: 48,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
