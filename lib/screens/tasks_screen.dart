@@ -176,19 +176,19 @@ class TaskItem {
   /// survive app restarts and stay correct when switching between tasks
   /// (each task derives its own number from its own real data).
   int get derivedHighestStep {
-  if (status.toLowerCase().contains('complete')) return 6;
-  final hasFindings = (observations?.isNotEmpty ?? false) ||
-      (discrepancies?.isNotEmpty ?? false) ||
-      (recommendations?.isNotEmpty ?? false) ||
-      (inspectorNotes?.isNotEmpty ?? false);
-  if (hasFindings) return 5;
-  if (checklistCompletedCount > 0) return 4;
-  if (photoCount > 0 || photoPaths.isNotEmpty) return 3;
-  if (confirmedLatitude != null && confirmedLongitude != null) return 2;
-  final s = status.toLowerCase();
-  if (s.contains('progress') || s.contains('ongoing')) return 1;
-  return 0;
-}
+    if (status.toLowerCase().contains('complete')) return 6;
+    final hasFindings = (observations?.isNotEmpty ?? false) ||
+        (discrepancies?.isNotEmpty ?? false) ||
+        (recommendations?.isNotEmpty ?? false) ||
+        (inspectorNotes?.isNotEmpty ?? false);
+    if (hasFindings) return 5;
+    if (checklistCompletedCount > 0) return 4;
+    if (photoCount > 0 || photoPaths.isNotEmpty) return 3;
+    if (confirmedLatitude != null && confirmedLongitude != null) return 2;
+    final s = status.toLowerCase();
+    if (s.contains('progress') || s.contains('ongoing')) return 1;
+    return 0;
+  }
 
   String get category {
     final s = status.toLowerCase();
@@ -241,7 +241,7 @@ class TaskItem {
       final today = DateTime.now();
       final dueDay = DateTime(due.year, due.month, due.day);
       final todayDay = DateTime(today.year, today.month, today.day);
-      return dueDay.isAfter(todayDay);
+      return dueDay.isAfter(todayDay); // booked for a future date
     } catch (_) {
       return false;
     }
@@ -293,17 +293,10 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
 
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-  String _selectedBarangay = 'All Barangays';
-
-  // Filter & Sort sheet — Date Range + Application Type.
-  // '30d' / '6m' / 'custom' / null (no date filter active). Applied against
-  // scheduledDate since that's the one date field every task has regardless
-  // of which lifecycle tab it's currently in.
-  String? _dateRangePreset;
+  String? _datePreset; // 'last30' | 'last6months' | 'custom' | null
   DateTime? _customStartDate;
   DateTime? _customEndDate;
-  String _selectedApplicationType = 'All';
-  static const _applicationTypes = ['All', 'Residential', 'Commercial', 'Industrial', 'Agricultural'];
+  String _selectedBarangay = 'All Barangays';
 
   static const _tabOrder = ['Pending', 'Ongoing', 'Scheduled', 'Completed'];
 
@@ -395,17 +388,11 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     if (mounted) _loadTasks();
   }
   
-  static const _monthAbbrev = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-  ];
-  String _formatDate(DateTime d) => '${_monthAbbrev[d.month - 1]} ${d.day}, ${d.year}';
-
   void _showFilterBottomSheet() {
     HapticFeedback.lightImpact();
-    String? tempDateRangePreset = _dateRangePreset;
-    DateTime? tempCustomStart = _customStartDate;
-    DateTime? tempCustomEnd = _customEndDate;
-    String tempApplicationType = _selectedApplicationType;
+    String? tempDatePreset = _datePreset;
+    DateTime? tempStartDate = _customStartDate;
+    DateTime? tempEndDate = _customEndDate;
     String tempBarangay = _selectedBarangay;
     String barangaySearchQuery = '';
 
@@ -418,26 +405,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
           final filteredBarangays = rosarioBarangays
               .where((b) => b.toLowerCase().contains(barangaySearchQuery.toLowerCase()))
               .toList();
-
-          Future<void> pickCustomDate({required bool isStart}) async {
-            final now = DateTime.now();
-            final result = await showDatePicker(
-              context: context,
-              initialDate: (isStart ? tempCustomStart : tempCustomEnd) ?? now,
-              firstDate: DateTime(2020),
-              lastDate: now,
-            );
-            if (result != null) {
-              setModalState(() {
-                tempDateRangePreset = 'custom';
-                if (isStart) {
-                  tempCustomStart = result;
-                } else {
-                  tempCustomEnd = result;
-                }
-              });
-            }
-          }
 
           return Container(
             constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
@@ -468,10 +435,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                     TextButton(
                       onPressed: () {
                         setModalState(() {
-                          tempDateRangePreset = null;
-                          tempCustomStart = null;
-                          tempCustomEnd = null;
-                          tempApplicationType = 'All';
+                          tempDatePreset = null;
+                          tempStartDate = null;
+                          tempEndDate = null;
                           tempBarangay = 'All Barangays';
                           barangaySearchQuery = '';
                         });
@@ -495,27 +461,42 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 24),
-
-                        // DATE RANGE SECTION — filters by scheduledDate, the
-                        // one date field present across every tab.
+                        
+                        // DATE RANGE SECTION
                         Row(
                           children: [
-                            const Icon(Icons.event_rounded, color: InsightTheme.ink3, size: 18),
+                            const Icon(Icons.date_range_rounded, color: InsightTheme.ink3, size: 18),
                             const SizedBox(width: 8),
                             Text('FILTER BY DATE RANGE', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
                           ],
                         ),
                         const SizedBox(height: 12),
-                        _SlidingSegmentedControl(
-                          options: const ['Last 30 Days', 'Last 6 Months'],
-                          selectedIndex: tempDateRangePreset == '30d'
-                              ? 0
-                              : (tempDateRangePreset == '6m' ? 1 : null),
-                          onChanged: (i) => setModalState(() {
-                            tempDateRangePreset = i == 0 ? '30d' : '6m';
-                            tempCustomStart = null;
-                            tempCustomEnd = null;
-                          }),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'Last 30 Days',
+                                isSelected: tempDatePreset == 'last30',
+                                onTap: () => setModalState(() {
+                                  tempDatePreset = 'last30';
+                                  tempStartDate = null;
+                                  tempEndDate = null;
+                                }),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'Last 6 Months',
+                                isSelected: tempDatePreset == 'last6months',
+                                onTap: () => setModalState(() {
+                                  tempDatePreset = 'last6months';
+                                  tempStartDate = null;
+                                  tempEndDate = null;
+                                }),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 16),
                         Text('CUSTOM DATE RANGE', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
@@ -523,43 +504,49 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                         Row(
                           children: [
                             Expanded(
-                              child: _DatePickerField(
-                                label: tempCustomStart != null ? _formatDate(tempCustomStart!) : 'Start date',
-                                isSet: tempCustomStart != null,
-                                onTap: () => pickCustomDate(isStart: true),
+                              child: _DatePickerChip(
+                                label: tempStartDate == null
+                                    ? 'Start date'
+                                    : '${tempStartDate!.year}-${tempStartDate!.month.toString().padLeft(2, '0')}-${tempStartDate!.day.toString().padLeft(2, '0')}',
+                                onTap: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: tempStartDate ?? DateTime.now(),
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime.now(),
+                                  );
+                                  if (picked != null) {
+                                    setModalState(() {
+                                      tempStartDate = picked;
+                                      tempDatePreset = 'custom';
+                                    });
+                                  }
+                                },
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: _DatePickerField(
-                                label: tempCustomEnd != null ? _formatDate(tempCustomEnd!) : 'End date',
-                                isSet: tempCustomEnd != null,
-                                onTap: () => pickCustomDate(isStart: false),
+                              child: _DatePickerChip(
+                                label: tempEndDate == null
+                                    ? 'End date'
+                                    : '${tempEndDate!.year}-${tempEndDate!.month.toString().padLeft(2, '0')}-${tempEndDate!.day.toString().padLeft(2, '0')}',
+                                onTap: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: tempEndDate ?? DateTime.now(),
+                                    firstDate: tempStartDate ?? DateTime(2020),
+                                    lastDate: DateTime.now(),
+                                  );
+                                  if (picked != null) {
+                                    setModalState(() {
+                                      tempEndDate = picked;
+                                      tempDatePreset = 'custom';
+                                    });
+                                  }
+                                },
                               ),
                             ),
                           ],
-                        ),
-                        const SizedBox(height: 28),
-
-                        // APPLICATION TYPE SECTION
-                        Row(
-                          children: [
-                            const Icon(Icons.category_outlined, color: InsightTheme.ink3, size: 18),
-                            const SizedBox(width: 8),
-                            Text('FILTER BY APPLICATION TYPE', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: _applicationTypes.map((type) {
-                            return _NativeFilterChip(
-                              label: type,
-                              isSelected: tempApplicationType == type,
-                              onTap: () => setModalState(() => tempApplicationType = type),
-                            );
-                          }).toList(),
                         ),
                         const SizedBox(height: 28),
                         
@@ -653,10 +640,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                   child: ElevatedButton(
                     onPressed: () {
                       setState(() {
-                        _dateRangePreset = tempDateRangePreset;
-                        _customStartDate = tempCustomStart;
-                        _customEndDate = tempCustomEnd;
-                        _selectedApplicationType = tempApplicationType;
+                        _datePreset = tempDatePreset;
+                        _customStartDate = tempStartDate;
+                        _customEndDate = tempEndDate;
                         _selectedBarangay = tempBarangay;
                       });
                       Navigator.pop(context);
@@ -678,25 +664,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     );
   }
 
-  /// Resolves the active `_dateRangePreset` into a concrete day-level range.
-  /// Returns null when 'custom' is selected but the user hasn't picked both
-  /// a start and end date yet — in that case the filter is a no-op.
-  ({DateTime start, DateTime end})? _resolveDateRange() {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    switch (_dateRangePreset) {
-      case '30d':
-        return (start: today.subtract(const Duration(days: 30)), end: today);
-      case '6m':
-        return (start: DateTime(today.year, today.month - 6, today.day), end: today);
-      case 'custom':
-        if (_customStartDate == null || _customEndDate == null) return null;
-        return (start: _customStartDate!, end: _customEndDate!);
-      default:
-        return null;
-    }
-  }
-
   Map<String, List<TaskItem>> _categorizeAndFilter() {
     final map = <String, List<TaskItem>>{
       for (final t in _tabOrder) t: <TaskItem>[],
@@ -714,47 +681,44 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
       if (_selectedBarangay != 'All Barangays') {
         if (!task.location.toLowerCase().contains(_selectedBarangay.toLowerCase())) continue;
       }
-      if (_selectedApplicationType != 'All') {
-        if (!(task.applicationType ?? '').toLowerCase().contains(_selectedApplicationType.toLowerCase())) continue;
-      }
-      if (_dateRangePreset != null) {
-        if (task.scheduledDate.isEmpty) continue; // no date to compare — can't be "in range"
-        DateTime scheduled;
+      if (_datePreset != null && task.scheduledDate.isNotEmpty) {
         try {
-          scheduled = DateTime.parse(task.scheduledDate);
-        } catch (_) {
-          continue;
-        }
-        final range = _resolveDateRange();
-        if (range == null) continue;
-        final day = DateTime(scheduled.year, scheduled.month, scheduled.day);
-        if (day.isBefore(range.start) || day.isAfter(range.end)) continue;
+          final taskDate = DateTime.parse(task.scheduledDate);
+          if (_datePreset == 'last30') {
+            if (taskDate.isBefore(DateTime.now().subtract(const Duration(days: 30)))) continue;
+          } else if (_datePreset == 'last6months') {
+            if (taskDate.isBefore(DateTime.now().subtract(const Duration(days: 182)))) continue;
+          } else if (_datePreset == 'custom') {
+            if (_customStartDate != null && taskDate.isBefore(_customStartDate!)) continue;
+            if (_customEndDate != null && taskDate.isAfter(_customEndDate!)) continue;
+          }
+        } catch (_) {}
       }
       map[task.category]!.add(task);
     }
 
     for (final category in map.keys) {
-  map[category]!.sort((a, b) {
-    switch (category) {
-      case 'Pending':
-        return a.createdAt.compareTo(b.createdAt);
-      case 'Ongoing':
-        final sa = a.startedAt ?? a.createdAt;
-        final sb = b.startedAt ?? b.createdAt;
-        return sa.compareTo(sb);
-      case 'Scheduled':
-        final da = a.deadlineDate?.isNotEmpty == true ? a.deadlineDate! : '9999-12-31';
-        final db = b.deadlineDate?.isNotEmpty == true ? b.deadlineDate! : '9999-12-31';
-        return da.compareTo(db);
-      case 'Completed':
-        final sa = a.submittedAt ?? '';
-        final sb = b.submittedAt ?? '';
-        return sa.compareTo(sb);
-      default:
-        return 0;
+      map[category]!.sort((a, b) {
+        switch (category) {
+          case 'Pending':
+            return a.createdAt.compareTo(b.createdAt);
+          case 'Ongoing':
+            final sa = a.startedAt ?? a.createdAt;
+            final sb = b.startedAt ?? b.createdAt;
+            return sa.compareTo(sb);
+          case 'Scheduled':
+            final da = a.deadlineDate?.isNotEmpty == true ? a.deadlineDate! : '9999-12-31';
+            final db = b.deadlineDate?.isNotEmpty == true ? b.deadlineDate! : '9999-12-31';
+            return da.compareTo(db);
+          case 'Completed':
+            final sa = a.submittedAt ?? '';
+            final sb = b.submittedAt ?? '';
+            return sa.compareTo(sb);
+          default:
+            return 0;
+        }
+      });
     }
-  });
-}
     return map;
   }
 
@@ -769,9 +733,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     final selectedCategory = _tabOrder[_currentTabIndex];
     final selectedTasks = categorized[selectedCategory] ?? [];
 
-    final bool hasActiveFilters = _selectedBarangay != 'All Barangays' ||
-        _selectedApplicationType != 'All' ||
-        _dateRangePreset != null;
+    final bool hasActiveFilters = _selectedBarangay != 'All Barangays' || _datePreset != null;
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -1032,120 +994,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
 /// COMPONENT WIDGETS
 /// ==================================================================
 
-/// An iOS-style segmented control with a pill that slides (not just fades)
-/// between options — used for the Date Range presets, where there are
-/// always exactly two fixed, equal-width choices so a continuous slide
-/// looks and feels natural. `selectedIndex` is null when neither preset is
-/// active (e.g. a custom range is in effect instead).
-class _SlidingSegmentedControl extends StatelessWidget {
-  final List<String> options;
-  final int? selectedIndex;
-  final ValueChanged<int> onChanged;
-
-  const _SlidingSegmentedControl({
-    required this.options,
-    required this.selectedIndex,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 42,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: InsightTheme.bg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: InsightTheme.line),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final segmentWidth = constraints.maxWidth / options.length;
-          return Stack(
-            children: [
-              AnimatedAlign(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                alignment: Alignment(
-                  selectedIndex == null ? -1 : (-1 + 2 * selectedIndex! / (options.length - 1)),
-                  0,
-                ),
-                child: selectedIndex == null
-                    ? const SizedBox.shrink()
-                    : Container(
-                        width: segmentWidth,
-                        height: double.infinity,
-                        decoration: BoxDecoration(
-                          color: InsightTheme.blue1,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-              ),
-              Row(
-                children: List.generate(options.length, (i) {
-                  final isSelected = selectedIndex == i;
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () => onChanged(i),
-                      behavior: HitTestBehavior.opaque,
-                      child: Center(
-                        child: Text(
-                          options[i],
-                          textAlign: TextAlign.center,
-                          style: InsightTheme.inter(12, w: FontWeight.w600, c: isSelected ? Colors.white : InsightTheme.ink2),
-                          maxLines: 1, overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _DatePickerField extends StatelessWidget {
-  final String label;
-  final bool isSet;
-  final VoidCallback onTap;
-
-  const _DatePickerField({required this.label, required this.isSet, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: isSet ? InsightTheme.blueTint : InsightTheme.bg,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isSet ? InsightTheme.blue1 : InsightTheme.line),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Flexible(
-              child: Text(
-                label,
-                style: InsightTheme.inter(13, w: FontWeight.w500, c: isSet ? InsightTheme.blue2 : InsightTheme.ink2),
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Icon(Icons.calendar_today_rounded, size: 14, color: isSet ? InsightTheme.blue1 : InsightTheme.ink3),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _NativeFilterChip extends StatelessWidget {
   final String label;
   final bool isSelected;
@@ -1169,6 +1017,36 @@ class _NativeFilterChip extends StatelessWidget {
           textAlign: TextAlign.center,
           style: InsightTheme.inter(12, w: isSelected ? FontWeight.w600 : FontWeight.w500, c: isSelected ? InsightTheme.blue2 : InsightTheme.ink2),
           maxLines: 1, overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+}
+
+class _DatePickerChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _DatePickerChip({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: InsightTheme.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: InsightTheme.line),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+            const Icon(Icons.calendar_today_outlined, size: 15, color: InsightTheme.ink3),
+          ],
         ),
       ),
     );
@@ -1732,4 +1610,5 @@ class _BottomNavItem extends StatelessWidget {
       ),
     );
   }
+
 }
