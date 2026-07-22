@@ -17,9 +17,6 @@ import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
-import '../widgets/motion/linked_list_motion.dart';
-import '../widgets/imaps_loading_indicator.dart';
-
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -143,7 +140,16 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
       if (type == 'gps_confirm') gps++;
       if (type == 'checklist_update') checklist++;
       if (type == 'submit_inspection') {
-        final paths = (payload['localPhotoPaths'] as List?)?.map((e) => e.toString()).toList() ?? [];
+        // NOTE: enqueueSubmitInspection() stores photos under 'photosData'
+        // (a list of maps: {photoPath, latitude, longitude, capturedAt}),
+        // not a flat 'localPhotoPaths' string list — this used to read the
+        // wrong key, so PHOTOS WAITING / PENDING SIZE always showed 0
+        // regardless of what was actually queued.
+        final photosList = (payload['photosData'] as List?) ?? [];
+        final paths = photosList
+            .map((e) => (e as Map)['photoPath']?.toString())
+            .whereType<String>()
+            .toList();
         photos += paths.length;
         for (final p in paths) {
           try {
@@ -157,11 +163,9 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
     }
 
     if (!mounted) return;
-    resetSprings();
     setState(() {
       _isOnline = online;
       _pendingRows = pending;
-
       _syncedRows = synced;
       _jobLookup = {for (final j in cachedJobs) (j['id'] as String): j};
       _gpsWaiting = gps;
@@ -238,7 +242,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
       case 'checklist_update':
         return 'Checklist Data (${payload['checklistCompletedCount'] ?? 0}/${payload['checklistTotalCount'] ?? 0} items)';
       case 'submit_inspection':
-        final n = (payload['localPhotoPaths'] as List?)?.length ?? 0;
+        final n = (payload['photosData'] as List?)?.length ?? 0;
         return 'Full Submission — $n photo(s) + Findings';
       default:
         return type;
@@ -249,7 +253,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
     final type = row['type'] as String;
     if (type != 'submit_inspection') return '—';
     final payload = _payloadOf(row);
-    final n = (payload['localPhotoPaths'] as List?)?.length ?? 0;
+    final n = (payload['photosData'] as List?)?.length ?? 0;
     return n > 0 ? '$n file(s)' : '0 B';
   }
 
@@ -306,7 +310,7 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
           SafeArea(
             bottom: false,
             child: _loading
-                ? const Center(child: ImapsLoadingIndicator(size: 60, label: "Syncing data..."))
+                ? const Center(child: CircularProgressIndicator())
                 : RefreshIndicator(
                     onRefresh: _refresh,
                     child: Column(
@@ -485,9 +489,9 @@ class _UpdatesScreenState extends State<UpdatesScreen> with TickerProviderStateM
                                 ..._pendingRows.asMap().entries.map((entry) {
                                   final i = entry.key;
                                   final row = entry.value;
-                                  return LinkedListSlide(
-                                    key: ValueKey('linked_pending_${row['id']}'),
-                                    index: i,
+                                  return SpringSlide(
+                                    animation: springForKey('pending-${row['id']}', 2 + (i % 8)),
+                                    beginOffset: const Offset(0, 24),
                                     child: Padding(
                                       padding: const EdgeInsets.only(bottom: 10),
                                       child: UpdatingTile(

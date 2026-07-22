@@ -22,6 +22,7 @@ class SyncOutboxService {
 
   static bool _draining = false;
   static StreamSubscription<List<ConnectivityResult>>? _connSub;
+  static Timer? _debounce;
   static const _lastSyncPrefsKey = 'field_sync_last_success';
 
   static bool get isDraining => _draining;
@@ -42,11 +43,20 @@ class SyncOutboxService {
   /// something was queued last session and connectivity is already back),
   /// then keeps listening so a queued action syncs automatically the
   /// moment signal returns — not just on the next app open.
+  ///
+  /// Phase 2 hardening: connectivity events are debounced (900ms) before
+  /// triggering a drain. `drain()` itself already no-ops on a re-entrant
+  /// call via the `_draining` guard, so this isn't needed to prevent
+  /// overlapping drains — it's to stop a flaky/flapping signal (a few
+  /// on/off/on events within a second, common on weak field signal) from
+  /// firing several back-to-back `getActionableActions()` queries for
+  /// what is, in practice, a single reconnect.
   static void start() {
     drain();
     _connSub ??= Connectivity().onConnectivityChanged.listen((results) {
       if (results.any((r) => r != ConnectivityResult.none)) {
-        drain();
+        _debounce?.cancel();
+        _debounce = Timer(const Duration(milliseconds: 900), drain);
       }
     });
   }
