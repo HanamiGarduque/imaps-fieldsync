@@ -1,4 +1,3 @@
-
 import 'dart:io';
 import 'dart:convert';
 import 'package:uuid/uuid.dart';
@@ -29,14 +28,11 @@ class SupabaseService {
       return;
     }
     try {
-      await client.from('inspector_device_subscriptions').upsert(
-        {
-          'inspector_id': user.id,
-          'device_token': deviceToken,
-          'platform': platform,
-        },
-        onConflict: 'inspector_id,device_token',
-      );
+      await client.from('inspector_device_subscriptions').upsert({
+        'inspector_id': user.id,
+        'device_token': deviceToken,
+        'platform': platform,
+      }, onConflict: 'inspector_id,device_token');
     } catch (e) {
       debugPrint('Failed to save notification subscription: $e');
     }
@@ -53,18 +49,17 @@ class SupabaseService {
     final user = client.auth.currentUser;
     if (user == null) return;
     try {
-      await client.from('inspector_devices').upsert(
-        {
-          'inspector_id': user.id,
-          'device_id': deviceId,
-          'platform': Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : 'desktop'),
-          'biometric_enabled': biometricEnabled,
-          'biometric_type': biometricType,
-          'last_login_at': DateTime.now().toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
-        },
-        onConflict: 'inspector_id,device_id',
-      );
+      await client.from('inspector_devices').upsert({
+        'inspector_id': user.id,
+        'device_id': deviceId,
+        'platform': Platform.isAndroid
+            ? 'android'
+            : (Platform.isIOS ? 'ios' : 'desktop'),
+        'biometric_enabled': biometricEnabled,
+        'biometric_type': biometricType,
+        'last_login_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'inspector_id,device_id');
     } catch (e) {
       debugPrint('[SUPABASE] syncInspectorDevice error: $e');
     }
@@ -119,7 +114,9 @@ class SupabaseService {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> fetchRecentActivity({int limit = 10}) async {
+  static Future<List<Map<String, dynamic>>> fetchRecentActivity({
+    int limit = 10,
+  }) async {
     final userId = client.auth.currentUser?.id;
     if (userId == null) return [];
     try {
@@ -156,9 +153,11 @@ class SupabaseService {
   }
 
   static Future<void> markActivityRead(String activityId) async {
-
     try {
-      await client.from('activity_log').update({'is_read': true}).eq('id', activityId);
+      await client
+          .from('activity_log')
+          .update({'is_read': true})
+          .eq('id', activityId);
     } catch (e) {
       debugPrint('Error marking activity read: $e');
     }
@@ -208,16 +207,14 @@ class SupabaseService {
     if (userId == null) throw Exception('No authenticated user');
     // Direct delete scoped to this inspector — safe even with RLS
     try {
-      await client
-          .from('activity_log')
-          .delete()
-          .eq('inspector_id', userId);
+      await client.from('activity_log').delete().eq('inspector_id', userId);
     } catch (e) {
       // Fallback: try RPC if direct delete failed
       debugPrint('Direct clear failed, trying RPC fallback: $e');
       await client.rpc('clear_own_activity');
     }
   }
+
   // ─────────────────────────────────────────────────────────────────────────
   // FETCH JOBS  (Tasks screen)
   //   FK hint: field_jobs.supabase_application_id → supabase_zoning_applications
@@ -227,8 +224,8 @@ class SupabaseService {
     if (userId == null) return [];
 
     final response = await client
-    .from('field_jobs')
-    .select('''
+        .from('field_jobs')
+        .select('''
       id,
       local_inspection_id,
       status,
@@ -237,6 +234,7 @@ class SupabaseService {
       is_self_scheduled,
       current_step,
       created_at,
+      updated_at,
       started_at,
       submitted_at,
       supabase_parcel_id,
@@ -257,16 +255,28 @@ class SupabaseService {
         longitude
       )
     ''')
-    .eq('assigned_inspector_id', userId)
-    .order('scheduled_date', ascending: true);
+        .eq('assigned_inspector_id', userId)
+        .order('scheduled_date', ascending: true);
 
-  return List<Map<String, dynamic>>.from(response);
-}
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  static Future<String?> fetchJobUpdatedAt(String jobId) async {
+    final response = await client
+        .from('field_jobs')
+        .select('updated_at')
+        .eq('id', jobId)
+        .single();
+    final updatedAt = response['updated_at'];
+    return updatedAt == null ? null : updatedAt.toString();
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // FETCH PARCEL DETAILS  (Parcel detail screen)
   // ─────────────────────────────────────────────────────────────────────────
-  static Future<Map<String, dynamic>?> fetchParcelDetails(String parcelId) async {
+  static Future<Map<String, dynamic>?> fetchParcelDetails(
+    String parcelId,
+  ) async {
     try {
       final response = await client
           .from('supabase_parcels')
@@ -294,11 +304,14 @@ class SupabaseService {
   }) async {
     final dateStr =
         '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    await client.from('field_jobs').update({
-      'scheduled_date': dateStr,
-      'is_self_scheduled': true,
-      if (note != null && note.trim().isNotEmpty) 'remarks': note.trim(),
-    }).eq('id', jobId);
+    await client
+        .from('field_jobs')
+        .update({
+          'scheduled_date': dateStr,
+          'is_self_scheduled': true,
+          if (note != null && note.trim().isNotEmpty) 'remarks': note.trim(),
+        })
+        .eq('id', jobId);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -313,11 +326,10 @@ class SupabaseService {
     required double latitude,
     required double longitude,
   }) async {
-    final result = await client.rpc('distance_to_parcel_boundary', params: {
-      'parcel_id': parcelId,
-      'lat': latitude,
-      'lng': longitude,
-    });
+    final result = await client.rpc(
+      'distance_to_parcel_boundary',
+      params: {'parcel_id': parcelId, 'lat': latitude, 'lng': longitude},
+    );
     return (result as num).toDouble();
   }
 
@@ -328,23 +340,27 @@ class SupabaseService {
   //   and stepped away, without clobbering a status a later step already set.
   // ─────────────────────────────────────────────────────────────────────────
   static Future<bool> markJobOngoing(String jobId) async {
-  try {
-    await client
-        .from('field_jobs')
-        .update({'status': 'in_progress'})
-        .eq('id', jobId)
-        .not('status', 'ilike', 'completed'); 
-        await client
-        .from('field_jobs')
-        .update({'started_at': DateTime.now().toUtc().toIso8601String()})
-        .eq('id', jobId)
-        .filter('started_at', 'is', null); // huwag lang i-touch kung completed na
-    return true;
-  } catch (e) {
-    debugPrint('Error marking job ongoing: $e');
-    return false;
+    try {
+      await client
+          .from('field_jobs')
+          .update({'status': 'in_progress'})
+          .eq('id', jobId)
+          .not('status', 'ilike', 'completed');
+      await client
+          .from('field_jobs')
+          .update({'started_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', jobId)
+          .filter(
+            'started_at',
+            'is',
+            null,
+          ); // huwag lang i-touch kung completed na
+      return true;
+    } catch (e) {
+      debugPrint('Error marking job ongoing: $e');
+      return false;
+    }
   }
-}
 
   // ─────────────────────────────────────────────────────────────────────────
   // CONFIRM GPS ON-SITE  (GPS verification screen → marks job in_progress)
@@ -357,18 +373,21 @@ class SupabaseService {
     String? locationLabel,
   }) async {
     try {
-      await client.from('field_jobs').update({
-        'status': 'in_progress',
-        'confirmed_latitude': latitude,
-        'confirmed_longitude': longitude,
-        'gps_accuracy_m': accuracyMeters,
-        'gps_confirmed_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', jobId);
       await client
-        .from('field_jobs')
-        .update({'started_at': DateTime.now().toUtc().toIso8601String()})
-        .eq('id', jobId)
-        .filter('started_at', 'is', null); // only sets it the first time
+          .from('field_jobs')
+          .update({
+            'status': 'in_progress',
+            'confirmed_latitude': latitude,
+            'confirmed_longitude': longitude,
+            'gps_accuracy_m': accuracyMeters,
+            'gps_confirmed_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', jobId);
+      await client
+          .from('field_jobs')
+          .update({'started_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', jobId)
+          .filter('started_at', 'is', null); // only sets it the first time
       await logActivity(
         eventType: 'gps_confirmed',
         title: 'GPS verified on-site',
@@ -426,7 +445,8 @@ class SupabaseService {
 
   static Future<List<String>> uploadInspectionPhotos({
     required String jobId,
-    required List<Map<String, dynamic>> photosData, // Changed from List<String> localPaths
+    required List<Map<String, dynamic>>
+    photosData, // Changed from List<String> localPaths
   }) async {
     final List<String> uploadedUrls = [];
     final List<String> failedPaths = [];
@@ -451,31 +471,34 @@ class SupabaseService {
         // 1. Upload to Supabase Storage — upsert:true means a retry
         //    overwrites the SAME storage object instead of creating a new
         //    one under a new random name.
-        await client.storage.from('inspection-photos').upload(
-          storagePath,
-          file,
-          fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
-        );
+        await client.storage
+            .from('inspection-photos')
+            .upload(
+              storagePath,
+              file,
+              fileOptions: const FileOptions(
+                cacheControl: '3600',
+                upsert: true,
+              ),
+            );
 
-        final publicUrl = client.storage.from('inspection-photos').getPublicUrl(storagePath);
+        final publicUrl = client.storage
+            .from('inspection-photos')
+            .getPublicUrl(storagePath);
         uploadedUrls.add(publicUrl);
 
         // 2. Upsert (not insert) metadata into field_job_photos, keyed by
         //    the same deterministic id derived from the photo's storage
         //    path. A retry updates this one row in place — it never adds
         //    a second row for a photo that already synced.
-        await client.from('field_job_photos').upsert(
-          {
-            'id': rowId,
-            'field_job_id': jobId,
-            'photo_url': publicUrl,
-            'latitude': photo['latitude'],
-            'longitude': photo['longitude'],
-            'captured_at': photo['capturedAt'],
-          },
-          onConflict: 'id',
-        );
-
+        await client.from('field_job_photos').upsert({
+          'id': rowId,
+          'field_job_id': jobId,
+          'photo_url': publicUrl,
+          'latitude': photo['latitude'],
+          'longitude': photo['longitude'],
+          'captured_at': photo['capturedAt'],
+        }, onConflict: 'id');
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
         failedPaths.add(path);
@@ -490,6 +513,7 @@ class SupabaseService {
     }
     return uploadedUrls;
   }
+
   // ─────────────────────────────────────────────────────────────────────────
   // SUBMIT INSPECTION  (Review & submit screen → marks job completed)
   // ─────────────────────────────────────────────────────────────────────────
@@ -510,22 +534,25 @@ class SupabaseService {
     String? locationLabel,
   }) async {
     try {
-      await client.from('field_jobs').update({
-        'status': 'completed',
-        'findings': findings,
-        'is_compliant': isCompliant,
-        'inspection_result': inspectionResult,
-        if (observations != null) 'observations': observations,
-        if (discrepancies != null) 'discrepancies': discrepancies,
-        if (recommendations != null) 'recommendations': recommendations,
-        if (inspectorNotes != null) 'inspector_notes': inspectorNotes,
-        if (checklistData != null) 'checklist_data': checklistData,
-        'checklist_completed_count': checklistCompletedCount,
-        'checklist_total_count': checklistTotalCount,
-        if (photoPaths != null) 'photo_paths': photoPaths,
-        'photo_count': photoCount,
-        'submitted_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', jobId);
+      await client
+          .from('field_jobs')
+          .update({
+            'status': 'completed',
+            'findings': findings,
+            'is_compliant': isCompliant,
+            'inspection_result': inspectionResult,
+            if (observations != null) 'observations': observations,
+            if (discrepancies != null) 'discrepancies': discrepancies,
+            if (recommendations != null) 'recommendations': recommendations,
+            if (inspectorNotes != null) 'inspector_notes': inspectorNotes,
+            if (checklistData != null) 'checklist_data': checklistData,
+            'checklist_completed_count': checklistCompletedCount,
+            'checklist_total_count': checklistTotalCount,
+            if (photoPaths != null) 'photo_paths': photoPaths,
+            'photo_count': photoCount,
+            'submitted_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', jobId);
       await logActivity(
         eventType: 'inspection_completed',
         title: 'Inspection completed',
@@ -546,7 +573,7 @@ class SupabaseService {
   //   for the one job the inspector is actually opening.
   // ─────────────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────────────
-  // FETCH FULL JOB DETAIL 
+  // FETCH FULL JOB DETAIL
   // ─────────────────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>?> fetchJobDetail(String jobId) async {
     try {
@@ -582,17 +609,22 @@ class SupabaseService {
       return null;
     }
   }
+
   // ─────────────────────────────────────────────────────────────────────────
   // REOPEN A COMPLETED JOB FOR REWORK  (Completed detail screen → "Rework")
   //   Moves the job back to in_progress (so it shows under Ongoing again)
   //   without touching the previously submitted answers — those stay in
   //   place until the inspector actually edits and resubmits that step.
   // ─────────────────────────────────────────────────────────────────────────
-  static Future<void> reopenForRework({required String jobId, String? locationLabel}) async {
+  static Future<void> reopenForRework({
+    required String jobId,
+    String? locationLabel,
+  }) async {
     try {
-      await client.from('field_jobs').update({
-        'status': 'in_progress',
-      }).eq('id', jobId);
+      await client
+          .from('field_jobs')
+          .update({'status': 'in_progress'})
+          .eq('id', jobId);
       await logActivity(
         eventType: 'rework_started',
         title: 'Reopened for rework',
@@ -613,10 +645,7 @@ class SupabaseService {
     required Map<String, dynamic> updateData,
   }) async {
     try {
-      await client
-          .from('field_jobs')
-          .update(updateData)
-          .eq('id', jobId);
+      await client.from('field_jobs').update(updateData).eq('id', jobId);
     } catch (e) {
       debugPrint('Error updating field job: $e');
       rethrow;
@@ -698,11 +727,13 @@ class SupabaseService {
       final fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final storagePath = '$userId/$fileName';
 
-      await client.storage.from('avatars').upload(
-        storagePath,
-        file,
-        fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
-      );
+      await client.storage
+          .from('avatars')
+          .upload(
+            storagePath,
+            file,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
+          );
 
       return client.storage.from('avatars').getPublicUrl(storagePath);
     } catch (e) {

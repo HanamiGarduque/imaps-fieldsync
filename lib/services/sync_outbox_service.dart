@@ -22,8 +22,15 @@ class SyncOutboxService {
 
   static bool _draining = false;
   static StreamSubscription<List<ConnectivityResult>>? _connSub;
-  static Timer? _debounce;
   static const _lastSyncPrefsKey = 'field_sync_last_success';
+  static const _conflictSnapshotKey = 'cachedUpdatedAtSnapshot';
+  static const _forceSyncAnywayKey = 'forceSyncAnyway';
+  static const Set<String> _conflictSensitiveTypes = {
+    'gps_confirm',
+    'submit_inspection',
+    'checklist_update',
+    'current_step_update',
+  };
 
   static bool get isDraining => _draining;
 
@@ -43,20 +50,11 @@ class SyncOutboxService {
   /// something was queued last session and connectivity is already back),
   /// then keeps listening so a queued action syncs automatically the
   /// moment signal returns — not just on the next app open.
-  ///
-  /// Phase 2 hardening: connectivity events are debounced (900ms) before
-  /// triggering a drain. `drain()` itself already no-ops on a re-entrant
-  /// call via the `_draining` guard, so this isn't needed to prevent
-  /// overlapping drains — it's to stop a flaky/flapping signal (a few
-  /// on/off/on events within a second, common on weak field signal) from
-  /// firing several back-to-back `getActionableActions()` queries for
-  /// what is, in practice, a single reconnect.
   static void start() {
     drain();
     _connSub ??= Connectivity().onConnectivityChanged.listen((results) {
       if (results.any((r) => r != ConnectivityResult.none)) {
-        _debounce?.cancel();
-        _debounce = Timer(const Duration(milliseconds: 900), drain);
+        drain();
       }
     });
   }
@@ -69,10 +67,8 @@ class SyncOutboxService {
     required double longitude,
     required double accuracyMeters,
     String? locationLabel,
-  }) {
-    return DBHelper.enqueueAction(
-      id: const Uuid().v4(),
-      type: 'gps_confirm',
+  }) async {
+    final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {
         'latitude': latitude,
@@ -80,6 +76,12 @@ class SyncOutboxService {
         'accuracyMeters': accuracyMeters,
         'locationLabel': locationLabel,
       },
+    );
+    return DBHelper.enqueueAction(
+      id: const Uuid().v4(),
+      type: 'gps_confirm',
+      jobId: jobId,
+      payload: payload,
     );
   }
 
@@ -93,10 +95,8 @@ class SyncOutboxService {
     required List<Map<String, dynamic>> checklistData,
     required int checklistCompletedCount,
     required int checklistTotalCount,
-  }) {
-    return DBHelper.enqueueAction(
-      id: 'checklist_update_$jobId',
-      type: 'checklist_update',
+  }) async {
+    final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {
         'checklistData': checklistData,
@@ -104,8 +104,14 @@ class SyncOutboxService {
         'checklistTotalCount': checklistTotalCount,
       },
     );
+    return DBHelper.enqueueAction(
+      id: 'checklist_update_$jobId',
+      type: 'checklist_update',
+      jobId: jobId,
+      payload: payload,
+    );
   }
-  
+
   /// Queues a `current_step` update. Deterministic id per job (same
   /// pattern as `enqueueChecklistUpdate`) — if the inspector advances
   /// steps several times while offline, each call overwrites the same
@@ -119,12 +125,16 @@ class SyncOutboxService {
   static Future<void> enqueueCurrentStepUpdate({
     required String jobId,
     required int step,
-  }) {
+  }) async {
+    final payload = await _withConflictSnapshot(
+      jobId: jobId,
+      payload: {'currentStep': step},
+    );
     return DBHelper.enqueueAction(
       id: 'current_step_update_$jobId',
       type: 'current_step_update',
       jobId: jobId,
-      payload: {'currentStep': step},
+      payload: payload,
     );
   }
 
@@ -144,12 +154,11 @@ class SyncOutboxService {
     required List<Map<String, dynamic>> checklistData,
     required int checklistCompletedCount,
     required int checklistTotalCount,
-    required List<Map<String, dynamic>> photosData, // UPDATED: Changed to expect Map data
+    required List<Map<String, dynamic>>
+    photosData, // UPDATED: Changed to expect Map data
     String? locationLabel,
-  }) {
-    return DBHelper.enqueueAction(
-      id: const Uuid().v4(),
-      type: 'submit_inspection',
+  }) async {
+    final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {
         'findings': findings,
@@ -165,6 +174,12 @@ class SyncOutboxService {
         'photosData': photosData, // UPDATED: Storing photosData instead
         'locationLabel': locationLabel,
       },
+    );
+    return DBHelper.enqueueAction(
+      id: const Uuid().v4(),
+      type: 'submit_inspection',
+      jobId: jobId,
+      payload: payload,
     );
   }
 
@@ -185,8 +200,15 @@ class SyncOutboxService {
           await _executeAction(action);
           await DBHelper.markActionSynced(id);
           await _recordSuccessfulSync();
+        } on _OutboxConflictException catch (e) {
+          debugPrint(
+            'SyncOutboxService: action $id (${action['type']}) conflict: ${e.message}',
+          );
+          await DBHelper.markActionConflict(id, e.message);
         } catch (e) {
-          debugPrint('SyncOutboxService: action $id (${action['type']}) failed: $e');
+          debugPrint(
+            'SyncOutboxService: action $id (${action['type']}) failed: $e',
+          );
           await DBHelper.markActionFailed(id, e.toString());
           // Keep draining the rest — one stuck action (e.g. a job that
           // got deleted server-side) shouldn't block everything queued
@@ -201,7 +223,14 @@ class SyncOutboxService {
   static Future<void> _executeAction(Map<String, dynamic> action) async {
     final type = action['type'] as String;
     final jobId = action['job_id'] as String;
-    final payload = Map<String, dynamic>.from(jsonDecode(action['payload'] as String) as Map);
+    final payload = Map<String, dynamic>.from(
+      jsonDecode(action['payload'] as String) as Map,
+    );
+    await _throwIfServerVersionConflict(
+      type: type,
+      jobId: jobId,
+      payload: payload,
+    );
 
     switch (type) {
       case 'gps_confirm':
@@ -219,19 +248,32 @@ class SyncOutboxService {
         // paths/metadata captured back on Step 3. If a photo file no longer exists
         // (e.g. cleared cache), uploadInspectionPhotos already skips it
         // rather than failing the whole action.
-        
+
         // UPDATED: Cast the dynamic list back into List<Map<String, dynamic>>
-        final photosData = (payload['photosData'] as List)
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
-            
+        final dynamicPhotos = payload['photosData'] as List?;
+        final legacyPaths =
+            (payload['localPhotoPaths'] as List?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            const <String>[];
+        final photosData = dynamicPhotos != null
+            ? dynamicPhotos
+                  .map((e) => Map<String, dynamic>.from(e as Map))
+                  .toList()
+            : legacyPaths
+                  .map((p) => <String, dynamic>{'photoPath': p})
+                  .toList();
+
         // UPDATED: Pass photosData instead of localPaths
-        final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: jobId, photosData: photosData);
-        
+        final photoPaths = await SupabaseService.uploadInspectionPhotos(
+          jobId: jobId,
+          photosData: photosData,
+        );
+
         final checklistData = (payload['checklistData'] as List)
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
-            
+
         await SupabaseService.submitInspection(
           jobId: jobId,
           findings: payload['findings'] as String,
@@ -274,4 +316,51 @@ class SyncOutboxService {
         debugPrint('SyncOutboxService: unknown action type "$type", skipping');
     }
   }
+
+  static Future<Map<String, dynamic>> _withConflictSnapshot({
+    required String jobId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final snapshot = await DBHelper.getCachedJobUpdatedAt(jobId);
+    return {...payload, _conflictSnapshotKey: snapshot};
+  }
+
+  static Future<void> _throwIfServerVersionConflict({
+    required String type,
+    required String jobId,
+    required Map<String, dynamic> payload,
+  }) async {
+    if (!_conflictSensitiveTypes.contains(type)) return;
+    if (payload[_forceSyncAnywayKey] == true) return;
+
+    final cachedUpdatedAt = payload[_conflictSnapshotKey] as String?;
+    if (cachedUpdatedAt == null || cachedUpdatedAt.isEmpty) return;
+
+    final serverUpdatedAt = await SupabaseService.fetchJobUpdatedAt(jobId);
+    if (serverUpdatedAt == null || serverUpdatedAt.isEmpty) return;
+
+    if (_sameInstant(cachedUpdatedAt, serverUpdatedAt)) return;
+
+    throw _OutboxConflictException(
+      'Conflict detected: job changed on server after this offline action was created. '
+      'Cached: $cachedUpdatedAt, Server: $serverUpdatedAt.',
+    );
+  }
+
+  static bool _sameInstant(String a, String b) {
+    final da = DateTime.tryParse(a);
+    final db = DateTime.tryParse(b);
+    if (da != null && db != null) {
+      return da.toUtc().isAtSameMomentAs(db.toUtc());
+    }
+    return a == b;
+  }
+}
+
+class _OutboxConflictException implements Exception {
+  final String message;
+  _OutboxConflictException(this.message);
+
+  @override
+  String toString() => message;
 }

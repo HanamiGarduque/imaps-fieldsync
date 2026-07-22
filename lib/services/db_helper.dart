@@ -17,7 +17,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -32,18 +32,29 @@ class DBHelper {
           // default categorization/deadline-checking instead of reflecting
           // what the online path already knows. Add them so cached jobs
           // carry the same fields as a live fetch.
-          await db.execute('ALTER TABLE local_jobs ADD COLUMN deadline_date TEXT');
-          await db.execute('ALTER TABLE local_jobs ADD COLUMN is_self_scheduled INTEGER DEFAULT 0');
-          await db.execute('ALTER TABLE local_jobs ADD COLUMN application_type TEXT');
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN deadline_date TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN is_self_scheduled INTEGER DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN application_type TEXT',
+          );
         }
         if (oldVersion < 4) {
           await db.execute(_pendingActionsSchema);
         }
         if (oldVersion < 5) {
-  await db.execute(
-    'ALTER TABLE local_inspections ADD COLUMN current_step INTEGER DEFAULT 0'
-  );
-}
+          await db.execute(
+            'ALTER TABLE local_inspections ADD COLUMN current_step INTEGER DEFAULT 0',
+          );
+        }
+        if (oldVersion < 6) {
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN cached_updated_at TEXT',
+          );
+        }
       },
       onCreate: (db, version) async {
         // Table for caching assigned jobs
@@ -60,6 +71,7 @@ class DBHelper {
             barangay TEXT,
             reference_number TEXT,
             application_type TEXT,
+            cached_updated_at TEXT,
             parcel_lat REAL,
             parcel_lng REAL,
             lot_area_sqm REAL,
@@ -134,28 +146,26 @@ class DBHelper {
     for (final job in jobs) {
       final app = job['supabase_zoning_applications'] ?? {};
       final parcel = job['supabase_parcels'] ?? {};
-      batch.insert(
-        'local_jobs',
-        {
-          'id': job['id'],
-          'local_inspection_id': job['local_inspection_id'],
-          'status': job['status'],
-          'scheduled_date': job['scheduled_date'],
-          'deadline_date': job['deadline_date'],
-          'is_self_scheduled': (job['is_self_scheduled'] == true) ? 1 : 0,
-          'supabase_parcel_id': job['supabase_parcel_id'],
-          'applicant_name': app['applicant_name'] ?? 'Unknown Applicant',
-          'barangay': app['barangay'] ?? 'No barangay listed',
-          'reference_number': app['reference_number'] ?? '',
-          'application_type': app['application_type'],
-          'parcel_lat': parcel['latitude'],
-          'parcel_lng': parcel['longitude'],
-          'lot_area_sqm': parcel['lot_area_sqm'],
-          'declared_land_use': parcel['declared_land_use'] ?? 'Single-detached residential',
-          'parcel_address': parcel['address'] ?? '',
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      batch.insert('local_jobs', {
+        'id': job['id'],
+        'local_inspection_id': job['local_inspection_id'],
+        'status': job['status'],
+        'scheduled_date': job['scheduled_date'],
+        'deadline_date': job['deadline_date'],
+        'is_self_scheduled': (job['is_self_scheduled'] == true) ? 1 : 0,
+        'supabase_parcel_id': job['supabase_parcel_id'],
+        'applicant_name': app['applicant_name'] ?? 'Unknown Applicant',
+        'barangay': app['barangay'] ?? 'No barangay listed',
+        'reference_number': app['reference_number'] ?? '',
+        'application_type': app['application_type'],
+        'cached_updated_at': job['updated_at'],
+        'parcel_lat': parcel['latitude'],
+        'parcel_lng': parcel['longitude'],
+        'lot_area_sqm': parcel['lot_area_sqm'],
+        'declared_land_use':
+            parcel['declared_land_use'] ?? 'Single-detached residential',
+        'parcel_address': parcel['address'] ?? '',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
   }
@@ -163,6 +173,20 @@ class DBHelper {
   static Future<List<Map<String, dynamic>>> getCachedJobs() async {
     final db = await database;
     return await db.query('local_jobs');
+  }
+
+  static Future<String?> getCachedJobUpdatedAt(String jobId) async {
+    final db = await database;
+    final rows = await db.query(
+      'local_jobs',
+      columns: ['cached_updated_at'],
+      where: 'id = ?',
+      whereArgs: [jobId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final value = rows.first['cached_updated_at'];
+    return value == null ? null : value.toString();
   }
 
   // --- LOCAL INSPECTIONS ---
@@ -175,25 +199,21 @@ class DBHelper {
     required String inspectionResult,
     required Map<String, dynamic> checklist,
     required String boundaryStatus,
-    int currentStep = 0,  
+    int currentStep = 0,
   }) async {
     final db = await database;
-    await db.insert(
-      'local_inspections',
-      {
-        'id': jobId,
-        'actual_land_use': actualLandUse,
-        'notes': notes,
-        'is_compliant': isCompliant ? 1 : 0,
-        'inspection_result': inspectionResult,
-        'checklist_json': jsonEncode(checklist),
-        'boundary_status': boundaryStatus,
-        'current_step': currentStep, 
-        'is_synced': 0,
-        'updated_at': DateTime.now().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('local_inspections', {
+      'id': jobId,
+      'actual_land_use': actualLandUse,
+      'notes': notes,
+      'is_compliant': isCompliant ? 1 : 0,
+      'inspection_result': inspectionResult,
+      'checklist_json': jsonEncode(checklist),
+      'boundary_status': boundaryStatus,
+      'current_step': currentStep,
+      'is_synced': 0,
+      'updated_at': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<Map<String, dynamic>?> getLocalInspection(String jobId) async {
@@ -233,20 +253,16 @@ class DBHelper {
     required double? longitude,
   }) async {
     final db = await database;
-    await db.insert(
-      'local_photos',
-      {
-        'id': photoId,
-        'job_id': jobId,
-        'photo_path': photoPath,
-        'notes': notes,
-        'latitude': latitude,
-        'longitude': longitude,
-        'captured_at': DateTime.now().toIso8601String(),
-        'is_synced': 0,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('local_photos', {
+      'id': photoId,
+      'job_id': jobId,
+      'photo_path': photoPath,
+      'notes': notes,
+      'latitude': latitude,
+      'longitude': longitude,
+      'captured_at': DateTime.now().toIso8601String(),
+      'is_synced': 0,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<List<Map<String, dynamic>>> getLocalPhotos(String jobId) async {
@@ -287,21 +303,17 @@ class DBHelper {
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
-    await db.insert(
-      'pending_actions',
-      {
-        'id': id,
-        'type': type,
-        'job_id': jobId,
-        'payload': jsonEncode(payload),
-        'status': 'pending',
-        'retry_count': 0,
-        'last_error': null,
-        'created_at': now,
-        'updated_at': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('pending_actions', {
+      'id': id,
+      'type': type,
+      'job_id': jobId,
+      'payload': jsonEncode(payload),
+      'status': 'pending',
+      'retry_count': 0,
+      'last_error': null,
+      'created_at': now,
+      'updated_at': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// Rows ready to (re)try — pending or previously-failed, oldest first so
@@ -315,10 +327,19 @@ class DBHelper {
     );
   }
 
+  static Future<List<Map<String, dynamic>>> getSyncCenterQueueActions() async {
+    final db = await database;
+    return await db.query(
+      'pending_actions',
+      where: "status IN ('pending', 'failed', 'syncing', 'conflict')",
+      orderBy: 'created_at ASC',
+    );
+  }
+
   static Future<int> getPendingActionsCount() async {
     final db = await database;
     final result = await db.rawQuery(
-      "SELECT COUNT(*) AS c FROM pending_actions WHERE status IN ('pending', 'failed')",
+      "SELECT COUNT(*) AS c FROM pending_actions WHERE status IN ('pending', 'failed', 'conflict')",
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
@@ -355,7 +376,9 @@ class DBHelper {
 
   /// Real completed-sync history for the Sync Center's audit log —
   /// replaces the old screen's hardcoded rows.
-  static Future<List<Map<String, dynamic>>> getRecentSyncedActions({int limit = 20}) async {
+  static Future<List<Map<String, dynamic>>> getRecentSyncedActions({
+    int limit = 20,
+  }) async {
     final db = await database;
     return await db.query(
       'pending_actions',
@@ -371,6 +394,49 @@ class DBHelper {
       "UPDATE pending_actions SET status = 'failed', retry_count = retry_count + 1, "
       "last_error = ?, updated_at = ? WHERE id = ?",
       [error, DateTime.now().toIso8601String(), id],
+    );
+  }
+
+  static Future<void> markActionConflict(String id, String error) async {
+    final db = await database;
+    await db.update(
+      'pending_actions',
+      {
+        'status': 'conflict',
+        'last_error': error,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  static Future<void> markActionForceSync(String id) async {
+    final db = await database;
+    final rows = await db.query(
+      'pending_actions',
+      columns: ['payload'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+
+    final payload = Map<String, dynamic>.from(
+      jsonDecode(rows.first['payload'] as String) as Map,
+    );
+    payload['forceSyncAnyway'] = true;
+
+    await db.update(
+      'pending_actions',
+      {
+        'payload': jsonEncode(payload),
+        'status': 'pending',
+        'last_error': null,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
     );
   }
 }
