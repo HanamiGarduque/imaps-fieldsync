@@ -120,6 +120,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   bool _loading = true;
   bool _isOnline = true;
   bool _syncingNow = false;
+  // Phase 8 (Selective Sync) — which job's "Sync This Inspection" button is
+  // mid-flight, if any. Separate from `_syncingNow` (which tracks the
+  // full-queue "Sync Now" button) so tapping one doesn't visually disable
+  // the other's card, and so only the tapped card shows its own spinner.
+  String? _syncingJobId;
 
   List<Map<String, dynamic>> _pendingRows = [];
   List<Map<String, dynamic>> _syncedRows = [];
@@ -145,11 +150,18 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _refresh(replay: true);
     _loadCacheStats();
     // Light polling while this screen is open — catches progress from a
     // drain that SyncOutboxService kicked off elsewhere (e.g. connectivity
     // just came back while the inspector was on a different screen).
+    // NOTE: intentionally does NOT replay entrance animations (replay:
+    // false, the default) — this used to call the bare _refresh(), which
+    // called resetSprings() unconditionally on every tick, so the whole
+    // screen's entrance (header, status card, every completed-log row)
+    // replayed from scratch every 4 seconds the screen was open. This is
+    // a re-fix of the Phase 1 UI regression audit finding — a prior merge
+    // reintroduced the unconditional resetSprings() call.
     _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refresh());
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
@@ -166,7 +178,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     super.dispose();
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool replay = false}) async {
     final connectivity = await Connectivity().checkConnectivity();
     final online = connectivity.any((r) => r != ConnectivityResult.none);
     final pending = await DBHelper.getSyncCenterQueueActions();
@@ -209,7 +221,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     }
 
     if (!mounted) return;
-    resetSprings();
+    if (replay) resetSprings();
     setState(() {
       _isOnline = online;
       _pendingRows = pending;
@@ -319,6 +331,155 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
+  }
+
+  /// Phase 8 (Selective Sync). Syncs only the pending actions belonging to
+  /// one inspection, via `drain(onlyJobId: ...)` — the full-queue "Sync Now"
+  /// path above is completely untouched. Guarded against double-taps the
+  /// same way `_handleSyncNow` is, plus it also backs off while a full sync
+  /// is already running (both ultimately go through the same `_draining`
+  /// flag in SyncOutboxService, so a second concurrent call would just be
+  /// silently ignored there — checking here too keeps the button itself
+  /// visibly disabled instead of tapping into a no-op).
+  Future<void> _handleSyncThisInspection(String jobId) async {
+    if (_syncingNow || _syncingJobId != null) return;
+    if (!_isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No internet connection. This will sync automatically once you\'re back online.',
+            style: InsightTheme.inter(13, c: Colors.white),
+          ),
+          backgroundColor: InsightTheme.amberInk,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+    HapticFeedback.lightImpact();
+    setState(() => _syncingJobId = jobId);
+    await SyncOutboxService.drain(trigger: 'manual', onlyJobId: jobId);
+    await _refresh();
+    if (!mounted) return;
+    setState(() => _syncingJobId = null);
+
+    final stillPendingForJob = _pendingRows
+        .where((r) => r['job_id'] == jobId)
+        .toList();
+    final hasConflict = stillPendingForJob.any((r) => r['status'] == 'conflict');
+    final hasFailed = stillPendingForJob.any((r) => r['status'] == 'failed');
+    final label = _jobLabel(jobId);
+
+    String message;
+    Color color;
+    if (stillPendingForJob.isEmpty) {
+      message = '$label synced successfully.';
+      color = InsightTheme.greenInk;
+    } else if (hasConflict) {
+      message = '$label needs conflict review before it can sync.';
+      color = InsightTheme.amberInk;
+    } else if (hasFailed) {
+      message = '$label couldn\'t sync. It will retry automatically.';
+      color = InsightTheme.redInk;
+    } else {
+      message = '$label is still syncing.';
+      color = InsightTheme.amberInk;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: InsightTheme.inter(13, c: Colors.white)),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  /// Phase 8 (Selective Sync). Same card rendering as before, plus one
+  /// "Sync This Inspection" button per *job* (not per row) — a job can
+  /// have several pending action rows (checklist_update, current_step,
+  /// submit_inspection...) but only needs one button, shown on the first
+  /// row for that job, to avoid a wall of duplicate buttons for the same
+  /// inspection. Conflict rows keep their own existing "Review changes" /
+  /// "Force sync anyway" buttons instead — Selective Sync doesn't apply
+  /// to a row that already needs manual conflict review.
+  List<Widget> _buildPendingCards() {
+    final seenJobIds = <String>{};
+    return _pendingRows.asMap().entries.map((entry) {
+      final i = entry.key;
+      final row = entry.value;
+      final jobId = row['job_id'] as String;
+      final isConflict = row['status'] == 'conflict';
+      final isFirstForJob = seenJobIds.add(jobId); // true only the first time
+      final isSyncingThisJob = _syncingJobId == jobId;
+
+      return LinkedListSlide(
+        key: ValueKey('linked_pending_${row['id']}'),
+        index: i,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              UpdatingTile(
+                itemKey: row['id'] ?? i,
+                signature: Object.hash(row['status'], row['type']),
+                child: _LogDataRow(
+                  icon: _iconFor(row['type'] as String),
+                  title: _jobLabel(jobId),
+                  dataType: _typeLabel(row),
+                  dataSize: _dataSizeFor(row),
+                  statusText: isSyncingThisJob
+                      ? 'Syncing…'
+                      : _statusTextFor(row),
+                  isPending: true,
+                  isFailed: row['status'] == 'failed',
+                  isConflict: isConflict,
+                ),
+              ),
+              if (isConflict) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => _handleReviewConflict(row),
+                      child: const Text('Review changes'),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => _handleForceSync(row),
+                      child: const Text('Force sync anyway'),
+                    ),
+                  ],
+                ),
+              ] else if (isFirstForJob) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: (_syncingNow || _syncingJobId != null)
+                          ? null
+                          : () => _handleSyncThisInspection(jobId),
+                      icon: isSyncingThisJob
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.sync_rounded, size: 16),
+                      label: Text(
+                        isSyncingThisJob ? 'Syncing…' : 'Sync This Inspection',
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }).toList();
   }
 
   String _jobLabel(String jobId) {
@@ -505,7 +666,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                     ),
                   )
                 : RefreshIndicator(
-                    onRefresh: _refresh,
+                    onRefresh: () => _refresh(replay: true),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -975,74 +1136,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   ],
                                 ),
                                 const SizedBox(height: 12),
-                                ..._pendingRows.asMap().entries.map((entry) {
-                                  final i = entry.key;
-                                  final row = entry.value;
-                                  return LinkedListSlide(
-                                    key: ValueKey(
-                                      'linked_pending_${row['id']}',
-                                    ),
-                                    index: i,
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: 10,
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          UpdatingTile(
-                                            itemKey: row['id'] ?? i,
-                                            signature: Object.hash(
-                                              row['status'],
-                                              row['type'],
-                                            ),
-                                            child: _LogDataRow(
-                                              icon: _iconFor(
-                                                row['type'] as String,
-                                              ),
-                                              title: _jobLabel(
-                                                row['job_id'] as String,
-                                              ),
-                                              dataType: _typeLabel(row),
-                                              dataSize: _dataSizeFor(row),
-                                              statusText: _statusTextFor(row),
-                                              isPending: true,
-                                              isFailed:
-                                                  row['status'] == 'failed',
-                                              isConflict:
-                                                  row['status'] == 'conflict',
-                                            ),
-                                          ),
-                                          if (row['status'] == 'conflict') ...[
-                                            const SizedBox(height: 8),
-                                            Row(
-                                              children: [
-                                                TextButton(
-                                                  onPressed: () =>
-                                                      _handleReviewConflict(
-                                                        row,
-                                                      ),
-                                                  child: const Text(
-                                                    'Review changes',
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                TextButton(
-                                                  onPressed: () =>
-                                                      _handleForceSync(row),
-                                                  child: const Text(
-                                                    'Force sync anyway',
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }),
+                                ..._buildPendingCards(),
                                 const SizedBox(height: 18),
                               ],
 

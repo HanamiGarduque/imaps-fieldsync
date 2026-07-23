@@ -280,11 +280,22 @@ class SyncOutboxService {
   /// connectivity change or app-startup drain fired it. Doesn't affect
   /// behavior, only what the "Synchronization Activity" history says
   /// started the queue.
-  static Future<void> drain({String trigger = 'automatic'}) async {
+  ///
+  /// [onlyJobId] — Phase 8 (Selective Sync). `null` (default) is the
+  /// original, unchanged full-drain behavior: every actionable row,
+  /// queue-wide. When set, only rows belonging to that job are processed
+  /// — same order, same per-action status handling, same conflict/error
+  /// paths — everything else in the queue is left completely untouched
+  /// (not read, not marked syncing/failed, still `pending` in its
+  /// original position) so a later full drain picks it up normally.
+  static Future<void> drain({String trigger = 'automatic', String? onlyJobId}) async {
     if (_draining) return;
     _draining = true;
     try {
-      final actions = await DBHelper.getActionableActions();
+      final allActions = await DBHelper.getActionableActions();
+      final actions = onlyJobId == null
+          ? allActions
+          : allActions.where((a) => a['job_id'] == onlyJobId).toList();
       final total = actions.length;
       if (total == 0) return;
 
@@ -294,7 +305,7 @@ class SyncOutboxService {
         message: total == 1
             ? 'Synchronization started — 1 item to send.'
             : 'Synchronization started — $total items to send.',
-        technicalDetails: {'trigger': trigger, 'itemCount': total},
+        technicalDetails: {'trigger': trigger, 'itemCount': total, if (onlyJobId != null) 'onlyJobId': onlyJobId},
       );
 
       var successCount = 0;
@@ -468,6 +479,28 @@ class SyncOutboxService {
         // paths/metadata captured back on Step 3. If a photo file no longer exists
         // (e.g. cleared cache), uploadInspectionPhotos already skips it
         // rather than failing the whole action.
+        //
+        // Phase 1 audit item #5 — DECISION (documented, not changed):
+        // photos are uploaded FIRST, then submitInspection() finalizes the
+        // field_jobs record (findings/checklist/status/photo_paths) SECOND.
+        // This is the opposite order from the original spec draft ("text
+        // uploads first... photos upload last"), but it's the safer order
+        // and is being kept as-is:
+        //   - Uploading photos first means submitInspection() always
+        //     receives the REAL uploaded photoPaths/photoCount, so the
+        //     final field_jobs row is written once, complete and correct.
+        //   - The reverse order (submit first, photos after) would create
+        //     a window where field_jobs.status is already "submitted" but
+        //     photo_paths is empty/incomplete — if the photo upload then
+        //     failed or the app was killed mid-upload, the record would
+        //     look finished to any admin/reviewer viewing it in Supabase,
+        //     while actually missing its evidence photos. That's a worse
+        //     partial state than the current one (nothing shows as
+        //     submitted until it verifiably has everything).
+        //   - If this action fails partway (e.g. mid photo-upload), the
+        //     whole action stays `pending`/`failed` and retries as a
+        //     whole on the next drain — submitInspection() is never
+        //     called with incomplete data.
 
         // UPDATED: Cast the dynamic list back into List<Map<String, dynamic>>
         final dynamicPhotos = payload['photosData'] as List?;

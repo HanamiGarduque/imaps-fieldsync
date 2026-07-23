@@ -364,7 +364,24 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                   'barangay': j['barangay'],
                   'reference_number': j['reference_number'],
                   'application_type': j['application_type'],
-                }
+                },
+                // Phase 1 audit fix (item #1 — Pre-Cache display gap):
+                // `local_jobs` already caches these parcel fields
+                // (see DBHelper.cacheJobs) but this offline branch never
+                // passed them through, so the Tasks List always showed
+                // "Not yet on file" for land use/lot area while offline
+                // even though GPS Verification (which reads local_jobs
+                // directly) already had the real cached values.
+                // NOTE: property_index_number and the applicant's
+                // contact_number/email are not cached in local_jobs at
+                // all today — those stay null/"Not yet on file" offline
+                // regardless of this fix. Caching them would need a
+                // schema change to local_jobs + cacheJobs(), which is a
+                // separate, larger change than this display-wiring fix.
+                'supabase_parcels': {
+                  'land_use_class': j['declared_land_use'],
+                  'lot_area_sqm': j['lot_area_sqm'],
+                },
               });
             }).toList();
             _isLoading = false;
