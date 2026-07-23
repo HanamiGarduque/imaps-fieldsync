@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../services/supabase_service.dart';
+import '../services/db_helper.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/imaps_loading_indicator.dart';
 
@@ -42,14 +44,28 @@ class InsightTheme {
 }
 
 /// ==================================================================
-/// SCREEN 4 — NOTIFICATIONS
+/// SCREEN 4 — NOTIFICATIONS / ACTIVITY
 /// Real data from activity_log (via fetchRecentActivity), with real
 /// unread tracking (activity_log.is_read) instead of hardcoded rows.
 /// Now with spring entrance animations, Clear All button, and
 /// swipe-to-dismiss.
+///
+/// Phase 6 (Detailed Sync Logs): this screen is also the reused
+/// architecture home for synchronization history — a top-level
+/// "Activity | Sync" mode switch was added instead of building a
+/// separate standalone Sync Logs page. "Activity" is the pre-existing
+/// user-activity feed (unchanged). "Sync" is new: a paginated,
+/// local-first (SQLite `sync_log_entries`) timeline of synchronization
+/// engine events, with user-friendly messages by default and technical
+/// details available behind an expandable section per entry.
 /// ==================================================================
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key});
+  /// 0 = Activity (default), 1 = Sync. Lets the Sync Center's
+  /// "Synchronization History >" entry deep-link straight into the Sync
+  /// tab instead of landing on Activity and requiring an extra tap.
+  final int initialMode;
+
+  const NotificationsScreen({super.key, this.initialMode = 0});
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -57,15 +73,25 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen>
     with TickerProviderStateMixin, SpringEntrance {
-  int _currentTabIndex = 0; // 0 = All, 1 = Unread
+  late int _mode; // 0 = Activity, 1 = Sync — top-level switch (Phase 6)
+  int _currentTabIndex = 0; // 0 = All, 1 = Unread — only used within Activity mode
   bool _isLoading = true;
   String? _error;
   List<Map<String, dynamic>> _activity = [];
 
+  // --- Phase 6: Sync log state (separate from _activity by design —
+  // different table, different meaning, never merged into one list) ---
+  List<Map<String, dynamic>> _syncLogs = [];
+  bool _isLoadingSyncLogs = true;
+  bool _syncLogHasMore = true;
+  static const int _syncLogPageSize = 20;
+
   @override
   void initState() {
     super.initState();
+    _mode = widget.initialMode;
     _load();
+    _loadSyncLogs(reset: true);
   }
 
   @override
@@ -83,6 +109,60 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     } catch (e) {
       if (!mounted) return;
       setState(() { _error = 'Could not load notifications.'; _isLoading = false; });
+    }
+  }
+
+  /// Phase 6 — loads sync log entries a page at a time (default 20).
+  /// [reset] starts over from the newest entry (pull-to-refresh, initial
+  /// load); otherwise appends the next page ("Load more" tap) so opening
+  /// a long-lived install's history never pulls the whole table at once.
+  Future<void> _loadSyncLogs({bool reset = false}) async {
+    if (reset) {
+      setState(() { _isLoadingSyncLogs = true; _syncLogs = []; _syncLogHasMore = true; });
+    }
+    try {
+      final page = await DBHelper.getSyncLogEntries(
+        limit: _syncLogPageSize,
+        offset: reset ? 0 : _syncLogs.length,
+      );
+      if (!mounted) return;
+      setState(() {
+        _syncLogs = reset ? page : [..._syncLogs, ...page];
+        _syncLogHasMore = page.length == _syncLogPageSize;
+        _isLoadingSyncLogs = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _isLoadingSyncLogs = false; });
+    }
+  }
+
+  /// Icon + color per sync log `result` — kept visually distinct from
+  /// the Activity feed's per-event-type theme, since this answers "did
+  /// this sync step succeed?" rather than "what kind of action was it?".
+  Map<String, dynamic> _syncResultTheme(String result) {
+    switch (result) {
+      case 'success':
+        return {'icon': Icons.check_circle_rounded, 'bg': InsightTheme.greenTint, 'fg': InsightTheme.greenInk};
+      case 'error':
+        return {'icon': Icons.error_rounded, 'bg': InsightTheme.redTint, 'fg': InsightTheme.redInk};
+      case 'warning':
+        return {'icon': Icons.warning_rounded, 'bg': InsightTheme.amberTint, 'fg': InsightTheme.amberInk};
+      default:
+        return {'icon': Icons.sync_rounded, 'bg': InsightTheme.blueTint, 'fg': InsightTheme.blueInk};
+    }
+  }
+
+  /// Pretty-prints the technical_details JSON for the expandable section.
+  /// Deliberately simple key: value lines — this is a debugging aid, not
+  /// user-facing copy, so raw field names are fine here.
+  String _formatTechnicalDetails(String? raw) {
+    if (raw == null || raw.isEmpty) return 'No additional details.';
+    try {
+      final map = jsonDecode(raw) as Map;
+      return map.entries.map((e) => '${e.key}: ${e.value}').join('\n');
+    } catch (_) {
+      return raw;
     }
   }
 
@@ -264,9 +344,12 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                         _GlassBackButton(onTap: () => Navigator.pop(context)),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text('Notifications', style: InsightTheme.poppins(17, w: FontWeight.w700)),
+                          child: Text(
+                            _mode == 0 ? 'Notifications' : 'Synchronization History',
+                            style: InsightTheme.poppins(17, w: FontWeight.w700),
+                          ),
                         ),
-                        if (_activity.isNotEmpty)
+                        if (_mode == 0 && _activity.isNotEmpty)
                           GestureDetector(
                             onTap: _clearAll,
                             child: Container(
@@ -296,9 +379,30 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   ),
                 ),
 
-                // ── Tab pills ──
+                // ── Phase 6: Activity / Sync mode switch ──
+                // Kept logically separate from the All/Unread pills below
+                // — this is a different axis (WHICH log you're viewing),
+                // not a filter within one log.
                 SpringSlide(
                   animation: springFor(1),
+                  beginOffset: const Offset(0, 16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        _TabPill(text: "Activity", isActive: _mode == 0, onTap: () => setState(() => _mode = 0)),
+                        const SizedBox(width: 8),
+                        _TabPill(text: "Sync", isActive: _mode == 1, onTap: () => setState(() => _mode = 1)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // ── All/Unread pills — only meaningful within Activity ──
+                if (_mode == 0)
+                SpringSlide(
+                  animation: springFor(2),
                   beginOffset: const Offset(0, 20),
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -314,9 +418,20 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 ),
                 const SizedBox(height: 14),
 
-                // ── Notification list ──
+                // ── List — Activity feed or Sync log, per _mode ──
                 Expanded(
-                  child: _isLoading
+                  child: _mode == 1 ? _buildSyncLogList() : _buildActivityList(visible),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActivityList(List<Map<String, dynamic>> visible) {
+    return _isLoading
                       ? const Center(child: ImapsLoadingIndicator(size: 60))
                       : _error != null
                           ? Center(
@@ -397,12 +512,102 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                       );
                                     },
                                   ),
-                                ),
+                                );
+  }
+
+  /// Phase 6 — Sync log list. Same paginated data-integrity guarantees as
+  /// the outbox itself: every entry shows a friendly message by default,
+  /// with technical details behind a per-entry expandable section.
+  Widget _buildSyncLogList() {
+    if (_isLoadingSyncLogs) {
+      return const Center(child: ImapsLoadingIndicator(size: 60));
+    }
+    if (_syncLogs.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.sync_rounded, size: 40, color: InsightTheme.ink3),
+            const SizedBox(height: 12),
+            Text('No synchronization activity yet.', style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: () => _loadSyncLogs(reset: true),
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        itemCount: _syncLogs.length + (_syncLogHasMore ? 1 : 0),
+        itemBuilder: (context, i) {
+          if (i == _syncLogs.length) {
+            // "Load more" footer — keeps this screen fast to open even
+            // with thousands of historical entries (Performance
+            // requirement from the Phase 6 spec).
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: OutlinedButton(
+                  onPressed: () => _loadSyncLogs(),
+                  child: const Text('Load more'),
                 ),
-              ],
+              ),
+            );
+          }
+          final entry = _syncLogs[i];
+          final theme = _syncResultTheme(entry['result'] as String? ?? 'info');
+          final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: InsightTheme.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: InsightTheme.line),
+              ),
+              child: Theme(
+                // Removes the default ExpansionTile divider lines so it
+                // matches the rest of this screen's card styling.
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  enabled: hasDetails,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                  leading: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(11)),
+                    child: Icon(theme['icon'] as IconData, size: 16, color: theme['fg'] as Color),
+                  ),
+                  title: Text(
+                    entry['message'] as String? ?? '',
+                    style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
+                  ),
+                  subtitle: Text(
+                    _timeAgo(entry['created_at'] as String?),
+                    style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                  ),
+                  trailing: hasDetails
+                      ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
+                      : const SizedBox.shrink(),
+                  children: hasDetails
+                      ? [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                _formatTechnicalDetails(entry['technical_details'] as String?),
+                                style: InsightTheme.inter(11, c: InsightTheme.ink3, h: 1.5),
+                              ),
+                            ),
+                          ),
+                        ]
+                      : const [],
+                ),
+              ),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -557,4 +762,3 @@ class _GlassBackButton extends StatelessWidget {
     );
   }
 }
-

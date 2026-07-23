@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 class DBHelper {
   static Database? _database;
@@ -17,7 +19,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -54,6 +56,19 @@ class DBHelper {
           await db.execute(
             'ALTER TABLE local_jobs ADD COLUMN cached_updated_at TEXT',
           );
+        }
+        if (oldVersion < 7) {
+          // Phase 6 (Detailed Sync Logs): local-first, offline-capable log
+          // of every synchronization EVENT (not just final action status).
+          // Deliberately separate from `activity_log` (Supabase, online,
+          // user-initiated actions like Login/Submit) — this table is
+          // system-initiated sync events (Queue Started, Upload Failed,
+          // Retry, Conflict Detected, etc.), consumed by the Notifications
+          // screen's new "Sync" tab. `event_type` is a free-form string
+          // (not an enum/CHECK constraint) so future event types (Document
+          // Sync, Background Sync, future cloud integrations) never need a
+          // schema migration to add.
+          await db.execute(_syncLogEntriesSchema);
         }
       },
       onCreate: (db, version) async {
@@ -116,6 +131,9 @@ class DBHelper {
         // having its own bespoke offline logic. SyncOutboxService drains
         // this in order once connectivity returns.
         await db.execute(_pendingActionsSchema);
+
+        // Phase 6 — Detailed Sync Logs (see _syncLogEntriesSchema below).
+        await db.execute(_syncLogEntriesSchema);
       },
     );
   }
@@ -131,6 +149,44 @@ class DBHelper {
       last_error TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    )
+  ''';
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Phase 6 — Detailed Sync Logs
+  //   Local-first (SQLite) event log for the SYNCHRONIZATION ENGINE
+  //   itself — deliberately separate from the online `activity_log`
+  //   table (Supabase), which records USER-initiated actions (Login,
+  //   Manual Sync tap, Inspection Submitted). This table records
+  //   SYSTEM-initiated sync events: Queue Started/Finished, Upload
+  //   Started/Completed/Failed, Retry Attempt, Conflict Detected —
+  //   one row per event, not just a final status.
+  //
+  //   `event_type` is free-form TEXT (no CHECK constraint / enum) so new
+  //   event types (Document Sync, Background Sync, future cloud
+  //   integrations) never require a schema migration.
+  //
+  //   `message` is the sanitized, user-friendly line shown by default
+  //   (e.g. "Network connection lost.") — never a raw exception string.
+  //   `technical_details` is optional JSON (HTTP status, function name,
+  //   exception type) shown only inside an expandable section; it must
+  //   never contain tokens, keys, passwords, connection strings, or PII —
+  //   sanitize before writing, not just before display.
+  //
+  //   `pending_action_id`/`job_id` give data-integrity: every log entry
+  //   traces back to the exact outbox action and job it came from, so
+  //   entries from one inspection can never bleed into another's history.
+  // ─────────────────────────────────────────────────────────────────────
+  static const String _syncLogEntriesSchema = '''
+    CREATE TABLE sync_log_entries(
+      id TEXT PRIMARY KEY,
+      pending_action_id TEXT,
+      job_id TEXT,
+      event_type TEXT NOT NULL,
+      result TEXT NOT NULL,
+      message TEXT NOT NULL,
+      technical_details TEXT,
+      created_at TEXT NOT NULL
     )
   ''';
 
@@ -438,5 +494,195 @@ class DBHelper {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // PHASE 6 — DETAILED SYNC LOGS
+  // ─────────────────────────────────────────────────────────────────────
+
+  /// Writes one synchronization event. Called by SyncOutboxService at
+  /// every meaningful point of the drain loop — not just the final
+  /// outcome — so the Notifications screen's "Sync" tab can show a real
+  /// per-attempt timeline (Attempt 1: timeout, Attempt 2: conflict,
+  /// Attempt 3: success), not just the latest state.
+  ///
+  /// [message] must already be the sanitized, user-friendly line — this
+  /// function does not sanitize on your behalf. [technicalDetails] is
+  /// optional and only ever shown behind an expandable "Technical
+  /// Details" section by the UI — never put tokens/keys/PII/raw SQL in
+  /// either field.
+  static Future<void> logSyncEvent({
+    required String eventType,
+    required String result, // 'info' | 'success' | 'error' | 'warning'
+    required String message,
+    String? jobId,
+    String? pendingActionId,
+    Map<String, dynamic>? technicalDetails,
+  }) async {
+    final db = await database;
+    await db.insert('sync_log_entries', {
+      'id': const Uuid().v4(),
+      'pending_action_id': pendingActionId,
+      'job_id': jobId,
+      'event_type': eventType,
+      'result': result,
+      'message': message,
+      'technical_details': technicalDetails != null
+          ? jsonEncode(technicalDetails)
+          : null,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Paginated, newest-first fetch — the Notifications "Sync" tab loads
+  /// this in pages (default 20) instead of the whole table at once, so a
+  /// long-lived install with thousands of entries stays fast to open.
+  static Future<List<Map<String, dynamic>>> getSyncLogEntries({
+    int limit = 20,
+    int offset = 0,
+    String? jobId,
+  }) async {
+    final db = await database;
+    return db.query(
+      'sync_log_entries',
+      where: jobId != null ? 'job_id = ?' : null,
+      whereArgs: jobId != null ? [jobId] : null,
+      orderBy: 'created_at DESC',
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  static Future<int> getSyncLogCount({String? jobId}) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      jobId != null
+          ? 'SELECT COUNT(*) as c FROM sync_log_entries WHERE job_id = ?'
+          : 'SELECT COUNT(*) as c FROM sync_log_entries',
+      jobId != null ? [jobId] : null,
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // PHASE 7 — STORAGE MANAGEMENT
+  //   Shows the inspector what's actually taking up space on-device, and
+  //   gives a safe way to reclaim it. Deliberately conservative about
+  //   what "clearable" means:
+  //     - Cached job/task data (local_jobs, local_inspections) is NEVER
+  //       offered for clearing here — it's small (text/JSON) and needed
+  //       for the next time the inspector opens that job, even after
+  //       it's synced (rework, reference, offline re-view).
+  //     - Synced `pending_actions` rows are NEVER deleted by this
+  //       feature — they're the data source for the Sync Center's
+  //       "Completed Audit Log" section. Clearing them here would break
+  //       that feature silently.
+  //     - What IS safe to clear: local photo FILES (not rows) once
+  //       Supabase already has them (is_synced = 1) — the bytes are
+  //       fully redundant with what's in Storage at that point. Also
+  //       safe: old sync_log_entries beyond a retention window, since
+  //       Phase 6's log has no natural cap and would otherwise grow
+  //       forever on a long-lived install.
+  // ─────────────────────────────────────────────────────────────────────
+
+  /// Snapshot of on-device cache usage for the Storage section of the
+  /// Sync Center. `clearableBytes` is specifically the synced-photo-file
+  /// portion — the only thing [clearSyncedPhotoCache] actually removes.
+  static Future<Map<String, dynamic>> getCacheStats() async {
+    final db = await database;
+
+    final jobsCount = Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) as c FROM local_jobs'),
+        ) ??
+        0;
+
+    final syncedPhotoRows = await db.query(
+      'local_photos',
+      columns: ['photo_path'],
+      where: 'is_synced = 1',
+    );
+    final unsyncedPhotoCount = Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) as c FROM local_photos WHERE is_synced = 0',
+          ),
+        ) ??
+        0;
+
+    var clearableBytes = 0;
+    for (final row in syncedPhotoRows) {
+      final path = row['photo_path'] as String?;
+      if (path == null) continue;
+      try {
+        final file = File(path);
+        if (await file.exists()) clearableBytes += await file.length();
+      } catch (_) {
+        // File already gone / inaccessible — doesn't count, nothing to
+        // reclaim from it.
+      }
+    }
+
+    final syncLogCount = await getSyncLogCount();
+
+    return {
+      'cachedJobsCount': jobsCount,
+      'syncedPhotoFileCount': syncedPhotoRows.length,
+      'unsyncedPhotoFileCount': unsyncedPhotoCount,
+      'clearableBytes': clearableBytes,
+      'syncLogCount': syncLogCount,
+    };
+  }
+
+  /// Deletes the on-disk FILE for every already-synced local photo
+  /// (`is_synced = 1`), then removes those rows. Never touches photos
+  /// still waiting to sync (`is_synced = 0`) — those files are the only
+  /// copy that exists until they actually reach Supabase Storage.
+  /// Returns the number of files actually freed, for a confirmation
+  /// message ("Freed 12 photo(s), 8.4 MB").
+  static Future<int> clearSyncedPhotoCache() async {
+    final db = await database;
+    final syncedRows = await db.query(
+      'local_photos',
+      where: 'is_synced = 1',
+    );
+
+    var cleared = 0;
+    for (final row in syncedRows) {
+      final path = row['photo_path'] as String?;
+      if (path == null) continue;
+      try {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+          cleared++;
+        }
+      } catch (_) {
+        // Couldn't delete this one (permissions, already gone) — leave
+        // its row alone too, rather than losing track of a file that
+        // might still exist.
+        continue;
+      }
+    }
+
+    await db.delete('local_photos', where: 'is_synced = 1');
+
+    return cleared;
+  }
+
+  /// Keeps `sync_log_entries` from growing forever on a long-lived
+  /// install — retains only the most recent [keep] entries. Called
+  /// automatically at the end of every drain (see SyncOutboxService),
+  /// so this is routine maintenance, not something the inspector has to
+  /// think about; the manual "Clear cache" action in Storage Management
+  /// additionally offers to run it on demand for an immediate size drop.
+  static Future<void> pruneSyncLogEntries({int keep = 500}) async {
+    final db = await database;
+    final total = await getSyncLogCount();
+    if (total <= keep) return;
+    await db.rawDelete('''
+      DELETE FROM sync_log_entries
+      WHERE id NOT IN (
+        SELECT id FROM sync_log_entries ORDER BY created_at DESC LIMIT ?
+      )
+    ''', [keep]);
   }
 }

@@ -14,6 +14,7 @@ import '../services/sync_outbox_service.dart';
 import 'home_dashboard_screen.dart';
 import 'tasks_screen.dart';
 import 'profile_screen.dart';
+import 'notifications_screen.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
@@ -130,6 +131,14 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   double _pendingBytes = 0;
   DateTime? _lastSync;
 
+  // --- Phase 7: Storage Management state ---
+  int _cachedJobsCount = 0;
+  int _syncedPhotoFileCount = 0;
+  int _unsyncedPhotoFileCount = 0;
+  int _clearableBytes = 0;
+  int _syncLogCount = 0;
+  bool _clearingCache = false;
+
   Timer? _pollTimer;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
 
@@ -137,6 +146,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   void initState() {
     super.initState();
     _refresh();
+    _loadCacheStats();
     // Light polling while this screen is open — catches progress from a
     // drain that SyncOutboxService kicked off elsewhere (e.g. connectivity
     // just came back while the inspector was on a different screen).
@@ -216,12 +226,77 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     });
   }
 
+  /// Phase 7 — separate from the main `_refresh()` poll loop on purpose:
+  /// this touches the filesystem (checking each synced photo's size),
+  /// which is unnecessary work to repeat every 4 seconds. Loaded once at
+  /// open and again right after a manual clear.
+  Future<void> _loadCacheStats() async {
+    final stats = await DBHelper.getCacheStats();
+    if (!mounted) return;
+    setState(() {
+      _cachedJobsCount = stats['cachedJobsCount'] as int;
+      _syncedPhotoFileCount = stats['syncedPhotoFileCount'] as int;
+      _unsyncedPhotoFileCount = stats['unsyncedPhotoFileCount'] as int;
+      _clearableBytes = stats['clearableBytes'] as int;
+      _syncLogCount = stats['syncLogCount'] as int;
+    });
+  }
+
+  Future<void> _handleClearCache() async {
+    if (_clearingCache) return;
+    if (_clearableBytes == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nothing to clear right now.')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: InsightTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Clear synced photo cache?', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+        content: Text(
+          'This removes $_syncedPhotoFileCount photo file(s) already backed up to the server '
+          '(${_formatBytes(_clearableBytes.toDouble())}) from this device. Photos still waiting '
+          'to sync are never affected.',
+          style: InsightTheme.inter(13, c: InsightTheme.ink2),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink3)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Clear', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.redInk)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _clearingCache = true);
+    final cleared = await DBHelper.clearSyncedPhotoCache();
+    await _loadCacheStats();
+    if (!mounted) return;
+    setState(() => _clearingCache = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Freed $cleared photo file(s).'),
+        backgroundColor: InsightTheme.greenInk,
+      ),
+    );
+  }
+
   Future<void> _handleSyncNow() async {
     if (_syncingNow) return;
     HapticFeedback.lightImpact();
     setState(() => _syncingNow = true);
-    await SyncOutboxService.drain();
+    await SyncOutboxService.drain(trigger: 'manual');
     await _refresh();
+    unawaited(_loadCacheStats());
     if (!mounted) return;
     final stillPending = _pendingRows.length;
     final conflictCount = _pendingRows
@@ -275,6 +350,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         return Icons.map_rounded;
       case 'checklist_update':
         return Icons.text_snippet_rounded;
+      case 'current_step_update':
+        return Icons.timeline_rounded;
       case 'submit_inspection':
         return Icons.image_rounded;
       default:
@@ -290,6 +367,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         return 'GPS Verification Coordinates';
       case 'checklist_update':
         return 'Checklist Data (${payload['checklistCompletedCount'] ?? 0}/${payload['checklistTotalCount'] ?? 0} items)';
+      case 'current_step_update':
+        return 'Progress Update (Step ${payload['currentStep'] ?? '—'})';
       case 'submit_inspection':
         final n = (payload['photosData'] as List?)?.length ?? 0;
         return 'Full Submission — $n photo(s) + Findings';
@@ -482,6 +561,50 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                           ),
                                         ),
                                       ],
+                                    ),
+                                    // Phase 5: live drain progress, e.g.
+                                    // "Submitting inspection (2 of 5) —
+                                    // Uploading photo 3 of 12". Only visible
+                                    // while SyncOutboxService is actually
+                                    // draining; collapses to nothing (not
+                                    // even a SizedBox) the rest of the time
+                                    // so it doesn't reserve dead space.
+                                    ValueListenableBuilder<SyncProgress?>(
+                                      valueListenable: SyncOutboxService.progress,
+                                      builder: (context, syncProgress, _) {
+                                        if (syncProgress == null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return Padding(
+                                          padding: const EdgeInsets.only(top: 4),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const SizedBox(
+                                                width: 9,
+                                                height: 9,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 1.3,
+                                                  color: InsightTheme.blue1,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Flexible(
+                                                child: Text(
+                                                  syncProgress.displayText,
+                                                  style: InsightTheme.inter(
+                                                    11.5,
+                                                    w: FontWeight.w500,
+                                                    c: InsightTheme.blueInk,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ],
                                 ),
@@ -694,7 +817,128 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           ),
                         ),
 
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 20),
+
+                        // Phase 6: lightweight entry point to the full
+                        // Synchronization Activity history — deliberately
+                        // NOT a long log inline here (per the Phase 6
+                        // architecture decision, the Sync Center stays
+                        // focused on live/current status only). Deep-links
+                        // straight into the Notifications screen's "Sync"
+                        // tab.
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: GestureDetector(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const NotificationsScreen(initialMode: 1),
+                              ),
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              decoration: BoxDecoration(
+                                color: InsightTheme.surface,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: InsightTheme.line),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.history_rounded, size: 18, color: InsightTheme.ink2),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Synchronization History',
+                                      style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right_rounded, size: 18, color: InsightTheme.ink3),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Phase 7: Storage Management. Shows what's
+                        // actually reclaimable (synced photo files only —
+                        // see DBHelper.getCacheStats doc comment for why
+                        // job cache and the Completed Audit Log's
+                        // underlying rows are deliberately excluded).
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.surface,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: InsightTheme.line),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.sd_storage_rounded, size: 16, color: InsightTheme.ink2),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Offline Storage',
+                                      style: InsightTheme.jetBrains(10.5, w: FontWeight.w700, ls: 0.6, c: InsightTheme.ink2),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _StorageStatItem(
+                                        label: 'Cached Jobs',
+                                        value: '$_cachedJobsCount',
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _StorageStatItem(
+                                        label: 'Photos Waiting',
+                                        value: '$_unsyncedPhotoFileCount',
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _StorageStatItem(
+                                        label: 'Reclaimable',
+                                        value: _formatBytes(_clearableBytes.toDouble()),
+                                        valueColor: _clearableBytes > 0 ? InsightTheme.amberInk : null,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 14),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton(
+                                    onPressed: _clearingCache ? null : _handleClearCache,
+                                    style: OutlinedButton.styleFrom(
+                                      side: const BorderSide(color: InsightTheme.lineStrong),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                    ),
+                                    child: _clearingCache
+                                        ? const SizedBox(
+                                            width: 16, height: 16,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          )
+                                        : Text(
+                                            'Clear Synced Photo Cache',
+                                            style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                                          ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
 
                         // 3. REAL DATA LOG
                         Expanded(
@@ -969,6 +1213,36 @@ class _UpdatesScreenState extends State<UpdatesScreen>
 /// ==================================================================
 /// COMPONENT WIDGETS
 /// ==================================================================
+
+class _StorageStatItem extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  const _StorageStatItem({
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: InsightTheme.jetBrains(8.5, c: InsightTheme.ink3, ls: 0.3),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: InsightTheme.poppins(14, w: FontWeight.w700, c: valueColor ?? InsightTheme.ink),
+        ),
+      ],
+    );
+  }
+}
 
 class _MetricItem extends StatelessWidget {
   final String label;

@@ -8,6 +8,66 @@ import 'package:uuid/uuid.dart';
 import 'db_helper.dart';
 import 'supabase_service.dart';
 
+/// Phase 5 — Sync Progress Indicator.
+///   Snapshot of "where the drain loop is right now", published via
+///   [SyncOutboxService.progress] so any widget (the Sync Center's own
+///   status card, or a small banner on another screen) can show live
+///   text like "Syncing item 2 of 5" and, for a submit_inspection action
+///   with photos, "Uploading photo 3 of 12" underneath it.
+///   `null` means nothing is syncing right now.
+class SyncProgress {
+  final int actionIndex; // 1-based — "this is the Nth action"
+  final int actionTotal;
+  final String actionType;
+  final int? photoIndex; // 1-based, only set while uploading photos
+  final int? photoTotal;
+
+  const SyncProgress({
+    required this.actionIndex,
+    required this.actionTotal,
+    required this.actionType,
+    this.photoIndex,
+    this.photoTotal,
+  });
+
+  SyncProgress copyWithPhoto({required int photoIndex, required int photoTotal}) {
+    return SyncProgress(
+      actionIndex: actionIndex,
+      actionTotal: actionTotal,
+      actionType: actionType,
+      photoIndex: photoIndex,
+      photoTotal: photoTotal,
+    );
+  }
+
+  /// Short human label for the action itself, e.g. "Submitting inspection".
+  String get actionLabel {
+    switch (actionType) {
+      case 'gps_confirm':
+        return 'Syncing GPS verification';
+      case 'checklist_update':
+        return 'Syncing checklist';
+      case 'current_step_update':
+        return 'Syncing progress';
+      case 'submit_inspection':
+        return 'Submitting inspection';
+      default:
+        return 'Syncing';
+    }
+  }
+
+  /// Full display line, e.g. "Submitting inspection (2 of 5) — Uploading
+  /// photo 3 of 12", or just "Syncing GPS verification (1 of 3)" when
+  /// there's no photo sub-progress for this action type.
+  String get displayText {
+    final base = '$actionLabel ($actionIndex of $actionTotal)';
+    if (photoIndex != null && photoTotal != null && photoTotal! > 0) {
+      return '$base — Uploading photo $photoIndex of $photoTotal';
+    }
+    return base;
+  }
+}
+
 /// FieldSync's single outbox drain engine (Phase A/C of the offline
 /// roadmap). Every offline-capable action becomes one `pending_actions`
 /// row (see DBHelper); this service is the only thing that reads that
@@ -22,6 +82,7 @@ class SyncOutboxService {
 
   static bool _draining = false;
   static StreamSubscription<List<ConnectivityResult>>? _connSub;
+  static Timer? _debounce;
   static const _lastSyncPrefsKey = 'field_sync_last_success';
   static const _conflictSnapshotKey = 'cachedUpdatedAtSnapshot';
   static const _forceSyncAnywayKey = 'forceSyncAnyway';
@@ -31,6 +92,14 @@ class SyncOutboxService {
     'checklist_update',
     'current_step_update',
   };
+
+  /// Live progress of the current drain pass. Any widget can do
+  /// `ValueListenableBuilder<SyncProgress?>(valueListenable:
+  /// SyncOutboxService.progress, ...)` to show live sync status without
+  /// polling. `null` while idle/not draining.
+  static final ValueNotifier<SyncProgress?> progress =
+      ValueNotifier<SyncProgress?>(null);
+
 
   static bool get isDraining => _draining;
 
@@ -50,17 +119,34 @@ class SyncOutboxService {
   /// something was queued last session and connectivity is already back),
   /// then keeps listening so a queued action syncs automatically the
   /// moment signal returns — not just on the next app open.
+  ///
+  /// Phase 2 hardening: connectivity events are debounced (900ms) before
+  /// triggering a drain. `drain()` itself already no-ops on a re-entrant
+  /// call via the `_draining` guard, so this isn't needed to prevent
+  /// overlapping drains — it's to stop a flaky/flapping signal (a few
+  /// on/off/on events within a second, common on weak field signal) from
+  /// firing several back-to-back `getActionableActions()` queries for
+  /// what is, in practice, a single reconnect.
   static void start() {
     drain();
     _connSub ??= Connectivity().onConnectivityChanged.listen((results) {
       if (results.any((r) => r != ConnectivityResult.none)) {
-        drain();
+        _debounce?.cancel();
+        _debounce = Timer(const Duration(milliseconds: 900), drain);
       }
     });
   }
 
   // --- ENQUEUE HELPERS (one per action type) ---
 
+  /// Queues a GPS confirmation. Deterministic id per job (same dedup
+  /// pattern as `enqueueChecklistUpdate`/`enqueueCurrentStepUpdate`) —
+  /// added after real-device testing surfaced 8 separate
+  /// "GPS Verification Coordinates" cards in the Sync Center for a
+  /// single job, caused by this previously using a fresh
+  /// `Uuid().v4()` on every call. Re-visiting/re-confirming GPS several
+  /// times while offline now overwrites the same queued row with the
+  /// latest coordinates instead of piling up one row per confirm.
   static Future<void> enqueueGpsConfirm({
     required String jobId,
     required double latitude,
@@ -78,7 +164,7 @@ class SyncOutboxService {
       },
     );
     return DBHelper.enqueueAction(
-      id: const Uuid().v4(),
+      id: 'gps_confirm_$jobId',
       type: 'gps_confirm',
       jobId: jobId,
       payload: payload,
@@ -188,36 +274,170 @@ class SyncOutboxService {
   /// Processes every actionable row in creation order. Safe to call
   /// repeatedly/concurrently — re-entrant calls are ignored while one is
   /// already running.
-  static Future<void> drain() async {
+  ///
+  /// [trigger] is purely for the Phase 6 sync log — 'manual' when the
+  /// inspector tapped "Sync Now", 'automatic' (default) when a
+  /// connectivity change or app-startup drain fired it. Doesn't affect
+  /// behavior, only what the "Synchronization Activity" history says
+  /// started the queue.
+  static Future<void> drain({String trigger = 'automatic'}) async {
     if (_draining) return;
     _draining = true;
     try {
       final actions = await DBHelper.getActionableActions();
-      for (final action in actions) {
+      final total = actions.length;
+      if (total == 0) return;
+
+      await DBHelper.logSyncEvent(
+        eventType: 'queue_started',
+        result: 'info',
+        message: total == 1
+            ? 'Synchronization started — 1 item to send.'
+            : 'Synchronization started — $total items to send.',
+        technicalDetails: {'trigger': trigger, 'itemCount': total},
+      );
+
+      var successCount = 0;
+      var failCount = 0;
+      var conflictCount = 0;
+
+      for (var i = 0; i < actions.length; i++) {
+        final action = actions[i];
         final id = action['id'] as String;
+        final type = action['type'] as String;
+        final jobId = action['job_id'] as String;
+        progress.value = SyncProgress(
+          actionIndex: i + 1,
+          actionTotal: total,
+          actionType: type,
+        );
         await DBHelper.markActionSyncing(id);
+        await DBHelper.logSyncEvent(
+          eventType: 'upload_started',
+          result: 'info',
+          message: '${_friendlyActionName(type)} — sending...',
+          jobId: jobId,
+          pendingActionId: id,
+        );
         try {
           await _executeAction(action);
           await DBHelper.markActionSynced(id);
           await _recordSuccessfulSync();
+          successCount++;
+          await DBHelper.logSyncEvent(
+            eventType: 'upload_completed',
+            result: 'success',
+            message: '${_friendlyActionName(type)} completed successfully.',
+            jobId: jobId,
+            pendingActionId: id,
+          );
         } on _OutboxConflictException catch (e) {
           debugPrint(
             'SyncOutboxService: action $id (${action['type']}) conflict: ${e.message}',
           );
           await DBHelper.markActionConflict(id, e.message);
+          conflictCount++;
+          await DBHelper.logSyncEvent(
+            eventType: 'conflict_detected',
+            result: 'warning',
+            message:
+                'This record changed elsewhere before your update could sync. Review needed.',
+            jobId: jobId,
+            pendingActionId: id,
+            technicalDetails: {'reason': e.message},
+          );
         } catch (e) {
           debugPrint(
             'SyncOutboxService: action $id (${action['type']}) failed: $e',
           );
+          final retryCount = (action['retry_count'] as int? ?? 0) + 1;
           await DBHelper.markActionFailed(id, e.toString());
+          failCount++;
+          await DBHelper.logSyncEvent(
+            eventType: 'upload_failed',
+            result: 'error',
+            message: _friendlyErrorMessage(e),
+            jobId: jobId,
+            pendingActionId: id,
+            technicalDetails: {
+              'retryCount': retryCount,
+              'exceptionType': e.runtimeType.toString(),
+              // .toString() on most Dart exceptions is already just a
+              // human-readable description (no tokens/keys/SQL by
+              // construction in this codebase's own exception types) —
+              // still, this is the one place raw error text is persisted,
+              // so nothing beyond this string is ever stored.
+              'rawError': e.toString(),
+            },
+          );
           // Keep draining the rest — one stuck action (e.g. a job that
           // got deleted server-side) shouldn't block everything queued
           // after it.
         }
       }
+
+      await DBHelper.logSyncEvent(
+        eventType: 'queue_finished',
+        result: failCount > 0
+            ? 'warning'
+            : (conflictCount > 0 ? 'warning' : 'success'),
+        message:
+            'Synchronization finished — $successCount succeeded'
+            '${failCount > 0 ? ', $failCount failed' : ''}'
+            '${conflictCount > 0 ? ', $conflictCount need review' : ''}.',
+        technicalDetails: {
+          'successCount': successCount,
+          'failCount': failCount,
+          'conflictCount': conflictCount,
+        },
+      );
+
+      // Phase 7: routine maintenance — keeps sync_log_entries from
+      // growing unbounded on a long-lived install. Cheap no-op when
+      // under the cap (single COUNT query), so safe to call every drain.
+      await DBHelper.pruneSyncLogEntries();
     } finally {
+      progress.value = null;
       _draining = false;
     }
+  }
+
+  /// User-facing label for an action type, used in sync log messages.
+  /// Deliberately separate from [SyncProgress.actionLabel] (which is
+  /// tuned for a short live-progress line) — this one reads naturally in
+  /// a completed sentence like "GPS verification completed successfully."
+  static String _friendlyActionName(String actionType) {
+    switch (actionType) {
+      case 'gps_confirm':
+        return 'GPS verification';
+      case 'checklist_update':
+        return 'Checklist update';
+      case 'current_step_update':
+        return 'Progress update';
+      case 'submit_inspection':
+        return 'Inspection submission';
+      default:
+        return 'Synchronization';
+    }
+  }
+
+  /// Maps a raw exception to the sanitized, user-friendly line shown by
+  /// default in the Sync tab (Phase 6). Technical specifics (exception
+  /// type, raw message) still get stored, but only inside
+  /// `technical_details` — never surfaced here.
+  static String _friendlyErrorMessage(Object error) {
+    final text = error.toString();
+    if (text.contains('SocketException') ||
+        text.contains('Failed host lookup')) {
+      return 'Network connection lost. Will retry automatically.';
+    }
+    if (text.contains('TimeoutException') || text.contains('timeout')) {
+      return 'Connection timed out. Will retry automatically.';
+    }
+    if (text.contains('PostgrestException') || text.contains('storage')) {
+      return 'Server rejected this update. Will retry automatically.';
+    }
+    return 'Synchronization failed. Will retry automatically.';
   }
 
   static Future<void> _executeAction(Map<String, dynamic> action) async {
@@ -264,10 +484,21 @@ class SyncOutboxService {
                   .map((p) => <String, dynamic>{'photoPath': p})
                   .toList();
 
-        // UPDATED: Pass photosData instead of localPaths
+        // UPDATED: Pass photosData instead of localPaths, plus a progress
+        // callback so the current SyncProgress (already set with the
+        // action-level index/total above) gains photo-level detail too —
+        // Phase 5: "Uploading photo 3 of 12".
         final photoPaths = await SupabaseService.uploadInspectionPhotos(
           jobId: jobId,
           photosData: photosData,
+          onProgress: (photoIndex, photoTotal) {
+            final current = progress.value;
+            if (current == null) return;
+            progress.value = current.copyWithPhoto(
+              photoIndex: photoIndex,
+              photoTotal: photoTotal,
+            );
+          },
         );
 
         final checklistData = (payload['checklistData'] as List)

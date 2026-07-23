@@ -447,26 +447,84 @@ class SupabaseService {
     required String jobId,
     required List<Map<String, dynamic>>
     photosData, // Changed from List<String> localPaths
+    void Function(int photoIndex, int photoTotal)? onProgress,
   }) async {
     final List<String> uploadedUrls = [];
     final List<String> failedPaths = [];
 
+    // ─────────────────────────────────────────────────────────────────
+    // PHOTO UPLOAD RESUME (Phase 4)
+    //   Idempotency (Phase 1) already made retries *safe* — a retry never
+    //   creates a duplicate row/object. But it still re-uploaded every
+    //   photo's bytes from scratch on every retry, even ones that fully
+    //   succeeded on a prior attempt. On a flaky field connection where a
+    //   10-photo submit dies at photo #7, that means re-transferring 6
+    //   already-good photos every time, instead of resuming from #7.
+    //
+    //   Fix: compute each photo's deterministic rowId up front, batch-check
+    //   which ones already have a field_job_photos row (i.e. already fully
+    //   uploaded), and skip the storage upload + row upsert entirely for
+    //   those — just reuse the known public URL. Only photos not yet in
+    //   that set actually transfer bytes this attempt.
+    // ─────────────────────────────────────────────────────────────────
+    final Map<String, String> pathToStoragePath = {};
+    final Map<String, String> pathToRowId = {};
     for (final photo in photosData) {
+      final path = photo['photoPath'] as String?;
+      if (path == null) continue;
+      final photoKey = _stablePhotoKey(path);
+      final storagePath = 'inspections/$jobId/photo_$photoKey.jpg';
+      final rowId = const Uuid().v5(Uuid.NAMESPACE_URL, storagePath);
+      pathToStoragePath[path] = storagePath;
+      pathToRowId[path] = rowId;
+    }
+
+    Set<String> alreadyUploadedRowIds = {};
+    if (pathToRowId.isNotEmpty) {
+      try {
+        final existing = await client
+            .from('field_job_photos')
+            .select('id')
+            .eq('field_job_id', jobId)
+            .inFilter('id', pathToRowId.values.toList());
+        alreadyUploadedRowIds = (existing as List)
+            .map((row) => (row as Map)['id'] as String)
+            .toSet();
+      } catch (e) {
+        // If the check itself fails (e.g. offline mid-retry), fall back to
+        // the old safe-but-not-resumable behavior: treat nothing as
+        // already uploaded, so every photo is attempted this pass. Still
+        // correct (idempotent), just not optimized for this one attempt.
+        debugPrint('Photo resume check failed, uploading all: $e');
+        alreadyUploadedRowIds = {};
+      }
+    }
+
+    final int photoTotal = photosData.length;
+    for (var i = 0; i < photosData.length; i++) {
+      final photo = photosData[i];
       final path = photo['photoPath'] as String; // Extract path from the map
       try {
+        final storagePath = pathToStoragePath[path];
+        final rowId = pathToRowId[path];
+        if (storagePath == null || rowId == null) continue;
+
+        if (alreadyUploadedRowIds.contains(rowId)) {
+          // Already fully uploaded in a previous attempt — skip re-sending
+          // the file bytes, just reuse the existing public URL. Still
+          // reported to onProgress so "photo X of Y" reflects the whole
+          // batch, not just the ones actually transferred this pass.
+          onProgress?.call(i + 1, photoTotal);
+          uploadedUrls.add(
+            client.storage.from('inspection-photos').getPublicUrl(storagePath),
+          );
+          continue;
+        }
+
         final file = File(path);
         if (!await file.exists()) continue;
 
-        // Deterministic filename/id — parehong path, parehong result sa
-        // bawat retry, kaya hindi na dumadami ang naka-upload kapag
-        // na-retry ang action. `field_job_photos.id` ay uuid column sa
-        // Supabase, kaya kailangang valid UUID format ang gamitin — v5
-        // (namespace + stable name) ang ginagamit dito para deterministic
-        // pa rin pero tama ang format.
-        final photoKey = _stablePhotoKey(path);
-        final fileName = 'photo_$photoKey.jpg';
-        final storagePath = 'inspections/$jobId/$fileName';
-        final rowId = const Uuid().v5(Uuid.NAMESPACE_URL, storagePath);
+        onProgress?.call(i + 1, photoTotal);
 
         // 1. Upload to Supabase Storage — upsert:true means a retry
         //    overwrites the SAME storage object instead of creating a new
