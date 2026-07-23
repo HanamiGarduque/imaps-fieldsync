@@ -52,19 +52,79 @@ class SiteMapScreen extends StatefulWidget {
   State<SiteMapScreen> createState() => _SiteMapScreenState();
 }
 
-class _SiteMapScreenState extends State<SiteMapScreen> {
+class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserver {
   bool _loading = true;
   String? _error;
 
   ll.LatLng? _parcelLatLng;
   ll.LatLng? _deviceLatLng;
   double? _distanceMeters;
+  bool _retryingDeviceLocation = false;
   final MapController _mapController = MapController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadMapData();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Bug fix: previously the only way to pick up a location-service
+    // change (inspector turns Location back on, or grants the permission,
+    // from the system Settings screen) was to leave this screen entirely
+    // and reopen it — initState() was the only thing that ever called
+    // _loadMapData(). Now, coming back to the app after being backgrounded
+    // (e.g. returning from Settings) automatically retries the device
+    // position if it wasn't available before, without needing a full
+    // parcel/map reload or a manual back-and-forth.
+    if (state == AppLifecycleState.resumed && _deviceLatLng == null && !_loading) {
+      _retryDeviceLocation();
+    }
+  }
+
+  /// Lightweight retry — re-fetches just the device position/distance,
+  /// without re-fetching parcel details or refitting the map. Used by the
+  /// app-resume hook above and by the tappable "Location unavailable"
+  /// badge at the bottom of the map.
+  Future<void> _retryDeviceLocation() async {
+    if (_retryingDeviceLocation || _parcelLatLng == null) return;
+    setState(() => _retryingDeviceLocation = true);
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final online = connectivityResult is List
+          ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+          : connectivityResult != ConnectivityResult.none;
+      final pos = await LocationService.getCurrentLocation();
+      final newDeviceLatLng = ll.LatLng(pos.latitude, pos.longitude);
+      final newDistance = online
+          ? await SupabaseService.getDistanceToParcelBoundary(
+              parcelId: widget.task.parcelId!,
+              latitude: pos.latitude,
+              longitude: pos.longitude,
+            )
+          : SpatialOfflineService.haversineMeters(
+              pos.latitude, pos.longitude, _parcelLatLng!.latitude, _parcelLatLng!.longitude);
+      if (!mounted) return;
+      setState(() {
+        _deviceLatLng = newDeviceLatLng;
+        _distanceMeters = newDistance;
+        _retryingDeviceLocation = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+    } catch (_) {
+      // Still unavailable — leave the badge as a retry target, no need to
+      // surface a separate error for this secondary, best-effort fetch.
+      if (!mounted) return;
+      setState(() => _retryingDeviceLocation = false);
+    }
   }
 
   Future<void> _loadMapData() async {
@@ -287,18 +347,29 @@ final online = connectivityResult is List
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
                                               Row(children: [const Icon(Icons.circle, size: 10, color: InsightTheme.red), const SizedBox(width: 6), Text('Target Site', style: InsightTheme.inter(12, w: FontWeight.w600))]),
-                                              Row(children: [
-                                                const Icon(Icons.circle, size: 10, color: InsightTheme.blue1),
-                                                const SizedBox(width: 6),
-                                                Text(
-                                                  _deviceLatLng == null
-                                                      ? 'Location unavailable'
-                                                      : _distanceMeters != null
-                                                          ? 'You (${_distanceMeters!.round()}m)'
-                                                          : 'You',
-                                                  style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
-                                                ),
-                                              ]),
+                                              GestureDetector(
+                                                onTap: _deviceLatLng == null && !_retryingDeviceLocation
+                                                    ? _retryDeviceLocation
+                                                    : null,
+                                                child: Row(children: [
+                                                  const Icon(Icons.circle, size: 10, color: InsightTheme.blue1),
+                                                  const SizedBox(width: 6),
+                                                  if (_retryingDeviceLocation)
+                                                    const SizedBox(
+                                                      width: 12, height: 12,
+                                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                                    )
+                                                  else
+                                                    Text(
+                                                      _deviceLatLng == null
+                                                          ? 'Location unavailable — tap to retry'
+                                                          : _distanceMeters != null
+                                                              ? 'You (${_distanceMeters!.round()}m)'
+                                                              : 'You',
+                                                      style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
+                                                    ),
+                                                ]),
+                                              ),
                                             ],
                                           ),
                                         ),

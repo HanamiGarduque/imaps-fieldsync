@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../services/supabase_service.dart';
 import '../services/db_helper.dart';
+import '../services/sync_outbox_service.dart';
 import '../screens/tasks_screen.dart'; // To access TaskItem class
 
 class InspectionProvider extends ChangeNotifier {
@@ -111,7 +112,17 @@ class InspectionProvider extends ChangeNotifier {
     );
   }
 
-  // Also push to Supabase if online — best-effort, no throw on failure.
+  // Also push to Supabase if online — falls back to the offline outbox
+  // if it's not (or the request fails anyway), so the step is guaranteed
+  // to reach Supabase eventually instead of being silently lost.
+  //
+  // RE-FIX (2026-07-23): this outbox fallback was previously implemented
+  // (Phase 1 audit item #9) but was found reverted back to the old
+  // best-effort-only version — likely from an older inspection_provider.dart
+  // getting merged back in during unrelated work elsewhere. The
+  // `current_step_update` action type + `enqueueCurrentStepUpdate()` in
+  // SyncOutboxService were never removed, only this call site was — so
+  // this re-fix is just reconnecting the two, not rebuilding anything.
   try {
     final isConnected = await _checkConnectivity();
     if (isConnected) {
@@ -119,9 +130,22 @@ class InspectionProvider extends ChangeNotifier {
         jobId: _activeTask!.id,
         updateData: {'current_step': step},
       );
+    } else {
+      await SyncOutboxService.enqueueCurrentStepUpdate(
+        jobId: _activeTask!.id,
+        step: step,
+      );
     }
   } catch (e) {
-    debugPrint('updateStep: Supabase sync skipped — $e');
+    debugPrint('updateStep: direct Supabase push failed, queuing for retry — $e');
+    try {
+      await SyncOutboxService.enqueueCurrentStepUpdate(
+        jobId: _activeTask!.id,
+        step: step,
+      );
+    } catch (e2) {
+      debugPrint('updateStep: failed to queue current_step update — $e2');
+    }
   }
 }
 
@@ -146,6 +170,23 @@ class InspectionProvider extends ChangeNotifier {
     required double? longitude,
   }) {
     _capturedPhotos.add({
+      // ROOT-CAUSE FIX (2026-07-23) — Duplicate Photos Bug: this id used
+      // to NOT exist here. `saveAllInspectionState()` (and the older,
+      // unused `saveInspectionProgress()`) generated a *fresh* random
+      // `Uuid().v4()` for every photo, every single time either function
+      // ran — so if the inspector's progress got saved more than once
+      // while the same photos were still sitting in `_capturedPhotos`
+      // (e.g. once per step transition), each save call re-inserted every
+      // photo taken so far as a BRAND NEW `local_photos` row with a brand
+      // new id. `savePhotoLocally()` uses `ConflictAlgorithm.replace`,
+      // which would have safely no-op'd repeat saves of the *same* id —
+      // but a fresh id every time defeats that entirely. Each of those
+      // "new" rows then looked unsynced and got uploaded to Supabase as
+      // its own row too (real, unique captures — 3 photos became 6+ rows
+      // in `field_job_photos` after two saves).
+      // Fix: generate the id ONCE, here, at capture time, and have every
+      // save path below reuse this same id instead of minting a new one.
+      'id': const Uuid().v4(),
       'photoPath': photoPath,
       'notes': photoNotes,
       'latitude': latitude,
@@ -283,6 +324,7 @@ class InspectionProvider extends ChangeNotifier {
       _capturedPhotos.clear();
       for (final p in localPhotos) {
         _capturedPhotos.add({
+          'id': p['id'], // reuse the existing local_photos row id (see addPhoto() fix)
           'photoPath': p['photo_path'],
           'notes': p['notes'],
           'latitude': p['latitude'],
@@ -319,7 +361,9 @@ class InspectionProvider extends ChangeNotifier {
 
     // 2. Save photos to local sqlite
     for (final photo in _capturedPhotos) {
-      final photoId = const Uuid().v4();
+      // Reuse the stable id set in addPhoto()/reload instead of minting a
+      // new one each call — see the fix comment in addPhoto() for why.
+      final photoId = photo['id'] as String? ?? const Uuid().v4();
       await DBHelper.savePhotoLocally(
         photoId: photoId,
         jobId: _activeTask!.id,
@@ -472,7 +516,15 @@ class InspectionProvider extends ChangeNotifier {
     );
 
     for (final photo in _capturedPhotos) {
-      final photoId = const Uuid().v4();
+      // ROOT-CAUSE FIX (2026-07-23) — see addPhoto() for the full
+      // explanation. Reusing the stable id set at capture time means a
+      // repeat call to this function (e.g. on a second step transition
+      // while the same photos are still in memory) safely replaces the
+      // same local_photos row (ConflictAlgorithm.replace) instead of
+      // inserting a brand new one — so photos captured once are only
+      // ever uploaded/counted once, no matter how many times progress
+      // gets auto-saved.
+      final photoId = photo['id'] as String? ?? const Uuid().v4();
       await DBHelper.savePhotoLocally(
         photoId: photoId,
         jobId: _activeTask!.id,
