@@ -51,84 +51,84 @@ class InspectionProgress extends ChangeNotifier {
   /// Call when a step's "Continue" action fires, right before navigating
   /// forward. Steps can only be completed in order.
   void markStepComplete(int step) {
-  if (step == _highestCompleted + 1) {
-    _highestCompleted = step;
-    notifyListeners();
+    if (step == _highestCompleted + 1) {
+      _highestCompleted = step;
+      notifyListeners();
 
-    if (_activeTaskId != null) {
-      _persistCurrentStep(_activeTaskId!, step);
-    }
+      if (_activeTaskId != null) {
+        _persistCurrentStep(_activeTaskId!, step);
+      }
 
-    if (step < totalSteps && _activeTaskId != null) {
-      SupabaseService.logActivity(
-        eventType: 'step_completed',
-        title: 'Completed Step $step: ${stepTitles[step - 1]}',
-        subtitle: _activeTaskLabel,
-        fieldJobId: _activeTaskId,
-      );
+      if (step < totalSteps && _activeTaskId != null) {
+        SupabaseService.logActivity(
+          eventType: 'step_completed',
+          title: 'Completed Step $step: ${stepTitles[step - 1]}',
+          subtitle: _activeTaskLabel,
+          fieldJobId: _activeTaskId,
+        );
+      }
     }
   }
-}
 
-/// Saves the exact step number to SQLite (always) and Supabase (best-
-/// effort, if online). This gives us a real stored value alongside the
-/// derivedHighestStep heuristic — belt-and-suspenders, doesn't replace it.
-Future<void> _persistCurrentStep(String taskId, int step) async {
-  try {
-    final db = await DBHelper.database;
-    final existing = await DBHelper.getLocalInspection(taskId);
-    if (existing != null) {
-      await db.update(
-        'local_inspections',
-        {'current_step': step, 'updated_at': DateTime.now().toIso8601String()},
-        where: 'id = ?',
-        whereArgs: [taskId],
-      );
-    } else {
-      await db.insert('local_inspections', {
-        'id': taskId,
-        'current_step': step,
-        'is_synced': 0,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    }
-  } catch (e) {
-    debugPrint('_persistCurrentStep (SQLite) failed: $e');
-  }
-
-  try {
-    final connectivityResult = await Connectivity().checkConnectivity();
-    final online = connectivityResult is List
-        ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
-        : connectivityResult != ConnectivityResult.none;
-    if (online) {
-      await SupabaseService.updateJobInspectionProgress(
-        jobId: taskId,
-        updateData: {'current_step': step},
-      );
-    } else {
-      await SyncOutboxService.enqueueCurrentStepUpdate(jobId: taskId, step: step);
-    }
-  } catch (e) {
-    // ROOT-CAUSE FIX (2026-07-23): this used to be a dead-end — if this
-    // call failed (most commonly because the device was offline, but
-    // also on any transient Supabase error), the exception was just
-    // debugPrint'd and the step update was lost forever. There was no
-    // outbox fallback here, unlike every other offline-capable write in
-    // the app (GPS confirm, checklist, submit). That's why current_step
-    // in Supabase could stay stuck at 0 (or any earlier value)
-    // indefinitely even after the inspector had clearly moved forward,
-    // online or offline — this function is the one every screen actually
-    // calls (via InspectionProgress.instance.markStepComplete()), not
-    // InspectionProvider.updateStep(), which turned out to be unused.
-    debugPrint('_persistCurrentStep (Supabase) failed, queuing for retry — $e');
+  /// Saves the exact step number to SQLite (always) and Supabase (best-
+  /// effort, if online). This gives us a real stored value alongside the
+  /// derivedHighestStep heuristic — belt-and-suspenders, doesn't replace it.
+  Future<void> _persistCurrentStep(String taskId, int step) async {
     try {
-      await SyncOutboxService.enqueueCurrentStepUpdate(jobId: taskId, step: step);
-    } catch (e2) {
-      debugPrint('_persistCurrentStep: failed to queue current_step update — $e2');
+      final db = await DBHelper.database;
+      final existing = await DBHelper.getLocalInspection(taskId);
+      if (existing != null) {
+        await db.update(
+          'local_inspections',
+          {'current_step': step, 'updated_at': DateTime.now().toIso8601String()},
+          where: 'id = ?',
+          whereArgs: [taskId],
+        );
+      } else {
+        await db.insert('local_inspections', {
+          'id': taskId,
+          'current_step': step,
+          'is_synced': 0,
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+      }
+    } catch (e) {
+      debugPrint('_persistCurrentStep (SQLite) failed: $e');
+    }
+
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final online = connectivityResult is List
+          ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+          : connectivityResult != ConnectivityResult.none;
+      if (online) {
+        await SupabaseService.updateJobInspectionProgress(
+          jobId: taskId,
+          updateData: {'current_step': step},
+        );
+      } else {
+        await SyncOutboxService.enqueueCurrentStepUpdate(jobId: taskId, step: step);
+      }
+    } catch (e) {
+      // ROOT-CAUSE FIX (2026-07-23): this used to be a dead-end — if this
+      // call failed (most commonly because the device was offline, but
+      // also on any transient Supabase error), the exception was just
+      // debugPrint'd and the step update was lost forever. There was no
+      // outbox fallback here, unlike every other offline-capable write in
+      // the app (GPS confirm, checklist, submit). That's why current_step
+      // in Supabase could stay stuck at 0 (or any earlier value)
+      // indefinitely even after the inspector had clearly moved forward,
+      // online or offline — this function is the one every screen actually
+      // calls (via InspectionProgress.instance.markStepComplete()), not
+      // InspectionProvider.updateStep(), which turned out to be unused.
+      debugPrint('_persistCurrentStep (Supabase) failed, queuing for retry — $e');
+      try {
+        await SyncOutboxService.enqueueCurrentStepUpdate(jobId: taskId, step: step);
+      } catch (e2) {
+        debugPrint('_persistCurrentStep: failed to queue current_step update — $e2');
+      }
     }
   }
-}
 
   /// Makes sure progress belongs to the task currently open. If the
   /// inspector opens a different task, progress starts fresh instead of
