@@ -535,7 +535,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
       );
     }).toList();
   }
-  }
 
   String _jobLabel(String jobId) {
     final job = _jobLookup[jobId];
