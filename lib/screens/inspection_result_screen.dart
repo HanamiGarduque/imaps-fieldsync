@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../widgets/sensitive_screen.dart';
+
 // Note: this screen is a standalone assessment picker used from the
 // Zoning Comparison placeholder flow. The main 6-step inspection
 // workflow (Site → GPS → Photos → Checklist → Findings → Review &
@@ -64,7 +66,7 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -229,7 +231,7 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 

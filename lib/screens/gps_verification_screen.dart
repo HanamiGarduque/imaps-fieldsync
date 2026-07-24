@@ -20,6 +20,7 @@ import '../widgets/exit_confirm_dialog.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
+import '../widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -284,7 +285,7 @@ final online = connectivityResult is List
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return PopScope(
+    return SensitiveScreen(child: PopScope(
       canPop: InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
@@ -472,7 +473,7 @@ final online = connectivityResult is List
         ],
       ),
       ),
-    );
+    ));
   }
 }
 

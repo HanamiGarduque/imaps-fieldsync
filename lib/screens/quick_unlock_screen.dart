@@ -5,6 +5,7 @@ import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
+import '../widgets/sensitive_screen.dart';
 import 'home_dashboard_screen.dart';
 import 'login_screen.dart';
 
@@ -99,7 +100,7 @@ class _QuickUnlockScreenState extends State<QuickUnlockScreen> with WidgetsBindi
       return const Scaffold(backgroundColor: _Colors.bg, body: Center(child: CircularProgressIndicator()));
     }
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: _Colors.bg,
       body: SafeArea(
         child: Padding(
@@ -152,6 +153,6 @@ class _QuickUnlockScreenState extends State<QuickUnlockScreen> with WidgetsBindi
           ),
         ),
       ),
-    );
+    ));
   }
 }

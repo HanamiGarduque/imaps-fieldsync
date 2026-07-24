@@ -9,7 +9,9 @@ import '../services/notification_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
+import '../services/supabase_service.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 import 'main_shell_screen.dart';
 
 
@@ -327,6 +329,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (profile != null) {
+        SupabaseService.logSecurityEvent(eventType: 'login_success', severity: 'info');
+
         await SecurePrefsService.setSavedEmail(_emailController.text.trim());
 
         if (!mounted) return;
@@ -431,7 +435,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Center(
@@ -634,7 +638,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildFieldLabel(String text) {

@@ -6,6 +6,7 @@ import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 import 'quick_unlock_setup_screen.dart';
 
 class _Colors {
@@ -132,7 +133,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: _Colors.bg,
       appBar: AppBar(
         backgroundColor: _Colors.bg,
@@ -341,7 +342,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 const SizedBox(height: 24),
               ],
             ),
-    );
+    ));
   }
 
   Widget _buildStatusCard() {

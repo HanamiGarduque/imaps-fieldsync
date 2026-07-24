@@ -11,6 +11,7 @@ import '../providers/inspection_provider.dart';
 import '../services/supabase_service.dart';
 import '../services/sync_outbox_service.dart';
 import '../widgets/exit_confirm_dialog.dart';
+import '../widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -123,7 +124,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return PopScope(
+    return SensitiveScreen(child: PopScope(
       canPop: InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
@@ -282,7 +283,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
         ],
       ),
       ),
-    );
+    ));
   }
 }
 

@@ -20,6 +20,7 @@ import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
 import '../widgets/motion/linked_list_motion.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 
 
 /// ==================================================================
@@ -832,7 +833,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
 
     final bool hasActiveFilters = _selectedBarangay != 'All Barangays' || _datePreset != null;
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
       extendBody: true,
       appBar: AppBar(
@@ -1132,7 +1133,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
           }
         },
       ),
-    );
+    ));
   }
 }
 

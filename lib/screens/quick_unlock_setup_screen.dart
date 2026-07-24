@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 
 class _Colors {
   static const bg = Color(0xFFF2F4FB);
@@ -82,7 +83,7 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: _Colors.bg,
       appBar: AppBar(
         backgroundColor: _Colors.bg,
@@ -150,7 +151,7 @@ class _QuickUnlockSetupScreenState extends State<QuickUnlockSetupScreen> {
                 ),
               ],
             ),
-    );
+    ));
   }
 
   Widget _card(List<Widget> children) {
@@ -208,7 +209,7 @@ class _PatternSetupFlowState extends State<_PatternSetupFlow> {
   @override
   Widget build(BuildContext context) {
     final title = _first == null ? 'Draw a new pattern' : 'Confirm your pattern';
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: _Colors.bg,
       appBar: AppBar(
         backgroundColor: _Colors.bg,
@@ -230,6 +231,6 @@ class _PatternSetupFlowState extends State<_PatternSetupFlow> {
           ],
         ),
       ),
-    );
+    ));
   }
 }

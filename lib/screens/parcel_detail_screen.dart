@@ -13,6 +13,7 @@ import 'field_findings_screen.dart';
 import 'review_submit_screen.dart';
 import 'inspection_progress.dart';
 import '../providers/inspection_provider.dart';
+import '../widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -220,7 +221,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
 
     final isReworkMode = context.watch<InspectionProvider>().isReworkMode;
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
       bottomNavigationBar: isReworkMode
           ? SafeArea(
@@ -432,7 +433,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   Widget _sectionShell({required int step, required String title, required Widget child}) {

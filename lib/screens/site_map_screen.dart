@@ -15,6 +15,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -209,7 +210,7 @@ final online = connectivityResult is List
     final task = widget.task;
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -413,7 +414,7 @@ final online = connectivityResult is List
           ),
         ],
       ),
-    );
+    ));
   }
 }
 

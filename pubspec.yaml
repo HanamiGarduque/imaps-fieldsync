@@ -67,6 +67,8 @@ dependencies:
 
   app_links: ^6.0.0
 
+  screen_protector: ^1.5.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -92,3 +94,6 @@ flutter_launcher_icons:
 
 dependency_overrides:
   path_provider_foundation: 2.4.2
+
+
+  

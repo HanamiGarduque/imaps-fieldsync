@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'supabase_service.dart';
 
 /// Manages the device-local "quick unlock" configuration: whether
 /// pattern unlock is enabled, and the salted hash of the pattern (the
@@ -56,19 +57,29 @@ class QuickUnlockService {
     await _storage.write(key: _kPatternHash, value: hash);
     await _storage.write(key: _kPatternEnabled, value: 'true');
     await _storage.write(key: _kBoundEmail, value: _norm(email));
+
+    // Fire-and-forget: this only succeeds while there's a live Supabase
+    // session (log_security_event is keyed off auth.uid()), which is the
+    // normal case here since pattern setup happens from Security Settings.
+    SupabaseService.logSecurityEvent(eventType: 'pattern_enable', severity: 'info');
   }
 
   static Future<bool> verifyPattern(List<int> pattern) async {
     final salt = await _storage.read(key: _kPatternSalt);
     final storedHash = await _storage.read(key: _kPatternHash);
     if (salt == null || storedHash == null) return false;
-    return _hashPattern(pattern, salt) == storedHash;
+    final ok = _hashPattern(pattern, salt) == storedHash;
+    if (!ok) {
+      SupabaseService.logSecurityEvent(eventType: 'pattern_verify_failed', severity: 'warning');
+    }
+    return ok;
   }
 
   static Future<void> disablePattern() async {
     await _storage.delete(key: _kPatternEnabled);
     await _storage.delete(key: _kPatternHash);
     await _storage.delete(key: _kPatternSalt);
+    SupabaseService.logSecurityEvent(eventType: 'pattern_disable', severity: 'info');
   }
 
   /// Wipe everything — call this on sign-out / switch-account so the

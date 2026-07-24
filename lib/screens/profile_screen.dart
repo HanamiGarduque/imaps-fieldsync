@@ -168,6 +168,12 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     // 2. Fire-and-forget background session sign-out
     // Note: We preserve biometric enrollment settings on the device so that
     // when the user logs back in, their Security & Protection settings remain active.
+    //
+    // Audit log must fire BEFORE signOut() — log_security_event is a
+    // SECURITY DEFINER RPC keyed off auth.uid(), so it silently no-ops
+    // once there's no authenticated session to attribute the event to.
+    SupabaseService.logSecurityEvent(eventType: 'logout', severity: 'info')
+        .catchError((e) => debugPrint('[SIGNOUT] logSecurityEvent error: $e'));
     AuthService.signOut().catchError((e) => debugPrint('[SIGNOUT] AuthService.signOut error: $e'));
   }
 

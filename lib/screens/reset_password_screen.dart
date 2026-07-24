@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
+import '../services/supabase_service.dart';
 import 'splash_screen.dart' show LoginScreen;
 
 /// Lands here after the inspector taps the reset link from their email.
@@ -48,11 +49,21 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Passcode updated. Please sign in again.')),
       );
-      // Full auth teardown after password reset
-      await AuthService.signOut();
+      // Full auth teardown after password reset.
+      // Order matters: log_security_event / syncInspectorDevice are keyed
+      // off auth.uid(), so anything that logs has to run BEFORE signOut()
+      // clears the session — clearEnrollment() already tries to log
+      // 'biometric_disable' internally, so it needs to come first too
+      // (previously it ran after signOut() and silently never logged).
+      await SupabaseService.logSecurityEvent(
+        eventType: 'logout',
+        severity: 'info',
+        metadata: {'reason': 'password_reset'},
+      );
       await QuickUnlockService.clearAll();
       await BiometricService.clearEnrollment();
       await SecurePrefsService.clearAll();
+      await AuthService.signOut();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),

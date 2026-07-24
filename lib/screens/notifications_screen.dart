@@ -8,6 +8,7 @@ import '../services/supabase_service.dart';
 import '../services/db_helper.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -304,7 +305,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final visible = _visibleActivity;
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
@@ -427,7 +428,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           ),
         ],
       ),
-    );
+    ));
   }
 
   Widget _buildActivityList(List<Map<String, dynamic>> visible) {

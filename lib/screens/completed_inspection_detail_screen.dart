@@ -14,6 +14,7 @@ import 'capture_photo_screen.dart' hide InsightTheme;
 import 'field_findings_screen.dart' hide InsightTheme;
 import 'review_submit_screen.dart' hide InsightTheme;
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
@@ -136,7 +137,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
       appBar: AppBar(
         backgroundColor: InsightTheme.surface,
@@ -159,7 +160,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                   ),
                 )
               : _buildBody(_fullTask!),
-    );
+    ));
   }
 
   Widget _buildBody(TaskItem task) {

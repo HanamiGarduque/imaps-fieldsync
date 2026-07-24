@@ -17,6 +17,7 @@ import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 import '../widgets/exit_confirm_dialog.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -177,7 +178,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   void dispose() { _notesController.dispose(); _cameraController?.dispose(); super.dispose(); }
 
   @override
-  Widget build(BuildContext context) => _isCameraMode ? _buildCameraMode() : _buildGridMode();
+  Widget build(BuildContext context) => SensitiveScreen(child: _isCameraMode ? _buildCameraMode() : _buildGridMode());
 
   Widget _buildGridMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);

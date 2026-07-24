@@ -10,10 +10,12 @@ import '../services/biometric_service.dart';
 import '../services/notification_service.dart';
 import '../services/secure_prefs_service.dart';
 import '../services/quick_unlock_service.dart';
+import '../services/supabase_service.dart';
 import '../widgets/pattern_lock_pad.dart';
 import 'main_shell_screen.dart';
 import 'quick_unlock_screen.dart';
 import '../widgets/imaps_loading_indicator.dart';
+import '../widgets/sensitive_screen.dart';
 
 // ==================================================================
 // DESIGN TOKENS
@@ -420,6 +422,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (profile != null) {
+        SupabaseService.logSecurityEvent(eventType: 'login_success', severity: 'info');
+
         // Persist email & encrypted secret for pre-fill and biometric auto-login
         await SecurePrefsService.setSavedEmail(_emailController.text.trim());
         await SecurePrefsService.setBioSecret(_passwordController.text);
@@ -508,7 +512,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
-    return Scaffold(
+    return SensitiveScreen(child: Scaffold(
       backgroundColor: AppColors.bg,
       body: Stack(
         children: [
@@ -691,7 +695,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   Widget _buildFieldLabel(String text) =>

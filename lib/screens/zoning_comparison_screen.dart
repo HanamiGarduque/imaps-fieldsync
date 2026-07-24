@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/insight_theme.dart';
 import '../widgets/insight_widgets.dart';
+import '../widgets/sensitive_screen.dart';
 import 'inspection_result_screen.dart';
 
 /// ==================================================================
@@ -13,7 +14,7 @@ class ZoningComparisonScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InsightScaffold(
+    return SensitiveScreen(child: InsightScaffold(
       topBar: const InsightTopBar(title: 'Zoning comparison'),
       stepBar: const InsightStepBar(currentStep: 4, stepNumber: '04', caption: 'Findings'),
       body: ListView(
@@ -55,6 +56,6 @@ class ZoningComparisonScreen extends StatelessWidget {
           onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const InspectionResultScreen())),
         ),
       ),
-    );
+    ));
   }
 }

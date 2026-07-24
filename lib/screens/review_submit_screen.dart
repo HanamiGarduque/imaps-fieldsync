@@ -11,6 +11,7 @@ import 'inspection_progress.dart';
 import 'tasks_screen.dart'; 
 import '../models/user_profile.dart';
 import '../widgets/exit_confirm_dialog.dart';
+import '../widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -132,7 +133,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
     final effectiveTotal = checklistTotal > 0 ? checklistTotal : widget.checklistTotal;
     final effectiveDone = checklistTotal > 0 ? checklistDone : widget.checklistDone;
 
-    return PopScope(
+    return SensitiveScreen(child: PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
@@ -246,7 +247,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
         ],
       ),
       ),
-    );
+    ));
   }
 }
 
