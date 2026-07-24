@@ -116,6 +116,40 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   void _retakePhoto() => setState(() => _capturedPhotoPath = null);
 
+  void _confirmRemovePhoto(int index) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove this photo?'),
+        content: const Text('This photo will be removed from the inspection. This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _removePhoto(index);
+            },
+            child: const Text('Remove', style: TextStyle(color: Color(0xFFD1293D))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _removePhoto(int index) {
+    if (index < 0 || index >= _capturedPhotos.length) return;
+    setState(() => _capturedPhotos.removeAt(index));
+    // Screen-local `_capturedPhotos` and InspectionProvider's own list have
+    // been kept in lockstep — appended together in _savePhotoAndReturnToGrid
+    // and seeded together in initState — so the same index is safe to
+    // remove from both. The provider call also handles cleaning up the
+    // local_photos DB row and any already-synced Supabase copy.
+    context.read<InspectionProvider>().removePhoto(index);
+  }
+
   void _savePhotoAndReturnToGrid() {
     if (_capturedPhotos.length >= maxPhotos) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Max $maxPhotos photos reached.', style: InsightTheme.inter(13, c: Colors.white)), backgroundColor: InsightTheme.ink));
@@ -219,7 +253,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1),
                     itemCount: _capturedPhotos.length + (_capturedPhotos.length < maxPhotos ? 1 : 0),
                     itemBuilder: (context, index) {
-                      if (index < _capturedPhotos.length) return _PhotoCell(photoPath: _capturedPhotos[index]['photoPath'] as String);
+                      if (index < _capturedPhotos.length) {
+                        return _PhotoCell(
+                          photoPath: _capturedPhotos[index]['photoPath'] as String,
+                          onRemove: () => _confirmRemovePhoto(index),
+                        );
+                      }
                       return _AddPhotoCell(onTap: () => setState(() => _isCameraMode = true));
                     },
                   ),
@@ -415,7 +454,8 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
 class _PhotoCell extends StatelessWidget {
   final String photoPath;
-  const _PhotoCell({required this.photoPath});
+  final VoidCallback onRemove;
+  const _PhotoCell({required this.photoPath, required this.onRemove});
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -424,14 +464,37 @@ class _PhotoCell extends StatelessWidget {
         image: DecorationImage(image: FileImage(File(photoPath)), fit: BoxFit.cover),
         boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 4, offset: Offset(0, 2))],
       ),
-      alignment: Alignment.bottomLeft,
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(6)),
-          child: Text('Captured', style: InsightTheme.jetBrains(9, c: Colors.white)),
-        ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0, right: 0, bottom: 0,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(6)),
+                  child: Text('Captured', style: InsightTheme.jetBrains(9, c: Colors.white)),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 6, right: 6,
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.mediumImpact();
+                onRemove();
+              },
+              child: Container(
+                width: 26, height: 26,
+                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.65), shape: BoxShape.circle),
+                child: const Icon(Icons.close_rounded, size: 16, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

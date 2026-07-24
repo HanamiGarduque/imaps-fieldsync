@@ -196,9 +196,50 @@ class InspectionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void removePhoto(int index) {
+  /// Removes one captured photo — from the in-memory list, from
+  /// local_photos if it was already persisted there, and (best-effort)
+  /// from Supabase if it was already synced there too.
+  ///
+  /// FIX (2026-07-23) — "no remove photo" usability gap: this method
+  /// existed before but was never called from any screen, and only ever
+  /// removed the in-memory entry — a photo already saved via
+  /// `saveStepPhotos()` would still be sitting in `local_photos` and
+  /// potentially already uploaded to Supabase, so it would silently
+  /// reappear/re-count on the next save even after being "removed" from
+  /// the grid. Now properly wired to the Photos step's per-cell delete
+  /// button, and cleans up all three layers.
+  Future<void> removePhoto(int index) async {
+    if (index < 0 || index >= _capturedPhotos.length) return;
+    final photo = _capturedPhotos[index];
     _capturedPhotos.removeAt(index);
     notifyListeners();
+
+    final photoId = photo['id'] as String?;
+    final photoPath = photo['photoPath'] as String?;
+    if (photoId != null) {
+      try {
+        await DBHelper.deleteLocalPhoto(photoId);
+      } catch (e) {
+        debugPrint('removePhoto: local delete failed — $e');
+      }
+    }
+    if (photoPath != null && _activeTask != null) {
+      // Best-effort — if this photo was never actually uploaded (e.g.
+      // removed before ever going online), these calls just no-op rather
+      // than error. If the device is offline right now, this silently
+      // fails and an already-synced copy may be left behind in Supabase
+      // as a known limitation — there's no delete-outbox action yet to
+      // retry this later. Acceptable for now since the common case is
+      // removing a photo shortly after taking it, before it's synced.
+      try {
+        await SupabaseService.deleteInspectionPhoto(
+          jobId: _activeTask!.id,
+          localPath: photoPath,
+        );
+      } catch (e) {
+        debugPrint('removePhoto: Supabase cleanup failed — $e');
+      }
+    }
   }
 
   // --- FINDINGS METHODS ---

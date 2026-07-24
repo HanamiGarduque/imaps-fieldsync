@@ -443,6 +443,34 @@ class SupabaseService {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
+  /// Best-effort cleanup of one photo that was already synced to Supabase —
+  /// added alongside the new "remove photo" feature on the Photos step.
+  /// Derives the exact same storage path / row id that
+  /// `uploadInspectionPhotos()` would have used for this local file (same
+  /// `_stablePhotoKey()` + Uuid v5 scheme), so it targets precisely the
+  /// object this photo would have created, nothing else. Safe to call even
+  /// if the photo was never actually uploaded (e.g. removed before ever
+  /// going online) — storage/table deletes on a non-existent object are
+  /// no-ops, not errors, so this doesn't need to know sync status upfront.
+  static Future<void> deleteInspectionPhoto({
+    required String jobId,
+    required String localPath,
+  }) async {
+    final photoKey = _stablePhotoKey(localPath);
+    final storagePath = 'inspections/$jobId/photo_$photoKey.jpg';
+    final rowId = const Uuid().v5(Uuid.NAMESPACE_URL, storagePath);
+    try {
+      await client.storage.from('inspection-photos').remove([storagePath]);
+    } catch (e) {
+      debugPrint('deleteInspectionPhoto: storage remove skipped — $e');
+    }
+    try {
+      await client.from('field_job_photos').delete().eq('id', rowId);
+    } catch (e) {
+      debugPrint('deleteInspectionPhoto: row delete skipped — $e');
+    }
+  }
+
   static Future<List<String>> uploadInspectionPhotos({
     required String jobId,
     required List<Map<String, dynamic>>

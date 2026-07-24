@@ -396,90 +396,145 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     );
   }
 
-  /// Phase 8 (Selective Sync). Same card rendering as before, plus one
-  /// "Sync This Inspection" button per *job* (not per row) — a job can
-  /// have several pending action rows (checklist_update, current_step,
-  /// submit_inspection...) but only needs one button, shown on the first
-  /// row for that job, to avoid a wall of duplicate buttons for the same
-  /// inspection. Conflict rows keep their own existing "Review changes" /
-  /// "Force sync anyway" buttons instead — Selective Sync doesn't apply
-  /// to a row that already needs manual conflict review.
+  /// Phase 8 (Selective Sync) + visual grouping fix (2026-07-23).
+  ///
+  /// A job can have several independent pending action rows (GPS confirm,
+  /// checklist update, current_step update, submit_inspection) — each is
+  /// its own row in `pending_actions` by design (see roadmap Phase 0), but
+  /// previously they rendered as N separate, unrelated-looking cards with
+  /// the "Sync This Inspection" button floating as a plain text link above
+  /// the first one — nothing visually tied the button, or the rows
+  /// themselves, together as belonging to one inspection. Inspectors
+  /// reasonably read this as 4 unrelated things instead of 1 inspection
+  /// with 4 pending pieces.
+  ///
+  /// This groups all of a job's rows inside one shared, clearly-bordered
+  /// container, with a small group header naming the inspection once, and
+  /// the "Sync This Inspection" (or conflict) action(s) anchored inside
+  /// that same container — so it's unambiguous which rows an action
+  /// applies to.
   List<Widget> _buildPendingCards() {
-    final seenJobIds = <String>{};
-    return _pendingRows.asMap().entries.map((entry) {
-      final i = entry.key;
-      final row = entry.value;
+    // Group rows by job_id, preserving the order each job first appears in.
+    final order = <String>[];
+    final grouped = <String, List<Map<String, dynamic>>>{};
+    for (final row in _pendingRows) {
       final jobId = row['job_id'] as String;
-      final isConflict = row['status'] == 'conflict';
-      final isFirstForJob = seenJobIds.add(jobId); // true only the first time
+      if (!grouped.containsKey(jobId)) order.add(jobId);
+      grouped.putIfAbsent(jobId, () => []).add(row);
+    }
+  
+    var flatIndex = 0;
+    return order.map((jobId) {
+      final rows = grouped[jobId]!;
+      final groupIndex = flatIndex;
+      flatIndex++;
+      final hasConflict = rows.any((r) => r['status'] == 'conflict');
       final isSyncingThisJob = _syncingJobId == jobId;
 
       return LinkedListSlide(
-        key: ValueKey('linked_pending_${row['id']}'),
-        index: i,
+        key: ValueKey('linked_group_$jobId'),
+        index: groupIndex,
         child: Padding(
           padding: const EdgeInsets.only(bottom: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              UpdatingTile(
-                itemKey: row['id'] ?? i,
-                signature: Object.hash(row['status'], row['type']),
-                child: _LogDataRow(
-                  icon: _iconFor(row['type'] as String),
-                  title: _jobLabel(jobId),
-                  dataType: _typeLabel(row),
-                  dataSize: _dataSizeFor(row),
-                  statusText: isSyncingThisJob
-                      ? 'Syncing…'
-                      : _statusTextFor(row),
-                  isPending: true,
-                  isFailed: row['status'] == 'failed',
-                  isConflict: isConflict,
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface2,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: InsightTheme.line, width: 1),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_copy_outlined, size: 15, color: InsightTheme.ink2),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _jobLabel(jobId),
+                          style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink2),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        rows.length == 1 ? '1 item' : '${rows.length} items',
+                        style: InsightTheme.jetBrains(10, c: InsightTheme.ink3),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              if (isConflict) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => _handleReviewConflict(row),
-                      child: const Text('Review changes'),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => _handleForceSync(row),
-                      child: const Text('Force sync anyway'),
-                    ),
-                  ],
-                ),
-              ] else if (isFirstForJob) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: (_syncingNow || _syncingJobId != null)
-                          ? null
-                          : () => _handleSyncThisInspection(jobId),
-                      icon: isSyncingThisJob
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.sync_rounded, size: 16),
-                      label: Text(
-                        isSyncingThisJob ? 'Syncing…' : 'Sync This Inspection',
+                for (final row in rows) ...[
+                  UpdatingTile(
+                    itemKey: row['id'] ?? row.hashCode,
+                    signature: Object.hash(row['status'], row['type']),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _LogDataRow(
+                        icon: _iconFor(row['type'] as String),
+                        title: _typeLabel(row),
+                        dataType: _shortTypeTag(row),
+                        dataSize: _dataSizeFor(row),
+                        statusText: (isSyncingThisJob && row['status'] != 'conflict')
+                            ? 'Syncing…'
+                            : _statusTextFor(row),
+                        isPending: true,
+                        isFailed: row['status'] == 'failed',
+                        isConflict: row['status'] == 'conflict',
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
+                if (hasConflict) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => _handleReviewConflict(
+                          rows.firstWhere((r) => r['status'] == 'conflict'),
+                        ),
+                        child: const Text('Review changes'),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => _handleForceSync(
+                          rows.firstWhere((r) => r['status'] == 'conflict'),
+                        ),
+                        child: const Text('Force sync anyway'),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: (_syncingNow || _syncingJobId != null)
+                            ? null
+                            : () => _handleSyncThisInspection(jobId),
+                        icon: isSyncingThisJob
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.sync_rounded, size: 16),
+                        label: Text(
+                          isSyncingThisJob ? 'Syncing…' : 'Sync This Inspection',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       );
     }).toList();
+  }
   }
 
   String _jobLabel(String jobId) {
@@ -535,6 +590,21 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         return 'Full Submission — $n photo(s) + Findings';
       default:
         return type;
+    }
+  }
+
+  String _shortTypeTag(Map<String, dynamic> row) {
+    switch (row['type'] as String) {
+      case 'gps_confirm':
+        return 'GPS check-in';
+      case 'checklist_update':
+        return 'Checklist';
+      case 'current_step_update':
+        return 'Step progress';
+      case 'submit_inspection':
+        return 'Final submission';
+      default:
+        return 'Update';
     }
   }
 

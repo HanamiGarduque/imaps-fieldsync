@@ -345,6 +345,18 @@ class DBHelper {
     );
   }
 
+  /// Removes one photo's row from local_photos, if it was ever persisted
+  /// there. Added alongside the "remove photo" feature on the Photos step
+  /// — a photo the inspector removes before submitting was previously
+  /// impossible to un-persist, since local_photos had no delete path at
+  /// all (only insert-or-replace and mark-synced). Safe to call even if
+  /// the photo was never saved to SQLite yet (in-memory only) — deletes
+  /// zero rows in that case.
+  static Future<void> deleteLocalPhoto(String photoId) async {
+    final db = await database;
+    await db.delete('local_photos', where: 'id = ?', whereArgs: [photoId]);
+  }
+
   // --- PENDING ACTIONS OUTBOX (FieldSync) ---
   //
   // One generic queue for every offline-capable write, instead of
