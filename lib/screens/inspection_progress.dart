@@ -119,8 +119,10 @@ class InspectionProgress extends ChangeNotifier {
       // in Supabase could stay stuck at 0 (or any earlier value)
       // indefinitely even after the inspector had clearly moved forward,
       // online or offline — this function is the one every screen actually
-      // calls (via InspectionProgress.instance.markStepComplete()), not
-      // InspectionProvider.updateStep(), which turned out to be unused.
+      // calls (via InspectionProgress.instance.markStepComplete()).
+      // (2026-07-24: the old duplicate persistence path,
+      // InspectionProvider.updateStep(), was confirmed unused and removed —
+      // this is now the only writer of current_step.)
       debugPrint('_persistCurrentStep (Supabase) failed, queuing for retry — $e');
       try {
         await SyncOutboxService.enqueueCurrentStepUpdate(jobId: taskId, step: step);
@@ -133,12 +135,36 @@ class InspectionProgress extends ChangeNotifier {
   /// Makes sure progress belongs to the task currently open. If the
   /// inspector opens a different task, progress starts fresh instead of
   /// carrying over from whatever they were last inspecting.
+  ///
+  /// FIX (2026-07-24) — Finding B (Pending audit): this used to only reset
+  /// `_highestCompleted` when `taskId` differed from whatever was already
+  /// active. Since this singleton's `_activeTaskId` is never cleared just by
+  /// backing out of the hub screen (only `reset()` does, called from the
+  /// review/submit screen), re-opening the SAME task a second time in one
+  /// app session — without opening a different task in between — hit the
+  /// `_activeTaskId == taskId` case and silently kept whatever stale
+  /// in-memory `_highestCompleted` was left over, ignoring the freshly
+  /// re-fetched `initialStep` entirely. That could show the wrong current
+  /// step if the real progress had changed in the meantime (a sync from
+  /// another device, or a rework flow completing steps) — a direct
+  /// violation of "status must depend only on stored data, never the
+  /// screen/session." Now every call with a non-null `initialStep` — i.e.
+  /// every real entry into the hub screen — re-syncs from that fresh value,
+  /// whether or not the task id changed. `initialStep` is itself derived
+  /// from `task.currentStep`/`derivedHighestStep`, which are already kept
+  /// current by the Bug 1 fix, so trusting it here is exactly "always read
+  /// from the database, not from what the UI happened to have in memory."
   void ensureActiveInspection(String taskId, {String? label, int? initialStep}) {
-    if (_activeTaskId != taskId) {
-      _activeTaskId = taskId;
-      _highestCompleted = initialStep ?? 0;
-    }
+    final isDifferentTask = _activeTaskId != taskId;
+    _activeTaskId = taskId;
     _activeTaskLabel = label ?? _activeTaskLabel;
+    if (initialStep != null) {
+      _highestCompleted = initialStep;
+    } else if (isDifferentTask) {
+      // No fresh step data supplied — fall back to "different task, start
+      // fresh" rather than carrying over the previous task's progress.
+      _highestCompleted = 0;
+    }
   }
 
   void reset() {

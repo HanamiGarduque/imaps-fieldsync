@@ -468,7 +468,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                     SpringSlide(
                       animation: springFor(5),
                       beginOffset: const Offset(0, 36),
-                      child: _QuickActionBtn(icon: Icons.calendar_month_rounded, label: 'Schedule', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabScheduled)))),
+                      child: _QuickActionBtn(icon: Icons.calendar_month_rounded, label: 'Schedule', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile, initialTabIndex: TasksScreen.tabPending, scrollToScheduled: true)))),
                     ),
                     SpringSlide(
                       animation: springFor(6),

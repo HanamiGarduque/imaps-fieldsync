@@ -7,7 +7,6 @@ import 'package:uuid/uuid.dart';
 
 import '../services/supabase_service.dart';
 import '../services/db_helper.dart';
-import '../services/sync_outbox_service.dart';
 import '../screens/tasks_screen.dart'; // To access TaskItem class
 
 class InspectionProvider extends ChangeNotifier {
@@ -90,64 +89,18 @@ class InspectionProvider extends ChangeNotifier {
   notifyListeners();
 }
 
-  Future<void> updateStep(int step) async {
-  _currentStep = step;
-  notifyListeners();
-
-  if (_activeTask == null) return;
-
-  // Persist to SQLite immediately — survives app restart, task switching,
-  // and internet loss. This is the core fix for Bug 1.
-  final draft = await DBHelper.getLocalInspection(_activeTask!.id);
-  if (draft != null) {
-    final db = await DBHelper.database;
-    await db.update(
-      'local_inspections',
-      {
-        'current_step': step,
-        'updated_at': DateTime.now().toIso8601String(),
-      },
-      where: 'id = ?',
-      whereArgs: [_activeTask!.id],
-    );
-  }
-
-  // Also push to Supabase if online — falls back to the offline outbox
-  // if it's not (or the request fails anyway), so the step is guaranteed
-  // to reach Supabase eventually instead of being silently lost.
-  //
-  // RE-FIX (2026-07-23): this outbox fallback was previously implemented
-  // (Phase 1 audit item #9) but was found reverted back to the old
-  // best-effort-only version — likely from an older inspection_provider.dart
-  // getting merged back in during unrelated work elsewhere. The
-  // `current_step_update` action type + `enqueueCurrentStepUpdate()` in
-  // SyncOutboxService were never removed, only this call site was — so
-  // this re-fix is just reconnecting the two, not rebuilding anything.
-  try {
-    final isConnected = await _checkConnectivity();
-    if (isConnected) {
-      await SupabaseService.updateJobInspectionProgress(
-        jobId: _activeTask!.id,
-        updateData: {'current_step': step},
-      );
-    } else {
-      await SyncOutboxService.enqueueCurrentStepUpdate(
-        jobId: _activeTask!.id,
-        step: step,
-      );
-    }
-  } catch (e) {
-    debugPrint('updateStep: direct Supabase push failed, queuing for retry — $e');
-    try {
-      await SyncOutboxService.enqueueCurrentStepUpdate(
-        jobId: _activeTask!.id,
-        step: step,
-      );
-    } catch (e2) {
-      debugPrint('updateStep: failed to queue current_step update — $e2');
-    }
-  }
-}
+  // NOTE (removed 2026-07-24): this class used to have an updateStep(int)
+  // method that duplicated current_step persistence (SQLite + Supabase +
+  // outbox fallback). Audit confirmed no screen ever called it — the only
+  // live path is InspectionProgress.instance.markStepComplete(), which has
+  // its own equivalent persistence in inspection_progress.dart's
+  // _persistCurrentStep(). Removed instead of "re-fixing" again, since a
+  // dead duplicate is a bigger long-term risk (someone edits the wrong copy)
+  // than having only one source of truth for current_step writes.
+  // If InspectionProvider ever needs to react to step changes (e.g. to
+  // recompute checklist/photo state), read from
+  // InspectionProgress.instance.currentStep instead of re-adding a second
+  // writer.
 
   // --- CHECKLIST UPDATE METHODS ---
 

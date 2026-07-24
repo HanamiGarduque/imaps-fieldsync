@@ -275,15 +275,33 @@ class TasksScreen extends StatefulWidget {
 
   /// Which segment tab to land on when this screen mounts.
   /// Use the `TasksScreen.tab*` constants instead of raw ints so
-  /// callers stay readable and in sync with `_tabOrder`.
+  /// callers stay readable and in sync with `_visibleTabOrder`.
   final int initialTabIndex;
 
+  // Phase 3 (My Tasks status architecture): "Scheduled" is no longer its
+  // own segment tab — it's now a section header inside Pending (see
+  // `_categorizeAndFilter` / `_visibleTabOrder`). TaskItem.category still
+  // returns 'Scheduled' as its own value (unchanged) so callers outside
+  // this screen — e.g. ActiveAssignmentsFolderCard's status coloring on
+  // the Home dashboard — keep working exactly as before; only this
+  // screen's tab layout changed.
   static const int tabPending = 0;
   static const int tabOngoing = 1;
-  static const int tabScheduled = 2;
-  static const int tabCompleted = 3;
+  static const int tabCompleted = 2;
 
-  const TasksScreen({super.key, required this.profile, this.initialTabIndex = tabOngoing, this.showBottomNav = true});
+  /// When true, mounts on the Pending tab and auto-scrolls to the
+  /// "Scheduled" section header once tasks finish loading — used by the
+  /// Home dashboard's "Schedule" quick action, which used to jump straight
+  /// to the now-removed standalone Scheduled tab.
+  final bool scrollToScheduled;
+
+  const TasksScreen({
+    super.key,
+    required this.profile,
+    this.initialTabIndex = tabOngoing,
+    this.showBottomNav = true,
+    this.scrollToScheduled = false,
+  });
   final bool showBottomNav;
 
   @override
@@ -301,7 +319,15 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   DateTime? _customEndDate;
   String _selectedBarangay = 'All Barangays';
 
+  // Internal categorization/sorting still uses all 4 real categories —
+  // TaskItem.category is unchanged. Only the visible segment tabs (below)
+  // collapse Scheduled into Pending.
   static const _tabOrder = ['Pending', 'Ongoing', 'Scheduled', 'Completed'];
+  // What's actually shown as segment tabs, post-Phase-3.
+  static const _visibleTabOrder = ['Pending', 'Ongoing', 'Completed'];
+
+  final GlobalKey _scheduledSectionKey = GlobalKey();
+  bool _pendingScrollToScheduled = false;
 
   List<TaskItem> _allTasks = [];
   bool _isLoading = true;
@@ -310,7 +336,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _currentTabIndex = widget.initialTabIndex;
+    _currentTabIndex = widget.scrollToScheduled ? TasksScreen.tabPending : widget.initialTabIndex;
+    _pendingScrollToScheduled = widget.scrollToScheduled;
     _loadTasks();
     _searchController.addListener(() {
       setState(() {
@@ -324,6 +351,48 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     _searchController.dispose();
     disposeSpringEntrance();
     super.dispose();
+  }
+
+  /// Runs once after the first frame where the Scheduled section actually
+  /// has content to scroll to — skips silently (and un-arms itself) if the
+  /// inspector has no scheduled tasks, since there's nothing to show.
+  void _maybeScrollToScheduledSection() {
+    if (!_pendingScrollToScheduled) return;
+    _pendingScrollToScheduled = false; // one-shot, regardless of outcome
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _scheduledSectionKey.currentContext;
+      if (ctx == null || !mounted) return;
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        alignment: 0.0,
+      );
+    });
+  }
+
+  /// Renders one task row exactly as before — factored out so both the
+  /// flat tabs (Ongoing/Completed) and the headed Pending tab build the
+  /// identical card/animation wrapper, byte-for-byte with the pre-Phase-3
+  /// version.
+  Widget _buildTaskRow(BuildContext context, TaskItem task, int index) {
+    return LinkedListSlide(
+      key: ValueKey('linked_tab_${_currentTabIndex}_${task.id}'),
+      index: index,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: UpdatingTile(
+          itemKey: task.id,
+          signature: Object.hash(task.status, task.scheduledDate, task.deadlineDate),
+          child: _CompactTaskCard(
+            key: ValueKey(task.id),
+            task: task,
+            onTapDetail: () => _openTask(context, task),
+            onScheduled: _loadTasks,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadTasks() async {
@@ -345,6 +414,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             _allTasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
             _isLoading = false;
           });
+          _maybeScrollToScheduledSection();
         }
       } else {
         final localJobs = await DBHelper.getCachedJobs();
@@ -386,6 +456,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             }).toList();
             _isLoading = false;
           });
+          _maybeScrollToScheduledSection();
         }
       }
     } catch (e) {
@@ -750,8 +821,14 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     final scheduled = categorized['Scheduled'] ?? [];
     final completed = categorized['Completed'] ?? [];
 
-    final selectedCategory = _tabOrder[_currentTabIndex];
-    final selectedTasks = categorized[selectedCategory] ?? [];
+    final selectedCategory = _visibleTabOrder[_currentTabIndex];
+    final bool isPendingTab = selectedCategory == 'Pending';
+    // Phase 3: Pending tab now shows both real-Pending and Scheduled tasks
+    // together, split into two headed sections below — but as one combined
+    // list for the empty-state check and non-Pending tabs.
+    final selectedTasks = isPendingTab
+        ? [...scheduled, ...pending]
+        : (categorized[selectedCategory] ?? []);
 
     final bool hasActiveFilters = _selectedBarangay != 'All Barangays' || _datePreset != null;
 
@@ -927,10 +1004,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                       padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
                                       child: Row(
                                         children: [
-                                          _SegmentTab(text: "Pending", count: pending.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                                          _SegmentTab(text: "Pending", count: pending.length + scheduled.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
                                           _SegmentTab(text: "Ongoing", count: ongoing.length, isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
-                                          _SegmentTab(text: "Scheduled", count: scheduled.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
-                                          _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 3, onTap: () => setState(() => _currentTabIndex = 3)),
+                                          _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
                                         ],
                                       ),
                                     ),
@@ -959,7 +1035,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                   ),
                                   const SizedBox(height: 16),
                                   Text(
-                                    'No ${_tabOrder[_currentTabIndex].toLowerCase()} tasks found',
+                                    'No ${_visibleTabOrder[_currentTabIndex].toLowerCase()} tasks found',
                                     style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.ink),
                                   ),
                                   const SizedBox(height: 4),
@@ -980,26 +1056,51 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                             sliver: SliverList(
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
+                                  // Phase 3: within the Pending tab only, insert
+                                  // "Scheduled" / "Available Anytime" section
+                                  // headers ahead of their respective task
+                                  // groups. Other tabs render exactly as before —
+                                  // a flat list with no header rows.
+                                  if (isPendingTab) {
+                                    final hasScheduledHeader = scheduled.isNotEmpty;
+                                    final hasAvailableHeader = pending.isNotEmpty;
+                                    var cursor = index;
+                                    if (hasScheduledHeader) {
+                                      if (cursor == 0) {
+                                        return _PendingSectionHeader(
+                                          key: _scheduledSectionKey,
+                                          title: 'Scheduled',
+                                          count: scheduled.length,
+                                        );
+                                      }
+                                      cursor -= 1;
+                                      if (cursor < scheduled.length) {
+                                        return _buildTaskRow(context, scheduled[cursor], index);
+                                      }
+                                      cursor -= scheduled.length;
+                                    }
+                                    if (hasAvailableHeader) {
+                                      if (cursor == 0) {
+                                        return _PendingSectionHeader(
+                                          title: 'Available Anytime',
+                                          count: pending.length,
+                                        );
+                                      }
+                                      cursor -= 1;
+                                      return _buildTaskRow(context, pending[cursor], index);
+                                    }
+                                    // Shouldn't reach here given selectedTasks
+                                    // isn't empty, but fail safe rather than crash.
+                                    return const SizedBox.shrink();
+                                  }
                                   final task = selectedTasks[index];
-                                  return LinkedListSlide(
-                                    key: ValueKey('linked_tab_${_currentTabIndex}_${task.id}'),
-                                    index: index,
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(bottom: 8),
-                                      child: UpdatingTile(
-                                        itemKey: task.id,
-                                        signature: Object.hash(task.status, task.scheduledDate, task.deadlineDate),
-                                        child: _CompactTaskCard(
-                                          key: ValueKey(task.id), 
-                                          task: task,
-                                          onTapDetail: () => _openTask(context, task),
-                                          onScheduled: _loadTasks,
-                                        ),
-                                      ),
-                                    ),
-                                  );
+                                  return _buildTaskRow(context, task, index);
                                 },
-                                childCount: selectedTasks.length,
+                                childCount: isPendingTab
+                                    ? selectedTasks.length +
+                                        (scheduled.isNotEmpty ? 1 : 0) +
+                                        (pending.isNotEmpty ? 1 : 0)
+                                    : selectedTasks.length,
                               ),
                             ),
                           ),
@@ -1093,6 +1194,38 @@ class _DatePickerChip extends StatelessWidget {
             const Icon(Icons.calendar_today_outlined, size: 15, color: InsightTheme.ink3),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Phase 3 — simple, plain section header used inside the Pending tab to
+/// separate Scheduled tasks from Available Anytime tasks. Deliberately
+/// minimal (just a label + count) per the "no folder UI, no collapsible
+/// sections, no redesign" instruction — this replaces a whole segment tab,
+/// not a stylistic upgrade.
+class _PendingSectionHeader extends StatelessWidget {
+  final String title;
+  final int count;
+
+  const _PendingSectionHeader({super.key, required this.title, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 10),
+      child: Row(
+        children: [
+          Text(
+            title,
+            style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.ink2),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '($count)',
+            style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink3),
+          ),
+        ],
       ),
     );
   }
