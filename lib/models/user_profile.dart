@@ -26,6 +26,18 @@ class UserProfile {
     );
   }
 
+  /// Round-trips with fromMap() — used to cache the profile locally
+  /// (SecurePrefsService) so a previously-authenticated inspector can keep
+  /// working if a later profile refresh fails only because there's no
+  /// connectivity, not because the account was actually deactivated.
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'full_name': fullName,
+        'role': role,
+        'phone_number': phoneNumber,
+        'avatar_url': avatarUrl,
+        'email': email,
+      };
 
   bool get isAdmin => role == 'admin';
   bool get isInspector => role == 'inspector';

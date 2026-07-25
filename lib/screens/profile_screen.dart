@@ -11,7 +11,7 @@ import '../services/supabase_service.dart';
 import '../services/quick_unlock_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
-import 'login_screen.dart'; 
+import 'splash_screen.dart' show LoginScreen; 
 import 'home_dashboard_screen.dart';
 import 'tasks_screen.dart';
 import 'updates_screen.dart';

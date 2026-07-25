@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/user_profile.dart';
+import 'secure_prefs_service.dart';
 import 'supabase_service.dart';
 
 class AuthService {
@@ -80,5 +82,62 @@ class AuthService {
         .single();
 
     return UserProfile.fromMap(data, email: user.email);
+  }
+
+  /// True if the device currently appears to have network connectivity.
+  /// Same version-safe pattern already used elsewhere in this codebase
+  /// (gps_verification_screen.dart, site_map_screen.dart) since
+  /// connectivity_plus's checkConnectivity() return type changed between
+  /// major versions (single ConnectivityResult pre-v5, List<> from v5+).
+  static Future<bool> hasConnectivity() async {
+    final result = await Connectivity().checkConnectivity();
+    return result is List
+        ? (result as List).any((r) => r != ConnectivityResult.none)
+        : result != ConnectivityResult.none;
+  }
+
+  /// True if [error] looks like a connectivity failure rather than a
+  /// genuine server-side rejection (wrong credentials, revoked session,
+  /// deactivated account, etc.). Text-matching is a fallback signal only —
+  /// callers should check [hasConnectivity] first.
+  static bool looksLikeConnectivityError(Object error) {
+    final msg = error.toString().toLowerCase();
+    return msg.contains('socketexception') ||
+        msg.contains('failed host lookup') ||
+        msg.contains('network is unreachable') ||
+        msg.contains('connection timed out') ||
+        msg.contains('clientexception') ||
+        msg.contains('timeoutexception');
+  }
+
+  /// Like [getCurrentProfile], but falls back to the last-known-good
+  /// locally-cached profile (SecurePrefsService) if the fresh fetch fails
+  /// *specifically because there's no connectivity* — so a previously-
+  /// authenticated inspector isn't bounced back to Login just because one
+  /// network call couldn't reach the server while their session is still
+  /// perfectly valid. Refreshes the cache on every successful fetch.
+  ///
+  /// Does NOT fall back on a genuine server-side rejection (e.g. the
+  /// account row no longer exists) — that error is rethrown so the caller
+  /// treats it as a real failure, not silently masked by a stale cache.
+  static Future<UserProfile?> getCurrentProfileOfflineAware() async {
+    final user = _client.auth.currentUser;
+    if (user == null) return null;
+
+    try {
+      final profile = await getCurrentProfile();
+      if (profile != null) {
+        await SecurePrefsService.setCachedProfile(profile);
+      }
+      return profile;
+    } catch (e) {
+      final offline = !(await hasConnectivity()) || looksLikeConnectivityError(e);
+      if (!offline) rethrow;
+
+      debugPrint('[AUTH] Profile fetch failed offline, trying cache: $e');
+      final cached = await SecurePrefsService.getCachedProfile();
+      if (cached != null && cached.id == user.id) return cached;
+      rethrow; // no usable cache for this specific user — surface the real error
+    }
   }
 }

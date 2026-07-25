@@ -7,7 +7,7 @@ import '../services/quick_unlock_service.dart';
 import '../widgets/pattern_lock_pad.dart';
 import '../widgets/sensitive_screen.dart';
 import 'home_dashboard_screen.dart';
-import 'login_screen.dart';
+import 'splash_screen.dart' show LoginScreen;
 
 class _Colors {
   static const bg = Color(0xFFF2F4FB);

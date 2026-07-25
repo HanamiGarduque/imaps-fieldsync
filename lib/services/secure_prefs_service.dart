@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../models/user_profile.dart';
 
 /// Secure replacement for SharedPreferences — used only for auth-related
 /// and security-sensitive preferences. Backed by Android Keystore /
@@ -15,6 +17,7 @@ class SecurePrefsService {
   // ── Key constants ───────────────────────────────────────────────────────
   static const _kSavedEmail        = 'sp_saved_email';
   static const _kBioSecret         = 'sp_bio_secret';
+  static const _kCachedProfile     = 'sp_cached_profile';
 
   // ── Biometric enrollment ────────────────────────────────────────────────
   static const _kBioEnrolled       = 'sp_bio_enrolled';
@@ -43,6 +46,29 @@ class SecurePrefsService {
 
   static Future<void> removeBioSecret() =>
       _storage.delete(key: _kBioSecret);
+
+  // ── Cached profile (offline fallback) ───────────────────────────────────
+  // Written after every successful profile fetch. Read only as a fallback
+  // when a fresh fetch fails specifically because there's no connectivity —
+  // never used to override a genuine server-side rejection (e.g. a
+  // deactivated account), since the caller is expected to check the id
+  // matches the currently-authenticated user before trusting it.
+
+  static Future<UserProfile?> getCachedProfile() async {
+    final raw = await _storage.read(key: _kCachedProfile);
+    if (raw == null) return null;
+    try {
+      return UserProfile.fromMap(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> setCachedProfile(UserProfile profile) =>
+      _storage.write(key: _kCachedProfile, value: jsonEncode(profile.toMap()));
+
+  static Future<void> removeCachedProfile() =>
+      _storage.delete(key: _kCachedProfile);
 
 
 
@@ -96,6 +122,7 @@ class SecurePrefsService {
   /// Call on logout / account switch. Wipes all auth prefs.
   static Future<void> clearAuthPrefs() async {
     await _storage.delete(key: _kSavedEmail);
+    await _storage.delete(key: _kCachedProfile);
   }
 
   /// Call when biometric is disabled or the device changes.

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'supabase_service.dart';
 
@@ -61,7 +62,11 @@ class QuickUnlockService {
     // Fire-and-forget: this only succeeds while there's a live Supabase
     // session (log_security_event is keyed off auth.uid()), which is the
     // normal case here since pattern setup happens from Security Settings.
-    SupabaseService.logSecurityEvent(eventType: 'pattern_enable', severity: 'info');
+    // .catchError guards against Supabase not being initialized/reachable
+    // yet (logSecurityEvent already swallows its own RPC errors, but the
+    // Supabase.instance getter itself can throw before that point).
+    SupabaseService.logSecurityEvent(eventType: 'pattern_enable', severity: 'info')
+        .catchError((e) => debugPrint('[QUICK_UNLOCK] pattern_enable log error: $e'));
   }
 
   static Future<bool> verifyPattern(List<int> pattern) async {
@@ -70,7 +75,8 @@ class QuickUnlockService {
     if (salt == null || storedHash == null) return false;
     final ok = _hashPattern(pattern, salt) == storedHash;
     if (!ok) {
-      SupabaseService.logSecurityEvent(eventType: 'pattern_verify_failed', severity: 'warning');
+      SupabaseService.logSecurityEvent(eventType: 'pattern_verify_failed', severity: 'warning')
+          .catchError((e) => debugPrint('[QUICK_UNLOCK] pattern_verify_failed log error: $e'));
     }
     return ok;
   }
@@ -79,7 +85,8 @@ class QuickUnlockService {
     await _storage.delete(key: _kPatternEnabled);
     await _storage.delete(key: _kPatternHash);
     await _storage.delete(key: _kPatternSalt);
-    SupabaseService.logSecurityEvent(eventType: 'pattern_disable', severity: 'info');
+    SupabaseService.logSecurityEvent(eventType: 'pattern_disable', severity: 'info')
+        .catchError((e) => debugPrint('[QUICK_UNLOCK] pattern_disable log error: $e'));
   }
 
   /// Wipe everything — call this on sign-out / switch-account so the

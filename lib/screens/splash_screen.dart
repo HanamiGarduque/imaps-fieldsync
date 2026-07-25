@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
@@ -79,15 +80,24 @@ class _SplashScreenState extends State<SplashScreen> {
       if (AuthService.isLocalSessionExpired) {
         final refreshed = await AuthService.tryRefreshSession();
         if (!refreshed) {
-          await AuthService.signOut();
-          await _goToLogin();
-          return;
+          // Only treat this as a real logout if the refresh actually failed
+          // for a reason other than "no connectivity" — e.g. the refresh
+          // token was genuinely revoked. Offline, the refresh token itself
+          // may still be perfectly valid; we just can't reach the server
+          // to redeem it right now. Wiping in that case would lock out an
+          // inspector with an otherwise-valid session for no real reason.
+          if (await AuthService.hasConnectivity()) {
+            await AuthService.signOut();
+            await _goToLogin();
+            return;
+          }
+          debugPrint('[SPLASH] Refresh failed offline — proceeding with cached session/profile.');
         }
 
       }
 
-      // ── STEP 3: Fetch profile ─────────────────────────────────────────
-      final profile = await AuthService.getCurrentProfile();
+      // ── STEP 3: Fetch profile (offline-aware) ──────────────────────────
+      final profile = await AuthService.getCurrentProfileOfflineAware();
       if (profile == null || !mounted) {
         await _goToLogin();
         return;
@@ -269,21 +279,30 @@ class _LoginScreenState extends State<LoginScreen> {
       if (AuthService.isLocalSessionExpired) {
         final refreshed = await AuthService.tryRefreshSession();
         if (!refreshed) {
-          await AuthService.signOut();
-          await QuickUnlockService.clearAll();
-          await BiometricService.clearEnrollment();
-          await SecurePrefsService.clearAll();
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _errorMessage = 'Session unrecoverable. Please sign in with password.';
-            });
+          // Same distinction as the cold-start path: only wipe if this is a
+          // genuine revocation, not just "couldn't reach the server right
+          // now." A stolen/lost device losing biometric access the moment
+          // it goes offline would actually be the *wrong* failure mode for
+          // an offline-first field app — the wipe should be reserved for
+          // when we can positively confirm the session is actually dead.
+          if (await AuthService.hasConnectivity()) {
+            await AuthService.signOut();
+            await QuickUnlockService.clearAll();
+            await BiometricService.clearEnrollment();
+            await SecurePrefsService.clearAll();
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+                _errorMessage = 'Session unrecoverable. Please sign in with password.';
+              });
+            }
+            return;
           }
-          return;
+          debugPrint('[BIOMETRIC] Refresh failed offline — proceeding with cached session/profile.');
         }
       }
 
-      final profile = await AuthService.getCurrentProfile();
+      final profile = await AuthService.getCurrentProfileOfflineAware();
       if (!mounted) return;
 
       if (profile != null) {
@@ -324,12 +343,13 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text,
       );
       await NotificationService.registerCurrentDevice();
-      final profile = await AuthService.getCurrentProfile();
+      final profile = await AuthService.getCurrentProfileOfflineAware();
 
       if (!mounted) return;
 
       if (profile != null) {
-        SupabaseService.logSecurityEvent(eventType: 'login_success', severity: 'info');
+        SupabaseService.logSecurityEvent(eventType: 'login_success', severity: 'info')
+            .catchError((e) => debugPrint('[LOGIN] login_success log error: $e'));
 
         await SecurePrefsService.setSavedEmail(_emailController.text.trim());
 
@@ -346,8 +366,37 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       debugPrint('LOGIN ERROR: $e');
       if (mounted) {
+        // AuthService.signIn() is a network call — a connectivity failure
+        // throws here too, and was previously shown as "Invalid ID or
+        // passcode," which sends someone with a correct password and no
+        // signal down the wrong troubleshooting path entirely. Password
+        // login fundamentally requires connectivity (the password is never
+        // checked locally, only Supabase's server verifies it).
+        //
+        // Check real connectivity first (connectivity_plus is already a
+        // project dependency) rather than only guessing from the
+        // exception's message text, since that varies by platform and SDK
+        // version. Fall back to the text-based guess only if connectivity
+        // *looks* fine but the request still failed (e.g. connected to
+        // Wi-Fi with no actual internet, or a Supabase outage).
+        final connectivityResult = await Connectivity().checkConnectivity();
+        final hasConnection = connectivityResult is List
+            ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+            : connectivityResult != ConnectivityResult.none;
+        final msg = e.toString().toLowerCase();
+        final looksLikeNetworkError = msg.contains('socketexception') ||
+            msg.contains('failed host lookup') ||
+            msg.contains('network is unreachable') ||
+            msg.contains('connection timed out') ||
+            msg.contains('clientexception') ||
+            msg.contains('timeoutexception');
+
         setState(() {
-          _errorMessage = 'Invalid ID or passcode. Please try again.';
+          _errorMessage = (!hasConnection || looksLikeNetworkError)
+              ? 'No internet connection. Password sign-in needs connectivity — '
+                'try biometric or pattern unlock if you\'ve set one up, or '
+                'reconnect and try again.'
+              : 'Invalid ID or passcode. Please try again.';
         });
       }
     } finally {
