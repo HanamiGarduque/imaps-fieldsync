@@ -15,6 +15,7 @@ import 'field_findings_screen.dart' hide InsightTheme;
 import 'review_submit_screen.dart' hide InsightTheme;
 import '../widgets/imaps_loading_indicator.dart';
 import '../widgets/sensitive_screen.dart';
+import '../widgets/photo_viewer.dart';
 
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
@@ -321,7 +322,9 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         itemCount: task.photoPaths.length,
         // FIXED: Added identifiers context and index
         separatorBuilder: (context, index) => const SizedBox(width: 10),
-        itemBuilder: (_, i) => ClipRRect(
+        itemBuilder: (_, i) => GestureDetector(
+          onTap: () => openFullscreenPhotoViewer(context, task.photoPaths, i),
+          child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
           child: Image.network(
             task.photoPaths[i],
@@ -339,6 +342,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
               ),
               child: const Icon(Icons.broken_image_outlined, size: 24, color: InsightTheme.ink3),
             ),
+          ),
           ),
         ),
       ),
@@ -437,7 +441,7 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
                           color: InsightTheme.blueTint,
-                          // FIXED: Replaced 😎 with 8)
+                          // FIXED: Replaced  with 8)
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.2)),
                         ),
@@ -445,7 +449,7 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             const Icon(Icons.refresh_rounded, color: InsightTheme.blue2, size: 16),
-                            // FIXED: Replaced 😎 with 8)
+                            // FIXED: Replaced  with 8)
                             const SizedBox(width: 8),
                             Text('Rework this step', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blue2)),
                           ],

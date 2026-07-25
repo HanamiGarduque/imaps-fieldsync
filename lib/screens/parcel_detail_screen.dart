@@ -14,6 +14,7 @@ import 'review_submit_screen.dart';
 import 'inspection_progress.dart';
 import '../providers/inspection_provider.dart';
 import '../widgets/sensitive_screen.dart';
+import '../widgets/photo_viewer.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -129,13 +130,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       );
 
   void _openFullscreenPhoto(List<String> photoPaths, int startIndex) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => _FullscreenPhotoViewer(photoPaths: photoPaths, startIndex: startIndex),
-        fullscreenDialog: true,
-      ),
-    );
+    openFullscreenPhotoViewer(context, photoPaths, startIndex);
   }
 
   void _goToStep(BuildContext context, int step, WidgetBuilder builder) {
@@ -760,60 +755,6 @@ class _GlassBackButton extends StatelessWidget {
   }
 }
 
-class _FullscreenPhotoViewer extends StatefulWidget {
-  final List<String> photoPaths;
-  final int startIndex;
-  const _FullscreenPhotoViewer({required this.photoPaths, required this.startIndex});
-
-  @override
-  State<_FullscreenPhotoViewer> createState() => _FullscreenPhotoViewerState();
-}
-
-class _FullscreenPhotoViewerState extends State<_FullscreenPhotoViewer> {
-  late PageController _pageController;
-  late int _currentIndex;
-
-  @override
-  void initState() {
-    super.initState();
-    _currentIndex = widget.startIndex;
-    _pageController = PageController(initialPage: widget.startIndex);
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text('${_currentIndex + 1} / ${widget.photoPaths.length}'),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: PageView.builder(
-        controller: _pageController,
-        itemCount: widget.photoPaths.length,
-        onPageChanged: (i) => setState(() => _currentIndex = i),
-        itemBuilder: (context, i) => InteractiveViewer(
-          child: Center(
-            child: Image.network(
-              widget.photoPaths[i],
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Icon(
-                Icons.broken_image_outlined,
-                color: Colors.white38,
-                size: 48,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+// Fullscreen photo viewer moved to lib/widgets/photo_viewer.dart
+// (FullscreenPhotoViewer) so it's shared across every screen with task
+// photos, not duplicated per-screen.

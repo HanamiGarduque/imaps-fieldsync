@@ -18,6 +18,7 @@ import '../providers/inspection_provider.dart';
 import '../widgets/exit_confirm_dialog.dart';
 import '../widgets/imaps_loading_indicator.dart';
 import '../widgets/sensitive_screen.dart';
+import '../widgets/photo_viewer.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -257,6 +258,8 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                       if (index < _capturedPhotos.length) {
                         return _PhotoCell(
                           photoPath: _capturedPhotos[index]['photoPath'] as String,
+                          allPhotoPaths: _capturedPhotos.map((p) => p['photoPath'] as String).toList(),
+                          index: index,
                           onRemove: () => _confirmRemovePhoto(index),
                         );
                       }
@@ -455,14 +458,32 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
 class _PhotoCell extends StatelessWidget {
   final String photoPath;
+  final List<String> allPhotoPaths;
+  final int index;
   final VoidCallback onRemove;
-  const _PhotoCell({required this.photoPath, required this.onRemove});
+  const _PhotoCell({
+    required this.photoPath,
+    required this.allPhotoPaths,
+    required this.index,
+    required this.onRemove,
+  });
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // FIX: this cell used to always assume `photoPath` was a local device
+    // path (FileImage only). A photo rehydrated for rework
+    // (InspectionProvider.hydrateForRework) has a remote Supabase Storage
+    // URL here instead, which FileImage can't load — the thumbnail was
+    // silently blank/broken for every photo carried over into a rework
+    // session. NetworkImage for a remote URL, FileImage otherwise.
+    final ImageProvider image = isRemotePhotoPath(photoPath)
+        ? NetworkImage(photoPath)
+        : FileImage(File(photoPath)) as ImageProvider;
+    return GestureDetector(
+      onTap: () => openFullscreenPhotoViewer(context, allPhotoPaths, index),
+      child: Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16), border: Border.all(color: InsightTheme.line),
-        image: DecorationImage(image: FileImage(File(photoPath)), fit: BoxFit.cover),
+        image: DecorationImage(image: image, fit: BoxFit.cover),
         boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 4, offset: Offset(0, 2))],
       ),
       child: Stack(
@@ -496,6 +517,7 @@ class _PhotoCell extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

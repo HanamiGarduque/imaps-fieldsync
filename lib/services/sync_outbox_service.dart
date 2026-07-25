@@ -45,6 +45,8 @@ class SyncProgress {
     switch (actionType) {
       case 'gps_confirm':
         return 'Syncing GPS verification';
+      case 'mark_ongoing':
+        return 'Syncing task status';
       case 'checklist_update':
         return 'Syncing checklist';
       case 'current_step_update':
@@ -168,6 +170,32 @@ class SyncOutboxService {
       type: 'gps_confirm',
       jobId: jobId,
       payload: payload,
+    );
+  }
+
+  /// Queues the Pending/Scheduled → Ongoing status flip. Deterministic id
+  /// per job (same dedup pattern as the others) — if the inspector exits
+  /// and re-enters a couple of times while offline, each call just
+  /// overwrites the same queued row rather than piling up duplicates.
+  ///
+  /// Ongoing-phase audit fix: `markJobOngoing()` used to be the one write
+  /// in this app with no outbox fallback at all — it swallowed its own
+  /// exceptions and returned `false`, and the exit-confirm dialog then
+  /// told the inspector "Saved offline — will sync when back online" even
+  /// though nothing was actually queued. That status flip was silently
+  /// lost for good unless the inspector later passed through GPS
+  /// confirmation (which does reliably set status — see
+  /// `enqueueGpsConfirm`). No payload needed beyond the job id — the
+  /// status/started_at update itself is inherently safe to retry
+  /// (`.not('status','ilike','completed')` / `started_at is null` guards
+  /// in `markJobOngoing` already make it idempotent), so this isn't in
+  /// `_conflictSensitiveTypes`.
+  static Future<void> enqueueMarkOngoing({required String jobId}) async {
+    return DBHelper.enqueueAction(
+      id: 'mark_ongoing_$jobId',
+      type: 'mark_ongoing',
+      jobId: jobId,
+      payload: const {},
     );
   }
 
@@ -421,6 +449,8 @@ class SyncOutboxService {
     switch (actionType) {
       case 'gps_confirm':
         return 'GPS verification';
+      case 'mark_ongoing':
+        return 'Task status update';
       case 'checklist_update':
         return 'Checklist update';
       case 'current_step_update':
@@ -472,6 +502,17 @@ class SyncOutboxService {
           accuracyMeters: (payload['accuracyMeters'] as num).toDouble(),
           locationLabel: payload['locationLabel'] as String?,
         );
+        break;
+      case 'mark_ongoing':
+        // markJobOngoing() catches its own exceptions and returns a bool
+        // rather than throwing (unlike confirmGpsOnSite) — so unlike every
+        // other case here, a plain `await` wouldn't surface a failure to
+        // the drain loop's try/catch above, and the action would get
+        // marked synced even though nothing actually happened server-side.
+        // Explicitly throw on `false` so retry/failed-action handling
+        // above behaves the same as it does for every other action type.
+        final ok = await SupabaseService.markJobOngoing(jobId);
+        if (!ok) throw Exception('markJobOngoing did not succeed');
         break;
       case 'submit_inspection':
         // Photos couldn't be uploaded while this was queued (that needs a

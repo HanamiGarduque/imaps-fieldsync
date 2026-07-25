@@ -237,11 +237,19 @@ class InspectionProvider extends ChangeNotifier {
     _isReworkMode = true;
 
     // Match stored checklist entries back onto the two known maps.
-    // Expects each entry to look like {'label': ..., 'value': true/false} —
-    // adjust the keys below if your actual checklist_data shape differs.
+    // FIX (Completed/Rework audit, Finding 2): this used to read
+    // entry['label'] ?? entry['key'], but the checklist is actually
+    // written as {'item': e.key, 'checked': e.value} everywhere it's
+    // saved (submit, and every per-toggle autosave in
+    // inspection_checklist_screen.dart) — 'label'/'key' never existed,
+    // so `key` was always null here and every entry was silently
+    // skipped. Rework's checklist step always reset to the hardcoded
+    // defaults below instead of the inspector's actual prior answers,
+    // directly contradicting the rework dialog's own promise that
+    // "the rest of the submitted inspection stays as-is."
     for (final entry in task.checklistData) {
-      final key = entry['label'] ?? entry['key'];
-      final value = entry['value'] ?? entry['checked'];
+      final key = entry['item'];
+      final value = entry['checked'];
       if (key == null) continue;
       if (_siteCondition.containsKey(key)) {
         _siteCondition[key] = value == true;
@@ -254,6 +262,17 @@ class InspectionProvider extends ChangeNotifier {
     // notes/lat/lng), so those come back empty. If you want that metadata
     // to survive a rework round-trip, pull from field_job_photos instead,
     // which DOES have latitude/longitude/captured_at.
+    //
+    // FIX (Completed/Rework audit, Finding 1): `path` here is a remote
+    // Supabase Storage URL (field_jobs.photo_paths), not a local device
+    // path. uploadInspectionPhotos() used to have no way to tell the
+    // difference — it would compute a resume-check key from the URL
+    // string itself (which never matches the row created from the
+    // *original* local path at first upload), fall through to
+    // File(url).exists() (always false for a URL), and silently `continue`
+    // — dropping the photo from the resubmission with no error at all.
+    // `isRemoteUrl: true` lets uploadInspectionPhotos short-circuit
+    // straight to reusing this URL instead of touching the filesystem.
     _capturedPhotos
       ..clear()
       ..addAll(
@@ -264,6 +283,7 @@ class InspectionProvider extends ChangeNotifier {
             'latitude': null,
             'longitude': null,
             'capturedAt': task.submittedAt,
+            'isRemoteUrl': true,
           },
         ),
       );

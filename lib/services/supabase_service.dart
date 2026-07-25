@@ -533,6 +533,20 @@ class SupabaseService {
       final photo = photosData[i];
       final path = photo['photoPath'] as String; // Extract path from the map
       try {
+        // FIX (Completed/Rework audit, Finding 1): a photo rehydrated by
+        // InspectionProvider.hydrateForRework() has `photoPath` set to its
+        // already-uploaded remote URL, not a local device path — reusing
+        // it directly here instead of falling through to the local-file
+        // logic below, which would derive a resume-check key from the URL
+        // string (never matching the row created from the *original*
+        // local path), then fail File(path).exists() and silently drop
+        // the photo from the resubmission with no error surfaced at all.
+        if (photo['isRemoteUrl'] == true) {
+          onProgress?.call(i + 1, photoTotal);
+          uploadedUrls.add(path);
+          continue;
+        }
+
         final storagePath = pathToStoragePath[path];
         final rowId = pathToRowId[path];
         if (storagePath == null || rowId == null) continue;

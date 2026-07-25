@@ -11,6 +11,7 @@ import '../services/db_helper.dart';
 
 import 'parcel_detail_screen.dart';
 import 'completed_inspection_detail_screen.dart';
+import 'inspection_progress.dart';
 import 'home_dashboard_screen.dart';
 import 'updates_screen.dart';
 import 'profile_screen.dart';
@@ -20,7 +21,6 @@ import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
 import '../widgets/motion/linked_list_motion.dart';
 import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
 
 
 /// ==================================================================
@@ -207,9 +207,18 @@ class TaskItem {
     // since that's still "not due yet."
     // "Pending" is the default: no plan locked in, so it can be done
     // whenever there's a slot — due-today/overdue included.
-    if (isSelfScheduled || _isScheduledAhead) return 'Scheduled';
+    if (isScheduledPlan) return 'Scheduled';
     return 'Pending';
   }
+
+  /// Whether this task is "on the schedule plan" at all — independent of
+  /// its current workflow status. Used both by `category` above (Pending
+  /// vs Scheduled, only reached once not Ongoing/Completed) and by the
+  /// cross-cutting "ScheduledActive" bucket in _categorizeAndFilter(),
+  /// which needs this same test WITHOUT the Ongoing/Completed short-circuit
+  /// — so a task can be "on the schedule plan" and "in progress" at the
+  /// same time (see Scheduled-vs-Ongoing UX fix).
+  bool get isScheduledPlan => isSelfScheduled || _isScheduledAhead;
 
   /// Null when a Scheduled task's date hasn't arrived yet. Otherwise flags
   /// how urgent it now is, so it doesn't just quietly sit there once due —
@@ -759,6 +768,17 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   Map<String, List<TaskItem>> _categorizeAndFilter() {
     final map = <String, List<TaskItem>>{
       for (final t in _tabOrder) t: <TaskItem>[],
+      // Design decision (Scheduled vs Ongoing UX, validated before
+      // implementing): a task that's on today's/self-scheduled plan
+      // AND already in progress should still surface in the Pending
+      // tab's "Scheduled" section — not just the Ongoing tab (both,
+      // per instruction) — even though its `category` is 'Ongoing' and
+      // it's therefore NOT in the `map['Scheduled']` bucket above.
+      // This bucket is that cross-cutting view: same "is this on the
+      // schedule plan" test as `category`, but without excluding
+      // Ongoing tasks — only Completed is excluded, since a finished
+      // inspection has nothing left to plan around.
+      'ScheduledActive': <TaskItem>[],
     };
     
     for (final task in _allTasks) {
@@ -787,6 +807,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         } catch (_) {}
       }
       map[task.category]!.add(task);
+      if (task.isScheduledPlan && task.category != 'Completed') {
+        map['ScheduledActive']!.add(task);
+      }
     }
 
     for (final category in map.keys) {
@@ -799,6 +822,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             final sb = b.startedAt ?? b.createdAt;
             return sa.compareTo(sb);
           case 'Scheduled':
+          case 'ScheduledActive':
             final da = a.deadlineDate?.isNotEmpty == true ? a.deadlineDate! : '9999-12-31';
             final db = b.deadlineDate?.isNotEmpty == true ? b.deadlineDate! : '9999-12-31';
             return da.compareTo(db);
@@ -819,7 +843,12 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     final categorized = _categorizeAndFilter();
     final ongoing = categorized['Ongoing'] ?? [];
     final pending = categorized['Pending'] ?? [];
-    final scheduled = categorized['Scheduled'] ?? [];
+    // Scheduled vs Ongoing UX fix: use the cross-cutting bucket (includes
+    // today's/self-scheduled tasks that are already In Progress), not the
+    // plain category bucket — see _categorizeAndFilter(). The Ongoing tab
+    // below still uses the plain `ongoing` bucket unchanged, so an active
+    // scheduled task appears in both, by design (validated: "show in both").
+    final scheduled = categorized['ScheduledActive'] ?? [];
     final completed = categorized['Completed'] ?? [];
 
     final selectedCategory = _visibleTabOrder[_currentTabIndex];
@@ -833,7 +862,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
 
     final bool hasActiveFilters = _selectedBarangay != 'All Barangays' || _datePreset != null;
 
-    return SensitiveScreen(child: Scaffold(
+    return Scaffold(
       backgroundColor: InsightTheme.bg,
       extendBody: true,
       appBar: AppBar(
@@ -1133,7 +1162,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
           }
         },
       ),
-    ));
+    );
   }
 }
 
@@ -1613,6 +1642,22 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   maxLines: 1, overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              if (widget.task.category == 'Ongoing') ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.blue1.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'In Progress • Step '
+                                    '${(widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep).clamp(1, InspectionProgress.totalSteps)}'
+                                    '/${InspectionProgress.totalSteps}',
+                                    style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.blue1),
+                                  ),
+                                ),
+                              ],
                               if (widget.task.scheduleUrgency != null) ...[
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),

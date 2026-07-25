@@ -244,6 +244,26 @@ final online = connectivityResult is List
     return ((math.atan2(y, x) * 180.0 / math.pi) + 360.0) % 360.0;
   }
 
+  /// Ongoing-phase audit fix: `SupabaseService.markJobOngoing()` swallows
+  /// its own errors and just returns `false` on failure (e.g. offline) —
+  /// with no outbox fallback, unlike every other write in this app. That
+  /// meant an inspector exiting before GPS confirmation while offline got
+  /// told "saved offline" when nothing was actually queued, and the
+  /// status flip was lost for good unless they later passed through GPS
+  /// confirmation (which is reliably outbox-backed). This wraps the same
+  /// call with that missing fallback, mirroring the pattern already used
+  /// for GPS confirm below.
+  Future<bool> _markOngoingWithFallback(String jobId) async {
+    final ok = await SupabaseService.markJobOngoing(jobId);
+    if (ok) return true;
+    try {
+      await SyncOutboxService.enqueueMarkOngoing(jobId: jobId);
+      return true; // queued — the exit dialog's "saved" message is now true
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _startInspection() async {
     if (!_verified || _latitude == null || _submitting) return;
     setState(() => _submitting = true);
@@ -289,12 +309,12 @@ final online = connectivityResult is List
       canPop: InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
-          SupabaseService.markJobOngoing(widget.task.id);
+          _markOngoingWithFallback(widget.task.id);
           return;
         }
         handleInspectionExit(
           context,
-          onSaveProgress: () => SupabaseService.markJobOngoing(widget.task.id),
+          onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
         );
       },
       child: Scaffold(
@@ -313,7 +333,7 @@ final online = connectivityResult is List
                     children: [
                       _GlassBackButton(onTap: () => handleInspectionExit(
                         context,
-                        onSaveProgress: () => SupabaseService.markJobOngoing(widget.task.id),
+                        onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
                       )),
                       const SizedBox(width: 14),
                       Expanded(
