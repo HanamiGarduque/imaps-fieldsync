@@ -19,7 +19,7 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -70,6 +70,18 @@ class DBHelper {
           // schema migration to add.
           await db.execute(_syncLogEntriesSchema);
         }
+        if (oldVersion < 8) {
+          // Rework redesign: mirrors the new Supabase field_jobs column.
+          // Non-null while a completed task has an unfinished rework
+          // session (status itself stays 'completed' throughout — see
+          // SupabaseService.reopenForRework), cleared back to null when
+          // the inspector finalizes via Review & Submit. Needed locally
+          // too so the "Modified" badge and rework state survive being
+          // offline, not just the online fetch path.
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN rework_started_at TEXT',
+          );
+        }
       },
       onCreate: (db, version) async {
         // Table for caching assigned jobs
@@ -87,6 +99,7 @@ class DBHelper {
             reference_number TEXT,
             application_type TEXT,
             cached_updated_at TEXT,
+            rework_started_at TEXT,
             parcel_lat REAL,
             parcel_lng REAL,
             lot_area_sqm REAL,
@@ -215,6 +228,7 @@ class DBHelper {
         'reference_number': app['reference_number'] ?? '',
         'application_type': app['application_type'],
         'cached_updated_at': job['updated_at'],
+        'rework_started_at': job['rework_started_at'],
         'parcel_lat': parcel['latitude'],
         'parcel_lng': parcel['longitude'],
         'lot_area_sqm': parcel['lot_area_sqm'],

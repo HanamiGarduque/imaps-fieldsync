@@ -480,31 +480,20 @@ class InspectionProvider extends ChangeNotifier {
     }
   }
 
-  /// "Save All" — pushes everything currently in the provider back to the
-  /// job, and restores status to 'completed' so the rework session closes
-  /// cleanly instead of leaving the job stuck as in_progress.
-  Future<bool> saveAllAndClose() async {
-    if (_activeTask == null) return false;
-    try {
-      await saveStepPhotos();
-      await saveStepChecklist();
-      await saveStepFindings();
-      await SupabaseService.updateJobInspectionProgress(
-        jobId: _activeTask!.id,
-        updateData: {'status': 'completed'},
-      );
-      await SupabaseService.logActivity(
-        eventType: 'inspection_completed',
-        title: 'Rework saved',
-        subtitle: _activeTask!.location,
-        fieldJobId: _activeTask!.id,
-      );
-      _isReworkMode = false;
-      return true;
-    } catch (e) {
-      debugPrint('saveAllAndClose failed: $e');
-      return false;
-    }
+  /// Rework redesign: this used to be "Save All" — an explicit save button
+  /// that pushed everything to Supabase and restored status to
+  /// 'completed' (because entering rework used to flip it away). Neither
+  /// is needed anymore: every step already auto-saves on its own exit
+  /// (saveStepPhotos/saveStepChecklist/saveStepFindings, plus per-toggle
+  /// checklist sync), and reopenForRework() no longer touches `status` at
+  /// all, so there's nothing left to "restore." This is now just closing
+  /// the rework session locally — rework_started_at intentionally stays
+  /// set (the "Modified" badge should persist) until the inspector
+  /// actually finalizes via Review & Submit, not just because they backed
+  /// out of editing early.
+  void exitReworkMode() {
+    _isReworkMode = false;
+    notifyListeners();
   }
 
   /// Comprehensive save-all helper that persists the current inspection

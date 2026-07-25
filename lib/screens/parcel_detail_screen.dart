@@ -53,7 +53,6 @@ class ParcelDetailScreen extends StatefulWidget {
 class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   TaskItem get task => widget.task;
   InspectionProgress get progress => InspectionProgress.instance;
-  bool _isSavingAll = false;
 
   @override
   void initState() {
@@ -145,13 +144,9 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     Navigator.push(context, MaterialPageRoute(builder: builder));
   }
 
-  Future<void> _handleSaveAll() async {
-    setState(() => _isSavingAll = true);
-    final ok = await context.read<InspectionProvider>().saveAllAndClose();
-    if (!mounted) return;
-    setState(() => _isSavingAll = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'All changes saved.' : 'Save failed — try again.')));
-    if (ok) Navigator.pop(context);
+  void _handleExitRework() {
+    context.read<InspectionProvider>().exitReworkMode();
+    Navigator.pop(context);
   }
 
   void _showSupportSheet(BuildContext context) {
@@ -222,20 +217,34 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
           ? SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: SizedBox(
-                  height: 52,
-                  child: FilledButton.icon(
-                    onPressed: _isSavingAll ? null : _handleSaveAll,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: InsightTheme.blue1,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Rework redesign: no "Save All" — each step already
+                    // auto-saves on its own, same as a normal inspection.
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Changes save automatically as you edit each step.',
+                        style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
-                    icon: _isSavingAll
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.save_rounded),
-                    label: Text(_isSavingAll ? 'Saving...' : 'Save All'),
-                  ),
+                    SizedBox(
+                      height: 52,
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _handleExitRework,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: InsightTheme.blue1,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        icon: const Icon(Icons.check_rounded),
+                        label: const Text('Done Editing'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             )

@@ -233,6 +233,7 @@ class SupabaseService {
       deadline_date,
       is_self_scheduled,
       current_step,
+      rework_started_at,
       created_at,
       updated_at,
       started_at,
@@ -651,6 +652,13 @@ class SupabaseService {
             if (photoPaths != null) 'photo_paths': photoPaths,
             'photo_count': photoCount,
             'submitted_at': DateTime.now().toUtc().toIso8601String(),
+            // Rework redesign: Review & Submit is the one finalize point,
+            // for both a normal submit (already null — harmless) and a
+            // rework resubmit (clears the "Modified" signal). status was
+            // already 'completed' the whole time it was being reworked,
+            // so this update is really "confirm the new revision," not
+            // "close out an in-progress task."
+            'rework_started_at': null,
           })
           .eq('id', jobId);
       await logActivity(
@@ -721,10 +729,20 @@ class SupabaseService {
     String? locationLabel,
   }) async {
     try {
+      // Rework redesign (device-test finding — merely editing one step
+      // during rework used to flip the task to "Ongoing 6/6" even before
+      // the inspector resubmitted, which isn't accurate: rework is
+      // editing an existing completed inspection, not starting a new
+      // one). `status` now stays 'completed' for the entire rework
+      // session — rework_started_at is the new signal that a rework is
+      // in progress, cleared back to null on finalize (see
+      // submitInspection). Guarded to 'completed' rows only — reopening
+      // a job that isn't actually completed yet isn't a valid rework.
       await client
           .from('field_jobs')
-          .update({'status': 'in_progress'})
-          .eq('id', jobId);
+          .update({'rework_started_at': DateTime.now().toIso8601String()})
+          .eq('id', jobId)
+          .ilike('status', 'completed');
       await logActivity(
         eventType: 'rework_started',
         title: 'Reopened for rework',

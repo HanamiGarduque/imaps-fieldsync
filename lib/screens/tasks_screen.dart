@@ -111,6 +111,11 @@ class TaskItem {
   final bool isSelfScheduled;
   final String createdAt;
   final String? startedAt;
+  // Rework redesign: non-null while a completed task has an unfinished
+  // rework session — status itself stays 'completed' throughout, so this
+  // is the actual signal for the "Modified" badge. Cleared back to null
+  // on finalize (Review & Submit).
+  final String? reworkStartedAt;
 
   TaskItem({
     required this.id, this.parcelId, required this.name, required this.location,
@@ -126,6 +131,7 @@ class TaskItem {
     this.currentStep = 0,
     this.createdAt = '',
     this.startedAt,
+    this.reworkStartedAt,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -173,6 +179,7 @@ class TaskItem {
       currentStep: (job['current_step'] as num?)?.toInt() ?? 0,
       createdAt: job['created_at'] as String? ?? '',
       startedAt: job['started_at'] as String?,
+      reworkStartedAt: job['rework_started_at'] as String?,
     );
   }
 
@@ -440,6 +447,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 'scheduled_date': j['scheduled_date'],
                 'deadline_date': j['deadline_date'],
                 'is_self_scheduled': j['is_self_scheduled'] == 1,
+                'rework_started_at': j['rework_started_at'],
                 'supabase_zoning_applications': {
                   'applicant_name': j['applicant_name'],
                   'barangay': j['barangay'],
@@ -1656,6 +1664,26 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                     '${(widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep).clamp(1, InspectionProgress.totalSteps)}'
                                     '/${InspectionProgress.totalSteps}',
                                     style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.blue1),
+                                  ),
+                                ),
+                              ],
+                              // Rework redesign: status stays 'completed' for
+                              // the whole rework session now (see
+                              // SupabaseService.reopenForRework), so this
+                              // badge — keyed off reworkStartedAt, not status
+                              // — is the only signal that a completed task
+                              // has an unfinished rework in progress.
+                              if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.orangeTint,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Modified',
+                                    style: InsightTheme.inter(9.5, w: FontWeight.w700, c: const Color(0xFFB45309)),
                                   ),
                                 ),
                               ],
