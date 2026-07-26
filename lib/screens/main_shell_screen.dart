@@ -111,31 +111,26 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
         return HomeDashboardScreen(
           key: ValueKey('home_tab_$index'),
           profile: widget.profile,
-          showBottomNav: false,
         );
       case 1:
         return TasksScreen(
           key: ValueKey('tasks_tab_$index'),
           profile: widget.profile,
-          showBottomNav: false,
         );
       case 2:
         return UpdatesScreen(
           key: ValueKey('updates_tab_$index'),
           profile: widget.profile,
-          showBottomNav: false,
         );
       case 3:
         return ProfileScreen(
           key: ValueKey('profile_tab_$index'),
           profile: widget.profile,
-          showBottomNav: false,
         );
       default:
         return HomeDashboardScreen(
           key: ValueKey('home_tab_$index'),
           profile: widget.profile,
-          showBottomNav: false,
         );
     }
   }

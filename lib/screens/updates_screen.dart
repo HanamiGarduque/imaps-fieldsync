@@ -11,12 +11,8 @@ import '../models/user_profile.dart';
 import '../services/db_helper.dart';
 import '../services/supabase_service.dart';
 import '../services/sync_outbox_service.dart';
-import 'home_dashboard_screen.dart';
-import 'tasks_screen.dart';
-import 'profile_screen.dart';
 import 'notifications_screen.dart';
-import '../widgets/insight_bottom_nav.dart';
-import '../widgets/insight_page_transition.dart';
+import '../widgets/insight_bottom_nav.dart'; // kInsightBottomNavReserve (scroll padding) only
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
 import '../widgets/motion/linked_list_motion.dart';
@@ -102,11 +98,9 @@ class InsightTheme {
 /// size — nothing is fabricated.
 class UpdatesScreen extends StatefulWidget {
   final UserProfile profile;
-  final bool showBottomNav;
   const UpdatesScreen({
     super.key,
     required this.profile,
-    this.showBottomNav = true,
   });
 
   @override
@@ -115,8 +109,6 @@ class UpdatesScreen extends StatefulWidget {
 
 class _UpdatesScreenState extends State<UpdatesScreen>
     with TickerProviderStateMixin, SpringEntrance {
-  final int _currentNavIndex = 2;
-
   bool _loading = true;
   bool _isOnline = true;
   bool _syncingNow = false;
@@ -1332,43 +1324,10 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         ],
       ),
 
-      // 4. FLOATING BOTTOM NAVIGATION
-      bottomNavigationBar: !widget.showBottomNav
-          ? null
-          : InsightBottomNav(
-              currentIndex: _currentNavIndex,
-              items: const [
-                InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
-                InsightNavItem(icon: Icons.assignment_outlined, label: 'Tasks'),
-                InsightNavItem(icon: Icons.sync_rounded, label: 'Updates'),
-                InsightNavItem(
-                  icon: Icons.person_outline_rounded,
-                  label: 'Profile',
-                ),
-              ],
-              onTap: (i) {
-                if (i == _currentNavIndex) return;
-                switch (i) {
-                  case 0:
-                    Navigator.of(context).pushReplacement(
-                      insightTabRoute(
-                        HomeDashboardScreen(profile: widget.profile),
-                      ),
-                    );
-                    break;
-                  case 1:
-                    Navigator.of(context).pushReplacement(
-                      insightTabRoute(TasksScreen(profile: widget.profile)),
-                    );
-                    break;
-                  case 3:
-                    Navigator.of(context).pushReplacement(
-                      insightTabRoute(ProfileScreen(profile: widget.profile)),
-                    );
-                    break;
-                }
-              },
-            ),
+      // Bottom navigation now lives solely in MainShellScreen (the app
+      // shell). This screen no longer renders its own nav bar — see
+      // NAVIGATION_REFACTOR.md for why the duplicate, per-page nav bar
+      // was removed.
     );
   }
 }

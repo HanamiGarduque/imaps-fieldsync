@@ -8,7 +8,8 @@ import '../providers/inspection_provider.dart';
 import '../services/supabase_service.dart';
 import '../services/sync_outbox_service.dart';
 import 'inspection_progress.dart';
-import 'tasks_screen.dart'; 
+import 'main_shell_screen.dart';
+import 'tasks_screen.dart' show TaskItem;
 import '../models/user_profile.dart';
 import '../widgets/exit_confirm_dialog.dart';
 import '../widgets/sensitive_screen.dart';
@@ -376,7 +377,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
                           InspectionProgress.instance.reset();
                           final profileMap = await SupabaseService.fetchMyProfile();
                           if (!context.mounted) return;
-                          if (profileMap != null) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => TasksScreen(profile: UserProfile.fromMap(profileMap))), (route) => false);
+                          if (profileMap != null) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => MainShellScreen(profile: UserProfile.fromMap(profileMap), initialIndex: 1)), (route) => false);
                           else Navigator.of(context).popUntil((route) => route.isFirst);
                         },
                         style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: Colors.transparent, shadowColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))).copyWith(elevation: WidgetStateProperty.all(0)),

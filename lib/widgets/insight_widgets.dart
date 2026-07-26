@@ -612,52 +612,11 @@ class InsightPhotoGrid extends StatelessWidget {
   }
 }
 
-/// .bottomnav — 5-tab bottom navigation matching the prototype's
-/// Home / Inspections / Map / History / Profile tabs.
-enum InsightTab { home, inspections, map, history, profile }
-
-class InsightBottomNav extends StatelessWidget {
-  final InsightTab current;
-  final ValueChanged<InsightTab> onSelect;
-  const InsightBottomNav({super.key, required this.current, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    final items = [
-      (tab: InsightTab.home, icon: Icons.home_rounded, label: 'Home'),
-      (tab: InsightTab.inspections, icon: Icons.assignment_outlined, label: 'Inspections'),
-      (tab: InsightTab.map, icon: Icons.map_outlined, label: 'Map'),
-      (tab: InsightTab.history, icon: Icons.history_rounded, label: 'History'),
-      (tab: InsightTab.profile, icon: Icons.person_outline_rounded, label: 'Profile'),
-    ];
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: InsightColors.lineStrong)),
-        color: Color(0xE6101B26),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          children: items.map((it) {
-            final active = it.tab == current;
-            return Expanded(
-              child: InkWell(
-                onTap: () => onSelect(it.tab),
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 10, bottom: 12),
-                  child: Column(
-                    children: [
-                      Icon(it.icon, size: 19, color: active ? InsightColors.amber : InsightColors.slate),
-                      const SizedBox(height: 4),
-                      Text(it.label, style: InsightText.mono(9.5, c: active ? InsightColors.amber : InsightColors.slate)),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-}
+// NOTE: an old prototype-era 5-tab bottom nav (InsightTab enum +
+// InsightBottomNav class, for a "Home / Inspections / Map / History /
+// Profile" layout) previously lived here. It was never imported or
+// instantiated anywhere in the app — confirmed via a project-wide search
+// during the bottom-nav persistence refactor (see NAVIGATION_REFACTOR.md)
+// — and has been removed as confirmed dead code. The bottom nav actually
+// in use is `InsightBottomNav` in widgets/insight_bottom_nav.dart, owned
+// solely by MainShellScreen.

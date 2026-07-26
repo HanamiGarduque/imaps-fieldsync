@@ -13,8 +13,7 @@ import 'profile_screen.dart';
 import 'notifications_screen.dart';
 import 'updates_screen.dart';
 import 'profile_edit_screen.dart'; 
-import '../widgets/insight_bottom_nav.dart';
-import '../widgets/insight_page_transition.dart';
+import '../widgets/insight_bottom_nav.dart'; // kInsightBottomNavReserve (scroll padding) only
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
 import '../widgets/imaps_loading_indicator.dart';
@@ -57,8 +56,7 @@ class InsightTheme {
 /// ==================================================================
 class HomeDashboardScreen extends StatefulWidget {
   final UserProfile profile;
-  final bool showBottomNav;
-  const HomeDashboardScreen({super.key, required this.profile, this.showBottomNav = true});
+  const HomeDashboardScreen({super.key, required this.profile});
 
   @override
   State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
@@ -66,7 +64,6 @@ class HomeDashboardScreen extends StatefulWidget {
 
 class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     with TickerProviderStateMixin, SpringEntrance {
-  int _currentNavIndex = 0;
 
   late PageController _pageController;
   int _currentCardIndex = 0;
@@ -542,34 +539,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
           ),
         ),
       ),
-      
-      // ----------------------------------------------------
-      // 5. FLOATING BOTTOM NAVIGATION 
-      // ----------------------------------------------------
-      bottomNavigationBar: !widget.showBottomNav ? null : InsightBottomNav(
-        currentIndex: _currentNavIndex,
-        items: const [
-          InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
-          InsightNavItem(icon: Icons.assignment_outlined, label: 'Tasks'),
-          InsightNavItem(icon: Icons.sync_rounded, label: 'Updates'),
-          InsightNavItem(icon: Icons.person_outline_rounded, label: 'Profile'),
-        ],
-        onTap: (i) {
-          if (i == _currentNavIndex) return;
-          setState(() => _currentNavIndex = i);
-          switch (i) {
-            case 1:
-              Navigator.of(context).pushReplacement(insightTabRoute(TasksScreen(profile: widget.profile)));
-              break;
-            case 2:
-              Navigator.of(context).pushReplacement(insightTabRoute(UpdatesScreen(profile: widget.profile)));
-              break;
-            case 3:
-              Navigator.of(context).pushReplacement(insightTabRoute(ProfileScreen(profile: widget.profile)));
-              break;
-          }
-        },
-      ),
+      // Bottom navigation now lives solely in MainShellScreen (the app
+      // shell). This screen no longer renders its own nav bar — see
+      // NAVIGATION_REFACTOR.md for why the duplicate, per-page nav bar
+      // was removed.
     );
   }
 }
@@ -810,40 +783,6 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _BottomNavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _BottomNavItem({required this.icon, required this.label, required this.isActive, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: EdgeInsets.symmetric(horizontal: isActive ? 16 : 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: isActive ? InsightTheme.blue1 : Colors.transparent, 
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: isActive ? [BoxShadow(color: InsightTheme.blue1.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))] : [],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: isActive ? Colors.white : InsightTheme.ink3, size: 22),
-            const SizedBox(height: 4),
-            Text(label, style: InsightTheme.inter(10, w: FontWeight.w700, c: isActive ? Colors.white : InsightTheme.ink3)),
-          ],
-        ),
       ),
     );
   }

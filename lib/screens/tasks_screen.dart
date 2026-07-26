@@ -12,11 +12,6 @@ import '../services/db_helper.dart';
 import 'parcel_detail_screen.dart';
 import 'completed_inspection_detail_screen.dart';
 import 'inspection_progress.dart';
-import 'home_dashboard_screen.dart';
-import 'updates_screen.dart';
-import 'profile_screen.dart';
-import '../widgets/insight_bottom_nav.dart';
-import '../widgets/insight_page_transition.dart';
 import '../widgets/motion/spring_entrance.dart';
 import '../widgets/motion/updating_tile.dart';
 import '../widgets/motion/linked_list_motion.dart';
@@ -324,17 +319,14 @@ class TasksScreen extends StatefulWidget {
     super.key,
     required this.profile,
     this.initialTabIndex = tabOngoing,
-    this.showBottomNav = true,
     this.scrollToScheduled = false,
   });
-  final bool showBottomNav;
 
   @override
   State<TasksScreen> createState() => _TasksScreenState();
 }
 
 class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin, SpringEntrance {
-  int _currentNavIndex = 1; 
   late int _currentTabIndex;
 
   final TextEditingController _searchController = TextEditingController();
@@ -1154,30 +1146,10 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                     ),
                   ),
       ),
-      bottomNavigationBar: !widget.showBottomNav ? null : InsightBottomNav(
-        currentIndex: _currentNavIndex,
-        items: const [
-          InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
-          InsightNavItem(icon: Icons.assignment_outlined, label: 'Tasks'),
-          InsightNavItem(icon: Icons.sync_rounded, label: 'Updates'),
-          InsightNavItem(icon: Icons.person_outline_rounded, label: 'Profile'),
-        ],
-        onTap: (i) {
-          if (i == _currentNavIndex) return;
-          setState(() => _currentNavIndex = i);
-          switch (i) {
-            case 0:
-              Navigator.of(context).pushReplacement(insightTabRoute(HomeDashboardScreen(profile: widget.profile)));
-              break;
-            case 2:
-              Navigator.of(context).pushReplacement(insightTabRoute(UpdatesScreen(profile: widget.profile)));
-              break;
-            case 3:
-              Navigator.of(context).pushReplacement(insightTabRoute(ProfileScreen(profile: widget.profile)));
-              break;
-          }
-        },
-      ),
+      // Bottom navigation now lives solely in MainShellScreen (the app
+      // shell). This screen no longer renders its own nav bar — see
+      // NAVIGATION_REFACTOR.md for why the duplicate, per-page nav bar
+      // was removed.
     ));
   }
 }
@@ -1864,46 +1836,4 @@ class _ActionBtn extends StatelessWidget {
       ),
     );
   }
-}
-
-class _BottomNavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _BottomNavItem({required this.icon, required this.label, required this.isActive, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        decoration: BoxDecoration(
-          gradient: isActive ? const LinearGradient(
-            colors: [InsightTheme.blue1, InsightTheme.blue2],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
-          ) : null,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: isActive ? Colors.white : InsightTheme.ink3, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              label, 
-              style: InsightTheme.inter(10, w: FontWeight.w600, c: isActive ? Colors.white : InsightTheme.ink3),
-              maxLines: 1, overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
 }
