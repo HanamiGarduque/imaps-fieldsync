@@ -1,14 +1,12 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../config/feature_flags.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_profile.dart';
 import '../models/dashboard_stats.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
-import '../services/quick_unlock_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
 import 'splash_screen.dart' show LoginScreen; 
@@ -17,7 +15,6 @@ import 'tasks_screen.dart';
 import 'updates_screen.dart';
 import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
-import 'quick_unlock_setup_screen.dart';
 import 'security_settings_screen.dart';
 import 'terms_privacy_screen.dart';
 import '../widgets/insight_bottom_nav.dart';
@@ -156,25 +153,36 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
   Future<void> _handleSignOut(BuildContext context) async {
     HapticFeedback.mediumImpact();
-    
-    // 1. Immediate UI navigation (0ms instant response)
+
+    // Audit log must fire BEFORE signOut() — log_security_event is a
+    // SECURITY DEFINER RPC keyed off auth.uid(), so it silently no-ops
+    // once there's no authenticated session to attribute the event to.
+    //
+    // Both are awaited, and navigation happens after: previously this
+    // navigated to LoginScreen *before* signOut() completed, leaving a
+    // window where AuthService.isLoggedIn could still read true and the
+    // biometric button could let someone back in without ever actually
+    // checking they were still authenticated. Note: We still preserve
+    // biometric enrollment settings on the device so that when the user
+    // logs back in, their Security & Protection settings remain active —
+    // only the live session itself needs to be gone before Login shows.
+    try {
+      await SupabaseService.logSecurityEvent(eventType: 'logout', severity: 'info');
+    } catch (e) {
+      debugPrint('[SIGNOUT] logSecurityEvent error: $e');
+    }
+    try {
+      await AuthService.signOut();
+    } catch (e) {
+      debugPrint('[SIGNOUT] AuthService.signOut error: $e');
+    }
+
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (route) => false,
       );
     }
-
-    // 2. Fire-and-forget background session sign-out
-    // Note: We preserve biometric enrollment settings on the device so that
-    // when the user logs back in, their Security & Protection settings remain active.
-    //
-    // Audit log must fire BEFORE signOut() — log_security_event is a
-    // SECURITY DEFINER RPC keyed off auth.uid(), so it silently no-ops
-    // once there's no authenticated session to attribute the event to.
-    SupabaseService.logSecurityEvent(eventType: 'logout', severity: 'info')
-        .catchError((e) => debugPrint('[SIGNOUT] logSecurityEvent error: $e'));
-    AuthService.signOut().catchError((e) => debugPrint('[SIGNOUT] AuthService.signOut error: $e'));
   }
 
 
@@ -551,21 +559,6 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                       const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
 
                       
-                      if (kQuickUnlockEnabled) ...[
-                        _ActionTile(
-                          icon: Icons.pattern,
-                          title: 'Quick Unlock',
-                          subtitle: 'Pattern unlock',
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (_) => QuickUnlockSetupScreen(userEmail: userEmail)),
-                            );
-                          },
-                        ),
-                        const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
-                      ],
-
                       _ActionTile(
                         icon: Icons.logout_rounded,
                         title: 'Sign out',

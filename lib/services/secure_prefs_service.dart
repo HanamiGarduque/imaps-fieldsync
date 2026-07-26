@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user_profile.dart';
 
@@ -18,6 +19,7 @@ class SecurePrefsService {
   static const _kSavedEmail        = 'sp_saved_email';
   static const _kBioSecret         = 'sp_bio_secret';
   static const _kCachedProfile     = 'sp_cached_profile';
+  static const _kDbEncryptionKey   = 'sp_db_encryption_key';
 
   // ── Biometric enrollment ────────────────────────────────────────────────
   static const _kBioEnrolled       = 'sp_bio_enrolled';
@@ -69,6 +71,49 @@ class SecurePrefsService {
 
   static Future<void> removeCachedProfile() =>
       _storage.delete(key: _kCachedProfile);
+
+  // ── Legacy pattern-lock data cleanup ────────────────────────────────────
+  // The App Pattern (Quick Unlock) feature was removed entirely — see
+  // AUTH_SECURITY_MASTER_DOC.md §Phase 3a. Its own service
+  // (quick_unlock_service.dart, deleted) used a separate FlutterSecureStorage
+  // instance under these key names. Deleting the *code* doesn't retroactively
+  // wipe data already written to a device that had a pattern set up before
+  // this removal — this purges those specific keys directly, satisfying
+  // "no pattern exists in Secure Storage" as an actual on-device fact, not
+  // just as a statement about current source code. Idempotent — a no-op on
+  // any device that never had a pattern set up, and harmless to call
+  // repeatedly (each key simply won't exist after the first successful run).
+  static Future<void> purgeLegacyPatternLockData() async {
+    const legacyKeys = [
+      'qu_pattern_enabled',
+      'qu_pattern_hash',
+      'qu_pattern_salt',
+      'qu_bound_email',
+    ];
+    for (final key in legacyKeys) {
+      try {
+        await _storage.delete(key: key);
+      } catch (e) {
+        debugPrint('[SECURE_PREFS] Legacy pattern-key purge error ($key): $e');
+      }
+    }
+  }
+
+  // ── Local database encryption key ───────────────────────────────────────
+  // Generated once (cryptographically random, 32 bytes) and reused for the
+  // life of the install — this is the SQLCipher passphrase for the local
+  // SQLite database (see db_helper.dart). Deliberately NOT included in
+  // clearAuthPrefs()/clearAll(): the encrypted database file survives
+  // logout and password-reset the same way it always did unencrypted —
+  // losing this key would make the entire local cache unreadable, which is
+  // a data-loss bug, not a security feature. It's still Keystore-backed and
+  // never leaves the device or touches Supabase.
+
+  static Future<String?> getDbEncryptionKey() =>
+      _storage.read(key: _kDbEncryptionKey);
+
+  static Future<void> setDbEncryptionKey(String key) =>
+      _storage.write(key: _kDbEncryptionKey, value: key);
 
 
 

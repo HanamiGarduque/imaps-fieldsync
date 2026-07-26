@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
+import 'secure_prefs_service.dart';
 
 class DBHelper {
   static Database? _database;
@@ -13,13 +16,108 @@ class DBHelper {
     return _database!;
   }
 
+  /// Cryptographically-random 32-byte key, generated once and reused for
+  /// the life of the install (Keystore-backed via SecurePrefsService).
+  /// Deliberately NOT derived from anything predictable (e.g. a timestamp)
+  /// — that exact mistake was found and flagged elsewhere in this app's
+  /// pattern-lock salt generation; not repeating it here.
+  static Future<String> _getOrCreateDbKey() async {
+    final existing = await SecurePrefsService.getDbEncryptionKey();
+    if (existing != null && existing.isNotEmpty) return existing;
+
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    final key = base64Url.encode(bytes);
+    await SecurePrefsService.setDbEncryptionKey(key);
+    return key;
+  }
+
+  /// True if [path] can actually be read as a SQLCipher database using
+  /// [password] — opening alone isn't a reliable check with SQLCipher
+  /// (a wrong key can still "open" the file handle), the first real query
+  /// is what actually proves the key is correct.
+  static Future<bool> _opensWithKey(String path, String? password) async {
+    Database? db;
+    try {
+      db = await openDatabase(path, password: password, readOnly: true);
+      await db.rawQuery('SELECT count(*) FROM sqlite_master');
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      await db?.close();
+    }
+  }
+
+  /// One-time migration for installs that ran before this database was
+  /// encrypted. Uses SQLCipher's documented sqlcipher_export() approach —
+  /// attach a new encrypted database, copy everything into it, then swap
+  /// it into place. The original plaintext file is renamed aside (not
+  /// deleted) as a safety net in case anything about the migration looks
+  /// wrong after the fact; it is NOT auto-deleted.
+  static Future<void> _migrateLegacyPlaintextDb(String path, String password) async {
+    debugPrint('[DB] Legacy unencrypted database detected — migrating to SQLCipher.');
+    final plainDb = await openDatabase(path);
+    final tmpPath = '$path.encrypting_tmp';
+    final tmpFile = File(tmpPath);
+    if (await tmpFile.exists()) {
+      // Leftover from a previous interrupted attempt — start clean.
+      await tmpFile.delete();
+    }
+
+    try {
+      await plainDb.execute("ATTACH DATABASE '$tmpPath' AS encrypted KEY '$password'");
+      await plainDb.execute("SELECT sqlcipher_export('encrypted')");
+      await plainDb.execute('DETACH DATABASE encrypted');
+    } finally {
+      await plainDb.close();
+    }
+
+    final backupPath = '$path.pre_encryption_backup';
+    final backupFile = File(backupPath);
+    if (await backupFile.exists()) await backupFile.delete();
+    await File(path).rename(backupPath);
+    await tmpFile.rename(path);
+
+    debugPrint(
+      '[DB] Migration complete. Original plaintext file preserved at '
+      '$backupPath — safe to delete manually once the app has been '
+      'confirmed working with the encrypted database.',
+    );
+  }
+
   static Future<Database> _initDB() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'imaps_fieldsync.db');
+    final password = await _getOrCreateDbKey();
+
+    if (await File(path).exists()) {
+      final alreadyEncrypted = await _opensWithKey(path, password);
+      if (!alreadyEncrypted) {
+        final isReadablePlaintext = await _opensWithKey(path, null);
+        if (isReadablePlaintext) {
+          await _migrateLegacyPlaintextDb(path, password);
+        } else {
+          // Neither the current key nor a plaintext read works. Don't
+          // guess — overwriting or deleting here risks real inspection
+          // data with no way back. Surface this loudly instead.
+          debugPrint(
+            '[DB] WARNING: existing database at $path could not be opened '
+            'with the stored key or as plaintext. Leaving it untouched — '
+            'this needs manual investigation, not an automatic fix.',
+          );
+          throw StateError(
+            'Local database exists but is unreadable with the current '
+            'encryption key. Needs manual investigation before proceeding.',
+          );
+        }
+      }
+    }
 
     return await openDatabase(
       path,
-      version: 8,
+      password: password,
+      version: 7,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -70,18 +168,6 @@ class DBHelper {
           // schema migration to add.
           await db.execute(_syncLogEntriesSchema);
         }
-        if (oldVersion < 8) {
-          // Rework redesign: mirrors the new Supabase field_jobs column.
-          // Non-null while a completed task has an unfinished rework
-          // session (status itself stays 'completed' throughout — see
-          // SupabaseService.reopenForRework), cleared back to null when
-          // the inspector finalizes via Review & Submit. Needed locally
-          // too so the "Modified" badge and rework state survive being
-          // offline, not just the online fetch path.
-          await db.execute(
-            'ALTER TABLE local_jobs ADD COLUMN rework_started_at TEXT',
-          );
-        }
       },
       onCreate: (db, version) async {
         // Table for caching assigned jobs
@@ -99,7 +185,6 @@ class DBHelper {
             reference_number TEXT,
             application_type TEXT,
             cached_updated_at TEXT,
-            rework_started_at TEXT,
             parcel_lat REAL,
             parcel_lng REAL,
             lot_area_sqm REAL,
@@ -228,7 +313,6 @@ class DBHelper {
         'reference_number': app['reference_number'] ?? '',
         'application_type': app['application_type'],
         'cached_updated_at': job['updated_at'],
-        'rework_started_at': job['rework_started_at'],
         'parcel_lat': parcel['latitude'],
         'parcel_lng': parcel['longitude'],
         'lot_area_sqm': parcel['lot_area_sqm'],

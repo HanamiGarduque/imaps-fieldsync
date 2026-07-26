@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
+import '../services/biometric_service.dart';
+import '../services/secure_prefs_service.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/sync_progress_banner.dart';
+import 'app_resume_lock_screen.dart';
 import 'home_dashboard_screen.dart';
 import 'tasks_screen.dart';
 import 'updates_screen.dart';
@@ -23,8 +26,16 @@ class MainShellScreen extends StatefulWidget {
   State<MainShellScreen> createState() => _MainShellScreenState();
 }
 
-class _MainShellScreenState extends State<MainShellScreen> {
+class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingObserver {
   late int _currentIndex;
+
+  // ── App-resume lock (see AUTH_SECURITY_MASTER_DOC.md §5d) ───────────────
+  // _pausedAt is set the moment the app leaves the foreground and cleared
+  // the next time it resumes — it only needs to survive within this one
+  // process lifetime, since a full app kill already goes through the
+  // splash-screen/session-check flow separately (see splash_screen.dart).
+  DateTime? _pausedAt;
+  bool _lockShowing = false;
 
   static const _items = [
     InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
@@ -37,6 +48,61 @@ class _MainShellScreenState extends State<MainShellScreen> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      // Only record the *first* moment we left the foreground in this
+      // backgrounding cycle — a brief inactive->paused->inactive flutter
+      // (e.g. a system dialog, a notification shade pull) shouldn't reset
+      // the clock each time.
+      _pausedAt ??= DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      _maybeShowResumeLock();
+    }
+  }
+
+  Future<void> _maybeShowResumeLock() async {
+    final pausedAt = _pausedAt;
+    _pausedAt = null;
+    if (pausedAt == null || _lockShowing) return;
+
+    final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
+    if (!requireOnOpen) return;
+
+    final enrolled = await BiometricService.isEnrolled();
+    if (!enrolled) return; // nothing to gate with if biometric isn't set up
+
+    final mins = await SecurePrefsService.getBioAutoLockMins();
+    // Design decision (AUTH_SECURITY_MASTER_DOC.md §5d): the stored value
+    // is -1=immediately, 0=no grace period configured/"never" (its
+    // original storage comment), or 1/5/10 minutes of grace. With the
+    // master switch (bio_require_on_open) already on, an ambiguous/unset
+    // grace value defaults to the *strictest* behavior (lock immediately)
+    // rather than the most permissive one — so both -1 and 0 lock right
+    // away here; only 1/5/10 get an actual grace window.
+    final elapsed = DateTime.now().difference(pausedAt);
+    final shouldLock = mins <= 0 || elapsed >= Duration(minutes: mins);
+    if (!shouldLock || !mounted) return;
+
+    _lockShowing = true;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const AppResumeLockScreen(),
+        fullscreenDialog: true,
+      ),
+    );
+    _lockShowing = false;
   }
 
   Widget _buildPage(int index) {

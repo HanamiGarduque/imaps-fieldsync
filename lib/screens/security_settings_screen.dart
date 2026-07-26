@@ -4,10 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/user_profile.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
-import '../services/quick_unlock_service.dart';
 import '../widgets/imaps_loading_indicator.dart';
 import '../widgets/sensitive_screen.dart';
-import 'quick_unlock_setup_screen.dart';
 
 class _Colors {
   static const bg = Color(0xFFF2F4FB);
@@ -41,9 +39,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   bool _requireProfile = false;
   int _autoLockMins = 0;
 
-  // Pattern unlock
-  bool _patternEnabled = false;
-
   @override
   void initState() {
     super.initState();
@@ -58,7 +53,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     final reqSync = await SecurePrefsService.getBioRequireOnSync();
     final reqProf = await SecurePrefsService.getBioRequireProfile();
     final autoLock = await SecurePrefsService.getBioAutoLockMins();
-    final patEnabled = await QuickUnlockService.isPatternEnabled();
 
     if (!mounted) return;
 
@@ -70,7 +64,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       _requireOnSync = reqSync;
       _requireProfile = reqProf;
       _autoLockMins = autoLock;
-      _patternEnabled = patEnabled;
       _loading = false;
     });
   }
@@ -297,35 +290,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                   ]),
                 ],
 
-                const SizedBox(height: 20),
-                _sectionHeader('GESTURE PATTERN LOCK'),
-                const SizedBox(height: 8),
-
-                _card([
-                  ListTile(
-                    leading: const Icon(Icons.pattern_rounded, color: _Colors.blue1),
-                    title: Text(
-                      'Draw Pattern Lock',
-                      style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      _patternEnabled ? 'Pattern registered on device' : 'Draw a 9-dot gesture pattern for quick unlock',
-                      style: GoogleFonts.inter(fontSize: 12, color: _Colors.ink2),
-                    ),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => QuickUnlockSetupScreen(userEmail: widget.profile.email ?? ''),
-                          ),
-                        );
-                        _loadSettings();
-                      },
-                      child: Text(_patternEnabled ? 'Change' : 'Set Up Pattern'),
-                    ),
-                  ),
-                ]),
-
                 const SizedBox(height: 24),
                 Row(
                   children: [
@@ -333,7 +297,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Biometric credentials and pattern hashes are stored in the device Keystore. Credentials are never transmitted to external servers.',
+                        'Biometric credentials are managed by your device\'s secure hardware (Keystore/Secure Enclave) and never transmitted to external servers — iMAPS FieldSync never sees or stores them.',
                         style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink3, height: 1.4),
                       ),
                     ),

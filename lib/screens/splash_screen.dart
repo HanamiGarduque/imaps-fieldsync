@@ -7,7 +7,6 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
-import '../services/quick_unlock_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
 import '../services/supabase_service.dart';
@@ -287,7 +286,6 @@ class _LoginScreenState extends State<LoginScreen> {
           // when we can positively confirm the session is actually dead.
           if (await AuthService.hasConnectivity()) {
             await AuthService.signOut();
-            await QuickUnlockService.clearAll();
             await BiometricService.clearEnrollment();
             await SecurePrefsService.clearAll();
             if (mounted) {

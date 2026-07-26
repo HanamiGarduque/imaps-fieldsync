@@ -6,6 +6,7 @@ import 'package:app_links/app_links.dart';
 import 'services/supabase_service.dart';
 import 'services/notification_service.dart';
 import 'services/sync_outbox_service.dart';
+import 'services/secure_prefs_service.dart';
 import 'providers/inspection_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/reset_password_screen.dart';
@@ -24,7 +25,13 @@ Future<void> main() async {
   await dotenv.load(fileName: ".env");
   await SupabaseService.initialize();
   await NotificationService.initialize();
-  
+
+  // One-time cleanup: purges any pattern-lock data left over from before
+  // the App Pattern feature was removed (see AUTH_SECURITY_MASTER_DOC.md,
+  // Phase 3a). Idempotent, cheap no-op on any device that never had a
+  // pattern set up.
+  await SecurePrefsService.purgeLegacyPatternLockData();
+
   SyncOutboxService.start();
   _listenForPasswordResetLinks();
   

@@ -2,18 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
-
-
-import '../config/feature_flags.dart';
 import '../services/auth_service.dart';
 import '../services/biometric_service.dart';
 import '../services/notification_service.dart';
 import '../services/secure_prefs_service.dart';
-import '../services/quick_unlock_service.dart';
 import '../services/supabase_service.dart';
-import '../widgets/pattern_lock_pad.dart';
 import 'main_shell_screen.dart';
-import 'quick_unlock_screen.dart';
 import '../widgets/imaps_loading_indicator.dart';
 import '../widgets/sensitive_screen.dart';
 

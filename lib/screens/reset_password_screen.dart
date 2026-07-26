@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
-import '../services/quick_unlock_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
 import '../services/supabase_service.dart';
@@ -60,7 +59,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         severity: 'info',
         metadata: {'reason': 'password_reset'},
       );
-      await QuickUnlockService.clearAll();
       await BiometricService.clearEnrollment();
       await SecurePrefsService.clearAll();
       await AuthService.signOut();
