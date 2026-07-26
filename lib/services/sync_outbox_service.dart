@@ -49,6 +49,10 @@ class SyncProgress {
         return 'Syncing task status';
       case 'checklist_update':
         return 'Syncing checklist';
+      case 'photos_update':
+        return 'Syncing photos';
+      case 'findings_update':
+        return 'Syncing findings';
       case 'current_step_update':
         return 'Syncing progress';
       case 'submit_inspection':
@@ -93,6 +97,8 @@ class SyncOutboxService {
     'submit_inspection',
     'checklist_update',
     'current_step_update',
+    'photos_update',
+    'findings_update',
   };
 
   /// Live progress of the current drain pass. Any widget can do
@@ -221,6 +227,67 @@ class SyncOutboxService {
     return DBHelper.enqueueAction(
       id: 'checklist_update_$jobId',
       type: 'checklist_update',
+      jobId: jobId,
+      payload: payload,
+    );
+  }
+
+  /// Queues a photos push. Deterministic id per job (same pattern as
+  /// enqueueChecklistUpdate) — repeated offline saves for the same job
+  /// overwrite one row instead of piling up. `photosData` carries the
+  /// same shape `uploadInspectionPhotos()` already expects (photoPath,
+  /// notes, lat/lng, and isRemoteUrl for rehydrated rework photos) —
+  /// embedded directly in the payload rather than re-read from
+  /// `local_photos` at drain time, since the live capture flow doesn't
+  /// persist there today (see addPhoto/saveStepPhotos) — this keeps the
+  /// retry self-contained regardless of that.
+  ///
+  /// Issue 4 fix (device-test finding — Task Overview showed "no photos
+  /// on file" for a step the inspector had already finished): Photos
+  /// never had any outbox fallback, and worse, saveStepPhotos() itself
+  /// wasn't even called on normal step-continue — only on early exit,
+  /// the rework-only Save button, or final submit. Both are fixed
+  /// together: saveStepPhotos() now falls back to this queue when
+  /// offline, and it's now called on every step-continue too, same as
+  /// checklist already does via its own per-toggle sync.
+  static Future<void> enqueuePhotosUpdate({
+    required String jobId,
+    required List<Map<String, dynamic>> photosData,
+  }) async {
+    final payload = await _withConflictSnapshot(
+      jobId: jobId,
+      payload: {'photos': photosData},
+    );
+    return DBHelper.enqueueAction(
+      id: 'photos_update_$jobId',
+      type: 'photos_update',
+      jobId: jobId,
+      payload: payload,
+    );
+  }
+
+  /// Queues a findings push. Same rationale as enqueuePhotosUpdate —
+  /// findings had no outbox fallback and wasn't called on normal
+  /// step-continue either, only on exit/rework-save/final-submit.
+  static Future<void> enqueueFindingsUpdate({
+    required String jobId,
+    required String observations,
+    required String? discrepancies,
+    required String? recommendations,
+    required String inspectorNotes,
+  }) async {
+    final payload = await _withConflictSnapshot(
+      jobId: jobId,
+      payload: {
+        'observations': observations,
+        'discrepancies': discrepancies,
+        'recommendations': recommendations,
+        'inspectorNotes': inspectorNotes,
+      },
+    );
+    return DBHelper.enqueueAction(
+      id: 'findings_update_$jobId',
+      type: 'findings_update',
       jobId: jobId,
       payload: payload,
     );
@@ -453,6 +520,10 @@ class SyncOutboxService {
         return 'Task status update';
       case 'checklist_update':
         return 'Checklist update';
+      case 'photos_update':
+        return 'Photos update';
+      case 'findings_update':
+        return 'Findings update';
       case 'current_step_update':
         return 'Progress update';
       case 'submit_inspection':
@@ -615,8 +686,33 @@ class SyncOutboxService {
           updateData: {'current_step': payload['currentStep']},
         );
         break;
-      // 'photo_upload' as its own standalone action (outside of submit)
-      // lands here in a future round if ever needed.
+      case 'photos_update':
+        final photosData = (payload['photos'] as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        final uploadedUrls = await SupabaseService.uploadInspectionPhotos(
+          jobId: jobId,
+          photosData: photosData,
+        );
+        await SupabaseService.updateJobInspectionProgress(
+          jobId: jobId,
+          updateData: {
+            'photo_paths': uploadedUrls,
+            'photo_count': uploadedUrls.length,
+          },
+        );
+        break;
+      case 'findings_update':
+        await SupabaseService.updateJobInspectionProgress(
+          jobId: jobId,
+          updateData: {
+            'observations': payload['observations'],
+            'discrepancies': payload['discrepancies'],
+            'recommendations': payload['recommendations'],
+            'inspector_notes': payload['inspectorNotes'],
+          },
+        );
+        break;
       default:
         debugPrint('SyncOutboxService: unknown action type "$type", skipping');
     }

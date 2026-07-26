@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../services/supabase_service.dart';
 import '../services/db_helper.dart';
+import '../services/sync_outbox_service.dart';
 import '../screens/tasks_screen.dart'; // To access TaskItem class
 
 class InspectionProvider extends ChangeNotifier {
@@ -37,6 +38,10 @@ class InspectionProvider extends ChangeNotifier {
 
   bool _isSyncing = false;
   bool _isReworkMode = false;
+  // Issue 2 fix: true once rework_started_at has been written for the
+  // CURRENT rework session — prevents writing it again on every
+  // subsequent edit (only the first real edit needs to set it).
+  bool _reworkModifiedMarked = false;
 
   // Getters
   TaskItem? get activeTask => _activeTask;
@@ -104,13 +109,35 @@ class InspectionProvider extends ChangeNotifier {
 
   // --- CHECKLIST UPDATE METHODS ---
 
+  /// Issue 2 fix: writes rework_started_at on the first actual edit of a
+  /// rework session — not on entering rework mode (that's what
+  /// reopenForRework() used to do, which is why merely opening a step and
+  /// backing out with zero changes still showed "Modified"). Best-effort,
+  /// no outbox fallback — if this particular write fails while offline,
+  /// the badge just won't show until a later successful attempt; the
+  /// actual edit itself is unaffected and still saved through its own
+  /// (already offline-safe) path. Fire-and-forget so it never blocks the
+  /// UI action that triggered it.
+  void _markReworkModifiedIfNeeded() {
+    if (!_isReworkMode || _reworkModifiedMarked || _activeTask == null) return;
+    _reworkModifiedMarked = true;
+    SupabaseService.updateJobInspectionProgress(
+      jobId: _activeTask!.id,
+      updateData: {'rework_started_at': DateTime.now().toIso8601String()},
+    ).catchError((e) {
+      debugPrint('markReworkModified failed (non-critical): $e');
+    });
+  }
+
   void setSiteCondition(String key, bool value) {
     _siteCondition[key] = value;
+    _markReworkModifiedIfNeeded();
     notifyListeners();
   }
 
   void setZoningObservation(String key, bool value) {
     _zoningObservations[key] = value;
+    _markReworkModifiedIfNeeded();
     notifyListeners();
   }
 
@@ -122,6 +149,7 @@ class InspectionProvider extends ChangeNotifier {
     required double? latitude,
     required double? longitude,
   }) {
+    _markReworkModifiedIfNeeded();
     _capturedPhotos.add({
       // ROOT-CAUSE FIX (2026-07-23) — Duplicate Photos Bug: this id used
       // to NOT exist here. `saveAllInspectionState()` (and the older,
@@ -163,6 +191,7 @@ class InspectionProvider extends ChangeNotifier {
   /// button, and cleans up all three layers.
   Future<void> removePhoto(int index) async {
     if (index < 0 || index >= _capturedPhotos.length) return;
+    _markReworkModifiedIfNeeded();
     final photo = _capturedPhotos[index];
     _capturedPhotos.removeAt(index);
     notifyListeners();
@@ -204,11 +233,22 @@ class InspectionProvider extends ChangeNotifier {
     required String recommendations,
     required String boundaryStatus,
   }) {
+    // Unlike the checklist toggles above, this is called from the step's
+    // exit-save regardless of whether the inspector actually changed
+    // anything — so mark-modified only if something genuinely differs,
+    // otherwise merely visiting and leaving Findings during rework would
+    // trip the same false "Modified" badge Issue 2 was about.
+    final changed = actualLandUse != _actualLandUse ||
+        notes != _notes ||
+        discrepancies != _discrepancies ||
+        recommendations != _recommendations ||
+        boundaryStatus != _boundaryStatus;
     _actualLandUse = actualLandUse;
     _notes = notes;
     _discrepancies = discrepancies;
     _recommendations = recommendations;
     _boundaryStatus = boundaryStatus;
+    if (changed) _markReworkModifiedIfNeeded();
     notifyListeners();
   }
 
@@ -234,7 +274,12 @@ class InspectionProvider extends ChangeNotifier {
     _activeTask = task;
     _isReworkMode = true;
     _currentStep = 1;
-    _isReworkMode = true;
+    // Issue 2 fix (device-test finding — "Modified" badge appeared just
+    // from opening Rework and backing out, with zero edits): this flag
+    // gates the first actual write of rework_started_at to the first real
+    // edit in THIS session, not to entering rework mode itself. Reset
+    // here so a fresh rework session starts clean.
+    _reworkModifiedMarked = false;
 
     // Match stored checklist entries back onto the two known maps.
     // FIX (Completed/Rework audit, Finding 2): this used to read
@@ -404,12 +449,11 @@ class InspectionProvider extends ChangeNotifier {
 
   Future<bool> saveStepPhotos() async {
     if (_activeTask == null) return false;
+    // Filter out any entries without a valid photo path, but keep the full Map structure
+    final photosToUpload = _capturedPhotos
+        .where((p) => (p['photoPath'] as String?)?.isNotEmpty == true)
+        .toList();
     try {
-      // Filter out any entries without a valid photo path, but keep the full Map structure
-      final photosToUpload = _capturedPhotos
-          .where((p) => (p['photoPath'] as String?)?.isNotEmpty == true)
-          .toList();
-
       // Pass the full list of maps as photosData
       final uploadedUrls = await SupabaseService.uploadInspectionPhotos(
         jobId: _activeTask!.id,
@@ -426,8 +470,22 @@ class InspectionProvider extends ChangeNotifier {
       );
       return true;
     } catch (e) {
-      debugPrint('saveStepPhotos failed: $e');
-      return false;
+      // Issue 4 fix (device-test finding — Task Overview showed "no
+      // photos on file" for a finished step): this used to have no
+      // offline fallback at all — a failed push (e.g. no connection) was
+      // just logged and lost. Queue it instead, same as every other
+      // step's save.
+      debugPrint('saveStepPhotos: direct push failed, queuing for retry — $e');
+      try {
+        await SyncOutboxService.enqueuePhotosUpdate(
+          jobId: _activeTask!.id,
+          photosData: photosToUpload,
+        );
+        return true; // queued — not lost, will apply once synced
+      } catch (e2) {
+        debugPrint('saveStepPhotos: failed to queue photos update — $e2');
+        return false;
+      }
     }
   }
 
@@ -460,23 +518,40 @@ class InspectionProvider extends ChangeNotifier {
 
   Future<bool> saveStepFindings() async {
     if (_activeTask == null) return false;
+    final observations =
+        'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.';
+    final discrepancies = _discrepancies.isNotEmpty ? _discrepancies : null;
+    final recommendations =
+        _recommendations.isNotEmpty ? _recommendations : null;
     try {
       await SupabaseService.updateJobInspectionProgress(
         jobId: _activeTask!.id,
         updateData: {
-          'observations':
-              'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.',
-          'discrepancies': _discrepancies.isNotEmpty ? _discrepancies : null,
-          'recommendations': _recommendations.isNotEmpty
-              ? _recommendations
-              : null,
+          'observations': observations,
+          'discrepancies': discrepancies,
+          'recommendations': recommendations,
           'inspector_notes': _notes,
         },
       );
       return true;
     } catch (e) {
-      debugPrint('saveStepFindings failed: $e');
-      return false;
+      // Issue 4 fix — same rationale as saveStepPhotos above: no offline
+      // fallback existed here before, so a failed push while offline was
+      // silently lost instead of queued.
+      debugPrint('saveStepFindings: direct push failed, queuing for retry — $e');
+      try {
+        await SyncOutboxService.enqueueFindingsUpdate(
+          jobId: _activeTask!.id,
+          observations: observations,
+          discrepancies: discrepancies,
+          recommendations: recommendations,
+          inspectorNotes: _notes,
+        );
+        return true;
+      } catch (e2) {
+        debugPrint('saveStepFindings: failed to queue findings update — $e2');
+        return false;
+      }
     }
   }
 

@@ -172,6 +172,15 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       return;
     }
     InspectionProgress.instance.markStepComplete(3);
+    // Issue 4 fix (device-test finding — Task Overview showed "no photos
+    // on file" after this step was already finished): saveStepPhotos()
+    // used to only run on early exit, the rework-only Save button, or
+    // final submit — never on normal forward progress, unlike checklist
+    // (which auto-saves per toggle). Fire-and-forget so a slow/offline
+    // save can't delay navigation; it now has its own outbox fallback
+    // too (see SyncOutboxService.enqueuePhotosUpdate), so nothing is
+    // lost either way.
+    context.read<InspectionProvider>().saveStepPhotos();
     Navigator.push(context, MaterialPageRoute(builder: (_) => InspectionChecklistScreen(task: widget.task, capturedPhotos: _capturedPhotos)));
   }
 

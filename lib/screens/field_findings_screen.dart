@@ -95,6 +95,11 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
           boundaryStatus: provider.boundaryStatus,
         );
     InspectionProgress.instance.markStepComplete(5);
+    // Issue 4 fix — same rationale as capture_photo_screen.dart's
+    // _finishAndContinue: findings never auto-saved on normal forward
+    // progress before, only on exit/rework-save/final-submit. Now has
+    // its own outbox fallback too (enqueueFindingsUpdate).
+    provider.saveStepFindings();
     Navigator.push(context, MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)));
   }
 

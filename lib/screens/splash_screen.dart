@@ -588,7 +588,19 @@ class _LoginScreenState extends State<LoginScreen> {
                         isPassword: true,
                       ),
 
-                      if (_biometricEnrolled) ...[
+                      // Only offer biometric here if there's actually a
+                      // session for it to restore. AuthService.isLoggedIn
+                      // is false after a real logout — biometric has no
+                      // stored credential to fall back on anymore (that
+                      // mechanism was removed, see AUTH_SECURITY_MASTER_DOC
+                      // §4.3/§5a), so showing this button unconditionally
+                      // meant it always failed with "Session expired" right
+                      // after the exact action (logout) that most people
+                      // would try it after. This still covers the
+                      // legitimate case — reaching Login because a
+                      // non-connectivity error interrupted profile loading
+                      // while the underlying session was still fine.
+                      if (_biometricEnrolled && AuthService.isLoggedIn) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
                           onPressed: _isLoading ? null : _handleBiometricLogin,
