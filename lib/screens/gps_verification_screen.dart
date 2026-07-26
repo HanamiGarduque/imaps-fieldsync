@@ -299,6 +299,14 @@ final online = connectivityResult is List
     HapticFeedback.selectionClick();
     InspectionProgress.instance.markStepComplete(2);
     setState(() => _submitting = false);
+    // Issue 2 fix (Completed Category enhancement): this screen never
+    // checked rework mode at all before — it always pushed forward to
+    // Photos regardless, advancing the normal wizard instead of returning
+    // to Inspection Summary during a rework session.
+    if (context.read<InspectionProvider>().isReworkMode) {
+      Navigator.pop(context);
+      return;
+    }
     Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));
   }
 
@@ -306,7 +314,7 @@ final online = connectivityResult is List
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return SensitiveScreen(child: PopScope(
-      canPop: InspectionProgress.instance.currentStep > 1,
+      canPop: !context.read<InspectionProvider>().isReworkMode && InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
           _markOngoingWithFallback(widget.task.id);
@@ -315,6 +323,7 @@ final online = connectivityResult is List
         handleInspectionExit(
           context,
           onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
+          isReworkMode: context.read<InspectionProvider>().isReworkMode,
         );
       },
       child: Scaffold(
@@ -334,6 +343,7 @@ final online = connectivityResult is List
                       _GlassBackButton(onTap: () => handleInspectionExit(
                         context,
                         onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
+                        isReworkMode: context.read<InspectionProvider>().isReworkMode,
                       )),
                       const SizedBox(width: 14),
                       Expanded(
@@ -482,7 +492,12 @@ final online = connectivityResult is List
                         alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
                         child: _submitting
                             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                            : Text(_verified ? 'Confirm & Continue' : 'Get closer to the site', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                            : Text(
+                                !_verified
+                                    ? 'Get closer to the site'
+                                    : (context.watch<InspectionProvider>().isReworkMode ? 'Save' : 'Confirm & Continue'),
+                                style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white),
+                              ),
                       ),
                     ),
                   ),

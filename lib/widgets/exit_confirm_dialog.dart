@@ -24,10 +24,42 @@ import 'imaps_loading_indicator.dart';
 /// The task's `status` flips to 'in_progress' server-side inside those
 /// save calls (see SupabaseService.updateJobInspectionProgress), which is
 /// what moves it into the "Ongoing" tab.
+/// [isReworkMode] — Issue 3 root-cause fix (device-test finding: a rework
+/// edit saved correctly but the Inspection Summary screen kept showing
+/// the old value until fully re-entering the task). The "currentStep > 1
+/// means there's a real previous step screen underneath" assumption above
+/// is FALSE during rework: `unlockAllForReview()` sets currentStep to the
+/// max (6) for every step, since rework lets you jump into any step
+/// directly — there's no previous-step screen underneath, just the
+/// Inspection Summary screen, which needs FRESH data the moment this
+/// screen closes. Firing the save unawaited and popping immediately let
+/// the summary's refresh race ahead of the still-in-flight save. During
+/// rework this always awaits the save before popping — no confirmation
+/// dialog needed (auto-save philosophy, nothing to "confirm"), just a
+/// brief blocking wait so the pop and the refresh it triggers never race.
 Future<void> handleInspectionExit(
   BuildContext context, {
   required Future<bool> Function() onSaveProgress,
+  bool isReworkMode = false,
 }) async {
+  if (isReworkMode) {
+    bool ok = false;
+    try {
+      ok = await onSaveProgress();
+    } catch (_) {
+      ok = false;
+    }
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved offline — will sync when back online.')),
+      );
+    }
+    if (!context.mounted) return;
+    Navigator.pop(context);
+    return;
+  }
+
   if (InspectionProgress.instance.currentStep > 1) {
     unawaited(onSaveProgress());
     if (context.mounted) Navigator.pop(context);

@@ -7,7 +7,7 @@ import '../services/supabase_service.dart';
 import '../providers/inspection_provider.dart';
 import 'inspection_progress.dart';
 
-import 'parcel_detail_screen.dart' hide InsightTheme;
+import 'site_map_screen.dart' hide InsightTheme;
 import 'gps_verification_screen.dart' hide InsightTheme;
 import 'inspection_checklist_screen.dart' hide InsightTheme;
 import 'capture_photo_screen.dart' hide InsightTheme;
@@ -116,7 +116,15 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     final Widget target;
     switch (step) {
       case 1:
-        target = ParcelDetailScreen(task: task);
+        // Issue 1 fix (Completed Category enhancement, reported by user):
+        // ParcelDetailScreen is NOT the Site Verification step — it's the
+        // general task-overview/landing hub shown before an inspection is
+        // even started (hardcoded title 'Task Overview', read-only
+        // application info + the 6-step list). The actual Site
+        // Verification screen is SiteMapScreen (see its own doc comment:
+        // "Site Verification (Step 1)"). Reworking Step 1 was silently
+        // landing on the wrong screen entirely.
+        target = SiteMapScreen(task: task);
         break;
       case 2:
         target = GpsVerificationScreen(task: task);

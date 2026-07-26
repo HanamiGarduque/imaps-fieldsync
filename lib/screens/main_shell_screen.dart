@@ -59,13 +59,19 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.hidden) {
-      // Only record the *first* moment we left the foreground in this
-      // backgrounding cycle — a brief inactive->paused->inactive flutter
-      // (e.g. a system dialog, a notification shade pull) shouldn't reset
-      // the clock each time.
+    // Deliberately NOT tracking AppLifecycleState.inactive here. On Android,
+    // showing the native biometric prompt itself (BiometricPrompt) briefly
+    // puts the app into `inactive` — the same transient state used for
+    // things like a notification shade pull or an incoming call — even
+    // though the user never actually left the app. Treating `inactive` as
+    // "backgrounded" meant every biometric prompt anywhere in the app
+    // (including Security Settings' "Test/Re-verify Sensor") looked
+    // indistinguishable from a real app-switch, which re-triggered this
+    // very lock screen right after using biometric for anything —
+    // including the lock screen's own auto-prompt, compounding into a
+    // loop. `paused`/`hidden` are the states that actually mean "the app
+    // is no longer visible," which is the only thing that should count.
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _pausedAt ??= DateTime.now();
     } else if (state == AppLifecycleState.resumed) {
       _maybeShowResumeLock();

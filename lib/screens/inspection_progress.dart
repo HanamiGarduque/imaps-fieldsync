@@ -40,6 +40,21 @@ class InspectionProgress extends ChangeNotifier {
   String? _activeTaskId;
   String? _activeTaskLabel;
 
+  // FIX (device-test finding — "progress showed 1/6 after reaching step 2"):
+  // markStepComplete() used to fire _persistCurrentStep() unawaited, so two
+  // steps completed in quick succession (e.g. Step 1 → Step 2, normal
+  // fast navigation) started two independent, concurrent background
+  // writes to the *same* outbox row (current_step_update is deduped per
+  // job). There's no ordering guarantee between two unawaited async
+  // calls — Step 1's write (which also does its own connectivity check)
+  // could finish *after* Step 2's, silently overwriting the newer step
+  // with the older one. Root cause was a race in write ordering, not a
+  // missed write or a Sync Center conflict — this queue makes every
+  // persistence call for this task wait for the previous one to finish
+  // first, so writes always apply in the order steps were actually
+  // completed, regardless of how fast each one's own I/O happens to be.
+  Future<void> _persistQueue = Future.value();
+
   int get highestCompleted => _highestCompleted;
   int get currentStep => (_highestCompleted + 1).clamp(1, totalSteps);
   bool get isComplete => _highestCompleted >= totalSteps;
@@ -56,7 +71,12 @@ class InspectionProgress extends ChangeNotifier {
       notifyListeners();
 
       if (_activeTaskId != null) {
-        _persistCurrentStep(_activeTaskId!, step);
+        // Capture taskId now, not inside the deferred closure below — by
+        // the time this queued write actually runs, the inspector could
+        // have already switched to a different task, and _activeTaskId
+        // would no longer be the one this particular step belongs to.
+        final taskId = _activeTaskId!;
+        _persistQueue = _persistQueue.then((_) => _persistCurrentStep(taskId, step));
       }
 
       if (step < totalSteps && _activeTaskId != null) {

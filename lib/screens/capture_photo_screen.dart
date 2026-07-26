@@ -193,7 +193,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   Widget _buildGridMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return PopScope(
-      canPop: InspectionProgress.instance.currentStep > 1,
+      canPop: !context.read<InspectionProvider>().isReworkMode && InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
           context.read<InspectionProvider>().saveStepPhotos();
@@ -202,6 +202,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
         handleInspectionExit(
           context,
           onSaveProgress: () => context.read<InspectionProvider>().saveStepPhotos(),
+          isReworkMode: context.read<InspectionProvider>().isReworkMode,
         );
       },
       child: Scaffold(
@@ -221,6 +222,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                       _GlassBackButton(onTap: () => handleInspectionExit(
                         context,
                         onSaveProgress: () => context.read<InspectionProvider>().saveStepPhotos(),
+                        isReworkMode: context.read<InspectionProvider>().isReworkMode,
                       )),
                       const SizedBox(width: 14),
                       Expanded(
@@ -290,9 +292,20 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                             onPressed: _isSaving ? null : () async {
                               setState(() => _isSaving = true);
                               final ok = await context.read<InspectionProvider>().saveStepPhotos();
-                              if (mounted) {
-                                setState(() => _isSaving = false);
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Photos saved.' : 'Save failed.')));
+                              if (!mounted) return;
+                              setState(() => _isSaving = false);
+                              // Issue 2 fix (Completed Category enhancement):
+                              // during rework there should be exactly one
+                              // button — Save — and it should return to
+                              // Inspection Summary, not leave the inspector
+                              // stranded on the step screen needing a
+                              // separate "Continue" tap that doesn't even
+                              // make sense here (there's no next rework step
+                              // to continue to).
+                              if (ok) {
+                                Navigator.pop(context);
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Save failed.')));
                               }
                             },
                             style: OutlinedButton.styleFrom(
@@ -304,8 +317,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                                 : Text('Save', style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.blue1)),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                      ],
+                      ] else ...[
                       Expanded(
                         child: ElevatedButton(
                           onPressed: _finishAndContinue,
@@ -327,11 +339,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                           ),
                         ),
                       ),
+                      ],
                     ],
                   ),
                 ),
               ],
-            ),
+          ),
           ),
         ],
       ),

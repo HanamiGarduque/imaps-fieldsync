@@ -124,13 +124,17 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return SensitiveScreen(child: PopScope(
-      canPop: InspectionProgress.instance.currentStep > 1,
+      canPop: !context.read<InspectionProvider>().isReworkMode && InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
           _syncControllersAndSave();
           return;
         }
-        handleInspectionExit(context, onSaveProgress: _syncControllersAndSave);
+        handleInspectionExit(
+          context,
+          onSaveProgress: _syncControllersAndSave,
+          isReworkMode: context.read<InspectionProvider>().isReworkMode,
+        );
       },
       child: Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -146,7 +150,11 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => handleInspectionExit(context, onSaveProgress: _syncControllersAndSave)),
+                      _GlassBackButton(onTap: () => handleInspectionExit(
+                        context,
+                        onSaveProgress: _syncControllersAndSave,
+                        isReworkMode: context.read<InspectionProvider>().isReworkMode,
+                      )),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -243,9 +251,15 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                             onPressed: _isSaving ? null : () async {
                               setState(() => _isSaving = true);
                               final ok = await _syncControllersAndSave();
-                              if (mounted) {
-                                setState(() => _isSaving = false);
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Findings saved.' : 'Save failed.')));
+                              if (!mounted) return;
+                              setState(() => _isSaving = false);
+                              // Issue 2 fix (Completed Category enhancement):
+                              // single Save button during rework, returns
+                              // to Inspection Summary.
+                              if (ok) {
+                                Navigator.pop(context);
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Save failed.')));
                               }
                             },
                             style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
@@ -254,8 +268,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                                 : Text('Save', style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.blue1)),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                      ],
+                      ] else ...[
                       Expanded(
                         child: ElevatedButton(
                           onPressed: _handleContinue,
@@ -277,6 +290,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                           ),
                         ),
                       ),
+                      ],
                     ],
                   ),
                 ),

@@ -125,7 +125,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return SensitiveScreen(child: PopScope(
-      canPop: InspectionProgress.instance.currentStep > 1,
+      canPop: !context.read<InspectionProvider>().isReworkMode && InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
           // Already popped natively (smooth swipe/hardware-back animation) —
@@ -136,6 +136,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
         handleInspectionExit(
           context,
           onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
+          isReworkMode: context.read<InspectionProvider>().isReworkMode,
         );
       },
       child: Scaffold(
@@ -155,6 +156,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       _GlassBackButton(onTap: () => handleInspectionExit(
                         context,
                         onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
+                        isReworkMode: context.read<InspectionProvider>().isReworkMode,
                       )),
                       const SizedBox(width: 14),
                       Expanded(
@@ -240,9 +242,17 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                             onPressed: _isSaving ? null : () async {
                               setState(() => _isSaving = true);
                               final ok = await context.read<InspectionProvider>().saveStepChecklist();
-                              if (mounted) {
-                                setState(() => _isSaving = false);
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Checklist saved.' : 'Save failed.')));
+                              if (!mounted) return;
+                              setState(() => _isSaving = false);
+                              // Issue 2 fix (Completed Category enhancement):
+                              // single Save button during rework, returns to
+                              // Inspection Summary instead of leaving the
+                              // inspector on the step needing a separate
+                              // "Continue" tap that doesn't apply here.
+                              if (ok) {
+                                Navigator.pop(context);
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Save failed.')));
                               }
                             },
                             style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
@@ -251,8 +261,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                                 : Text('Save', style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.blue1)),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                      ],
+                      ] else ...[
                       Expanded(
                         child: ElevatedButton(
                           onPressed: _continueToFindings,
@@ -274,6 +283,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           ),
                         ),
                       ),
+                      ],
                     ],
                   ),
                 ),

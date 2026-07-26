@@ -16,6 +16,8 @@ import '../services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
 import '../widgets/imaps_loading_indicator.dart';
 import '../widgets/sensitive_screen.dart';
+import 'package:provider/provider.dart';
+import '../providers/inspection_provider.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -388,6 +390,17 @@ final online = connectivityResult is List
                   child: ElevatedButton(
                     onPressed: () {
                       HapticFeedback.selectionClick();
+                      final isReworkMode = context.read<InspectionProvider>().isReworkMode;
+                      if (isReworkMode) {
+                        // Issue 2 fix (Completed Category enhancement):
+                        // this screen has no editable data of its own
+                        // (pure map/location confirmation) — during rework
+                        // there's nothing to push forward to, "Continue"
+                        // would incorrectly advance the normal wizard
+                        // instead of returning to Inspection Summary.
+                        Navigator.pop(context);
+                        return;
+                      }
                       InspectionProgress.instance.markStepComplete(1);
                       Navigator.push(context, MaterialPageRoute(builder: (_) => GpsVerificationScreen(task: task)));
                     },
@@ -404,7 +417,10 @@ final online = connectivityResult is List
                       ),
                       child: Container(
                         alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                        child: Text('Proceed to Location', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                        child: Text(
+                          context.watch<InspectionProvider>().isReworkMode ? 'Save' : 'Proceed to Location',
+                          style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white),
+                        ),
                       ),
                     ),
                   ),
