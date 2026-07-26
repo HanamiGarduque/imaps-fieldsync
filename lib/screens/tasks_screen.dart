@@ -116,6 +116,11 @@ class TaskItem {
   // is the actual signal for the "Modified" badge. Cleared back to null
   // on finalize (Review & Submit).
   final String? reworkStartedAt;
+  // Enhancement (Completed/Summary, 2026-07): DB-driven "last saved" signal.
+  // field_jobs.updated_at is auto-maintained by the trg_field_jobs_set_updated_at
+  // trigger on every UPDATE, so it reflects the true last-write time for both
+  // a normal submit and any in-progress rework edit — no new column needed.
+  final String? updatedAt;
 
   TaskItem({
     required this.id, this.parcelId, required this.name, required this.location,
@@ -132,6 +137,7 @@ class TaskItem {
     this.createdAt = '',
     this.startedAt,
     this.reworkStartedAt,
+    this.updatedAt,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -180,6 +186,7 @@ class TaskItem {
       createdAt: job['created_at'] as String? ?? '',
       startedAt: job['started_at'] as String?,
       reworkStartedAt: job['rework_started_at'] as String?,
+      updatedAt: job['updated_at'] as String?,
     );
   }
 

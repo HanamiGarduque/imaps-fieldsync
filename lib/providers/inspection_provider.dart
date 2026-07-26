@@ -491,16 +491,16 @@ class InspectionProvider extends ChangeNotifier {
 
   Future<bool> saveStepChecklist() async {
     if (_activeTask == null) return false;
+    final checklist = <Map<String, dynamic>>[
+      ..._siteCondition.entries.map(
+        (e) => {'item': e.key, 'checked': e.value},
+      ),
+      ..._zoningObservations.entries.map(
+        (e) => {'item': e.key, 'checked': e.value},
+      ),
+    ];
+    final done = checklist.where((c) => c['checked'] == true).length;
     try {
-      final checklist = <Map<String, dynamic>>[
-        ..._siteCondition.entries.map(
-          (e) => {'item': e.key, 'checked': e.value},
-        ),
-        ..._zoningObservations.entries.map(
-          (e) => {'item': e.key, 'checked': e.value},
-        ),
-      ];
-      final done = checklist.where((c) => c['checked'] == true).length;
       await SupabaseService.updateJobInspectionProgress(
         jobId: _activeTask!.id,
         updateData: {
@@ -511,8 +511,28 @@ class InspectionProvider extends ChangeNotifier {
       );
       return true;
     } catch (e) {
-      debugPrint('saveStepChecklist failed: $e');
-      return false;
+      // Consistency fix (offline/sync validation pass): this used to have
+      // no fallback at all — a failed direct push (e.g. offline) just
+      // returned false and the rework-mode "Save" button on the Checklist
+      // screen showed "Save failed.", even though the per-toggle autosave
+      // in inspection_checklist_screen.dart (_syncChecklistProgress) had
+      // already queued the same state via SyncOutboxService moments
+      // earlier — so no data was actually lost, but the message was
+      // misleading. Now matches the same queue-on-failure pattern already
+      // used by saveStepPhotos and saveStepFindings above.
+      debugPrint('saveStepChecklist: direct push failed, queuing for retry — $e');
+      try {
+        await SyncOutboxService.enqueueChecklistUpdate(
+          jobId: _activeTask!.id,
+          checklistData: checklist,
+          checklistCompletedCount: done,
+          checklistTotalCount: checklist.length,
+        );
+        return true; // queued — not lost, will apply once synced
+      } catch (e2) {
+        debugPrint('saveStepChecklist: failed to queue checklist update — $e2');
+        return false;
+      }
     }
   }
 

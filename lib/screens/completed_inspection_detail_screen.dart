@@ -133,7 +133,17 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
       default:
         target = ReviewSubmitScreen(task: task);
     }
-    Navigator.push(context, MaterialPageRoute(builder: (_) => target));
+    // Enhancement (Inspection Summary, 2026-07): re-fetch when control
+    // returns from the step screen, so an edit saved during rework shows
+    // up in the summary immediately without the inspector having to back
+    // out of this screen and reopen it. The step screens already save
+    // immediately on their own (per updateFindings/setSiteCondition/etc in
+    // InspectionProvider), so by the time Navigator pops back here the
+    // edit is already persisted — this call just reflects it on screen.
+    Navigator.push(context, MaterialPageRoute(builder: (_) => target))
+        .then((_) {
+      if (mounted) _loadFullDetail();
+    });
   }
 
   @override
@@ -265,9 +275,34 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  task.inspectionNo,
-                  style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3),
+                Row(
+                  children: [
+                    Text(
+                      task.inspectionNo,
+                      style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3),
+                    ),
+                    // Enhancement (Inspection Summary, 2026-07): surfaces
+                    // the same signal already used by the Completed list
+                    // (tasks_screen.dart) — reworkStartedAt non-null means
+                    // an unfinished rework edit exists. status itself is
+                    // untouched and stays 'completed' the whole time, so
+                    // showing this badge here never implies a category
+                    // change. Cleared back to null on Review & Submit.
+                    if (task.reworkStartedAt != null) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.orangeTint,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'Modified',
+                          style: InsightTheme.inter(9.5, w: FontWeight.w700, c: const Color(0xFFB45309)),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -283,12 +318,43 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                // Enhancement (Inspection Summary, 2026-07): "last saved"
+                // timestamp. Prefers updated_at (auto-maintained by the
+                // trg_field_jobs_set_updated_at DB trigger on every write,
+                // so it reflects rework edits too) and falls back to
+                // submitted_at for older rows fetched before this field
+                // existed on the client.
+                if ((task.updatedAt ?? task.submittedAt) != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Last saved: ${_formatTimestamp(task.updatedAt ?? task.submittedAt)}',
+                    style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
+                  ),
+                ],
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Enhancement (Inspection Summary, 2026-07): plain, dependency-free
+  /// timestamp formatting — intentionally not pulling in `intl` since it's
+  /// not already used elsewhere in this codebase and this task is scoped
+  /// to enhancing the summary, not adding new dependencies.
+  String _formatTimestamp(String? iso) {
+    if (iso == null || iso.isEmpty) return '—';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '—';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final minute = dt.minute.toString().padLeft(2, '0');
+    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year} · $hour12:$minute $ampm';
   }
 
   Widget _buildDetailRows(Map<String, String> rows) {
@@ -415,6 +481,30 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                       child: Text(
                         widget.title,
                         style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink),
+                      ),
+                    ),
+                    // Enhancement (Inspection Summary, 2026-07): per-step
+                    // status indicator. Deliberately just "Saved" (not a
+                    // per-step "Modified") — the data model only tracks a
+                    // single task-level rework_started_at, not which
+                    // individual step it belongs to, so labeling one step
+                    // as "Modified" over another would be a guess, not a
+                    // fact. The task-level Modified badge already lives on
+                    // the header above for that reason.
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: InsightTheme.greenTint,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.check_circle_rounded, size: 11, color: InsightTheme.green),
+                          const SizedBox(width: 3),
+                          Text('Saved', style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.green)),
+                        ],
                       ),
                     ),
                     Icon(
