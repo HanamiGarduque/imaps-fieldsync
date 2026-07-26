@@ -69,6 +69,8 @@ dependencies:
 
   screen_protector: ^1.5.2
 
+  sqflite_sqlcipher: ^3.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
