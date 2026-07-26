@@ -729,20 +729,24 @@ class SupabaseService {
     String? locationLabel,
   }) async {
     try {
-      // Rework redesign (device-test finding — merely editing one step
-      // during rework used to flip the task to "Ongoing 6/6" even before
-      // the inspector resubmitted, which isn't accurate: rework is
-      // editing an existing completed inspection, not starting a new
-      // one). `status` now stays 'completed' for the entire rework
-      // session — rework_started_at is the new signal that a rework is
-      // in progress, cleared back to null on finalize (see
-      // submitInspection). Guarded to 'completed' rows only — reopening
-      // a job that isn't actually completed yet isn't a valid rework.
-      await client
+      // Issue 2 fix (device-test finding): this used to write
+      // rework_started_at right here, immediately on entry — meaning
+      // opening a step for rework and backing out without changing
+      // anything still showed a "Modified" badge. The write now happens
+      // lazily, on the first actual edit (see
+      // InspectionProvider._markReworkModifiedIfNeeded), not on entry.
+      // Still worth confirming the job is actually completed before
+      // allowing entry, and logging that a rework session was opened —
+      // just no longer a data-changing action by itself.
+      final rows = await client
           .from('field_jobs')
-          .update({'rework_started_at': DateTime.now().toIso8601String()})
+          .select('status')
           .eq('id', jobId)
-          .ilike('status', 'completed');
+          .limit(1);
+      final status = (rows as List).isNotEmpty ? rows.first['status'] as String? : null;
+      if (status?.toLowerCase() != 'completed') {
+        throw Exception('Job is not completed — cannot reopen for rework.');
+      }
       await logActivity(
         eventType: 'rework_started',
         title: 'Reopened for rework',
