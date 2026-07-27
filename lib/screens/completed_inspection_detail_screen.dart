@@ -385,41 +385,92 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   }
 
   Widget _buildPhotoGrid(TaskItem task) {
-    if (task.photoPaths.isEmpty) {
+    // Fix (Step 3 / photo-notes audit, 2026-07): prefer the richer
+    // field_job_photos join (photoDetails — has notes) over the flat
+    // field_jobs.photo_paths URL list (photoPaths — never had notes).
+    // Falls back to photoPaths so older cached job data (fetched before
+    // this fix) still renders photos, just without a note caption.
+    final hasDetails = task.photoDetails.isNotEmpty;
+    final int count = hasDetails ? task.photoDetails.length : task.photoPaths.length;
+    if (count == 0) {
       return Text('No photos attached to this report.', style: InsightTheme.inter(13, c: InsightTheme.ink2));
     }
-    return SizedBox(
-      height: 100,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: task.photoPaths.length,
-        // FIXED: Added identifiers context and index
-        separatorBuilder: (context, index) => const SizedBox(width: 10),
-        itemBuilder: (_, i) => GestureDetector(
-          onTap: () => openFullscreenPhotoViewer(context, task.photoPaths, i),
-          child: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Image.network(
-            task.photoPaths[i],
-            width: 100,
-            height: 100,
-            fit: BoxFit.cover,
-            // FIXED: Added identifiers context, error, and stackTrace
-            errorBuilder: (context, error, stackTrace) => Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: InsightTheme.surface2,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: InsightTheme.line),
-              ),
-              child: const Icon(Icons.broken_image_outlined, size: 24, color: InsightTheme.ink3),
+    final urls = hasDetails
+        ? task.photoDetails.map((p) => (p['photo_url'] as String?) ?? '').toList()
+        : task.photoPaths;
+
+    // Redesign (photo-notes clarity pass, 2026-07): each photo + its note
+    // is its own bordered card with an explicit "Photo N of Count" label,
+    // so which note belongs to which picture is unambiguous even with
+    // several photos, rather than a plain unbounded row/strip.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(count, (i) {
+        final url = urls[i];
+        final note = hasDetails ? (task.photoDetails[i]['notes'] as String?) : null;
+        final hasNote = note != null && note.trim().isNotEmpty;
+        return Padding(
+          padding: EdgeInsets.only(bottom: i == count - 1 ? 0 : 10),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface2,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: InsightTheme.line),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  onTap: () => openFullscreenPhotoViewer(context, urls, i),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.network(
+                      url,
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: InsightTheme.line),
+                        ),
+                        child: const Icon(Icons.broken_image_outlined, size: 22, color: InsightTheme.ink3),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.photo_camera_outlined, size: 12, color: InsightTheme.ink3),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Photo ${i + 1} of $count',
+                            style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.4),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        hasNote ? note : 'No inspection note for this photo.',
+                        style: InsightTheme.inter(12.5, c: hasNote ? InsightTheme.ink2 : InsightTheme.ink3),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          ),
-        ),
-      ),
+        );
+      }),
     );
   }
 }

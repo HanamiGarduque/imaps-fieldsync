@@ -188,6 +188,18 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                         children: [
                           Text('STEP 4 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
                           Text(' — VERIFY COMPLIANCE', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
+                          const Spacer(),
+                          // Fix (deferred roadmap item, 2026-07): this
+                          // screen never displayed a live checklist count
+                          // at all — _doneCount/_totalCount were already
+                          // correct and already rebuilt instantly on every
+                          // toggle (setState in each _ChecklistItem's
+                          // onTap), the display just didn't exist yet.
+                          // Not a stale-data bug — a missing widget.
+                          Text(
+                            '$_doneCount of $_totalCount checked',
+                            style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.3),
+                          ),
                         ],
                       ),
                     ],

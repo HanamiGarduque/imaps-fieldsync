@@ -599,6 +599,12 @@ class SupabaseService {
           'latitude': photo['latitude'],
           'longitude': photo['longitude'],
           'captured_at': photo['capturedAt'],
+          // Fix (Summary/Step-3 audit): this was missing entirely, so the
+          // note the inspector typed for this specific photo — already
+          // captured on-device via InspectionProvider.addPhoto and already
+          // persisted locally (local_photos.notes) — was silently dropped
+          // on every upload and never reached Supabase at all.
+          'notes': photo['notes'],
         }, onConflict: 'id');
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
@@ -685,6 +691,21 @@ class SupabaseService {
   // ─────────────────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>?> fetchJobDetail(String jobId) async {
     try {
+      // Security hardening (RLS audit, 2026-07): this used to fetch by
+      // `id` alone, relying entirely on the "Inspectors can view their
+      // own assigned jobs" RLS policy to prevent one inspector from
+      // opening another inspector's job. That policy was being silently
+      // overridden by a separate, overly broad "Enable read access for
+      // all users" policy (USING (true), no role restriction) — Postgres
+      // ORs permissive RLS policies together, so the open one won, and
+      // ANY caller (even unauthenticated, via just the anon key) could
+      // read any job by id. The open policy has been dropped in
+      // migration_fix_field_jobs_rls.sql; this explicit filter is
+      // defense-in-depth so this query is correctly scoped even if RLS
+      // is ever misconfigured again — matching the same pattern already
+      // used in fetchMyJobs() and fetchCompletedJobs() above.
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) return null;
       final response = await client
           .from('field_jobs')
           .select('''
@@ -706,10 +727,12 @@ class SupabaseService {
               photo_url,
               latitude,
               longitude,
-              captured_at
+              captured_at,
+              notes
             )
           ''') // Added field_job_photos to the select query
           .eq('id', jobId)
+          .eq('assigned_inspector_id', userId)
           .single();
       return response;
     } catch (e) {

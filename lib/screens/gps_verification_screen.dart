@@ -297,16 +297,19 @@ final online = connectivityResult is List
     }
     context.read<InspectionProvider>().recordGpsVerification(distanceMeters: _distance ?? 0);
     HapticFeedback.selectionClick();
-    InspectionProgress.instance.markStepComplete(2);
     setState(() => _submitting = false);
     // Issue 2 fix (Completed Category enhancement): this screen never
     // checked rework mode at all before — it always pushed forward to
     // Photos regardless, advancing the normal wizard instead of returning
-    // to Inspection Summary during a rework session.
+    // to Inspection Summary during a rework session. markStepComplete(2)
+    // is step-wizard bookkeeping (advances current_step) — it belongs only
+    // to the normal forward-progress path below, not to an edit-in-place
+    // rework session, so it's no longer called unconditionally beforehand.
     if (context.read<InspectionProvider>().isReworkMode) {
       Navigator.pop(context);
       return;
     }
+    InspectionProgress.instance.markStepComplete(2);
     Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));
   }
 

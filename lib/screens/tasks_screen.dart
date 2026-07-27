@@ -91,6 +91,14 @@ class TaskItem {
   final String? inspectionResult;
   final bool? isCompliant;
   final List<String> photoPaths;
+  // Fix (Step 3 / photo-notes audit, 2026-07): photoPaths (from
+  // field_jobs.photo_paths) is only a flat list of URLs — it never carried
+  // the per-photo note the inspector typed at capture time. That note
+  // actually lives in the field_job_photos join (fetched by
+  // fetchJobDetail's `field_job_photos(...)` select) and was simply never
+  // read into TaskItem before. This carries the richer per-photo record
+  // (url/notes/lat/lng/captured_at) through so the Summary can show it.
+  final List<Map<String, dynamic>> photoDetails;
   final int photoCount;
   final int checklistCompletedCount;
   final int checklistTotalCount;
@@ -123,7 +131,7 @@ class TaskItem {
     this.scheduledDate = '', this.deadlineDate, this.landUseClass = 'Not yet on file', this.lotAreaSqm,
     this.propertyIndexNumber, this.applicationType, this.findings, this.observations,
     this.discrepancies, this.recommendations, this.inspectorNotes, this.inspectionResult,
-    this.isCompliant, this.photoPaths = const [], this.photoCount = 0,
+    this.isCompliant, this.photoPaths = const [], this.photoDetails = const [], this.photoCount = 0,
     this.checklistCompletedCount = 0, this.checklistTotalCount = 0, this.submittedAt,
     this.checklistData = const [], this.confirmedLatitude, this.confirmedLongitude,
     this.gpsAccuracyM, this.gpsConfirmedAt, this.isSelfScheduled = false,
@@ -166,6 +174,10 @@ class TaskItem {
       inspectionResult: job['inspection_result'] as String?,
       isCompliant: job['is_compliant'] as bool?,
       photoPaths: (job['photo_paths'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      photoDetails: (job['field_job_photos'] as List?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ??
+          const [],
       photoCount: (job['photo_count'] as num?)?.toInt() ?? 0,
       checklistCompletedCount: (job['checklist_completed_count'] as num?)?.toInt() ?? 0,
       checklistTotalCount: (job['checklist_total_count'] as num?)?.toInt() ?? 0,

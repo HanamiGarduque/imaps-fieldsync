@@ -92,6 +92,29 @@ class SyncOutboxService {
   static const _lastSyncPrefsKey = 'field_sync_last_success';
   static const _conflictSnapshotKey = 'cachedUpdatedAtSnapshot';
   static const _forceSyncAnywayKey = 'forceSyncAnyway';
+  // Architectural fix (Sync Center audit, 2026-07 — cross-referenced from
+  // the roadmap's parked "spurious conflict on 2nd+ action in a batch"
+  // finding): every queued action embeds the job's updated_at snapshot
+  // from the moment it was ENQUEUED (_withConflictSnapshot). If two
+  // conflict-sensitive actions for the same job are queued while offline
+  // (e.g. a checklist edit and a findings edit made back-to-back), both
+  // capture the SAME snapshot, since neither has synced yet. When the
+  // drain pass runs, action #1 succeeds and its own write legitimately
+  // advances the server's updated_at (via the DB trigger). Action #2 then
+  // compares its OWN stale, enqueue-time snapshot against the NOW-CURRENT
+  // server value — which action #1 (this same device, this same drain
+  // pass) just changed — and incorrectly reports "conflict detected,"
+  // even though nothing external touched the row. This map tracks, per
+  // job, the most recent updated_at THIS DEVICE is actually responsible
+  // for producing, so a later action in the same (or a later) drain pass
+  // is checked against the truth this device itself just wrote, not a
+  // stale value from before its own prior sibling action ran. Never
+  // explicitly cleared — it only ever advances, and a stale entry can
+  // only ever make a conflict check MORE lenient toward this device's own
+  // recent writes, never toward a genuinely different actor's change
+  // (that case is still caught below, since an external change advances
+  // the server past what's in this map too).
+  static final Map<String, String> _knownGoodUpdatedAt = {};
   static const Set<String> _conflictSensitiveTypes = {
     'gps_confirm',
     'submit_inspection',
@@ -716,6 +739,28 @@ class SyncOutboxService {
       default:
         debugPrint('SyncOutboxService: unknown action type "$type", skipping');
     }
+
+    // See _knownGoodUpdatedAt: after this write succeeds, remember the
+    // job's new server-side updated_at so a later conflict-sensitive
+    // action for the same job — queued in the same offline batch and
+    // still holding its own stale enqueue-time snapshot — is checked
+    // against what this device actually just wrote, not against a
+    // timestamp from before this write happened.
+    if (_conflictSensitiveTypes.contains(type)) {
+      try {
+        final freshUpdatedAt = await SupabaseService.fetchJobUpdatedAt(jobId);
+        if (freshUpdatedAt != null && freshUpdatedAt.isNotEmpty) {
+          _knownGoodUpdatedAt[jobId] = freshUpdatedAt;
+        }
+      } catch (e) {
+        // Non-fatal: worst case, the next sibling action falls back to
+        // its own enqueue-time snapshot and may re-trip the same
+        // (already rare) false-conflict case this fix targets — it does
+        // NOT cause a real conflict to go undetected, since a genuine
+        // external change would still be caught by the fallback path.
+        debugPrint('SyncOutboxService: could not refresh known-good updated_at for $jobId — $e');
+      }
+    }
   }
 
   static Future<Map<String, dynamic>> _withConflictSnapshot({
@@ -734,7 +779,13 @@ class SyncOutboxService {
     if (!_conflictSensitiveTypes.contains(type)) return;
     if (payload[_forceSyncAnywayKey] == true) return;
 
-    final cachedUpdatedAt = payload[_conflictSnapshotKey] as String?;
+    // Prefer the known-good value this device itself last wrote for this
+    // job (set below, after any earlier successful conflict-sensitive
+    // action in this or a prior drain pass) over the snapshot baked into
+    // this specific action's payload at enqueue time — see
+    // _knownGoodUpdatedAt for why the enqueue-time snapshot alone causes
+    // a false conflict on the 2nd+ queued action for the same job.
+    final cachedUpdatedAt = _knownGoodUpdatedAt[jobId] ?? payload[_conflictSnapshotKey] as String?;
     if (cachedUpdatedAt == null || cachedUpdatedAt.isEmpty) return;
 
     final serverUpdatedAt = await SupabaseService.fetchJobUpdatedAt(jobId);
