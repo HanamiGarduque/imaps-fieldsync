@@ -89,6 +89,15 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     final enrolled = await BiometricService.isEnrolled();
     if (!enrolled) return; // nothing to gate with if biometric isn't set up
 
+    // New request: don't gate behind an unconfirmed biometric — someone
+    // who just enrolled but hasn't done their one confirmation password
+    // login yet would otherwise get locked out with no way through (this
+    // lock screen has no password field by design). See
+    // BiometricService.isConfirmed() / splash_screen.dart's cold-start gate
+    // for the matching check.
+    final confirmed = await BiometricService.isConfirmed();
+    if (!confirmed) return;
+
     final mins = await SecurePrefsService.getBioAutoLockMins();
     // Design decision (AUTH_SECURITY_MASTER_DOC.md §5d): the stored value
     // is -1=immediately, 0=no grace period configured/"never" (its

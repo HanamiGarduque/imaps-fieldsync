@@ -23,6 +23,7 @@ class SecurePrefsService {
 
   // ── Biometric enrollment ────────────────────────────────────────────────
   static const _kBioEnrolled       = 'sp_bio_enrolled';
+  static const _kBioConfirmed      = 'sp_bio_confirmed';
   static const _kBioDeviceId       = 'sp_bio_device_id';
   static const _kBioRequireOnOpen  = 'sp_bio_require_on_open';
   static const _kBioRequireOnSync  = 'sp_bio_require_on_sync';
@@ -133,6 +134,18 @@ class SecurePrefsService {
     await _storage.write(key: _kBioDeviceId, value: deviceId);
   }
 
+  /// New request: biometric enrollment alone isn't enough to trust it for
+  /// actual sign-in yet — one normal email+password login has to succeed
+  /// *after* enrolling first, to confirm the person who enrolled it still
+  /// knows their real credentials. Every biometric entry point (Login
+  /// screen button, app-resume lock, cold-start gate) checks this before
+  /// offering biometric at all. Starts false on every fresh enrollment.
+  static Future<bool> isBioConfirmed() async =>
+      (await _storage.read(key: _kBioConfirmed)) == 'true';
+
+  static Future<void> setBioConfirmed(bool v) =>
+      _storage.write(key: _kBioConfirmed, value: v ? 'true' : 'false');
+
   // ── Biometric behaviour toggles ─────────────────────────────────────────
 
   static Future<bool> getBioRequireOnOpen() async =>
@@ -173,6 +186,7 @@ class SecurePrefsService {
   /// Call when biometric is disabled or the device changes.
   static Future<void> clearBioPrefs() async {
     await _storage.delete(key: _kBioEnrolled);
+    await _storage.delete(key: _kBioConfirmed);
     await _storage.delete(key: _kBioDeviceId);
     await _storage.delete(key: _kBioRequireOnOpen);
     await _storage.delete(key: _kBioRequireOnSync);

@@ -34,6 +34,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
 
   // Toggles
   bool _bioEnrolled = false;
+  bool _bioConfirmed = false;
   bool _requireOnOpen = false;
   bool _requireOnSync = false;
   bool _requireProfile = false;
@@ -49,6 +50,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     final supported = await BiometricService.isAvailable();
     final label = await BiometricService.primaryBiometricLabel();
     final enrolled = await BiometricService.isEnrolled();
+    final confirmed = await BiometricService.isConfirmed();
     final reqOpen = await SecurePrefsService.getBioRequireOnOpen();
     final reqSync = await SecurePrefsService.getBioRequireOnSync();
     final reqProf = await SecurePrefsService.getBioRequireProfile();
@@ -60,6 +62,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       _deviceSupported = supported;
       _biometricLabel = label;
       _bioEnrolled = enrolled;
+      _bioConfirmed = confirmed;
       _requireOnOpen = reqOpen;
       _requireOnSync = reqSync;
       _requireProfile = reqProf;
@@ -170,12 +173,36 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                     subtitle: Text(
                       _deviceSupported
                           ? (_bioEnrolled
-                              ? 'Active (Uses phone system $_biometricLabel)'
+                              ? (_bioConfirmed
+                                  ? 'Active (Uses phone system $_biometricLabel)'
+                                  : 'Enrolled — log in with your password once to activate')
                               : 'Uses your phone OS registered $_biometricLabel')
                           : 'Hardware not available or biometrics not enrolled in phone OS Settings',
                       style: GoogleFonts.inter(fontSize: 12, color: _Colors.ink2),
                     ),
                   ),
+
+                  if (_bioEnrolled && !_bioConfirmed) ...[
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFB8860B)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'One more step: sign in with your email and passcode once. '
+                              '$_biometricLabel unlock won\'t be offered anywhere until that '
+                              'confirms it\'s really you.',
+                              style: GoogleFonts.inter(fontSize: 11.5, color: const Color(0xFFB8860B), height: 1.4),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
 
                   if (_bioEnrolled) ...[
                     const Divider(height: 1, indent: 16, endIndent: 16),

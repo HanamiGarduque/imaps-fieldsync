@@ -12,6 +12,7 @@ import '../services/secure_prefs_service.dart';
 import '../services/supabase_service.dart';
 import '../widgets/imaps_loading_indicator.dart';
 import '../widgets/sensitive_screen.dart';
+import 'app_resume_lock_screen.dart';
 import 'main_shell_screen.dart';
 
 
@@ -102,7 +103,35 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
 
-      // ── STEP 4: Direct to MainShellScreen ────────────────────────────
+      // ── STEP 4: Cold-start biometric gate ──────────────────────────────
+      // "Require on App Open" (Security Settings) previously only gated
+      // resume-from-background (main_shell_screen.dart's lifecycle
+      // observer) — a genuine cold start (app fully closed/killed, then
+      // reopened) went straight through to Home with no biometric check
+      // at all, since this splash/session-check flow never consulted the
+      // setting. Same gate, same screen, reused here for the other entry
+      // point the setting's own name promises to cover.
+      final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
+      final bioEnrolled = await BiometricService.isEnrolled();
+      final bioConfirmed = await BiometricService.isConfirmed();
+      // Don't gate behind an unconfirmed biometric — that would lock out
+      // someone who hasn't done their one confirmation login yet with no
+      // way through (this screen has no password field). Fall through to
+      // STEP 5 instead, same as if biometric weren't enrolled at all.
+      if (requireOnOpen && bioEnrolled && bioConfirmed) {
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => AppResumeLockScreen(
+                nextScreenBuilder: (_) => MainShellScreen(profile: profile),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      // ── STEP 5: Direct to MainShellScreen ────────────────────────────
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
@@ -219,6 +248,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _errorMessage;
 
   bool _biometricEnrolled = false;
+  bool _bioConfirmed = false;
   String _biometricLabel = 'Biometric';
 
   @override
@@ -230,6 +260,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _loadSavedEmailAndBio() async {
     final savedEmail = await SecurePrefsService.getSavedEmail();
     final bioEnrolled = await BiometricService.isEnrolled();
+    final bioConfirmed = await BiometricService.isConfirmed();
     final bioLabel = await BiometricService.primaryBiometricLabel();
 
     if (mounted) {
@@ -238,6 +269,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _emailController.text = savedEmail;
         }
         _biometricEnrolled = bioEnrolled;
+        _bioConfirmed = bioConfirmed;
         _biometricLabel = bioLabel;
       });
     }
@@ -335,6 +367,19 @@ class _LoginScreenState extends State<LoginScreen> {
       _errorMessage = null;
     });
 
+    // Navigator.pushReplacement() doesn't block until the transition
+    // animation finishes — it returns almost immediately. That means the
+    // old `finally` block's setState(() => _isLoading = false) was still
+    // running on this screen, mid-transition, right after a *successful*
+    // login — and at that exact moment AuthService.isLoggedIn had just
+    // become true, so the biometric button's visibility condition
+    // suddenly matched for one frame, flashing it into view on the
+    // outgoing screen for an instant before it fully replaced. Skipping
+    // the reset once we've actually started navigating avoids that
+    // rebuild entirely — nothing needs `_isLoading` reset on a screen
+    // that's being torn down anyway.
+    var navigatedAway = false;
+
     try {
       await AuthService.signIn(
         email: _emailController.text.trim(),
@@ -351,7 +396,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await SecurePrefsService.setSavedEmail(_emailController.text.trim());
 
+        // New request: a freshly-enrolled biometric isn't trusted for
+        // sign-in yet — this real credentials login is exactly the "one
+        // confirmation" it's waiting for. Only writes if it was actually
+        // pending, so this is a no-op on every ordinary login once biometric
+        // is already confirmed (or was never enrolled).
+        if (await BiometricService.isEnrolled() && !await BiometricService.isConfirmed()) {
+          await SecurePrefsService.setBioConfirmed(true);
+        }
+
         if (!mounted) return;
+        navigatedAway = true;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
         );
@@ -398,7 +453,7 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     } finally {
-      if (mounted) {
+      if (mounted && !navigatedAway) {
         setState(() => _isLoading = false);
       }
     }
@@ -600,7 +655,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       // legitimate case — reaching Login because a
                       // non-connectivity error interrupted profile loading
                       // while the underlying session was still fine.
-                      if (_biometricEnrolled && AuthService.isLoggedIn) ...[
+                      //
+                      // _bioConfirmed: newly-enrolled biometric isn't
+                      // trusted for sign-in until one real password login
+                      // has succeeded after enrolling — see
+                      // BiometricService.isConfirmed().
+                      if (_biometricEnrolled && _bioConfirmed && AuthService.isLoggedIn) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
                           onPressed: _isLoading ? null : _handleBiometricLogin,

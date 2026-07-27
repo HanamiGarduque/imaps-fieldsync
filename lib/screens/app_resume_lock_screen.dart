@@ -4,10 +4,9 @@ import '../services/biometric_service.dart';
 import '../widgets/sensitive_screen.dart';
 import 'splash_screen.dart' show LoginScreen;
 
-/// Shown when the app resumes from background and the resume-lock policy
-/// (Security Settings → "Require on App Open" + the auto-lock timer) says
-/// it's time to re-check. See AUTH_SECURITY_MASTER_DOC.md §5d for the full
-/// design rationale — the short version:
+/// Shown two places: (1) app-resume, per the original §5d design, and
+/// (2) cold start, when "Require on App Open" is on — see splash_screen.dart
+/// _checkSession(). Same screen, same rule, either entry point:
 ///
 /// - Biometric-only, deliberately. No pattern or password field lives on
 ///   this screen — that's not an oversight, it's so the app tells one
@@ -21,7 +20,14 @@ import 'splash_screen.dart' show LoginScreen;
 /// - Can't be dismissed with the back button/gesture (PopScope canPop:
 ///   false) — the only ways off this screen are "unlock" or "sign out."
 class AppResumeLockScreen extends StatefulWidget {
-  const AppResumeLockScreen({super.key});
+  /// What to show after a successful unlock. If null (the app-resume
+  /// case), this screen was pushed on top of an already-visible
+  /// MainShellScreen, so success just pops back to it. If provided (the
+  /// cold-start case), there's nothing to pop back to yet — this screen
+  /// itself replaces the route with whatever's built here instead.
+  final WidgetBuilder? nextScreenBuilder;
+
+  const AppResumeLockScreen({super.key, this.nextScreenBuilder});
 
   @override
   State<AppResumeLockScreen> createState() => _AppResumeLockScreenState();
@@ -60,7 +66,13 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
     if (!mounted) return;
 
     if (ok) {
-      Navigator.of(context).pop();
+      if (widget.nextScreenBuilder != null) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: widget.nextScreenBuilder!),
+        );
+      } else {
+        Navigator.of(context).pop();
+      }
     } else {
       setState(() {
         _checking = false;

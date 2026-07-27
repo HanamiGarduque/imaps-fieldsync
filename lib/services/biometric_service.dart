@@ -122,6 +122,11 @@ class BiometricService {
     final bioLabel = await primaryBiometricLabel();
     await SecurePrefsService.setBioEnrolled(enrolled: true, deviceId: deviceId);
     await SecurePrefsService.setBioRequireOnOpen(true);
+    // New enrollment (including re-enrollment) always starts unconfirmed —
+    // one real password login is required before biometric is trusted for
+    // actual sign-in. See SecurePrefsService.setBioConfirmed for the
+    // rationale.
+    await SecurePrefsService.setBioConfirmed(false);
 
     // Sync device status & log audit event to Supabase
     await SupabaseService.syncInspectorDevice(
@@ -157,6 +162,11 @@ class BiometricService {
 
     return true;
   }
+
+  /// True only if biometric is enrolled AND a real password login has
+  /// succeeded since that enrollment. Callers should check this — not just
+  /// [isEnrolled] — before offering biometric as a sign-in method anywhere.
+  static Future<bool> isConfirmed() => SecurePrefsService.isBioConfirmed();
 
 
 
@@ -210,4 +220,3 @@ enum BioType { fingerprint, face, iris, device }
 extension BiometricTypeHelper on BiometricService {
   static Future<BioType> get type => BiometricService.primaryBiometricType();
 }
-
