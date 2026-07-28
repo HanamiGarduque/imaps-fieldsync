@@ -2,14 +2,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
-import 'package:app_links/app_links.dart';
 import 'services/supabase_service.dart';
+import 'services/auth_service.dart';
 import 'services/notification_service.dart';
 import 'services/sync_outbox_service.dart';
 import 'services/secure_prefs_service.dart';
 import 'providers/inspection_provider.dart';
 import 'screens/splash_screen.dart';
-import 'screens/reset_password_screen.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -24,6 +23,7 @@ Future<void> main() async {
 
   await dotenv.load(fileName: ".env");
   await SupabaseService.initialize();
+  AuthService.attachSessionListener();
   await NotificationService.initialize();
 
   // One-time cleanup: purges any pattern-lock data left over from before
@@ -33,8 +33,7 @@ Future<void> main() async {
   await SecurePrefsService.purgeLegacyPatternLockData();
 
   SyncOutboxService.start();
-  _listenForPasswordResetLinks();
-  
+
   runApp(
     ChangeNotifierProvider(
       create: (_) => InspectionProvider(),
@@ -43,21 +42,11 @@ Future<void> main() async {
   );
 }
 
-void _listenForPasswordResetLinks() {
-  final appLinks = AppLinks();
-  appLinks.uriLinkStream.listen((uri) async {
-    if (uri.toString().contains('reset-password') || uri.toString().contains('type=recovery')) {
-      try {
-        await SupabaseService.client.auth.getSessionFromUrl(uri);
-        navigatorKey.currentState?.push(
-          MaterialPageRoute(builder: (_) => const ResetPasswordScreen()),
-        );
-      } catch (e) {
-        debugPrint('[RESET_LINK] Failed to parse recovery link: $e');
-      }
-    }
-  });
-}
+// Forgot Passcode is admin-mediated (see splash_screen.dart
+// _handleForgotPasscode), not a self-service emailed-link reset — so this
+// app deliberately does NOT listen for Supabase recovery deep links.
+// If that ever changes, this is where a uriLinkStream listener (e.g. via
+// app_links) routing to a password-reset screen would go back in.
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});

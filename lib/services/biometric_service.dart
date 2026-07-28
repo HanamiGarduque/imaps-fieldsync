@@ -151,10 +151,15 @@ class BiometricService {
     
     // Device-change check
     final stored = await SecurePrefsService.getBioDeviceId();
-    if (stored == null) return false;
-    
-    final match = stored == _buildDeviceFingerprint();
+    final current = _buildDeviceFingerprint();
+    if (stored == null) {
+      debugPrint('[BIO][DIAG] isEnrolled: sp_bio_enrolled=true but no stored device id — treating as not enrolled (not clearing).');
+      return false;
+    }
+
+    final match = stored == current;
     if (!match) {
+      debugPrint('[BIO][DIAG] isEnrolled: DEVICE FINGERPRINT MISMATCH — stored="$stored" current="$current". Clearing enrollment.');
       // Automatic revocation on device mismatch
       await clearEnrollment();
       return false;

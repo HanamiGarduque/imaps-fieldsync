@@ -249,6 +249,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _biometricEnrolled = false;
   bool _bioConfirmed = false;
+  bool _hasBioSessionToken = false;
   String _biometricLabel = 'Biometric';
 
   @override
@@ -262,6 +263,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final bioEnrolled = await BiometricService.isEnrolled();
     final bioConfirmed = await BiometricService.isConfirmed();
     final bioLabel = await BiometricService.primaryBiometricLabel();
+    final bioSessionToken = await SecurePrefsService.getBioSessionToken();
 
     if (mounted) {
       setState(() {
@@ -271,6 +273,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _biometricEnrolled = bioEnrolled;
         _bioConfirmed = bioConfirmed;
         _biometricLabel = bioLabel;
+        _hasBioSessionToken = bioSessionToken != null;
       });
     }
   }
@@ -297,14 +300,37 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
+      debugPrint('[AUTH][DIAG] _handleBiometricLogin: biometric hardware auth succeeded. '
+          'AuthService.isLoggedIn=${AuthService.isLoggedIn}');
+
       if (!AuthService.isLoggedIn) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = 'Session expired. Please sign in with password.';
-          });
+        // Normal case after a logout: nothing live in memory, but a
+        // confirmed biometric has a saved refresh token to redeem.
+        // setSession() needs connectivity (Supabase validates + rotates
+        // the token server-side) — same offline-vs-genuinely-dead
+        // distinction as the refresh path below.
+        final restored = await AuthService.restoreSessionFromBiometric();
+        if (!restored) {
+          final online = await AuthService.hasConnectivity();
+          if (online) {
+            // Token was actually rejected server-side (revoked/expired
+            // beyond recovery), not just unreachable — treat the same as
+            // the genuine-revocation case elsewhere in this method.
+            await BiometricService.clearEnrollment();
+            await SecurePrefsService.clearAll();
+          }
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _errorMessage = online
+                  ? 'Session unrecoverable. Please sign in with password.'
+                  : 'No internet connection. Biometric sign-in needs '
+                    'connectivity to restore your session — reconnect and '
+                    'try again, or sign in with your password.';
+            });
+          }
+          return;
         }
-        return;
       }
 
       if (AuthService.isLocalSessionExpired) {
@@ -317,7 +343,7 @@ class _LoginScreenState extends State<LoginScreen> {
           // an offline-first field app — the wipe should be reserved for
           // when we can positively confirm the session is actually dead.
           if (await AuthService.hasConnectivity()) {
-            await AuthService.signOut();
+            await AuthService.signOut(revokeEverywhere: true);
             await BiometricService.clearEnrollment();
             await SecurePrefsService.clearAll();
             if (mounted) {
@@ -401,8 +427,13 @@ class _LoginScreenState extends State<LoginScreen> {
         // confirmation" it's waiting for. Only writes if it was actually
         // pending, so this is a no-op on every ordinary login once biometric
         // is already confirmed (or was never enrolled).
-        if (await BiometricService.isEnrolled() && !await BiometricService.isConfirmed()) {
+        final bioEnrolledAtLogin = await BiometricService.isEnrolled();
+        final bioConfirmedAtLogin = await BiometricService.isConfirmed();
+        debugPrint('[AUTH][DIAG] _handleLogin: post-password-login check — '
+            'enrolled=$bioEnrolledAtLogin, confirmed(before)=$bioConfirmedAtLogin');
+        if (bioEnrolledAtLogin && !bioConfirmedAtLogin) {
           await SecurePrefsService.setBioConfirmed(true);
+          debugPrint('[AUTH][DIAG] _handleLogin: set bioConfirmed=true.');
         }
 
         if (!mounted) return;
@@ -459,46 +490,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Forgot Passcode is admin-mediated, not self-service. Only the MPDO
+  // admin (an operator of the separate MPDO system this app never talks
+  // to — they have no account/session inside this app at all) can
+  // actually change an inspector's passcode. This just opens the phone's
+  // mail app addressed to them; the admin resets it on their end and
+  // emails the new one back. There is deliberately no Supabase
+  // resetPasswordForEmail() call here — that would let an inspector set
+  // their own new password via an emailed magic link, which is exactly
+  // the self-service flow this project doesn't want.
   Future<void> _handleForgotPasscode() async {
-    final email = _emailController.text.trim();
-    
-    if (email.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter your email to reset your passcode.';
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await AuthService.resetPassword(email: email);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Reset instructions sent to $email', 
-              style: AppText.inter(13, c: Colors.white),
-            ),
-            backgroundColor: const Color(0xFF10B981),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('RESET ERROR: $e');
-      await _contactAdministrator();
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+    await _contactAdministrator();
   }
 
   Future<void> _contactAdministrator() async {
@@ -643,24 +645,26 @@ class _LoginScreenState extends State<LoginScreen> {
                         isPassword: true,
                       ),
 
-                      // Only offer biometric here if there's actually a
-                      // session for it to restore. AuthService.isLoggedIn
-                      // is false after a real logout — biometric has no
-                      // stored credential to fall back on anymore (that
-                      // mechanism was removed, see AUTH_SECURITY_MASTER_DOC
-                      // §4.3/§5a), so showing this button unconditionally
-                      // meant it always failed with "Session expired" right
-                      // after the exact action (logout) that most people
-                      // would try it after. This still covers the
-                      // legitimate case — reaching Login because a
-                      // non-connectivity error interrupted profile loading
-                      // while the underlying session was still fine.
+                      // Offer biometric whenever it's enrolled + confirmed,
+                      // AND there's something for it to actually restore —
+                      // either a still-live session (AuthService.isLoggedIn,
+                      // e.g. a non-connectivity error interrupted profile
+                      // loading), or a saved refresh token from the last
+                      // confirmed login/refresh (_hasBioSessionToken).
+                      // signOut() is local-only now (see AuthService.signOut),
+                      // so that saved token is still valid server-side right
+                      // after a normal logout — that's the whole point:
+                      // sign out of the visible session, then get back in
+                      // with a fingerprint instead of retyping the password.
+                      // AuthService.restoreSessionFromBiometric() is what
+                      // actually redeems that token when the button is used.
                       //
                       // _bioConfirmed: newly-enrolled biometric isn't
                       // trusted for sign-in until one real password login
                       // has succeeded after enrolling — see
                       // BiometricService.isConfirmed().
-                      if (_biometricEnrolled && _bioConfirmed && AuthService.isLoggedIn) ...[
+                      if (_biometricEnrolled && _bioConfirmed &&
+                          (AuthService.isLoggedIn || _hasBioSessionToken)) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
                           onPressed: _isLoading ? null : _handleBiometricLogin,

@@ -29,6 +29,7 @@ class SecurePrefsService {
   static const _kBioRequireOnSync  = 'sp_bio_require_on_sync';
   static const _kBioRequireProfile = 'sp_bio_require_profile';
   static const _kBioAutoLockMins   = 'sp_bio_auto_lock_mins'; // '0','1','5','10','-1'=immediately
+  static const _kBioSessionToken   = 'sp_bio_session_token';
 
   // ── Saved Email & Encrypted Biometric Secret ────────────────────────────
 
@@ -175,6 +176,25 @@ class SecurePrefsService {
   static Future<void> setBioAutoLockMins(int minutes) =>
       _storage.write(key: _kBioAutoLockMins, value: minutes.toString());
 
+  // ── Biometric session restore token ─────────────────────────────────────
+  // Stores the Supabase *refresh token* (never the password, never the
+  // access token) so a confirmed biometric can silently restore a session
+  // after a local-only logout. Refresh tokens rotate on every use — callers
+  // MUST re-save the new one every time this is consumed via setSession()
+  // or refreshSession(), or the next biometric attempt will fail with a
+  // stale/already-used token. Wiped by clearBioPrefs() same as every other
+  // biometric key, so disabling biometric or a genuine revocation removes
+  // it just like everything else.
+
+  static Future<String?> getBioSessionToken() =>
+      _storage.read(key: _kBioSessionToken);
+
+  static Future<void> setBioSessionToken(String refreshToken) =>
+      _storage.write(key: _kBioSessionToken, value: refreshToken);
+
+  static Future<void> removeBioSessionToken() =>
+      _storage.delete(key: _kBioSessionToken);
+
   // ── Bulk clear ──────────────────────────────────────────────────────────
 
   /// Call on logout / account switch. Wipes all auth prefs.
@@ -192,6 +212,7 @@ class SecurePrefsService {
     await _storage.delete(key: _kBioRequireOnSync);
     await _storage.delete(key: _kBioRequireProfile);
     await _storage.delete(key: _kBioAutoLockMins);
+    await _storage.delete(key: _kBioSessionToken);
   }
 
   /// Full wipe — used on signOut.
