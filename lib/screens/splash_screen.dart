@@ -249,7 +249,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _biometricEnrolled = false;
   bool _bioConfirmed = false;
-  bool _hasBioSessionToken = false;
   String _biometricLabel = 'Biometric';
 
   @override
@@ -263,7 +262,6 @@ class _LoginScreenState extends State<LoginScreen> {
     final bioEnrolled = await BiometricService.isEnrolled();
     final bioConfirmed = await BiometricService.isConfirmed();
     final bioLabel = await BiometricService.primaryBiometricLabel();
-    final bioSessionToken = await SecurePrefsService.getBioSessionToken();
 
     if (mounted) {
       setState(() {
@@ -273,7 +271,6 @@ class _LoginScreenState extends State<LoginScreen> {
         _biometricEnrolled = bioEnrolled;
         _bioConfirmed = bioConfirmed;
         _biometricLabel = bioLabel;
-        _hasBioSessionToken = bioSessionToken != null;
       });
     }
   }
@@ -300,38 +297,32 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      debugPrint('[AUTH][DIAG] _handleBiometricLogin: biometric hardware auth succeeded. '
-          'AuthService.isLoggedIn=${AuthService.isLoggedIn}');
-
-      if (!AuthService.isLoggedIn) {
-        // Normal case after a logout: nothing live in memory, but a
-        // confirmed biometric has a saved refresh token to redeem.
-        // setSession() needs connectivity (Supabase validates + rotates
-        // the token server-side) — same offline-vs-genuinely-dead
-        // distinction as the refresh path below.
-        final restored = await AuthService.restoreSessionFromBiometric();
-        if (!restored) {
-          final online = await AuthService.hasConnectivity();
-          if (online) {
-            // Token was actually rejected server-side (revoked/expired
-            // beyond recovery), not just unreachable — treat the same as
-            // the genuine-revocation case elsewhere in this method.
-            await BiometricService.clearEnrollment();
-            await SecurePrefsService.clearAll();
-          }
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _errorMessage = online
-                  ? 'Session unrecoverable. Please sign in with password.'
-                  : 'No internet connection. Biometric sign-in needs '
-                    'connectivity to restore your session — reconnect and '
-                    'try again, or sign in with your password.';
-            });
-          }
-          return;
+      if (!AuthService.hasLiveUnderlyingSession) {
+        // Genuinely nothing left underneath — the real session actually
+        // died (server-side revocation, or a refresh that failed while
+        // the app was closed long enough for even the refresh token to
+        // expire). This is the one case that legitimately needs a wipe.
+        final online = await AuthService.hasConnectivity();
+        if (online) {
+          await BiometricService.clearEnrollment();
+          await SecurePrefsService.clearAll();
         }
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = online
+                ? 'Session unrecoverable. Please sign in with password.'
+                : 'No internet connection. Please reconnect and try again, '
+                  'or sign in with your password.';
+          });
+        }
+        return;
       }
+
+      // The real session was never touched by logging out (see
+      // AuthService.signOut) — this is just un-hiding it. No network call,
+      // no token to redeem, nothing that can be "rejected."
+      await AuthService.clearSoftLogout();
 
       if (AuthService.isLocalSessionExpired) {
         final refreshed = await AuthService.tryRefreshSession();
@@ -367,8 +358,7 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
         );
-      }
- else {
+      } else {
         setState(() {
           _errorMessage = 'Login succeeded, but profile was not found.';
         });
@@ -645,26 +635,27 @@ class _LoginScreenState extends State<LoginScreen> {
                         isPassword: true,
                       ),
 
-                      // Offer biometric whenever it's enrolled + confirmed,
-                      // AND there's something for it to actually restore —
-                      // either a still-live session (AuthService.isLoggedIn,
-                      // e.g. a non-connectivity error interrupted profile
-                      // loading), or a saved refresh token from the last
-                      // confirmed login/refresh (_hasBioSessionToken).
-                      // signOut() is local-only now (see AuthService.signOut),
-                      // so that saved token is still valid server-side right
-                      // after a normal logout — that's the whole point:
-                      // sign out of the visible session, then get back in
-                      // with a fingerprint instead of retyping the password.
-                      // AuthService.restoreSessionFromBiometric() is what
-                      // actually redeems that token when the button is used.
+                      // Offer biometric whenever it's enrolled + confirmed
+                      // AND the real underlying Supabase session is still
+                      // alive on this device (AuthService.
+                      // hasLiveUnderlyingSession) — regardless of whether
+                      // it's currently "soft-logged-out" (AuthService.
+                      // isLoggedIn false, see AuthService.signOut). A
+                      // normal logout never actually destroys the session
+                      // — Supabase's own signOut() would revoke the
+                      // refresh token server-side no matter what scope is
+                      // passed, so instead of trying to restore a killed
+                      // token afterward, the session is just hidden and
+                      // left alone. Tapping this button un-hides it
+                      // (AuthService.clearSoftLogout()) — no network call,
+                      // nothing that can be rejected.
                       //
                       // _bioConfirmed: newly-enrolled biometric isn't
                       // trusted for sign-in until one real password login
                       // has succeeded after enrolling — see
                       // BiometricService.isConfirmed().
                       if (_biometricEnrolled && _bioConfirmed &&
-                          (AuthService.isLoggedIn || _hasBioSessionToken)) ...[
+                          AuthService.hasLiveUnderlyingSession) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
                           onPressed: _isLoading ? null : _handleBiometricLogin,

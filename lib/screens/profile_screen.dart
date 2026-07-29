@@ -159,12 +159,13 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     // checking they were still authenticated. Note: We still preserve
     // biometric enrollment settings on the device so that when the user
     // logs back in, their Security & Protection settings remain active —
-    // only the live session itself needs to be gone before Login shows.
-    // AuthService.signOut() defaults to a LOCAL-only sign-out (not a
-    // global revoke), which is what makes the biometric button actually
-    // usable again right after this: it leaves the saved refresh token
-    // (SecurePrefsService.getBioSessionToken) valid server-side so
-    // AuthService.restoreSessionFromBiometric() can redeem it.
+    // only the visible session itself needs to be gone before Login shows.
+    // AuthService.signOut() doesn't actually call Supabase's real signOut()
+    // when biometric is enrolled+confirmed — it just flags the session as
+    // hidden (see AUTH_SECURITY_MASTER_DOC.md §14). The real session is
+    // never touched, so AuthService.clearSoftLogout() (used by the
+    // biometric button) has nothing to restore over the network — it's
+    // just un-hiding it.
     try {
       await SupabaseService.logSecurityEvent(eventType: 'logout', severity: 'info');
     } catch (e) {

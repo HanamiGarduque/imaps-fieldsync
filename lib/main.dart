@@ -9,6 +9,7 @@ import 'services/sync_outbox_service.dart';
 import 'services/secure_prefs_service.dart';
 import 'providers/inspection_provider.dart';
 import 'screens/splash_screen.dart';
+import 'widgets/debug_screenshot_toggle.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -23,7 +24,7 @@ Future<void> main() async {
 
   await dotenv.load(fileName: ".env");
   await SupabaseService.initialize();
-  AuthService.attachSessionListener();
+  await AuthService.loadSoftLogoutState();
   await NotificationService.initialize();
 
   // One-time cleanup: purges any pattern-lock data left over from before
@@ -59,6 +60,12 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.indigo, useMaterial3: true),
       home: const SplashScreen(),
+      // Phase 3b (debug-only, see AUTH_SECURITY_MASTER_DOC.md and
+      // widgets/debug_screenshot_toggle.dart): DebugScreenshotToggle
+      // returns `child` completely unwrapped outside kDebugMode, so this
+      // line is inert in release/profile builds.
+      builder: (context, child) =>
+          DebugScreenshotToggle(child: child ?? const SizedBox.shrink()),
     );
   }
 }

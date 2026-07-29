@@ -29,7 +29,7 @@ class SecurePrefsService {
   static const _kBioRequireOnSync  = 'sp_bio_require_on_sync';
   static const _kBioRequireProfile = 'sp_bio_require_profile';
   static const _kBioAutoLockMins   = 'sp_bio_auto_lock_mins'; // '0','1','5','10','-1'=immediately
-  static const _kBioSessionToken   = 'sp_bio_session_token';
+  static const _kSoftLoggedOut     = 'sp_soft_logged_out';
 
   // ── Saved Email & Encrypted Biometric Secret ────────────────────────────
 
@@ -176,24 +176,27 @@ class SecurePrefsService {
   static Future<void> setBioAutoLockMins(int minutes) =>
       _storage.write(key: _kBioAutoLockMins, value: minutes.toString());
 
-  // ── Biometric session restore token ─────────────────────────────────────
-  // Stores the Supabase *refresh token* (never the password, never the
-  // access token) so a confirmed biometric can silently restore a session
-  // after a local-only logout. Refresh tokens rotate on every use — callers
-  // MUST re-save the new one every time this is consumed via setSession()
-  // or refreshSession(), or the next biometric attempt will fail with a
-  // stale/already-used token. Wiped by clearBioPrefs() same as every other
-  // biometric key, so disabling biometric or a genuine revocation removes
-  // it just like everything else.
+  // ── Soft logout flag ─────────────────────────────────────────────────────
+  // Replaces an earlier (broken) design that tried to save a copy of the
+  // Supabase refresh token to restore after logout — that doesn't work:
+  // Supabase's signOut() revokes the CURRENT session's refresh token
+  // server-side regardless of scope ('local' vs 'global' only changes
+  // whether OTHER devices/sessions are also revoked — the current one is
+  // always killed, since that's what "signing out" means). So a saved
+  // copy of that same token is worthless the moment signOut() runs.
+  //
+  // This flag instead means: "the real Supabase session is still fully
+  // alive underneath, the person just asked to look logged-out on this
+  // device." AuthService.signOut() sets this instead of calling Supabase's
+  // real signOut() at all, whenever biometric is enrolled+confirmed — see
+  // AUTH_SECURITY_MASTER_DOC.md §14. Biometric login then just clears this
+  // flag; there's no token to restore because nothing was ever revoked.
 
-  static Future<String?> getBioSessionToken() =>
-      _storage.read(key: _kBioSessionToken);
+  static Future<bool> isSoftLoggedOut() async =>
+      (await _storage.read(key: _kSoftLoggedOut)) == 'true';
 
-  static Future<void> setBioSessionToken(String refreshToken) =>
-      _storage.write(key: _kBioSessionToken, value: refreshToken);
-
-  static Future<void> removeBioSessionToken() =>
-      _storage.delete(key: _kBioSessionToken);
+  static Future<void> setSoftLoggedOut(bool v) =>
+      _storage.write(key: _kSoftLoggedOut, value: v ? 'true' : 'false');
 
   // ── Bulk clear ──────────────────────────────────────────────────────────
 
@@ -212,7 +215,7 @@ class SecurePrefsService {
     await _storage.delete(key: _kBioRequireOnSync);
     await _storage.delete(key: _kBioRequireProfile);
     await _storage.delete(key: _kBioAutoLockMins);
-    await _storage.delete(key: _kBioSessionToken);
+    await _storage.delete(key: _kSoftLoggedOut);
   }
 
   /// Full wipe — used on signOut.
