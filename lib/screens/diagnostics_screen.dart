@@ -1,0 +1,486 @@
+import 'package:flutter/material.dart';
+import '../services/diagnostics_service.dart';
+import '../widgets/sensitive_screen.dart';
+
+// Local palette approximating the app's existing blue/coral identity
+// without duplicating the full InsightTheme class into yet another file
+// (that duplication is already flagged as tech debt project-wide — see
+// AUTH_SECURITY_MASTER_DOC.md's drift-sweep notes).
+const _kBlue = Color(0xFF4C6FFF);
+const _kBlueTint = Color(0xFFEDF1FF);
+const _kInk = Color(0xFF141628);
+const _kInk2 = Color(0xFF666C82);
+const _kLine = Color(0xFFE7E9F0);
+const _kSurface = Colors.white;
+const _kBg = Color(0xFFF5F6FA);
+const _kAmber = Color(0xFFF5A623);
+const _kGreen = Color(0xFF16A34A);
+const _kCoral = Color(0xFFEF4444);
+
+/// Phase 3c — Diagnostics / Error Reports.
+///
+/// Purpose (see AUTH_SECURITY_MASTER_DOC.md §Phase 3c for the full
+/// writeup): lets an inspector flag a problem for the MPDO admin team
+/// without needing to understand or debug the app themselves. The
+/// inspector provides a short title/description; the more technical
+/// fields (technical description, repro steps, affected file,
+/// recommended action) are filled in later by the admin/dev team
+/// directly in Supabase — the admin has no account inside this app,
+/// consistent with how "Forgot Passcode" already works here.
+///
+/// Security: this summary list screen is deliberately NOT wrapped in
+/// SensitiveScreen — it must be safe to screenshot for documentation/
+/// support purposes, and never shows secrets, tokens, or auth data. The
+/// detail screen (_ReportDetailScreen below), which can contain more
+/// technical information once the admin has reviewed a report, IS
+/// wrapped in SensitiveScreen.
+class DiagnosticsScreen extends StatefulWidget {
+  const DiagnosticsScreen({super.key});
+
+  @override
+  State<DiagnosticsScreen> createState() => _DiagnosticsScreenState();
+}
+
+class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
+  late Future<List<DiagnosticReport>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = DiagnosticsService.fetchMyReports();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _future = DiagnosticsService.fetchMyReports());
+    await _future;
+  }
+
+  Future<void> _openSubmitSheet() async {
+    final submitted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _SubmitReportSheet(),
+    );
+    if (submitted == true) _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Deliberately NOT wrapped in SensitiveScreen — see class doc above.
+    return Scaffold(
+      backgroundColor: _kBg,
+      appBar: AppBar(
+        backgroundColor: _kBg,
+        elevation: 0,
+        foregroundColor: _kInk,
+        title: const Text('Diagnostics & Support',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17, color: _kInk)),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openSubmitSheet,
+        backgroundColor: _kBlue,
+        icon: const Icon(Icons.flag_outlined, color: Colors.white),
+        label: const Text('Report an Issue', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<DiagnosticReport>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator(color: _kBlue));
+            }
+            if (snapshot.hasError) {
+              return ListView(
+                children: [
+                  const SizedBox(height: 120),
+                  Icon(Icons.cloud_off_rounded, size: 40, color: _kInk2.withOpacity(0.4)),
+                  const SizedBox(height: 12),
+                  const Center(
+                    child: Text('Couldn\'t load your reports.\nPull down to try again.',
+                        textAlign: TextAlign.center, style: TextStyle(color: _kInk2)),
+                  ),
+                ],
+              );
+            }
+            final reports = snapshot.data ?? [];
+            if (reports.isEmpty) {
+              return ListView(
+                children: [
+                  const SizedBox(height: 100),
+                  Icon(Icons.task_alt_rounded, size: 44, color: _kInk2.withOpacity(0.35)),
+                  const SizedBox(height: 12),
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 40),
+                      child: Text(
+                        'No issues reported yet. If something in the app isn\'t working right, tap "Report an Issue" below.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: _kInk2),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+              itemCount: reports.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, i) => _ReportCard(report: reports[i]),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ReportCard extends StatelessWidget {
+  final DiagnosticReport report;
+  const _ReportCard({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _kSurface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => _ReportDetailScreen(report: report)),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _kLine),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(report.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: _kInk)),
+                  ),
+                  _StatusPill(status: report.status),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                report.summary,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _kInk2, fontSize: 13),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  if (report.module != null) ...[
+                    Icon(Icons.apps_rounded, size: 13, color: _kInk2.withOpacity(0.7)),
+                    const SizedBox(width: 4),
+                    Text(report.module!, style: TextStyle(fontSize: 11, color: _kInk2.withOpacity(0.8))),
+                    const SizedBox(width: 12),
+                  ],
+                  Icon(Icons.schedule_rounded, size: 13, color: _kInk2.withOpacity(0.7)),
+                  const SizedBox(width: 4),
+                  Text(_formatDate(report.createdAt), style: TextStyle(fontSize: 11, color: _kInk2.withOpacity(0.8))),
+                  const Spacer(),
+                  Text(report.referenceCode,
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _kBlue)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _formatDate(DateTime d) =>
+      '${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}/${d.year}';
+}
+
+class _StatusPill extends StatelessWidget {
+  final String status;
+  const _StatusPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    late Color color;
+    late String label;
+    switch (status) {
+      case 'in_review':
+        color = _kAmber;
+        label = 'In Review';
+        break;
+      case 'resolved':
+        color = _kGreen;
+        label = 'Resolved';
+        break;
+      case 'wont_fix':
+        color = _kInk2;
+        label = 'Won\'t Fix';
+        break;
+      default:
+        color = _kBlue;
+        label = 'Submitted';
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
+      child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+    );
+  }
+}
+
+/// Detail view. Wrapped in SensitiveScreen — once the admin has reviewed
+/// a report, this can contain technical detail (affected file, recommended
+/// action) that shouldn't be casually screenshotted or shared, unlike the
+/// summary list.
+class _ReportDetailScreen extends StatelessWidget {
+  final DiagnosticReport report;
+  const _ReportDetailScreen({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    return SensitiveScreen(
+      child: Scaffold(
+        backgroundColor: _kBg,
+        appBar: AppBar(
+          backgroundColor: _kBg,
+          elevation: 0,
+          foregroundColor: _kInk,
+          title: Text(report.referenceCode,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: _kInk)),
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(report.title,
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: _kInk)),
+                ),
+                _StatusPill(status: report.status),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _DetailSection(label: 'What you reported', content: report.summary),
+            if (report.module != null) ...[
+              const SizedBox(height: 16),
+              _DetailSection(label: 'Affected area', content: report.module!),
+            ],
+            const SizedBox(height: 24),
+            const Divider(color: _kLine),
+            const SizedBox(height: 16),
+            if (!report.hasDetail)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _kAmber.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _kAmber.withOpacity(0.25)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.hourglass_top_rounded, color: _kAmber, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Not yet reviewed by the MPDO team. You\'ll see more detail here once someone looks into it.',
+                        style: TextStyle(color: _kInk2, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else ...[
+              if (report.technicalDescription != null)
+                _DetailSection(label: 'Technical description', content: report.technicalDescription!),
+              if (report.reproSteps != null) ...[
+                const SizedBox(height: 16),
+                _DetailSection(label: 'Steps to reproduce', content: report.reproSteps!),
+              ],
+              if (report.affectedFile != null) ...[
+                const SizedBox(height: 16),
+                _DetailSection(label: 'Affected file/module', content: report.affectedFile!, mono: true),
+              ],
+              if (report.recommendedAction != null) ...[
+                const SizedBox(height: 16),
+                _DetailSection(label: 'Recommended action', content: report.recommendedAction!),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailSection extends StatelessWidget {
+  final String label;
+  final String content;
+  final bool mono;
+  const _DetailSection({required this.label, required this.content, this.mono = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label.toUpperCase(),
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _kInk2, letterSpacing: 0.6)),
+        const SizedBox(height: 6),
+        Text(
+          content,
+          style: TextStyle(
+            fontSize: 14,
+            color: _kInk,
+            fontFamily: mono ? 'monospace' : null,
+            height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Simple submission form — title, short description, optional affected
+/// area. Deliberately no field for "technical description" or similar —
+/// that's the admin's job to add later, not something an inspector should
+/// be asked to guess at.
+class _SubmitReportSheet extends StatefulWidget {
+  const _SubmitReportSheet();
+
+  @override
+  State<_SubmitReportSheet> createState() => _SubmitReportSheetState();
+}
+
+class _SubmitReportSheetState extends State<_SubmitReportSheet> {
+  final _titleController = TextEditingController();
+  final _summaryController = TextEditingController();
+  final _moduleController = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _summaryController.dispose();
+    _moduleController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final title = _titleController.text.trim();
+    final summary = _summaryController.text.trim();
+    if (title.isEmpty || summary.isEmpty) {
+      setState(() => _error = 'Please fill in both the title and description.');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await DiagnosticsService.submitReport(
+        title: title,
+        summary: summary,
+        module: _moduleController.text,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _error = 'Couldn\'t submit right now. Check your connection and try again.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: _kSurface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(color: _kLine, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Report an Issue',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: _kInk)),
+            const SizedBox(height: 4),
+            const Text(
+              'Describe what happened in your own words — no need to include technical details, the MPDO team will follow up.',
+              style: TextStyle(color: _kInk2, fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _titleController,
+              decoration: _inputDecoration('Title', 'e.g. "App crashes when opening a task"'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _summaryController,
+              maxLines: 4,
+              decoration: _inputDecoration('What happened?', 'Describe the issue as you experienced it'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _moduleController,
+              decoration: _inputDecoration('Affected screen (optional)', 'e.g. "Photo Capture", "Sync"'),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: _kCoral, fontSize: 13)),
+            ],
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _submitting ? null : _submit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _kBlue,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: _submitting
+                    ? const SizedBox(width: 20, height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Submit Report', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(String label, String hint) => InputDecoration(
+        labelText: label,
+        hintText: hint,
+        hintStyle: TextStyle(color: _kInk2.withOpacity(0.5), fontSize: 13),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kLine)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kLine)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kBlue, width: 1.5)),
+      );
+}

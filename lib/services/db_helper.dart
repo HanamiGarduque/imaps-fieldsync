@@ -524,6 +524,27 @@ class DBHelper {
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
+  /// Known Issue #4 (AUTH_SECURITY_MASTER_DOC.md §17) — clears every
+  /// locally-cached inspection-related table. This is a low-level
+  /// primitive only: it does NOT check for unsynced pending work first —
+  /// that safety check belongs to the caller (see
+  /// LocalDataGuardService.reconcileLocalDataOwnership), which must never
+  /// call this while getPendingActionsCount() > 0, or real unsynced field
+  /// inspection work would be destroyed permanently. Deliberately clears
+  /// rows rather than deleting the database file itself, so the SQLCipher
+  /// encryption key/setup is untouched.
+  static Future<void> wipeAllLocalData() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('local_jobs');
+      await txn.delete('local_inspections');
+      await txn.delete('local_photos');
+      await txn.delete('pending_actions');
+      await txn.delete('sync_log_entries');
+    });
+    debugPrint('[DB] wipeAllLocalData: all local inspection tables cleared.');
+  }
+
   static Future<void> markActionSyncing(String id) async {
     final db = await database;
     await db.update(

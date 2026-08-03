@@ -10,6 +10,7 @@ import '../services/notification_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
 import '../services/supabase_service.dart';
+import '../services/local_data_guard_service.dart';
 import '../widgets/imaps_loading_indicator.dart';
 import '../widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
@@ -353,7 +354,16 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (profile != null) {
-        await NotificationService.registerCurrentDevice();
+        // Fire-and-forget: this is push-notification device registration,
+        // unrelated to authentication itself. If it fails (most commonly
+        // because we're offline — the exact scenario biometric login is
+        // supposed to keep working in, per §14), it must NOT throw into
+        // this function's outer catch and block navigation to Home with a
+        // misleading "Biometric authentication error" message. It'll
+        // naturally succeed next time this runs while online.
+        NotificationService.registerCurrentDevice().catchError(
+          (e) => debugPrint('[BIOMETRIC] registerCurrentDevice failed (non-fatal): $e'),
+        );
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
@@ -401,7 +411,39 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-      await NotificationService.registerCurrentDevice();
+      // Fire-and-forget — see the same fix in _handleBiometricLogin for
+      // why this must not be able to block a successful login.
+      NotificationService.registerCurrentDevice().catchError(
+        (e) => debugPrint('[LOGIN] registerCurrentDevice failed (non-fatal): $e'),
+      );
+
+      // Known Issue #4 fix — only meaningful right after a *fresh*
+      // password login, since that's the only path that can introduce a
+      // different inspector's session onto a device than whoever's data
+      // is already cached locally (biometric/cold-start can only ever
+      // resume the one session already live on the device).
+      final authenticatedUserId = SupabaseService.client.auth.currentUser?.id;
+      if (authenticatedUserId != null) {
+        final result = await LocalDataGuardService.reconcileLocalDataOwnership(
+          authenticatedUserId,
+        );
+        if (result == LocalDataReconcileResult.blockedPendingSync) {
+          // Don't leave them logged in with another inspector's unsynced
+          // work sitting on the device — sign back out for real (this
+          // inspector never actually got to see anything yet) and explain.
+          await AuthService.signOut(revokeEverywhere: true);
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _errorMessage = 'This device has unsynced work from another '
+                  'inspector. Please have them log in and sync while '
+                  'online before switching users, or contact the admin.';
+            });
+          }
+          return;
+        }
+      }
+
       final profile = await AuthService.getCurrentProfileOfflineAware();
 
       if (!mounted) return;

@@ -26,10 +26,9 @@ class SecurePrefsService {
   static const _kBioConfirmed      = 'sp_bio_confirmed';
   static const _kBioDeviceId       = 'sp_bio_device_id';
   static const _kBioRequireOnOpen  = 'sp_bio_require_on_open';
-  static const _kBioRequireOnSync  = 'sp_bio_require_on_sync';
-  static const _kBioRequireProfile = 'sp_bio_require_profile';
   static const _kBioAutoLockMins   = 'sp_bio_auto_lock_mins'; // '0','1','5','10','-1'=immediately
   static const _kSoftLoggedOut     = 'sp_soft_logged_out';
+  static const _kLocalDataOwnerId  = 'sp_local_data_owner_id';
 
   // ── Saved Email & Encrypted Biometric Secret ────────────────────────────
 
@@ -155,18 +154,6 @@ class SecurePrefsService {
   static Future<void> setBioRequireOnOpen(bool v) =>
       _storage.write(key: _kBioRequireOnOpen, value: v ? 'true' : 'false');
 
-  static Future<bool> getBioRequireOnSync() async =>
-      (await _storage.read(key: _kBioRequireOnSync)) == 'true';
-
-  static Future<void> setBioRequireOnSync(bool v) =>
-      _storage.write(key: _kBioRequireOnSync, value: v ? 'true' : 'false');
-
-  static Future<bool> getBioRequireProfile() async =>
-      (await _storage.read(key: _kBioRequireProfile)) == 'true';
-
-  static Future<void> setBioRequireProfile(bool v) =>
-      _storage.write(key: _kBioRequireProfile, value: v ? 'true' : 'false');
-
   /// Auto-lock minutes: 0=never, 1=1min, 5=5min, 10=10min, -1=immediately.
   static Future<int> getBioAutoLockMins() async {
     final raw = await _storage.read(key: _kBioAutoLockMins);
@@ -198,6 +185,19 @@ class SecurePrefsService {
   static Future<void> setSoftLoggedOut(bool v) =>
       _storage.write(key: _kSoftLoggedOut, value: v ? 'true' : 'false');
 
+  // ── Local data ownership (Known Issue #4) ───────────────────────────────
+  // Tracks which inspector's user id the locally-cached inspection data
+  // (local_jobs/local_inspections/local_photos in DbHelper) currently
+  // belongs to. Used to detect a *different* inspector logging in on a
+  // device that still has another inspector's cached data — see
+  // LocalDataGuardService for what actually happens with that.
+
+  static Future<String?> getLocalDataOwnerId() =>
+      _storage.read(key: _kLocalDataOwnerId);
+
+  static Future<void> setLocalDataOwnerId(String userId) =>
+      _storage.write(key: _kLocalDataOwnerId, value: userId);
+
   // ── Bulk clear ──────────────────────────────────────────────────────────
 
   /// Call on logout / account switch. Wipes all auth prefs.
@@ -212,8 +212,6 @@ class SecurePrefsService {
     await _storage.delete(key: _kBioConfirmed);
     await _storage.delete(key: _kBioDeviceId);
     await _storage.delete(key: _kBioRequireOnOpen);
-    await _storage.delete(key: _kBioRequireOnSync);
-    await _storage.delete(key: _kBioRequireProfile);
     await _storage.delete(key: _kBioAutoLockMins);
     await _storage.delete(key: _kSoftLoggedOut);
   }

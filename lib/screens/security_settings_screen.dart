@@ -36,8 +36,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   bool _bioEnrolled = false;
   bool _bioConfirmed = false;
   bool _requireOnOpen = false;
-  bool _requireOnSync = false;
-  bool _requireProfile = false;
   int _autoLockMins = 0;
 
   @override
@@ -52,8 +50,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     final enrolled = await BiometricService.isEnrolled();
     final confirmed = await BiometricService.isConfirmed();
     final reqOpen = await SecurePrefsService.getBioRequireOnOpen();
-    final reqSync = await SecurePrefsService.getBioRequireOnSync();
-    final reqProf = await SecurePrefsService.getBioRequireProfile();
     final autoLock = await SecurePrefsService.getBioAutoLockMins();
 
     if (!mounted) return;
@@ -64,8 +60,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       _bioEnrolled = enrolled;
       _bioConfirmed = confirmed;
       _requireOnOpen = reqOpen;
-      _requireOnSync = reqSync;
-      _requireProfile = reqProf;
       _autoLockMins = autoLock;
       _loading = false;
     });
@@ -94,8 +88,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       setState(() {
         _bioEnrolled = false;
         _requireOnOpen = false;
-        _requireOnSync = false;
-        _requireProfile = false;
       });
       _showSnack('$_biometricLabel login disabled');
     }
@@ -233,48 +225,6 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                       ),
                       subtitle: Text(
                         'Prompt biometric verification on app launch',
-                        style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink2),
-                      ),
-                    ),
-                    const Divider(height: 1, indent: 16, endIndent: 16),
-                    SwitchListTile(
-                      value: _requireOnSync,
-                      onChanged: (v) async {
-                        await SecurePrefsService.setBioRequireOnSync(v);
-                        setState(() => _requireOnSync = v);
-                      },
-                      activeTrackColor: _Colors.blue1,
-                      title: Text(
-                        'Require Before Syncing',
-                        style: GoogleFonts.inter(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w500,
-                          color: _Colors.ink,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Confirm identity before uploading inspection data',
-                        style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink2),
-                      ),
-                    ),
-                    const Divider(height: 1, indent: 16, endIndent: 16),
-                    SwitchListTile(
-                      value: _requireProfile,
-                      onChanged: (v) async {
-                        await SecurePrefsService.setBioRequireProfile(v);
-                        setState(() => _requireProfile = v);
-                      },
-                      activeTrackColor: _Colors.blue1,
-                      title: Text(
-                        'Require Before Profile Changes',
-                        style: GoogleFonts.inter(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w500,
-                          color: _Colors.ink,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Confirm identity before editing personal details',
                         style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink2),
                       ),
                     ),

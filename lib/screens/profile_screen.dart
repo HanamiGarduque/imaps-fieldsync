@@ -15,6 +15,7 @@ import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
 import 'security_settings_screen.dart';
 import 'terms_privacy_screen.dart';
+import 'diagnostics_screen.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../widgets/motion/spring_entrance.dart';
 
@@ -543,6 +544,20 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                         },
                       ),
                       const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+
+                      _ActionTile(
+                        icon: Icons.flag_outlined,
+                        title: 'Diagnostics & Support',
+                        subtitle: 'Report an issue to the MPDO team',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+                          );
+                        },
+                      ),
+                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+
                       
                       // RESTORED: Terms and Privacy Policy Action Tile
                       _ActionTile(
