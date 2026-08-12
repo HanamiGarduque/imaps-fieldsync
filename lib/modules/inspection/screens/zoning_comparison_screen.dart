@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../theme/insight_theme.dart';
-import '../widgets/insight_widgets.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/insight_widgets.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'inspection_result_screen.dart';
 
 /// ==================================================================

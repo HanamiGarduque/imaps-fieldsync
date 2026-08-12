@@ -10,14 +10,14 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/location_service.dart';
 import '../services/geotag_service.dart';
 
-import 'tasks_screen.dart';
+import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'inspection_checklist_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 import '../widgets/exit_confirm_dialog.dart';
-import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import '../widgets/photo_viewer.dart';
 
 class InsightTheme {

@@ -9,18 +9,18 @@ import 'package:provider/provider.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 
 import '../services/location_service.dart';
-import '../services/supabase_service.dart';
-import '../services/sync_outbox_service.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/sync_outbox_service.dart';
 import '../providers/inspection_provider.dart';
 import 'capture_photo_screen.dart';
-import 'tasks_screen.dart';
+import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import '../widgets/exit_confirm_dialog.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import '../services/db_helper.dart';
+import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -116,10 +116,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
       if (widget.task.parcelId == null) throw Exception('No parcel linked.');
       final pos = await LocationService.getCurrentLocation();
       final connectivityResult = await Connectivity().checkConnectivity();
-final online = connectivityResult is List
-    ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
-    : connectivityResult != ConnectivityResult.none;
-
+      final online = connectivityResult.any((r) => r != ConnectivityResult.none);
       double? dist;
       double? parcelLat;
       double? parcelLng;
@@ -178,10 +175,7 @@ final online = connectivityResult is List
       // swallowed below). Now it mirrors the same online/offline branch
       // that _checkLocation() already uses.
       final connectivityResult = await Connectivity().checkConnectivity();
-      final online = connectivityResult is List
-          ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
-          : connectivityResult != ConnectivityResult.none;
-
+      final online = connectivityResult.any((r) => r != ConnectivityResult.none);
       double? dist;
       double? parcelLat;
       double? parcelLng;

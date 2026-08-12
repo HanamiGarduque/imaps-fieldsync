@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import 'tasks_screen.dart'; // TaskItem, InsightTheme
-import '../services/supabase_service.dart';
+import '../../tasks/screens/tasks_screen.dart'; // TaskItem, InsightTheme
+import '../../../core/services/supabase_service.dart';
 import '../providers/inspection_provider.dart';
 import 'inspection_progress.dart';
 
@@ -13,8 +13,8 @@ import 'inspection_checklist_screen.dart' hide InsightTheme;
 import 'capture_photo_screen.dart' hide InsightTheme;
 import 'field_findings_screen.dart' hide InsightTheme;
 import 'review_submit_screen.dart' hide InsightTheme;
-import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import '../widgets/photo_viewer.dart';
 
 class CompletedInspectionDetailScreen extends StatefulWidget {

@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
-import '../services/supabase_service.dart';
-import '../services/db_helper.dart';
-import '../services/sync_outbox_service.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/db_helper.dart';
+import '../../../core/services/sync_outbox_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 /// ==================================================================
 /// INSPECTION PROGRESS TRACKER

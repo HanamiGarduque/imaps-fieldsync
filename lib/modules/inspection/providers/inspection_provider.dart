@@ -5,10 +5,10 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../services/supabase_service.dart';
-import '../services/db_helper.dart';
-import '../services/sync_outbox_service.dart';
-import '../screens/tasks_screen.dart'; // To access TaskItem class
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/db_helper.dart';
+import '../../../core/services/sync_outbox_service.dart';
+import '../../tasks/screens/tasks_screen.dart'; // To access TaskItem class
 
 class InspectionProvider extends ChangeNotifier {
   TaskItem? _activeTask;

@@ -3,21 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../models/user_profile.dart';
+import '../../../core/models/user_profile.dart';
 import '../models/dashboard_stats.dart';
-import '../services/auth_service.dart';
-import '../services/supabase_service.dart';
-import '../services/biometric_service.dart';
-import '../services/secure_prefs_service.dart';
-import 'splash_screen.dart' show LoginScreen; 
-import 'tasks_screen.dart' show TaskItem;
+import '../../../core/services/auth_service.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../auth_startup/screens/splash_screen.dart' show LoginScreen;
+import '../../tasks/screens/tasks_screen.dart' show TaskItem;
 import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
-import 'security_settings_screen.dart';
+import '../../auth_startup/screens/security_settings_screen.dart';
 import 'terms_privacy_screen.dart';
 import 'diagnostics_screen.dart';
 import '../widgets/dashboard_widgets.dart';
-import '../widgets/motion/spring_entrance.dart';
+import '../../../core/widgets/motion/spring_entrance.dart';
 
 
 /// ==================================================================

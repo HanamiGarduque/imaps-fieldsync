@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 // Note: this screen is a standalone assessment picker used from the
 // Zoning Comparison placeholder flow. The main 6-step inspection

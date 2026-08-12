@@ -6,16 +6,16 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../services/location_service.dart';
-import '../services/supabase_service.dart';
+import '../../../core/services/supabase_service.dart';
 import 'gps_verification_screen.dart';
-import 'tasks_screen.dart';
+import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import '../services/db_helper.dart';
+import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
-import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 

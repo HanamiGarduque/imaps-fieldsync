@@ -3,15 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'field_findings_screen.dart';
-import 'tasks_screen.dart';
+import 'review_submit_screen.dart';
+import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
-import '../services/supabase_service.dart';
-import '../services/sync_outbox_service.dart';
 import '../widgets/exit_confirm_dialog.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -23,102 +21,103 @@ class InsightTheme {
   static const Color blue1 = Color(0xFF3D6BFF);
   static const Color blue2 = Color(0xFF0B2FBF);
   static const Color blueInk = Color(0xFF1A3FC4);
+  static const Color green = Color(0xFF12A150);
+  static const Color redTint = Color(0xFFFDECEE);
+  static const Color redInk = Color(0xFFB72A3B);
   static const Color line = Color(0x1A141628); 
-  static const Color lineStrong = Color(0x2A141628); 
   
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
   static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
   static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
 }
 
-class InspectionChecklistScreen extends StatefulWidget {
+class FieldFindingsScreen extends StatefulWidget {
   final TaskItem task;
   final List<Map<String, dynamic>> capturedPhotos;
-  const InspectionChecklistScreen({super.key, required this.task, this.capturedPhotos = const []});
+  final int checklistDone;
+  final int checklistTotal;
+
+  const FieldFindingsScreen({super.key, required this.task, this.capturedPhotos = const [], this.checklistDone = 0, this.checklistTotal = 0});
   @override
-  State<InspectionChecklistScreen> createState() => _InspectionChecklistScreenState();
+  State<FieldFindingsScreen> createState() => _FieldFindingsScreenState();
 }
 
-class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
-  // BUG FIX #4C — Summary Sync Lock / Form Update Mismatch.
-  // These used to be hardcoded defaults that ignored whatever real state
-  // InspectionProvider already had (loaded via startInspection's local
-  // draft recovery, or hydrateForRework for a reopened job). That's why the
-  // screen always rendered the same "3/5" regardless of what was actually
-  // saved, and why edits made here didn't stick. Now they're seeded from
-  // the provider on first frame.
-  final Map<String, bool> _siteCondition = {'Structure matches declared use': true, 'Setback distances compliant': true};
+class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
   bool _isSaving = false;
-  final Map<String, bool> _zoningObservations = {'Accessibility & road frontage': true, 'Surrounding developments noted': false, 'Signage / commercial activity present': false};
-
-  int get _doneCount => _siteCondition.values.where((v) => v).length + _zoningObservations.values.where((v) => v).length;
-  int get _totalCount => _siteCondition.length + _zoningObservations.length;
+  late final TextEditingController _notesController;
+  late final TextEditingController _discrepancyTitleController;
+  late final TextEditingController _discrepancyDetailController;
+  late final TextEditingController _recommendationsController;
 
   @override
   void initState() {
     super.initState();
+    // BUG FIX #4A — Global Data Persistence.
+    // Controllers used to always start empty, even when InspectionProvider
+    // already had real hydrated data (rework mode, or a resumed Ongoing
+    // task). That meant the inspector saw blank fields for findings that
+    // were already on file, and hitting "Continue" without retyping would
+    // silently overwrite that real data with empty strings. Prefill from
+    // the provider's current state instead — it's already correctly
+    // seeded via hydrateForRework() / startInspection()'s local draft load.
     final provider = context.read<InspectionProvider>();
-    _siteCondition
-      ..clear()
-      ..addAll(provider.siteCondition);
-    _zoningObservations
-      ..clear()
-      ..addAll(provider.zoningObservations);
+    _notesController = TextEditingController(text: provider.notes);
+    _discrepancyTitleController = TextEditingController();
+    _discrepancyDetailController = TextEditingController(text: provider.discrepancies);
+    _recommendationsController = TextEditingController(text: provider.recommendations);
   }
 
-  // Guards against a burst of rapid taps piling up out-of-order requests —
-  // only the latest call's result matters, so we don't need to await/queue
-  // each one, just make sure an older response can't clobber the DB after
-  // a newer one already landed.
-  int _syncSeq = 0;
+  @override
+  void dispose() {
+    _notesController.dispose(); _discrepancyTitleController.dispose(); _discrepancyDetailController.dispose(); _recommendationsController.dispose();
+    super.dispose();
+  }
 
-  /// Pushes the checklist as it stands right now to `field_jobs`, using the
-  /// same {'item','checked'} shape the final submit writes — so if the app
-  /// dies before Step 6, the ticks the inspector already made aren't lost,
-  /// and reopening this job for rework picks up mid-checklist state too.
-  /// This was `updateJobInspectionProgress()`'s original intended purpose;
-  /// it previously had zero callers.
-  Future<void> _syncChecklistProgress() async {
-    final mySeq = ++_syncSeq;
-    final checklist = [
-      ..._siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
-      ..._zoningObservations.entries.map((e) => {'item': e.key, 'checked': e.value}),
-    ];
-    try {
-      await SupabaseService.updateJobInspectionProgress(
-        jobId: widget.task.id,
-        updateData: {
-          'checklist_data': checklist,
-          'checklist_completed_count': _doneCount,
-          'checklist_total_count': _totalCount,
-        },
-      );
-    } catch (_) {
-      // Ignore stale results from superseded calls — a newer toggle
-      // already fired after this one.
-      if (mySeq != _syncSeq) return;
-      // Couldn't reach Supabase (e.g. offline) — queue it instead of just
-      // dropping the update. enqueueChecklistUpdate reuses one row per
-      // job, so repeated offline taps don't pile up duplicate queued
-      // rows — only the latest checklist state is kept. Step 6 submit
-      // still carries the authoritative checklist either way, so a
-      // failure here (queue included) never actually loses data.
-      try {
-        await SyncOutboxService.enqueueChecklistUpdate(
-          jobId: widget.task.id,
-          checklistData: checklist,
-          checklistCompletedCount: _doneCount,
-          checklistTotalCount: _totalCount,
+  void _handleContinue() {
+    HapticFeedback.selectionClick();
+
+    final discrepancyTitle = _discrepancyTitleController.text.trim();
+    final discrepancyDetail = _discrepancyDetailController.text.trim();
+    // Don't save a bare " — " when the inspector legitimately found nothing.
+    final discrepancies = (discrepancyTitle.isEmpty && discrepancyDetail.isEmpty)
+        ? ''
+        : [discrepancyTitle, discrepancyDetail].where((s) => s.isNotEmpty).join(' — ');
+
+    final provider = context.read<InspectionProvider>();
+    provider.updateFindings(
+          actualLandUse: widget.task.landUseClass,
+          notes: _notesController.text.trim(),
+          discrepancies: discrepancies,
+          recommendations: _recommendationsController.text.trim(),
+          // Carries forward whatever GpsVerificationScreen actually recorded
+          // in Step 2 (e.g. "Verified on-site — 6m from declared location")
+          // instead of hardcoding a status that may not reflect reality.
+          boundaryStatus: provider.boundaryStatus,
         );
-      } catch (_) {
-        // Nothing more we can do — safe to ignore, see comment above.
-      }
-    }
+    InspectionProgress.instance.markStepComplete(5);
+    // Issue 4 fix — same rationale as capture_photo_screen.dart's
+    // _finishAndContinue: findings never auto-saved on normal forward
+    // progress before, only on exit/rework-save/final-submit. Now has
+    // its own outbox fallback too (enqueueFindingsUpdate).
+    provider.saveStepFindings();
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)));
   }
 
-  void _continueToFindings() {
-    InspectionProgress.instance.markStepComplete(4);
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => FieldFindingsScreen(task: widget.task, capturedPhotos: widget.capturedPhotos, checklistDone: _doneCount, checklistTotal: _totalCount)));
+  Future<bool> _syncControllersAndSave() async {
+    final provider = context.read<InspectionProvider>();
+    final discrepancyTitle = _discrepancyTitleController.text.trim();
+    final discrepancyDetail = _discrepancyDetailController.text.trim();
+    final discrepancies = (discrepancyTitle.isEmpty && discrepancyDetail.isEmpty)
+        ? ''
+        : [discrepancyTitle, discrepancyDetail].where((s) => s.isNotEmpty).join(' — ');
+    provider.updateFindings(
+      actualLandUse: widget.task.landUseClass,
+      notes: _notesController.text.trim(),
+      discrepancies: discrepancies,
+      recommendations: _recommendationsController.text.trim(),
+      boundaryStatus: provider.boundaryStatus,
+    );
+    return provider.saveStepFindings();
   }
 
   @override
@@ -128,14 +127,12 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
       canPop: !context.read<InspectionProvider>().isReworkMode && InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
-          // Already popped natively (smooth swipe/hardware-back animation) —
-          // fire the save in the background, nothing to block on here.
-          context.read<InspectionProvider>().saveStepChecklist();
+          _syncControllersAndSave();
           return;
         }
         handleInspectionExit(
           context,
-          onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
+          onSaveProgress: _syncControllersAndSave,
           isReworkMode: context.read<InspectionProvider>().isReworkMode,
         );
       },
@@ -155,7 +152,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                     children: [
                       _GlassBackButton(onTap: () => handleInspectionExit(
                         context,
-                        onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
+                        onSaveProgress: _syncControllersAndSave,
                         isReworkMode: context.read<InspectionProvider>().isReworkMode,
                       )),
                       const SizedBox(width: 14),
@@ -163,7 +160,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Zoning Checklist', style: InsightTheme.poppins(17, w: FontWeight.w700)),
+                            Text('Field Findings', style: InsightTheme.poppins(17, w: FontWeight.w700)),
                             Text(widget.task.location, style: InsightTheme.inter(12, c: InsightTheme.ink2), maxLines: 1, overflow: TextOverflow.ellipsis),
                           ],
                         ),
@@ -179,27 +176,15 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       Container(
                         height: 6, decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(4)),
                         child: FractionallySizedBox(
-                          alignment: Alignment.centerLeft, widthFactor: 4/6,
+                          alignment: Alignment.centerLeft, widthFactor: 5/6,
                           child: Container(decoration: BoxDecoration(gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2]), borderRadius: BorderRadius.circular(4))),
                         ),
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          Text('STEP 4 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
-                          Text(' — VERIFY COMPLIANCE', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
-                          const Spacer(),
-                          // Fix (deferred roadmap item, 2026-07): this
-                          // screen never displayed a live checklist count
-                          // at all — _doneCount/_totalCount were already
-                          // correct and already rebuilt instantly on every
-                          // toggle (setState in each _ChecklistItem's
-                          // onTap), the display just didn't exist yet.
-                          // Not a stale-data bug — a missing widget.
-                          Text(
-                            '$_doneCount of $_totalCount checked',
-                            style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.3),
-                          ),
+                          Text('STEP 5 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
+                          Text(' — LOG OBSERVATIONS', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
                         ],
                       ),
                     ],
@@ -210,36 +195,48 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      _SectionLabel(title: 'SITE CONDITION'),
+                      _SectionLabel(title: 'OBSERVATIONS'),
                       const SizedBox(height: 12),
                       Container(
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
-                        child: Column(
-                          children: _siteCondition.entries.toList().asMap().entries.map((entry) {
-                            var e = entry.value;
-                            return _ChecklistItem(title: e.key, isChecked: e.value, isLast: entry.key == _siteCondition.length - 1, onTap: () {
-                              setState(() => _siteCondition[e.key] = !e.value);
-                              context.read<InspectionProvider>().setSiteCondition(e.key, !e.value);
-                              _syncChecklistProgress();
-                            });
-                          }).toList(),
+                        child: TextField(controller: _notesController, maxLines: 4, minLines: 3, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Describe what you observed on-site — structure condition, land use, notable features...')),
+                      ),
+                      if (widget.capturedPhotos.isNotEmpty || widget.checklistTotal > 0) ...[
+                        const SizedBox(height: 16),
+                        if (widget.capturedPhotos.isNotEmpty) Row(children: [const Icon(Icons.check_circle_rounded, size: 16, color: InsightTheme.green), const SizedBox(width: 8), Text('${widget.capturedPhotos.length} photos attached', style: InsightTheme.inter(13, c: InsightTheme.green))]),
+                        if (widget.checklistTotal > 0) Padding(padding: const EdgeInsets.only(top: 6), child: Row(children: [Icon(widget.checklistDone == widget.checklistTotal ? Icons.check_circle_rounded : Icons.info_rounded, size: 16, color: widget.checklistDone == widget.checklistTotal ? InsightTheme.green : InsightTheme.ink3), const SizedBox(width: 8), Text('Checklist: ${widget.checklistDone}/${widget.checklistTotal} completed', style: InsightTheme.inter(13, c: InsightTheme.ink2))])),
+                      ],
+                      const SizedBox(height: 28),
+                      _SectionLabel(title: 'DISCREPANCIES'),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: InsightTheme.redTint, borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.warning_amber_rounded, size: 18, color: InsightTheme.redInk)),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  TextField(controller: _discrepancyTitleController, style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Issue title (leave blank if none found)')),
+                                  const SizedBox(height: 6),
+                                  TextField(controller: _discrepancyDetailController, style: InsightTheme.inter(13, c: InsightTheme.ink2), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Location or details')),
+                                ],
+                              ),
+                            )
+                          ],
                         ),
                       ),
                       const SizedBox(height: 28),
-                      _SectionLabel(title: 'ZONING OBSERVATIONS'),
+                      _SectionLabel(title: 'RECOMMENDATIONS'),
                       const SizedBox(height: 12),
                       Container(
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
-                        child: Column(
-                          children: _zoningObservations.entries.toList().asMap().entries.map((entry) {
-                            var e = entry.value;
-                            return _ChecklistItem(title: e.key, isChecked: e.value, isLast: entry.key == _zoningObservations.length - 1, onTap: () {
-                              setState(() => _zoningObservations[e.key] = !e.value);
-                              context.read<InspectionProvider>().setZoningObservation(e.key, !e.value);
-                              _syncChecklistProgress();
-                            });
-                          }).toList(),
-                        ),
+                        child: TextField(controller: _recommendationsController, maxLines: 3, minLines: 2, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Enter recommendation for this application (e.g., required permits, follow-up actions)...')),
                       ),
                     ],
                   ),
@@ -253,14 +250,12 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           child: OutlinedButton(
                             onPressed: _isSaving ? null : () async {
                               setState(() => _isSaving = true);
-                              final ok = await context.read<InspectionProvider>().saveStepChecklist();
+                              final ok = await _syncControllersAndSave();
                               if (!mounted) return;
                               setState(() => _isSaving = false);
                               // Issue 2 fix (Completed Category enhancement):
-                              // single Save button during rework, returns to
-                              // Inspection Summary instead of leaving the
-                              // inspector on the step needing a separate
-                              // "Continue" tap that doesn't apply here.
+                              // single Save button during rework, returns
+                              // to Inspection Summary.
                               if (ok) {
                                 Navigator.pop(context);
                               } else {
@@ -276,7 +271,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       ] else ...[
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _continueToFindings,
+                          onPressed: _handleContinue,
                           style: ElevatedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
@@ -290,7 +285,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                             ),
                             child: Container(
                               alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                              child: Text('Continue to Findings', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                              child: Text('Continue to Review', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
                             ),
                           ),
                         ),
@@ -321,34 +316,6 @@ class _SectionLabel extends StatelessWidget {
         const SizedBox(width: 8),
         Text(title, style: InsightTheme.jetBrains(11, w: FontWeight.w500, ls: 1.2)),
       ],
-    );
-  }
-}
-
-class _ChecklistItem extends StatelessWidget {
-  final String title; final bool isChecked; final bool isLast; final VoidCallback onTap;
-  const _ChecklistItem({required this.title, required this.isChecked, required this.isLast, required this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () { HapticFeedback.lightImpact(); onTap(); },
-      borderRadius: BorderRadius.vertical(top: isLast ? Radius.zero : const Radius.circular(20), bottom: isLast ? const Radius.circular(20) : Radius.zero),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(border: isLast ? null : const Border(bottom: BorderSide(color: InsightTheme.line))),
-        child: Row(
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 24, height: 24,
-              decoration: BoxDecoration(shape: BoxShape.circle, gradient: isChecked ? const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2]) : null, color: isChecked ? null : Colors.transparent, border: isChecked ? null : Border.all(color: InsightTheme.lineStrong, width: 2)),
-              child: isChecked ? const Icon(Icons.check_rounded, color: Colors.white, size: 16) : null,
-            ),
-            const SizedBox(width: 14),
-            Expanded(child: Text(title, style: InsightTheme.inter(14, w: FontWeight.w500, c: InsightTheme.ink))),
-          ],
-        ),
-      ),
     );
   }
 }

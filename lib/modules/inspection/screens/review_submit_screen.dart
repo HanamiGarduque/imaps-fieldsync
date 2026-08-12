@@ -5,14 +5,14 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/inspection_provider.dart';
-import '../services/supabase_service.dart';
-import '../services/sync_outbox_service.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/sync_outbox_service.dart';
 import 'inspection_progress.dart';
-import 'main_shell_screen.dart';
-import 'tasks_screen.dart' show TaskItem;
-import '../models/user_profile.dart';
+import '../../../core/navigation/main_shell_screen.dart';
+import '../../tasks/screens/tasks_screen.dart' show TaskItem;
+import '../../../core/models/user_profile.dart';
 import '../widgets/exit_confirm_dialog.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);

@@ -7,16 +7,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../models/user_profile.dart';
-import '../services/db_helper.dart';
-import '../services/supabase_service.dart';
-import '../services/sync_outbox_service.dart';
-import 'notifications_screen.dart';
-import '../widgets/insight_bottom_nav.dart'; // kInsightBottomNavReserve (scroll padding) only
-import '../widgets/motion/spring_entrance.dart';
-import '../widgets/motion/updating_tile.dart';
-import '../widgets/motion/linked_list_motion.dart';
-import '../widgets/imaps_loading_indicator.dart';
+import '../../../core/models/user_profile.dart';
+import '../../../core/services/db_helper.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/sync_outbox_service.dart';
+import '../../profile_settings/screens/notifications_screen.dart';
+import '../../../core/widgets/insight_bottom_nav.dart'; // kInsightBottomNavReserve (scroll padding) only
+import '../../../core/widgets/motion/spring_entrance.dart';
+import '../../../core/widgets/motion/updating_tile.dart';
+import '../../../core/widgets/motion/linked_list_motion.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS
@@ -133,7 +133,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   int _syncedPhotoFileCount = 0;
   int _unsyncedPhotoFileCount = 0;
   int _clearableBytes = 0;
-  int _syncLogCount = 0;
   bool _clearingCache = false;
 
   Timer? _pollTimer;
@@ -242,7 +241,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
       _syncedPhotoFileCount = stats['syncedPhotoFileCount'] as int;
       _unsyncedPhotoFileCount = stats['unsyncedPhotoFileCount'] as int;
       _clearableBytes = stats['clearableBytes'] as int;
-      _syncLogCount = stats['syncLogCount'] as int;
     });
   }
 
@@ -1556,69 +1554,3 @@ class _LogDataRow extends StatelessWidget {
   }
 }
 
-class _BottomNavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _BottomNavItem({
-    required this.icon,
-    required this.label,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: EdgeInsets.symmetric(
-          horizontal: isActive ? 14 : 10,
-          vertical: 10,
-        ),
-        decoration: BoxDecoration(
-          gradient: isActive
-              ? const LinearGradient(
-                  colors: [InsightTheme.blue1, InsightTheme.blue2],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                )
-              : null,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: isActive
-              ? [
-                  BoxShadow(
-                    color: InsightTheme.blue1.withValues(alpha: 0.3),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : [],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              color: isActive ? Colors.white : InsightTheme.ink3,
-              size: 20,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: InsightTheme.inter(
-                10,
-                w: FontWeight.w600,
-                c: isActive ? Colors.white : InsightTheme.ink3,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
