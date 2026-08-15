@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'supabase_service.dart';
+import '../../../core/services/supabase_service.dart';
 
 /// A single diagnostic/error report, as an inspector or the summary list
 /// sees it. Detail fields are null until the admin team fills them in

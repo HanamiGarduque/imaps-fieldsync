@@ -1,6 +1,6 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
-import 'supabase_service.dart';
+import '../../../core/services/supabase_service.dart';
 
 class NotificationService {
   static Future<void> initialize() async {

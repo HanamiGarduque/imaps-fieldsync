@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/screen_protection_service.dart';
+import '../../modules/auth_startup/services/screen_protection_service.dart';
 
 /// Wrap the widget a "sensitive" screen returns from `build()` with this to
 /// block screenshots, screen recording, and the Recent-Apps preview while

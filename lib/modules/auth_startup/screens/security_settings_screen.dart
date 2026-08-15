@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../models/user_profile.dart';
+import '../../../core/models/user_profile.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
-import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 class _Colors {
   static const bg = Color(0xFFF2F4FB);

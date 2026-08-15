@@ -2,9 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/user_profile.dart';
-import 'secure_prefs_service.dart';
+import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import 'supabase_service.dart';
-import 'biometric_service.dart';
+import '../../modules/auth_startup/services/biometric_service.dart';
 
 class AuthService {
   static final SupabaseClient _client = SupabaseService.client; //[cite: 2]

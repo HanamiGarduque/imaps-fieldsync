@@ -34,8 +34,8 @@ class ScreenProtectionService {
   // To remove after documentation is done: delete this block, delete
   // setDebugOverride()/isDebugOverrideActive below, remove the two
   // `if (kDebugMode && _debugOverrideDisabled)` checks in enter()/exit(),
-  // delete lib/widgets/debug_screenshot_toggle.dart, and remove the
-  // `builder:` wiring for it in main.dart's MaterialApp.
+  // delete lib/modules/auth_startup/widgets/debug_screenshot_toggle.dart,
+  // and remove the `builder:` wiring for it in main.dart's MaterialApp.
   static bool _debugOverrideDisabled = false;
 
   static Future<void> enter() async {

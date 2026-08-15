@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
-import 'secure_prefs_service.dart';
+import '../../modules/auth_startup/services/secure_prefs_service.dart';
 
 class DBHelper {
   static Database? _database;

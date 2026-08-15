@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/diagnostics_service.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 // Local palette approximating the app's existing blue/coral identity
 // without duplicating the full InsightTheme class into yet another file

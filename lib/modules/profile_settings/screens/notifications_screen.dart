@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../services/supabase_service.dart';
-import '../services/db_helper.dart';
-import '../widgets/motion/spring_entrance.dart';
-import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/db_helper.dart';
+import '../../../core/widgets/motion/spring_entrance.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS

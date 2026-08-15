@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:local_auth/local_auth.dart';
 import 'secure_prefs_service.dart';
-import 'supabase_service.dart';
+import '../../../core/services/supabase_service.dart';
 
 
 

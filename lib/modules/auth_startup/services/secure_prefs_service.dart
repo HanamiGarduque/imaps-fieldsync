@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../models/user_profile.dart';
+import '../../../core/models/user_profile.dart';
 
 /// Secure replacement for SharedPreferences — used only for auth-related
 /// and security-sensitive preferences. Backed by Android Keystore /

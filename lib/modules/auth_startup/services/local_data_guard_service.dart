@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'db_helper.dart';
+import '../../../core/services/db_helper.dart';
 import 'secure_prefs_service.dart';
 
 /// Result of a reconciliation check — tells the caller what happened so

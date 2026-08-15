@@ -5,16 +5,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
-import '../services/auth_service.dart';
-import '../services/notification_service.dart';
+import '../../../core/services/auth_service.dart';
+import '../../profile_settings/services/notification_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
-import '../services/supabase_service.dart';
+import '../../../core/services/supabase_service.dart';
 import '../services/local_data_guard_service.dart';
-import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
-import 'main_shell_screen.dart';
+import '../../../core/navigation/main_shell_screen.dart';
 
 
 /// ==================================================================

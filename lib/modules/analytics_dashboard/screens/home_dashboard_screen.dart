@@ -4,19 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
-import '../models/user_profile.dart';
-import '../services/supabase_service.dart';
-import '../services/db_helper.dart';
-import 'tasks_screen.dart';
-import 'parcel_detail_screen.dart';
-import 'profile_screen.dart';
-import 'notifications_screen.dart';
-import 'updates_screen.dart';
-import 'profile_edit_screen.dart'; 
-import '../widgets/insight_bottom_nav.dart'; // kInsightBottomNavReserve (scroll padding) only
-import '../widgets/motion/spring_entrance.dart';
-import '../widgets/motion/updating_tile.dart';
-import '../widgets/imaps_loading_indicator.dart';
+import '../../../core/models/user_profile.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/db_helper.dart';
+import '../../tasks/screens/tasks_screen.dart';
+import '../../../core/navigation/parcel_detail_screen.dart';
+import '../../profile_settings/screens/profile_screen.dart';
+import '../../profile_settings/screens/notifications_screen.dart';
+import 'package:imaps_fieldsync/modules/offline_sync/screens/updates_screen.dart';
+import '../../profile_settings/screens/profile_edit_screen.dart'; 
+import '../../../core/widgets/insight_bottom_nav.dart'; // kInsightBottomNavReserve (scroll padding) only
+import '../../../core/widgets/motion/spring_entrance.dart';
+import '../../../core/widgets/motion/updating_tile.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../widgets/active_assignments_folder_card.dart';
 
 /// ==================================================================

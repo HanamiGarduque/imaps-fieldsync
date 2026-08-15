@@ -5,18 +5,18 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 
-import '../models/user_profile.dart';
-import '../services/supabase_service.dart';
-import '../services/db_helper.dart';
+import '../../../core/models/user_profile.dart';
+import '../../../core/services/supabase_service.dart';
+import '../../../core/services/db_helper.dart';
 
-import 'parcel_detail_screen.dart';
-import 'completed_inspection_detail_screen.dart';
-import 'inspection_progress.dart';
-import '../widgets/motion/spring_entrance.dart';
-import '../widgets/motion/updating_tile.dart';
-import '../widgets/motion/linked_list_motion.dart';
-import '../widgets/imaps_loading_indicator.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/navigation/parcel_detail_screen.dart';
+import '../../inspection/screens/completed_inspection_detail_screen.dart';
+import '../../inspection/screens/inspection_progress.dart';
+import '../../../core/widgets/motion/spring_entrance.dart';
+import '../../../core/widgets/motion/updating_tile.dart';
+import '../../../core/widgets/motion/linked_list_motion.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 
 /// ==================================================================

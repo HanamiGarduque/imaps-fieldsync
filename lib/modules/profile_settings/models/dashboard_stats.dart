@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import '../screens/tasks_screen.dart' show TaskItem;
+import '../../tasks/screens/tasks_screen.dart' show TaskItem;
 
 /// One point on the weekly trend bar chart.
 @immutable

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../services/auth_service.dart';
+import '../../../core/services/auth_service.dart';
 import '../services/biometric_service.dart';
-import '../widgets/sensitive_screen.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'splash_screen.dart' show LoginScreen;
 
 /// Shown two places: (1) app-resume, per the original §5d design, and

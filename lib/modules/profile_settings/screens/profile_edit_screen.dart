@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../models/user_profile.dart';
-import '../services/supabase_service.dart';
+import '../../../core/models/user_profile.dart';
+import '../../../core/services/supabase_service.dart';
 
 /// ==================================================================
 /// THEME COLORS & TOKENS

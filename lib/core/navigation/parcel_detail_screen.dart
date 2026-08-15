@@ -4,17 +4,17 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
-import 'tasks_screen.dart'; 
-import 'site_map_screen.dart';
-import 'gps_verification_screen.dart';
-import 'inspection_checklist_screen.dart';
-import 'capture_photo_screen.dart';
-import 'field_findings_screen.dart';
-import 'review_submit_screen.dart';
-import 'inspection_progress.dart';
-import '../providers/inspection_provider.dart';
-import '../widgets/sensitive_screen.dart';
-import '../widgets/photo_viewer.dart';
+import '../../modules/tasks/screens/tasks_screen.dart'; 
+import '../../modules/inspection/screens/site_map_screen.dart';
+import '../../modules/inspection/screens/gps_verification_screen.dart';
+import '../../modules/inspection/screens/inspection_checklist_screen.dart';
+import '../../modules/inspection/screens/capture_photo_screen.dart';
+import '../../modules/inspection/screens/field_findings_screen.dart';
+import '../../modules/inspection/screens/review_submit_screen.dart';
+import '../../modules/inspection/screens/inspection_progress.dart';
+import '../../modules/inspection/providers/inspection_provider.dart';
+import '../../core/widgets/sensitive_screen.dart';
+import '../../modules/inspection/widgets/photo_viewer.dart';
 
 class InsightTheme {
   static const Color bg = Color(0xFFF2F4FB);
@@ -764,6 +764,6 @@ class _GlassBackButton extends StatelessWidget {
   }
 }
 
-// Fullscreen photo viewer moved to lib/widgets/photo_viewer.dart
+// Fullscreen photo viewer moved to lib/modules/inspection/widgets/photo_viewer.dart
 // (FullscreenPhotoViewer) so it's shared across every screen with task
 // photos, not duplicated per-screen.

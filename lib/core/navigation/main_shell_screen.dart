@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
-import '../services/biometric_service.dart';
-import '../services/secure_prefs_service.dart';
+import '../../modules/auth_startup/services/biometric_service.dart';
+import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/sync_progress_banner.dart';
-import 'app_resume_lock_screen.dart';
-import 'home_dashboard_screen.dart';
-import 'tasks_screen.dart';
-import 'updates_screen.dart';
-import 'profile_screen.dart';
+import '../../modules/auth_startup/screens/app_resume_lock_screen.dart';
+import '../../modules/analytics_dashboard/screens/home_dashboard_screen.dart';
+import '../../modules/tasks/screens/tasks_screen.dart';
+import 'package:imaps_fieldsync/modules/offline_sync/screens/updates_screen.dart';
+import '../../modules/profile_settings/screens/profile_screen.dart';
 
 /// Single shell for the 4 primary tabs with fluid tab transitions
 /// and per-visit spring entrance animations.
