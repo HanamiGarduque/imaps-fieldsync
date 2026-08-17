@@ -1,14 +1,20 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
+import '../services/sync_outbox_service.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/sync_progress_banner.dart';
+import '../widgets/quick_actions_sheet.dart';
 import '../../modules/auth_startup/screens/app_resume_lock_screen.dart';
 import '../../modules/analytics_dashboard/screens/home_dashboard_screen.dart';
 import '../../modules/tasks/screens/tasks_screen.dart';
 import 'package:imaps_fieldsync/modules/offline_sync/screens/updates_screen.dart';
 import '../../modules/profile_settings/screens/profile_screen.dart';
+import '../../modules/profile_settings/screens/profile_edit_screen.dart';
+import '../../modules/inspection/screens/site_map_preview_screen.dart';
+import '../../modules/inspection/screens/compass_preview_screen.dart';
 
 /// Single shell for the 4 primary tabs with fluid tab transitions
 /// and per-visit spring entrance animations.
@@ -37,10 +43,30 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   DateTime? _pausedAt;
   bool _lockShowing = false;
 
+  // ── Nav scroll-hide effect + scroll-progress header ──────────────────
+  // Both driven by the same ScrollNotification bubbling up from whichever
+  // tab's own scroll view is active — no changes needed inside each tab
+  // screen.
+  bool _navHidden = false;
+  double _lastScrollExtent = 0;
+  double _scrollProgress = 0; // 0..1, current tab's scroll fraction
+
+  // ── Quick Actions sheet ───────────────────────────────────────────────
+  bool _quickActionsOpen = false;
+
+  // ── Tasks-tab badge ──────────────────────────────────────────────────
+  // ASSUMPTION (flagged to Master — no existing "new since last viewed"
+  // signal exists for tasks; see roadmap open item): this is a session-only
+  // proxy, not a persisted "unseen task" concept. The dot shows until the
+  // inspector opens the Tasks tab once this session, then clears and stays
+  // cleared until the app restarts. A real "new insert" signal would need
+  // a small data-layer addition — flagged separately, not done here.
+  bool _tasksVisitedThisSession = false;
+
   static const _items = [
     InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
     InsightNavItem(icon: Icons.assignment_outlined, label: 'Tasks'),
-    InsightNavItem(icon: Icons.sync_rounded, label: 'Updates'),
+    InsightNavItem(icon: Icons.sync_rounded, label: 'Sync'),
     InsightNavItem(icon: Icons.person_outline_rounded, label: 'Profile'),
   ];
 
@@ -48,6 +74,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    _tasksVisitedThisSession = _currentIndex == 1;
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -55,6 +82,95 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    // Scroll-progress header — kept live regardless of quick-actions state,
+    // it's harmless while the sheet is open (just not visible under the
+    // blur/scale focus effect).
+    final maxExtent = notification.metrics.maxScrollExtent;
+    final newProgress = maxExtent <= 0 ? 0.0 : (notification.metrics.pixels / maxExtent).clamp(0.0, 1.0);
+    if ((newProgress - _scrollProgress).abs() > 0.002) {
+      setState(() => _scrollProgress = newProgress);
+    }
+
+    // Quick actions open → don't fight the sheet with nav movement.
+    if (_quickActionsOpen) return false;
+
+    if (notification is ScrollUpdateNotification) {
+      final delta = notification.metrics.pixels - _lastScrollExtent;
+      _lastScrollExtent = notification.metrics.pixels;
+
+      if (notification.metrics.pixels <= 10) {
+        if (_navHidden) setState(() => _navHidden = false);
+        return false;
+      }
+      if (delta > 6 && !_navHidden) {
+        setState(() => _navHidden = true);
+      } else if (delta < -6 && _navHidden) {
+        setState(() => _navHidden = false);
+      }
+    } else if (notification is ScrollEndNotification) {
+      _lastScrollExtent = notification.metrics.pixels;
+    }
+    return false;
+  }
+
+  void _toggleQuickActions() {
+    setState(() => _quickActionsOpen = !_quickActionsOpen);
+  }
+
+  void _closeQuickActions() {
+    if (_quickActionsOpen) setState(() => _quickActionsOpen = false);
+  }
+
+  void _openTab(int index) {
+    if (index == 1) _tasksVisitedThisSession = true;
+    setState(() => _currentIndex = index);
+  }
+
+  List<QuickAction> _buildQuickActions() {
+    // Exact 5 actions and order from the approved reference. "Site map"
+    // and "Compass" intentionally open the new standalone preview screens
+    // (not the task-bound wizard steps) — see
+    // site_map_preview_screen.dart / compass_preview_screen.dart.
+    return [
+      QuickAction(
+        icon: Icons.map_outlined,
+        title: 'Site map',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SiteMapPreviewScreen()),
+        ),
+      ),
+      QuickAction(
+        icon: Icons.explore_outlined,
+        title: 'Compass',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const StandaloneCompassScreen()),
+        ),
+      ),
+      QuickAction(
+        icon: Icons.bar_chart_rounded,
+        title: 'Analytics overview',
+        // Existing page, not a new one: this IS the Home dashboard —
+        // jumps to the Home tab rather than pushing a duplicate screen.
+        onTap: () => _openTab(0),
+      ),
+      QuickAction(
+        icon: Icons.history_rounded,
+        title: 'Sync history',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)),
+        ),
+      ),
+      QuickAction(
+        icon: Icons.edit_outlined,
+        title: 'Edit profile',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ProfileEditScreen(profile: widget.profile)),
+        ),
+      ),
+    ];
   }
 
   @override
@@ -154,42 +270,188 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
-      body: Column(
+      body: Stack(
         children: [
-          // Phase 5: compact sync progress banner — shown on Home/Tasks/
-          // Profile tabs. Hidden on the Updates tab (index 2) since the
-          // Sync Center already renders its own detailed progress line;
-          // showing both at once would be a redundant duplicate.
-          if (_currentIndex != 2) const SyncProgressBanner(),
-          Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 450),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.05),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  ),
+          // ── Ambient mesh blur background ──────────────────────────────
+          // Same blurred-blob pattern already established in
+          // site_map_screen.dart / gps_verification_screen.dart (blue,
+          // two soft circles) — reused here behind the whole shell for
+          // consistency rather than inventing a new background treatment.
+          Positioned(
+            top: -80, right: -80,
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
+              child: Container(
+                width: 280, height: 280,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF3D6BFF).withValues(alpha: 0.16)),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -100, left: -100,
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
+              child: Container(
+                width: 260, height: 260,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF0B2FBF).withValues(alpha: 0.10)),
+              ),
+            ),
+          ),
+
+          // ── Main content — blurs + scales down slightly while Quick
+          // Actions is open (the reference's "Main Content Focus Effect"),
+          // on top of the ambient background so the blur has something to
+          // visibly act on.
+          AnimatedScale(
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            scale: _quickActionsOpen ? 0.95 : 1.0,
+            child: TweenAnimationBuilder<double>(
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutCubic,
+              tween: Tween(begin: 0, end: _quickActionsOpen ? 6.0 : 0.0),
+              builder: (context, blurSigma, child) {
+                return ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+                  child: child,
                 );
               },
-              child: _buildPage(_currentIndex),
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: Column(
+                  children: [
+                    // Thin scroll-progress line — 0% to 100% of the
+                    // active tab's scroll extent.
+                    SizedBox(
+                      height: 2.5,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return Align(
+                            alignment: Alignment.centerLeft,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 120),
+                              width: constraints.maxWidth * _scrollProgress,
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(colors: [Color(0xFF3D6BFF), Color(0xFF0B2FBF)]),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    // Phase 5: compact sync progress banner — shown on Home/Tasks/
+                    // Profile tabs. Hidden on the Updates tab (index 2) since the
+                    // Sync Center already renders its own detailed progress line;
+                    // showing both at once would be a redundant duplicate.
+                    if (_currentIndex != 2) const SyncProgressBanner(),
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 450),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.05),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: _buildPage(_currentIndex),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Backdrop — actual gaussian blur (not just a dim scrim) over
+          // whatever's behind the Quick Actions sheet, per the reference.
+          // Ignored entirely when closed so it never intercepts normal
+          // taps on the page underneath.
+          IgnorePointer(
+            ignoring: !_quickActionsOpen,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 250),
+              opacity: _quickActionsOpen ? 1 : 0,
+              child: GestureDetector(
+                onTap: _closeQuickActions,
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
+                  child: Container(color: Colors.black.withValues(alpha: 0.22)),
+                ),
+              ),
+            ),
+          ),
+
+          // Quick Actions sheet — floats just above the nav row, matching
+          // the approved reference position/shape (explicit theme-lock
+          // override for this one element — see quick_actions_sheet.dart).
+          // Mounted/unmounted with the open state so its internal
+          // staggered row animation replays every time it's opened.
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 190, // raised — the trigger now sits above the rail,
+                         // not beside it, so the sheet needs more
+                         // clearance to avoid overlapping the trigger.
+            child: IgnorePointer(
+              ignoring: !_quickActionsOpen,
+              child: AnimatedSlide(
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutCubic,
+                offset: _quickActionsOpen ? Offset.zero : const Offset(0, 0.08),
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 220),
+                  opacity: _quickActionsOpen ? 1 : 0,
+                  child: _quickActionsOpen
+                      ? QuickActionsSheet(
+                          key: const ValueKey('quick_actions_open'),
+                          actions: _buildQuickActions(),
+                          onClose: _closeQuickActions,
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ),
             ),
           ),
         ],
       ),
 
-      bottomNavigationBar: InsightBottomNav(
-        currentIndex: _currentIndex,
-        items: _items,
-        onTap: (i) {
-          if (i == _currentIndex) return;
-          setState(() => _currentIndex = i);
+      bottomNavigationBar: ValueListenableBuilder<SyncProgress?>(
+        valueListenable: SyncOutboxService.progress,
+        builder: (context, syncProgress, _) {
+          final items = [
+            _items[0],
+            InsightNavItem(
+              icon: _items[1].icon,
+              label: _items[1].label,
+              showBadge: !_tasksVisitedThisSession,
+            ),
+            InsightNavItem(
+              icon: _items[2].icon,
+              label: _items[2].label,
+              showBadge: syncProgress != null,
+            ),
+            _items[3],
+          ];
+          return InsightBottomNav(
+            currentIndex: _currentIndex,
+            items: items,
+            navHidden: _navHidden,
+            isQuickActionsOpen: _quickActionsOpen,
+            onQuickActionsTap: _toggleQuickActions,
+            onTap: (i) {
+              _closeQuickActions();
+              if (i == _currentIndex) return;
+              _openTab(i);
+            },
+          );
         },
       ),
     );

@@ -48,7 +48,7 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
       children: [
         widget.child,
         Positioned(
-          right: 8,
+          left: 8,
           bottom: 96,
           child: SafeArea(
             child: Material(
