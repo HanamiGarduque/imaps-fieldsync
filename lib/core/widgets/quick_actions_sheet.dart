@@ -19,8 +19,9 @@ import 'package:google_fonts/google_fonts.dart';
 class QuickAction {
   final IconData icon;
   final String title;
+  final String? subtitle; // optional — shown under the title, per the reference row layout
   final VoidCallback onTap;
-  const QuickAction({required this.icon, required this.title, required this.onTap});
+  const QuickAction({required this.icon, required this.title, this.subtitle, required this.onTap});
 }
 
 class QuickActionsSheet extends StatefulWidget {
@@ -47,10 +48,10 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(32),
         border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
         boxShadow: const [
           BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, 16)),
@@ -60,24 +61,23 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 4, 10),
+            padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   'Quick actions',
-                  style: GoogleFonts.spaceGrotesk(fontSize: 17, fontWeight: FontWeight.w700, color: QuickActionsSheet.ink),
+                  style: GoogleFonts.spaceGrotesk(fontSize: 20, fontWeight: FontWeight.w700, color: QuickActionsSheet.ink, letterSpacing: -0.3),
                 ),
                 GestureDetector(
                   onTap: widget.onClose,
                   behavior: HitTestBehavior.opaque,
                   child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF4F6FB),
+                    width: 38,
+                    height: 38,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF1F2F8),
                       shape: BoxShape.circle,
-                      border: Border.all(color: QuickActionsSheet.line),
                     ),
                     child: const Icon(Icons.close_rounded, size: 18, color: QuickActionsSheet.ink2),
                   ),
@@ -85,8 +85,6 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
               ],
             ),
           ),
-          Container(height: 1, color: QuickActionsSheet.line, margin: const EdgeInsets.symmetric(horizontal: 4)),
-          const SizedBox(height: 6),
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -168,6 +166,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = widget.action.subtitle;
     return GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
@@ -180,36 +179,67 @@ class _QuickActionRowState extends State<_QuickActionRow> {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        margin: const EdgeInsets.symmetric(vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: _pressed ? const Color(0xFFF4F6FB) : Colors.transparent,
+          // Matches the reference: no per-row card/border — a flat list,
+          // whitespace-separated, with only a soft highlight on press.
+          // (Also lines up with "prefer whitespace over dividers" from
+          // the UI-tips doc: cleaner, less visual noise than a bordered
+          // card per row.)
+          color: _pressed ? const Color(0xFFF8F9FC) : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
         ),
         // 44px+ tap target floor (UDAS §2.3) — row height comfortably
         // exceeds it once padding + icon + text are accounted for.
         child: Row(
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: QuickActionsSheet.blueTint,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(widget.action.icon, size: 20, color: QuickActionsSheet.blue1),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                widget.action.title,
-                style: GoogleFonts.ibmPlexSans(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: QuickActionsSheet.ink,
+            AnimatedScale(
+              duration: const Duration(milliseconds: 120),
+              scale: _pressed ? 0.95 : 1.0,
+              child: Container(
+                width: 48,
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: QuickActionsSheet.blueTint,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: QuickActionsSheet.blue1.withValues(alpha: 0.12)),
                 ),
+                child: Icon(widget.action.icon, size: 22, color: QuickActionsSheet.blue1),
               ),
             ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.action.title,
+                    style: GoogleFonts.ibmPlexSans(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w600,
+                      color: QuickActionsSheet.ink,
+                    ),
+                  ),
+                  if (subtitle != null && subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.ibmPlexSans(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: QuickActionsSheet.ink2,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Plain chevron, no circle backing — matches the reference's
+            // minimal trailing affordance.
+            Icon(Icons.chevron_right_rounded, size: 22, color: QuickActionsSheet.ink2.withValues(alpha: 0.55)),
           ],
         ),
       ),
