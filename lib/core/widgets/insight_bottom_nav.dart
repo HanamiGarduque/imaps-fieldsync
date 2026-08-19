@@ -13,14 +13,13 @@ import 'package:google_fonts/google_fonts.dart';
 /// right-aligned (so it visually sits over the Profile tab), matching
 /// Master's "quick action button on top of the nav bar" direction.
 ///
-/// Scroll-hide (per Master's direction): both the rail and the trigger
-/// hide together on scroll down. The trigger animates DOWN as it hides
-/// (toward the rail beneath it) rather than just fading in place, then
-/// both return together on scroll up. This replaces the earlier
-/// "always-visible + pulsing while hidden" behavior — Master explicitly
-/// asked for the trigger to actually hide with the rail this time, and
-/// scrolling back up to reveal it is a well-understood, always-available
-/// gesture, not a hidden/undiscoverable trap.
+/// Scroll-hide (per Master's direction): the trigger NEVER disappears.
+/// On scroll down, it drops from its resting spot above the rail down
+/// into the rail's own spot — the rail fades away in place underneath
+/// it as this happens, so the trigger effectively "lands" where the
+/// rail used to be. On scroll up, the trigger rises back to its resting
+/// spot above the rail, and the rail fades back in beneath it — same as
+/// before.
 ///
 /// Faithful to Master's reference nav bar structure otherwise:
 ///   - Solid white floating rail (not glass/blurred).
@@ -35,6 +34,15 @@ import 'package:google_fonts/google_fonts.dart';
 /// 2. Uniform active-pill width (based on the *longest* label across all
 ///    items, not the active item's own) — keeps the bar from
 ///    bouncing/re-centering when switching tabs.
+///
+/// PERF NOTE (see main_shell_screen.dart for the matching fix): this
+/// widget is now only rebuilt via a small, tightly-scoped
+/// ValueListenableBuilder in the shell — a scroll-driven `navHidden`
+/// toggle no longer rebuilds the rest of the app shell. The
+/// RepaintBoundary below isolates this rail's own repaints (gradient
+/// pill animation, label reveal) from whatever else is on screen, so
+/// this stays smooth regardless of what the active tab's content is
+/// doing.
 /// ==================================================================
 
 /// Bottom scroll-padding reserve so list content isn't hidden behind the
@@ -66,8 +74,9 @@ class InsightBottomNav extends StatelessWidget {
   final ValueChanged<int> onTap;
 
   /// Scroll-hide effect (applies uniformly across all tabs — driven by
-  /// the shell). Both the rail and the trigger hide together now — see
-  /// class doc comment above.
+  /// the shell). The rail fades away in place; the trigger stays visible
+  /// and simply drops down into the rail's spot — see class doc comment
+  /// above.
   final bool navHidden;
 
   /// Trigger button that opens/closes the Quick Actions sheet. Optional
@@ -215,58 +224,60 @@ class InsightBottomNav extends StatelessWidget {
       ),
     );
 
-    // Rail hide animation — slides slightly right, fades, and shrinks
-    // toward the corner as before.
-    final animatedRail = AnimatedSlide(
+    // Rail hide animation — fades and shrinks away in place (no longer
+    // slides sideways, since the trigger now docks into this same spot
+    // once it's hidden — see below).
+    final animatedRail = AnimatedOpacity(
       duration: _transitionDuration,
       curve: _transitionCurve,
-      offset: navHidden ? const Offset(0.04, 0) : Offset.zero,
-      child: AnimatedOpacity(
+      opacity: navHidden ? 0 : 1,
+      child: AnimatedScale(
         duration: _transitionDuration,
         curve: _transitionCurve,
-        opacity: navHidden ? 0 : 1,
-        child: AnimatedScale(
-          duration: _transitionDuration,
-          curve: _transitionCurve,
-          alignment: Alignment.center,
-          scale: navHidden ? 0.9 : 1.0,
-          child: IgnorePointer(ignoring: navHidden, child: rail),
-        ),
+        alignment: Alignment.center,
+        scale: navHidden ? 0.9 : 1.0,
+        child: IgnorePointer(ignoring: navHidden, child: rail),
       ),
     );
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (onQuickActionsTap != null) ...[
-              // Trigger hide animation — drops DOWN toward the rail
-              // while fading, instead of just sliding sideways, so it
-              // reads as "folding into" the rail as both hide together.
-              AnimatedSlide(
-                duration: _transitionDuration,
-                curve: _transitionCurve,
-                offset: navHidden ? const Offset(0, 1.15) : Offset.zero,
-                child: AnimatedOpacity(
+        child: SizedBox(
+          // Fixed total height regardless of hidden state — only the
+          // trigger's position and the rail's opacity animate, so the
+          // bottomNavigationBar slot never resizes/jumps.
+          height: _railAndTriggerSize + _triggerGap + _railAndTriggerSize,
+          child: RepaintBoundary(
+            child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // Rail — anchored at the bottom of this box, fades away in
+              // place when hidden.
+              Positioned(
+                left: 0, right: 0, bottom: 0,
+                child: animatedRail,
+              ),
+              // Trigger — per Master's direction, this NEVER disappears.
+              // It stays fully visible and interactive the whole time;
+              // on scroll down it simply drops from its resting spot
+              // above the rail DOWN into the rail's own spot (which has
+              // just faded away underneath it), then returns to its
+              // higher resting position on scroll up.
+              if (onQuickActionsTap != null)
+                AnimatedPositioned(
                   duration: _transitionDuration,
                   curve: _transitionCurve,
-                  opacity: navHidden ? 0 : 1,
-                  child: IgnorePointer(
-                    ignoring: navHidden,
-                    child: _QuickActionsTrigger(
-                      isOpen: isQuickActionsOpen,
-                      onTap: onQuickActionsTap!,
-                    ),
+                  right: 0,
+                  bottom: navHidden ? 0 : (_railAndTriggerSize + _triggerGap),
+                  child: _QuickActionsTrigger(
+                    isOpen: isQuickActionsOpen,
+                    onTap: onQuickActionsTap!,
                   ),
                 ),
-              ),
-              const SizedBox(height: _triggerGap),
             ],
-            animatedRail,
-          ],
+            ),
+          ),
         ),
       ),
     );

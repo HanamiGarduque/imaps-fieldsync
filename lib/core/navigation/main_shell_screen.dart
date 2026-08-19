@@ -13,6 +13,7 @@ import '../../modules/tasks/screens/tasks_screen.dart';
 import 'package:imaps_fieldsync/modules/offline_sync/screens/updates_screen.dart';
 import '../../modules/profile_settings/screens/profile_screen.dart';
 import '../../modules/profile_settings/screens/profile_edit_screen.dart';
+import '../../modules/profile_settings/screens/notifications_screen.dart';
 import '../../modules/inspection/screens/site_map_preview_screen.dart';
 import '../../modules/inspection/screens/compass_preview_screen.dart';
 
@@ -43,13 +44,11 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   DateTime? _pausedAt;
   bool _lockShowing = false;
 
-  // ── Nav scroll-hide effect + scroll-progress header ──────────────────
-  // Both driven by the same ScrollNotification bubbling up from whichever
-  // tab's own scroll view is active — no changes needed inside each tab
-  // screen.
+  // ── Nav scroll-hide effect ─────────────────────────────────────────────
+  // Hide the full nav stack on downward scroll and reveal it again once
+  // the list settles; this keeps the quick actions button in sync with the
+  // nav bar instead of leaving it floating over the content.
   bool _navHidden = false;
-  double _lastScrollExtent = 0;
-  double _scrollProgress = 0; // 0..1, current tab's scroll fraction
 
   // ── Quick Actions sheet ───────────────────────────────────────────────
   bool _quickActionsOpen = false;
@@ -85,33 +84,33 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   }
 
   bool _onScrollNotification(ScrollNotification notification) {
-    // Scroll-progress header — kept live regardless of quick-actions state,
-    // it's harmless while the sheet is open (just not visible under the
-    // blur/scale focus effect).
-    final maxExtent = notification.metrics.maxScrollExtent;
-    final newProgress = maxExtent <= 0 ? 0.0 : (notification.metrics.pixels / maxExtent).clamp(0.0, 1.0);
-    if ((newProgress - _scrollProgress).abs() > 0.002) {
-      setState(() => _scrollProgress = newProgress);
-    }
-
     // Quick actions open → don't fight the sheet with nav movement.
     if (_quickActionsOpen) return false;
 
-    if (notification is ScrollUpdateNotification) {
-      final delta = notification.metrics.pixels - _lastScrollExtent;
-      _lastScrollExtent = notification.metrics.pixels;
+    if (notification.metrics.axis != Axis.vertical) return false;
 
-      if (notification.metrics.pixels <= 10) {
+    if (notification is ScrollUpdateNotification) {
+      final delta = notification.scrollDelta ?? 0;
+      final pixels = notification.metrics.pixels;
+
+      // Keep the nav visible at the top edge, and otherwise hide it while
+      // the user is actively scrolling downward.
+      if (pixels <= 10) {
         if (_navHidden) setState(() => _navHidden = false);
         return false;
       }
-      if (delta > 6 && !_navHidden) {
+
+      if (delta > 0 && !_navHidden) {
         setState(() => _navHidden = true);
-      } else if (delta < -6 && _navHidden) {
+      } else if (delta < 0 && _navHidden) {
         setState(() => _navHidden = false);
       }
     } else if (notification is ScrollEndNotification) {
-      _lastScrollExtent = notification.metrics.pixels;
+      // Show the nav again once the user stops scrolling, even if the
+      // content is no longer at the top.
+      if (_navHidden && notification.metrics.pixels > 10) {
+        setState(() => _navHidden = false);
+      }
     }
     return false;
   }
@@ -138,6 +137,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
       QuickAction(
         icon: Icons.map_outlined,
         title: 'Site map',
+        subtitle: 'Navigate the area layout',
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const SiteMapPreviewScreen()),
         ),
@@ -145,6 +145,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
       QuickAction(
         icon: Icons.explore_outlined,
         title: 'Compass',
+        subtitle: 'Determine your orientation',
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const StandaloneCompassScreen()),
         ),
@@ -152,6 +153,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
       QuickAction(
         icon: Icons.bar_chart_rounded,
         title: 'Analytics overview',
+        subtitle: 'Track performance metrics',
         // Existing page, not a new one: this IS the Home dashboard —
         // jumps to the Home tab rather than pushing a duplicate screen.
         onTap: () => _openTab(0),
@@ -159,13 +161,19 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
       QuickAction(
         icon: Icons.history_rounded,
         title: 'Sync history',
+        subtitle: 'View synchronization activity',
+        // Deep-links straight into the Notifications screen's "Sync" mode
+        // (initialMode: 1) — per Master's correction, this belongs on the
+        // Notifications page's Synchronization History section, not the
+        // separate Sync Center (UpdatesScreen).
         onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => UpdatesScreen(profile: widget.profile)),
+          MaterialPageRoute(builder: (_) => const NotificationsScreen(initialMode: 1)),
         ),
       ),
       QuickAction(
         icon: Icons.edit_outlined,
         title: 'Edit profile',
+        subtitle: 'Update your personal details',
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => ProfileEditScreen(profile: widget.profile)),
         ),
@@ -242,6 +250,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
         return HomeDashboardScreen(
           key: ValueKey('home_tab_$index'),
           profile: widget.profile,
+          onNavigateToTab: _openTab,
         );
       case 1:
         return TasksScreen(
@@ -320,25 +329,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                 onNotification: _onScrollNotification,
                 child: Column(
                   children: [
-                    // Thin scroll-progress line — 0% to 100% of the
-                    // active tab's scroll extent.
-                    SizedBox(
-                      height: 2.5,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          return Align(
-                            alignment: Alignment.centerLeft,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 120),
-                              width: constraints.maxWidth * _scrollProgress,
-                              decoration: const BoxDecoration(
-                                gradient: LinearGradient(colors: [Color(0xFF3D6BFF), Color(0xFF0B2FBF)]),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
                     // Phase 5: compact sync progress banner — shown on Home/Tasks/
                     // Profile tabs. Hidden on the Updates tab (index 2) since the
                     // Sync Center already renders its own detailed progress line;
