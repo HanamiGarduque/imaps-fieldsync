@@ -347,6 +347,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   DateTime? _customStartDate;
   DateTime? _customEndDate;
   String _selectedBarangay = 'All Barangays';
+  // 'All' | 'Overdue' | 'Due today' — new quick-filter inside the filter sheet.
+  String _urgencyFilter = 'All';
 
   // Internal categorization/sorting still uses all 4 real categories —
   // TaskItem.category is unchanged. Only the visible segment tabs (below)
@@ -515,6 +517,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     DateTime? tempStartDate = _customStartDate;
     DateTime? tempEndDate = _customEndDate;
     String tempBarangay = _selectedBarangay;
+    String tempUrgency = _urgencyFilter;
     String barangaySearchQuery = '';
 
     showModalBottomSheet(
@@ -560,6 +563,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                           tempStartDate = null;
                           tempEndDate = null;
                           tempBarangay = 'All Barangays';
+                          tempUrgency = 'All';
                           barangaySearchQuery = '';
                         });
                       },
@@ -582,7 +586,49 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 24),
-                        
+
+                        // PRIORITY / URGENCY SECTION — new, per request:
+                        // quick filter for Overdue and Due Today, using the
+                        // same task.scheduleUrgency values already computed
+                        // and already shown on the card badges — no new
+                        // data source.
+                        Row(
+                          children: [
+                            const Icon(Icons.priority_high_rounded, color: InsightTheme.ink3, size: 18),
+                            const SizedBox(width: 8),
+                            Text('FILTER BY PRIORITY', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'All',
+                                isSelected: tempUrgency == 'All',
+                                onTap: () => setModalState(() => tempUrgency = 'All'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'Overdue',
+                                isSelected: tempUrgency == 'Overdue',
+                                onTap: () => setModalState(() => tempUrgency = 'Overdue'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'Due Today',
+                                isSelected: tempUrgency == 'Due today',
+                                onTap: () => setModalState(() => tempUrgency = 'Due today'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+
                         // DATE RANGE SECTION
                         Row(
                           children: [
@@ -765,6 +811,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                         _customStartDate = tempStartDate;
                         _customEndDate = tempEndDate;
                         _selectedBarangay = tempBarangay;
+                        _urgencyFilter = tempUrgency;
                       });
                       Navigator.pop(context);
                     },
@@ -812,6 +859,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
       }
       if (_selectedBarangay != 'All Barangays') {
         if (!task.location.toLowerCase().contains(_selectedBarangay.toLowerCase())) continue;
+      }
+      if (_urgencyFilter != 'All') {
+        if (task.scheduleUrgency != _urgencyFilter) continue;
       }
       if (_datePreset != null && task.scheduledDate.isNotEmpty) {
         try {
@@ -880,7 +930,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         ? [...scheduled, ...pending]
         : (categorized[selectedCategory] ?? []);
 
-    final bool hasActiveFilters = _selectedBarangay != 'All Barangays' || _datePreset != null;
+    final bool hasActiveFilters = _selectedBarangay != 'All Barangays' || _datePreset != null || _urgencyFilter != 'All';
 
     return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -903,28 +953,47 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Active Monitoring', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blue1, ls: 1.2)),
-                  const SizedBox(height: 4),
-                  Text('My Tasks', style: InsightTheme.poppins(24, w: FontWeight.w700, c: InsightTheme.ink)),
+                  // Restyled to a pill badge w/ status dot — visual only,
+                  // same "Active Monitoring" copy, matches reference header.
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.blueTint,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6, height: 6,
+                          decoration: const BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1),
+                        ),
+                        const SizedBox(width: 6),
+                        Text('ACTIVE MONITORING', style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.8)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text('My Tasks', style: InsightTheme.poppins(26, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4)),
                 ],
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
-                  color: InsightTheme.bg,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: InsightTheme.line),
+                  color: InsightTheme.blue1,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: const [BoxShadow(color: Color(0x1A2563EB), blurRadius: 16, offset: Offset(0, 6))],
                 ),
                 child: Column(
                   children: [
                     CountUpText(
                       value: _allTasks.length,
-                      style: InsightTheme.poppins(16, w: FontWeight.w700, c: InsightTheme.blue1, h: 1.0),
+                      style: InsightTheme.poppins(18, w: FontWeight.w800, c: Colors.white, h: 1.0),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Assigned',
-                      style: InsightTheme.inter(10, w: FontWeight.w600, c: InsightTheme.ink3),
+                      'ASSIGNED',
+                      style: InsightTheme.inter(9, w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.85), ls: 0.6),
                     ),
                   ],
                 ),
@@ -1032,33 +1101,42 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                   ],
                                   ),
                                 ),
-                                const SizedBox(height: 0),
+                                const SizedBox(height: 14),
                                 
-                                // CATEGORY CHIP SLIDER
+                                // CATEGORY SEGMENTED TABS — evenly divided,
+                                // no horizontal scroll needed for 3 items
+                                // (was a left-packed scrolling chip row).
+                                // Same _currentTabIndex state/logic, visual only.
                                 SpringSlide(
                                   animation: springFor(2),
                                   beginOffset: const Offset(0, 22),
                                   child: Container(
-                                    decoration: const BoxDecoration(
-                                      color: InsightTheme.surface,
-                                      border: Border(
-                                        bottom: BorderSide(
-                                          color: InsightTheme.line,
-                                          width: 1.0,
-                                        ),
-                                      ),
+                                    padding: const EdgeInsets.all(4),
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    decoration: BoxDecoration(
+                                      color: InsightTheme.surface2,
+                                      borderRadius: BorderRadius.circular(14),
                                     ),
-                                    child: SingleChildScrollView(
-                                      scrollDirection: Axis.horizontal,
-                                      physics: const BouncingScrollPhysics(),
-                                      padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
-                                      child: Row(
-                                        children: [
-                                          _SegmentTab(text: "Pending", count: pending.length + scheduled.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
-                                          _SegmentTab(text: "Ongoing", count: ongoing.length, isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
-                                          _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
-                                        ],
-                                      ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        // Wrapped in Expanded — without it, a
+                                        // 2-digit count (e.g. "Completed 21")
+                                        // pushes this tab's intrinsic width
+                                        // past the row's available space and
+                                        // the row overflows on the right,
+                                        // since a plain spaceBetween Row
+                                        // doesn't constrain child widths.
+                                        Expanded(
+                                          child: _SegmentTab(text: "Pending", count: pending.length + scheduled.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                                        ),
+                                        Expanded(
+                                          child: _SegmentTab(text: "Ongoing", count: ongoing.length, isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
+                                        ),
+                                        Expanded(
+                                          child: _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -1271,49 +1349,69 @@ class _SegmentTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Restyled from a left-packed filled chip to a full-width segmented
+    // tab (white pill + shadow when active) — same tap target/state,
+    // matches the reference's segmented-tab look while staying on
+    // this screen's own InsightTheme tokens.
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeInOut,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        margin: const EdgeInsets.only(right: 6),
+        // Horizontal padding tightened (14 -> 8) — combined with the
+        // smaller font/gap/badge below, this is what actually keeps
+        // "Completed 21" fitting at 100% scale so the FittedBox safety
+        // net never has to engage for it. Before this, "Completed" was
+        // the one tab that needed scaling down while "Pending"/"Ongoing"
+        // didn't, so despite sharing the same font-size value in code,
+        // they rendered at visibly different sizes — inconsistent look.
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        // Centers the Row now that this tab is wrapped in Expanded (see the
+        // call site) — without this, the tab's fixed-size content would
+        // sit left-packed with dead space to the right of it.
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: isActive ? InsightTheme.blue1 : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          color: isActive ? InsightTheme.surface : Colors.transparent,
+          borderRadius: BorderRadius.circular(11),
+          boxShadow: isActive ? const [BoxShadow(color: Color(0x0F000000), blurRadius: 8, offset: Offset(0, 2))] : null,
         ),
-        child: Row(
+        // FittedBox stays only as a defensive fallback for extremely
+        // narrow devices — under normal widths every tab now fits at its
+        // true 100% size, so all three render at the exact same text
+        // size instead of "Completed" alone shrinking to fit.
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               text,
               style: InsightTheme.inter(
-                13,
-                w: isActive ? FontWeight.w600 : FontWeight.w500,
-                c: isActive ? Colors.white : InsightTheme.ink3,
+                11.5,
+                w: isActive ? FontWeight.w700 : FontWeight.w600,
+                c: isActive ? InsightTheme.blueInk : InsightTheme.ink3,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 4),
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
-                color: isActive
-                    ? Colors.white.withValues(alpha: 0.25)
-                    : InsightTheme.surface2,
-                borderRadius: BorderRadius.circular(5),
+                color: isActive ? InsightTheme.blueTint : InsightTheme.surface,
+                borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
                 count.toString(),
                 style: InsightTheme.inter(
-                  11,
-                  w: FontWeight.w600,
-                  c: isActive ? Colors.white : InsightTheme.ink2,
+                  10.5,
+                  w: FontWeight.w700,
+                  c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
                 ),
               ),
             ),
           ],
+          ),
         ),
       ),
     );
@@ -1422,7 +1520,16 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     }
     final lastPickableDate = (deadline != null && deadline.isAfter(tomorrow)) ? deadline : tomorrow;
 
+    // Reschedule UX: if this task already has a scheduledDate, start the
+    // picker there instead of always defaulting to tomorrow — same
+    // scheduleJob() call either way, just a friendlier starting point.
     DateTime? pickedDate;
+    if (widget.task.scheduledDate.isNotEmpty) {
+      try {
+        final existing = DateTime.parse(widget.task.scheduledDate);
+        if (!existing.isBefore(tomorrow)) pickedDate = existing;
+      } catch (_) {}
+    }
     final notesController = TextEditingController();
 
     await showModalBottomSheet(
@@ -1451,7 +1558,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                         decoration: BoxDecoration(color: InsightTheme.line, borderRadius: BorderRadius.circular(2)),
                       ),
                     ),
-                    Text('Schedule this task', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+                    Text(
+                      widget.task.scheduledDate.isNotEmpty ? 'Reschedule this task' : 'Schedule this task',
+                      style: InsightTheme.poppins(16, w: FontWeight.w700),
+                    ),
                     const SizedBox(height: 4),
                     Text(widget.task.location, style: InsightTheme.inter(12.5, c: InsightTheme.ink2)),
                     const SizedBox(height: 18),
@@ -1549,7 +1659,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           padding: const EdgeInsets.symmetric(vertical: 15),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
-                        child: Text('Confirm schedule', style: InsightTheme.poppins(14, w: FontWeight.w600, c: Colors.white)),
+                        child: Text(
+                          widget.task.scheduledDate.isNotEmpty ? 'Confirm reschedule' : 'Confirm schedule',
+                          style: InsightTheme.poppins(14, w: FontWeight.w600, c: Colors.white),
+                        ),
                       ),
                     ),
                   ],
@@ -1566,19 +1679,36 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Widget build(BuildContext context) {
     final statusColor = _getStatusColor();
     final isUrgent = widget.task.category == 'Scheduled' && widget.task.isUrgentDeadline;
+    // Visual-only addition (approved Task 2 scope): a slim step-progress
+    // bar under the badge row, matching the reference mockup. Reuses the
+    // exact step math already used by the "In Progress" badge below —
+    // no new data source, no logic change.
+    final int stepValue = (widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
+        .clamp(0, InspectionProgress.totalSteps);
+    // Reschedule availability: a task can be (re)scheduled whenever it's
+    // still "on the schedule plan" and hasn't been submitted yet — that
+    // covers plain Pending/Scheduled AND an Ongoing-but-scheduled task
+    // (the ones that show up under the Pending tab's "Scheduled" section
+    // while already In Progress). Completed tasks are excluded since
+    // there's nothing left to plan around.
+    final bool canSchedule = widget.task.category != 'Completed' &&
+        (widget.task.category == 'Pending' ||
+            widget.task.category == 'Scheduled' ||
+            widget.task.isScheduledPlan);
 
     return Container(
+      margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
         color: isUrgent ? const Color(0xFFFEF2F2) : InsightTheme.surface,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isUrgent ? const Color(0xFFEF4444) : InsightTheme.line,
           width: isUrgent ? 1.4 : 1,
         ),
-        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
+        boxShadow: const [BoxShadow(color: Color(0x06000000), blurRadius: 8, offset: Offset(0, 2))],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1587,126 +1717,204 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                 setState(() => _isExpanded = !_isExpanded);
                 HapticFeedback.selectionClick();
               },
-              onLongPress: widget.task.category == 'Pending' ? () => _scheduleTask(context) : null,
+              // Reschedule allowed for Pending, Scheduled, AND an
+              // Ongoing-but-scheduled task — same canSchedule test used
+              // for the button below, so long-press and the visible
+              // button never disagree about whether this card can be
+              // (re)scheduled.
+              onLongPress: canSchedule ? () => _scheduleTask(context) : null,
               behavior: HitTestBehavior.opaque,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.all(14),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 8, height: 8,
-                      decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                    // Avatar — enlarged (32->44) per reference; status dot
+                    // moved onto the avatar corner instead of a separate
+                    // free-floating dot, same statusColor source.
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 44, height: 44,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: statusColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                          ),
+                          child: Text(_getInitials(widget.task.name), style: InsightTheme.poppins(13, w: FontWeight.w800, c: statusColor)),
+                        ),
+                        if (widget.task.category == 'Ongoing')
+                          Positioned(
+                            top: -2, right: -2,
+                            child: Container(
+                              width: 12, height: 12,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: statusColor,
+                                border: Border.all(color: InsightTheme.surface, width: 2),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Container(
-                      width: 32, height: 32,
-                      decoration: BoxDecoration(
-                        color: InsightTheme.bg,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: InsightTheme.line),
-                      ),
-                      child: Center(
-                        child: Text(_getInitials(widget.task.name), style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink)),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
                                 child: Text(
                                   widget.task.name,
-                                  style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
+                                  style: InsightTheme.poppins(14.5, w: FontWeight.w700, c: InsightTheme.ink),
                                   maxLines: 1, overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                widget.task.inspectionNo, 
-                                style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk)
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  widget.task.location,
-                                  style: InsightTheme.inter(11, c: InsightTheme.ink2),
-                                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (widget.task.category == 'Ongoing') ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  margin: const EdgeInsets.only(right: 6),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.blue1.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    'In Progress • Step '
-                                    '${(widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep).clamp(1, InspectionProgress.totalSteps)}'
-                                    '/${InspectionProgress.totalSteps}',
-                                    style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.blue1),
-                                  ),
-                                ),
-                              ],
-                              // Rework redesign: status stays 'completed' for
-                              // the whole rework session now (see
-                              // SupabaseService.reopenForRework), so this
-                              // badge — keyed off reworkStartedAt, not status
-                              // — is the only signal that a completed task
-                              // has an unfinished rework in progress.
-                              if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  margin: const EdgeInsets.only(right: 6),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.orangeTint,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    'Modified',
-                                    style: InsightTheme.inter(9.5, w: FontWeight.w700, c: const Color(0xFFB45309)),
-                                  ),
-                                ),
-                              ],
-                              if (widget.task.scheduleUrgency != null) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  margin: const EdgeInsets.only(right: 6),
-                                  decoration: BoxDecoration(
-                                    color: widget.task.scheduleUrgency == 'Overdue'
-                                        ? const Color(0xFFFEE2E2)
-                                        : InsightTheme.orangeTint,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    widget.task.scheduleUrgency!,
-                                    style: InsightTheme.inter(
-                                      9.5, w: FontWeight.w700,
-                                      c: widget.task.scheduleUrgency == 'Overdue'
-                                          ? const Color(0xFFB91C1C)
-                                          : InsightTheme.orangeInk,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              const SizedBox(width: 6),
                               AnimatedRotation(
                                 turns: _isExpanded ? 0.5 : 0.0,
                                 duration: const Duration(milliseconds: 250),
                                 curve: Curves.easeOutCubic,
                                 child: const Icon(
                                   Icons.keyboard_arrow_down_rounded,
-                                  color: InsightTheme.ink3, size: 18,
+                                  color: InsightTheme.ink3, size: 20,
                                 ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 5),
+                          // Permit/inspection no. — moved below the name into
+                          // its own mono chip (was inline beside the name).
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
+                            child: Text(
+                              widget.task.inspectionNo,
+                              style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.2),
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          Row(
+                            children: [
+                              const Icon(Icons.location_on_rounded, size: 13, color: InsightTheme.blue1),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  widget.task.location,
+                                  style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          // Status badges — same three conditions as before
+                          // (Ongoing / Modified / scheduleUrgency), now
+                          // wrapped instead of a single spaceBetween Row so
+                          // they can co-occur without overflow, each as a
+                          // rounded pill w/ icon.
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              if (widget.task.category == 'Ongoing')
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.blue1.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.autorenew_rounded, size: 11, color: InsightTheme.blue1),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'In Progress',
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blue1),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              // Rework redesign: status stays 'completed' for
+                              // the whole rework session now (see
+                              // SupabaseService.reopenForRework), so this
+                              // badge — keyed off reworkStartedAt, not status
+                              // — is the only signal that a completed task
+                              // has an unfinished rework in progress.
+                              if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.orangeTint,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFFB45309)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Modified',
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: const Color(0xFFB45309)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              if (widget.task.scheduleUrgency != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: widget.task.scheduleUrgency == 'Overdue'
+                                        ? const Color(0xFFFEE2E2)
+                                        : InsightTheme.orangeTint,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        widget.task.scheduleUrgency == 'Overdue' ? Icons.warning_rounded : Icons.access_time_rounded,
+                                        size: 11,
+                                        color: widget.task.scheduleUrgency == 'Overdue' ? const Color(0xFFB91C1C) : InsightTheme.orangeInk,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        widget.task.scheduleUrgency!,
+                                        style: InsightTheme.inter(
+                                          10, w: FontWeight.w700,
+                                          c: widget.task.scheduleUrgency == 'Overdue'
+                                              ? const Color(0xFFB91C1C)
+                                              : InsightTheme.orangeInk,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: LinearProgressIndicator(
+                                    value: InspectionProgress.totalSteps == 0 ? 0 : stepValue / InspectionProgress.totalSteps,
+                                    minHeight: 5,
+                                    backgroundColor: InsightTheme.surface2,
+                                    valueColor: AlwaysStoppedAnimation(statusColor),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'STEP $stepValue/${InspectionProgress.totalSteps}',
+                                style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.ink3),
                               ),
                             ],
                           ),
@@ -1770,7 +1978,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             ),
                           ),
                         ),
-                        if (widget.task.category == 'Pending') ...[
+                        if (canSchedule) ...[
                           const SizedBox(height: 8),
                           GestureDetector(
                             onTap: () => _scheduleTask(context),
@@ -1787,7 +1995,15 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   const Icon(Icons.calendar_today_rounded, color: InsightTheme.orange, size: 14),
                                   const SizedBox(width: 6),
                                   Text(
-                                    'Schedule Inspection Date',
+                                    // Label now reflects whether a date is
+                                    // actually already set (scheduledDate),
+                                    // not just the category string — an
+                                    // Ongoing-but-scheduled task also has a
+                                    // date on file, so it should read
+                                    // "Reschedule" too, not "Schedule".
+                                    widget.task.scheduledDate.isNotEmpty
+                                        ? 'Reschedule Inspection Date'
+                                        : 'Schedule Inspection Date',
                                     style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.orangeInk),
                                   ),
                                 ],
