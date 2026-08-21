@@ -218,18 +218,30 @@ class _QuickActionRowState extends State<_QuickActionRow> {
                     widget.action.title,
                     style: GoogleFonts.ibmPlexSans(
                       fontSize: 15.5,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                       color: QuickActionsSheet.ink,
+                      letterSpacing: -0.1,
+                      height: 1.25,
                     ),
                   ),
                   if (subtitle != null && subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
+                    // Deliberately smaller, lighter-weight, and lower
+                    // contrast than the title — a ~1.25 size-scale step
+                    // down plus a lighter weight (not just a lighter
+                    // color) is what actually keeps it from visually
+                    // competing with the title above it. Looser
+                    // line-height gives it its own breathing room instead
+                    // of sitting cramped right under the title.
                     Text(
                       subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.ibmPlexSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w400,
                         color: QuickActionsSheet.ink2,
+                        height: 1.35,
                       ),
                     ),
                   ],

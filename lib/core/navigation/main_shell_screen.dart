@@ -136,8 +136,8 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     return [
       QuickAction(
         icon: Icons.map_outlined,
-        title: 'Site map',
-        subtitle: 'Navigate the area layout',
+        title: 'Map',
+        subtitle: 'Navigate your current location',
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const SiteMapPreviewScreen()),
         ),
