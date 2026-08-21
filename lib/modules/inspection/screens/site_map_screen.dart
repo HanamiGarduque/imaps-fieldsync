@@ -16,27 +16,10 @@ import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/theme/insight_theme.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
-
-class InsightTheme {
-  static const Color bg = Color(0xFFF2F4FB);
-  static const Color surface = Colors.white;
-  static const Color surface2 = Color(0xFFEEF1FC);
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-  static const Color blueInk = Color(0xFF1A3FC4);
-  static const Color red = Color(0xFFE23B4E);
-  static const Color redInk = Color(0xFFB72A3B);
-  static const Color line = Color(0x1A141628);
-
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
-}
+import '../widgets/inspection_step_header.dart';
 
 /// Site Verification (Step 1). Full-bleed map (matches Master's reference
 /// picture 1 — edge-to-edge, floating glass controls) with a bent,
@@ -298,63 +281,15 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                 ],
               ),
 
-            // ── Floating glass header — back button + title/subtitle. ───
+            // ── Floating glass header — back button + title + step progress bar ───
             SafeArea(
               bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        _GlassIconButton(icon: Icons.arrow_back_ios_new_rounded, onTap: () => Navigator.pop(context)),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _GlassPill(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text('Site Verification', style: InsightTheme.poppins(15, w: FontWeight.w700)),
-                                Text(task.location, style: InsightTheme.inter(11, c: InsightTheme.ink2), maxLines: 1, overflow: TextOverflow.ellipsis),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    // Step progress — same 1/6 fraction as before, now a
-                    // floating glass pill instead of inline page content.
-                    _GlassPill(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: Container(
-                              height: 5, color: InsightTheme.surface2,
-                              child: FractionallySizedBox(
-                                alignment: Alignment.centerLeft, widthFactor: 1 / 6,
-                                child: Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2]))),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Text('STEP 1 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
-                              Text(' — LOCATE TARGET', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+              child: InspectionStepHeader(
+                title: 'Site Verification',
+                subtitle: task.location,
+                stepNumber: 1,
+                stepSubtitle: 'LOCATE TARGET',
+                onBack: () => Navigator.pop(context),
               ),
             ),
 

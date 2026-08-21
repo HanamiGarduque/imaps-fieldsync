@@ -16,30 +16,7 @@ import '../../modules/inspection/providers/inspection_provider.dart';
 import '../../core/widgets/sensitive_screen.dart';
 import '../../modules/inspection/widgets/photo_viewer.dart';
 
-class InsightTheme {
-  static const Color bg = Color(0xFFF2F4FB);
-  static const Color surface = Colors.white;
-  static const Color surface2 = Color(0xFFEEF1FC);
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-  static const Color blueTint = Color(0xFFE7EDFF);
-  static const Color blueInk = Color(0xFF1A3FC4);
-  static const Color green = Color(0xFF12A150);
-  static const Color greenTint = Color(0xFFE3F8EC);
-  static const Color greenInk = Color(0xFF0D7A3C);
-  static const Color line = Color(0x1A141628); 
-  static const Color lineStrong = Color(0x2A141628); 
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
-      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
-      GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
-}
+import '../theme/insight_theme.dart';
 
 class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
@@ -271,30 +248,11 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                   child: Row(
                     children: [
                       _GlassBackButton(onTap: () => Navigator.pop(context)),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 14),
                       Expanded(
                         child: Text(
                           'Task Overview',
-                          style: InsightTheme.poppins(16, w: FontWeight.w700, c: InsightTheme.ink),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SiteMapScreen(task: task))),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white),
-                            boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 4, offset: Offset(0, 2))],
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.map_rounded, color: InsightTheme.blue1, size: 14),
-                              const SizedBox(width: 6),
-                              Text('Site Map', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink)),
-                            ],
-                          ),
+                          style: InsightTheme.poppins(18, w: FontWeight.w700, c: InsightTheme.ink),
                         ),
                       ),
                     ],
@@ -537,20 +495,13 @@ class _GlassCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.90),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white),
-        boxShadow: const [
-          BoxShadow(color: Color(0x04141628), blurRadius: 8, offset: Offset(0, 2)),
-          BoxShadow(color: Color(0x081416928), blurRadius: 16, offset: Offset(0, 6)),
-        ],
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: kCardShadow,
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: child,
-        ),
+        borderRadius: BorderRadius.circular(20),
+        child: child,
       ),
     );
   }
@@ -626,24 +577,22 @@ class _StepRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      margin: const EdgeInsets.only(bottom: 2),
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: isCurrent ? InsightTheme.surface : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isCurrent ? InsightTheme.line : Colors.transparent),
-        boxShadow: isCurrent ? const [BoxShadow(color: Color(0x06000000), blurRadius: 6, offset: Offset(0, 2))] : [],
+        color: isCurrent ? InsightTheme.surface2 : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           onTap: () {
             HapticFeedback.selectionClick();
             step.onTap();
           },
           child: Padding(
-            padding: EdgeInsets.all(isCurrent ? 10 : 4),
+            padding: EdgeInsets.all(isCurrent ? 12 : 6),
             child: IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -651,14 +600,14 @@ class _StepRow extends StatelessWidget {
                   Column(
                     children: [
                       Container(
-                        width: 26, height: 26,
+                        width: 28, height: 28,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: isDone ? InsightTheme.greenTint : (isCurrent ? InsightTheme.blue1 : InsightTheme.surface2),
                         ),
                         child: Icon(
                           isDone ? Icons.check_rounded : (isLocked ? Icons.lock_outline_rounded : step.icon),
-                          size: 12,
+                          size: 13,
                           color: isDone ? InsightTheme.greenInk : (isCurrent ? Colors.white : InsightTheme.ink3),
                         ),
                       ),
@@ -667,7 +616,7 @@ class _StepRow extends StatelessWidget {
                           child: Container(
                             width: 2,
                             margin: const EdgeInsets.symmetric(vertical: 4),
-                            color: isDone ? InsightTheme.green.withValues(alpha: 0.4) : InsightTheme.line,
+                            color: isDone ? InsightTheme.green.withValues(alpha: 0.35) : InsightTheme.line,
                           ),
                         ),
                     ],
@@ -676,7 +625,7 @@ class _StepRow extends StatelessWidget {
                   
                   Expanded(
                     child: Padding(
-                      padding: EdgeInsets.only(bottom: isLast ? 0 : 12, top: 3),
+                      padding: EdgeInsets.only(bottom: isLast ? 0 : 10, top: 2),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -686,15 +635,21 @@ class _StepRow extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   step.title, 
-                                  style: InsightTheme.poppins(13, w: FontWeight.w600, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink),
+                                  style: InsightTheme.poppins(13.5, w: FontWeight.w600, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink),
                                   maxLines: 1, overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               if (isCurrent)
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(color: InsightTheme.blue1, borderRadius: BorderRadius.circular(6)),
-                                  child: Text('Start Task', style: InsightTheme.inter(10, w: FontWeight.w700, c: Colors.white)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.blue1, 
+                                    borderRadius: BorderRadius.circular(10),
+                                    boxShadow: const [
+                                      BoxShadow(color: Color(0x283563FF), blurRadius: 6, offset: Offset(0, 2))
+                                    ],
+                                  ),
+                                  child: Text('Start Task', style: InsightTheme.inter(10.5, w: FontWeight.w700, c: Colors.white)),
                                 )
                             ],
                           ),

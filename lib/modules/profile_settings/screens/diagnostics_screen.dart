@@ -1,21 +1,19 @@
 import 'package:flutter/material.dart';
 import '../services/diagnostics_service.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/theme/insight_theme.dart';
 
-// Local palette approximating the app's existing blue/coral identity
-// without duplicating the full InsightTheme class into yet another file
-// (that duplication is already flagged as tech debt project-wide — see
-// AUTH_SECURITY_MASTER_DOC.md's drift-sweep notes).
-const _kBlue = Color(0xFF4C6FFF);
-const _kBlueTint = Color(0xFFEDF1FF);
-const _kInk = Color(0xFF141628);
-const _kInk2 = Color(0xFF666C82);
-const _kLine = Color(0xFFE7E9F0);
-const _kSurface = Colors.white;
-const _kBg = Color(0xFFF5F6FA);
-const _kAmber = Color(0xFFF5A623);
-const _kGreen = Color(0xFF16A34A);
-const _kCoral = Color(0xFFEF4444);
+// Mapped to standard canonical InsightTheme design tokens
+const _kBlue = InsightTheme.blue1;
+const _kBlueTint = InsightTheme.blueTint;
+const _kInk = InsightTheme.ink;
+const _kInk2 = InsightTheme.ink2;
+const _kLine = InsightTheme.line;
+const _kSurface = InsightTheme.surface;
+const _kBg = InsightTheme.bg;
+const _kAmber = InsightTheme.orange;
+const _kGreen = InsightTheme.green;
+const _kCoral = InsightTheme.red;
 
 /// Phase 3c — Diagnostics / Error Reports.
 ///

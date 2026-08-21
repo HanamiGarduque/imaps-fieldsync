@@ -6,17 +6,9 @@ import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/theme/insight_theme.dart';
 
-class _Colors {
-  static const bg = Color(0xFFF2F4FB);
-  static const surface = Colors.white;
-  static const ink = Color(0xFF12141F);
-  static const ink2 = Color(0xFF666C82);
-  static const ink3 = Color(0xFFA2A7BC);
-  static const blue1 = Color(0xFF3D6BFF);
-  static const blue2 = Color(0xFF0B2FBF);
-  static const line = Color(0x12141628);
-}
+typedef _Colors = InsightTheme;
 
 
 class SecuritySettingsScreen extends StatefulWidget {

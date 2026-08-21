@@ -16,59 +16,7 @@ import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../widgets/active_assignments_folder_card.dart';
-
-/// ==================================================================
-/// THEME NOTE (corrected)
-/// ==================================================================
-/// A previous pass swapped this screen to core/theme/insight_theme.dart
-/// (InsightColors/InsightText — a dark palette). That was a misread of
-/// the codebase: that dark theme is only consumed by ONE screen
-/// (zoning_comparison_screen.dart). The light `InsightTheme` class below
-/// is the pattern actually repeated across ~17 screens app-wide —
-/// Tasks, Sync/Updates, Profile, Notifications, Parcel Detail, and most
-/// Inspection screens all define this same local class. That makes it
-/// the real, established theme for this app, not a stray duplicate.
-/// Reinstated here to match.
-class InsightTheme {
-  static const Color bg = Color(0xFFF4F6FB); 
-  static const Color surface = Colors.white;
-  // Added to match the same token already present in the sibling
-  // Tasks/Sync screens' local InsightTheme (surface2) — Home's original
-  // palette didn't need a secondary surface before; the new progress
-  // bars (Task Completion Flow) do, for the track behind each bar.
-  static const Color surface2 = Color(0xFFEDF0F7);
-  
-  static const Color ink = Color(0xFF0F111A);
-  static const Color ink2 = Color(0xFF595E73);
-  static const Color ink3 = Color(0xFF969CB3);
-  
-  static const Color blue1 = Color(0xFF3563FF);
-  static const Color blue2 = Color(0xFF0F32CA);
-  static const Color blueTint = Color(0xFFE4EBFF);
-  static const Color blueInk = Color(0xFF1336B8);
-  
-  static const Color red = Color(0xFFE23B4E);
-  static const Color green = Color(0xFF22C55E);
-  static const Color orange = Color(0xFFF59E0B);
-  
-  static const Color line = Color(0x15141628); 
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
-      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
-      
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
-      GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
-}
-
-/// Shared light-card lift shadow — reused for the avatar, notification
-/// button, and activity tiles instead of each spot inventing its own
-/// one-off BoxShadow value.
-const List<BoxShadow> kCardShadow = [
-  BoxShadow(color: Color(0x08000000), blurRadius: 12, offset: Offset(0, 4)),
-];
+import '../../../core/theme/insight_theme.dart';
 
 /// ==================================================================
 /// SCREEN — HOME DASHBOARD 
