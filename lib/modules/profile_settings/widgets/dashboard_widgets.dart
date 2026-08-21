@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 import '../models/dashboard_stats.dart';
+import '../../../core/theme/insight_theme.dart';
 
 /// ==================================================================
 /// Second pass on these 4 cards. First pass just scaled up the old
@@ -58,13 +59,12 @@ class _StatRow extends StatelessWidget {
 }
 
 /// ==================================================================
-/// COMPLETION RATE — redesigned for the modern dashboard reference:
-/// • Percentage + status pill live INSIDE the gauge arch (no duplicate
-///   number up top that repeats what the gauge already shows)
-/// • Header is compact: label left, "Updated today" right — one line
-/// • Gauge uses Expanded so it fills the card naturally — zero dead space
-/// • Stat row sits flush below the gauge with no padding waste
-/// • _GaugePainter is untouched — only the composition around it changed
+/// COMPLETION RATE — Pinterest-style Segmented Radial Block Gauge
+/// Matches the reference design:
+/// • Top banner pill with crown icon ("You're in the top 15% of performers")
+/// • 14 segmented radial rounded block pills in an arch
+/// • Large crisp center percentage + "completion goals" label
+/// • Dual soft stat cards at the bottom (Applications / Active Tasks)
 /// ==================================================================
 class CompletionGaugeCard extends StatelessWidget {
   final double rate; // 0.0 - 1.0
@@ -86,191 +86,207 @@ class CompletionGaugeCard extends StatelessWidget {
     required this.mutedTextColor,
   });
 
-  String get _status {
-    final r = rate.isNaN ? 0.0 : rate;
-    if (r >= 0.8) return 'Excellent';
-    if (r >= 0.5) return 'On Track';
-    if (r > 0) return 'Needs Attention';
-    return 'No Data Yet';
-  }
-
-  Color get _statusColor {
-    final r = rate.isNaN ? 0.0 : rate;
-    if (r >= 0.8) return fillColor;
-    if (r >= 0.5) return fillColor;
-    if (r > 0) return const Color(0xFFF59E0B); // amber — warning tone
-    return mutedTextColor;
-  }
-
   @override
   Widget build(BuildContext context) {
     final clamped = rate.isNaN ? 0.0 : rate.clamp(0.0, 1.0);
-    final percentLabel = '${(clamped * 100).round()}%';
+    final percentLabel = '${(clamped * 100).toStringAsFixed(1)}%';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Compact header ──────────────────────────────────────────
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text('COMPLETION RATE', style: _kLabelStyle.copyWith(color: mutedTextColor)),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: fillColor.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(20),
+        // ── 1. Segmented Radial Bar Arch ─────────────────────────────
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _SegmentedGaugePainter(
+                    progress: clamped,
+                    fill: fillColor,
+                    track: trackColor,
+                  ),
+                ),
               ),
-              child: Text(
-                'Updated today',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: fillColor),
+              Positioned(
+                bottom: 6,
+                left: 0,
+                right: 0,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      percentLabel,
+                      style: InsightTheme.poppins(
+                        26,
+                        w: FontWeight.w800,
+                        c: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'completion goals',
+                      style: InsightTheme.inter(
+                        11,
+                        w: FontWeight.w500,
+                        c: mutedTextColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
 
-        const SizedBox(height: 4),
+        const SizedBox(height: 10),
 
-        // ── Gauge — Expanded fills the card's remaining height ───────
-        Expanded(
-          child: CustomPaint(
-            painter: _GaugePainter(progress: clamped, track: trackColor, fill: fillColor),
-            child: Align(
-              // Position overlaid text in the open lower half of the arch
-              alignment: const Alignment(0, 0.5),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Big percentage — reads instantly at a glance
-                  Text(
-                    percentLabel,
-                    style: TextStyle(
-                      fontSize: 36,
-                      fontWeight: FontWeight.w800,
-                      color: textColor,
-                      height: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  // Status pill — tinted, uses fillColor for in-theme color
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _statusColor.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: _statusColor.withOpacity(0.25)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+        // ── 2. Bottom Dual Stat Cards (No Overflow) ──────────────────
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface2,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(shape: BoxShape.circle, color: _statusColor),
+                        Expanded(
+                          child: Text(
+                            'Applications',
+                            style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _status,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: _statusColor,
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF3563FF),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '3.5% ↗',
+                            style: InsightTheme.inter(8, w: FontWeight.w700, c: Colors.white),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 5),
+                    Text(
+                      '$totalApplications',
+                      style: InsightTheme.poppins(18, w: FontWeight.w800, c: InsightTheme.ink),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
-
-        // ── Footer stat row — flush below the gauge ──────────────────
-        Divider(height: 1, color: trackColor),
-        const SizedBox(height: 12),
-        _StatRow(
-          items: [
-            ('Applications', '$totalApplications'),
-            ('Active', '$activeWorkload'),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface2,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Workload',
+                            style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F111A),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '4.5% ↘',
+                            style: InsightTheme.inter(8, w: FontWeight.w700, c: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '$activeWorkload',
+                      style: InsightTheme.poppins(18, w: FontWeight.w800, c: InsightTheme.ink),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
-          textColor: textColor,
-          mutedTextColor: mutedTextColor,
-          dividerColor: trackColor,
         ),
-        const SizedBox(height: 4),
       ],
     );
   }
 }
 
-class _GaugePainter extends CustomPainter {
+class _SegmentedGaugePainter extends CustomPainter {
   final double progress; // 0.0 - 1.0
-  final Color track;
   final Color fill;
+  final Color track;
 
-  _GaugePainter({required this.progress, required this.track, required this.fill});
+  static const int totalSegments = 14;
+
+  _SegmentedGaugePainter({
+    required this.progress,
+    required this.fill,
+    required this.track,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final strokeWidth = math.max(14.0, size.height * 0.14);
-    final radius = math.min(size.width / 2 - 18, size.height - 42) - strokeWidth / 2;
-    final center = Offset(size.width / 2, size.height - strokeWidth / 2 - 8);
-    final rect = Rect.fromCircle(center: center, radius: radius);
+    final center = Offset(size.width / 2, size.height - 4);
+    final outerRadius = math.min(size.width / 2 - 14, size.height - 8);
+    final innerRadius = outerRadius * 0.65;
+    final strokeWidth = (outerRadius - innerRadius) * 0.44;
 
-    final trackPaint = Paint()
-      ..color = track
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
+    final activeCount = (progress * totalSegments).round();
 
-    final fillPaint = Paint()
-      ..shader = SweepGradient(
-        colors: [fill.withOpacity(0.55), fill],
-        startAngle: math.pi,
-        endAngle: 2 * math.pi,
-      ).createShader(rect)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
+    for (int i = 0; i < totalSegments; i++) {
+      final t = i / (totalSegments - 1);
+      final angle = math.pi + (t * math.pi);
 
-    canvas.drawArc(rect, math.pi, math.pi, false, trackPaint);
-    canvas.drawArc(rect, math.pi, math.pi * progress, false, fillPaint);
-
-    // Analog tick marks every 10% (longer/darker every 25%) — reads as a
-    // calibrated instrument rather than a flat filled donut segment.
-    final tickOuter = radius + strokeWidth / 2 + 3;
-    for (int i = 0; i <= 10; i++) {
-      final t = i / 10;
-      final angle = math.pi + math.pi * t;
-      final isMajor = i % 5 == 0 || i == 2 || i == 8; // 0, 25(ish), 50, 75(ish), 100
-      final tickLen = isMajor ? 9.0 : 4.5;
-      final p1 = Offset(center.dx + tickOuter * math.cos(angle), center.dy + tickOuter * math.sin(angle));
-      final p2 = Offset(center.dx + (tickOuter + tickLen) * math.cos(angle), center.dy + (tickOuter + tickLen) * math.sin(angle));
-      canvas.drawLine(
-        p1,
-        p2,
-        Paint()
-          ..color = t <= progress ? fill.withOpacity(0.55) : track
-          ..strokeWidth = isMajor ? 2.2 : 1.4
-          ..strokeCap = StrokeCap.round,
+      final p1 = Offset(
+        center.dx + innerRadius * math.cos(angle),
+        center.dy + innerRadius * math.sin(angle),
       );
-    }
+      final p2 = Offset(
+        center.dx + outerRadius * math.cos(angle),
+        center.dy + outerRadius * math.sin(angle),
+      );
 
-    // End-of-progress marker (needle head) — small design detail that makes
-    // the gauge read as a deliberate instrument, not a plain arc.
-    if (progress > 0.01) {
-      final angle = math.pi + math.pi * progress;
-      final dot = Offset(center.dx + radius * math.cos(angle), center.dy + radius * math.sin(angle));
-      canvas.drawCircle(dot, strokeWidth * 0.5, Paint()..color = Colors.white);
-      canvas.drawCircle(dot, strokeWidth * 0.5, Paint()..color = fill..style = PaintingStyle.stroke..strokeWidth = 2.5);
-      canvas.drawCircle(dot, strokeWidth * 0.18, Paint()..color = fill);
+      final isFilled = i < activeCount;
+      final blockColor = isFilled ? fill : track;
+
+      final paint = Paint()
+        ..color = blockColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round;
+
+      canvas.drawLine(p1, p2, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _GaugePainter oldDelegate) =>
+  bool shouldRepaint(covariant _SegmentedGaugePainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.fill != fill || oldDelegate.track != track;
 }
 
