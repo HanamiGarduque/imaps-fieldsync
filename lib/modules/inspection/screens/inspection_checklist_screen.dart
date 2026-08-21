@@ -13,23 +13,8 @@ import '../../../core/services/sync_outbox_service.dart';
 import '../widgets/exit_confirm_dialog.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
-class InsightTheme {
-  static const Color bg = Color(0xFFF2F4FB);
-  static const Color surface = Colors.white;
-  static const Color surface2 = Color(0xFFEEF1FC);
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-  static const Color blueInk = Color(0xFF1A3FC4);
-  static const Color line = Color(0x1A141628); 
-  static const Color lineStrong = Color(0x2A141628); 
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
-}
+import '../../../core/theme/insight_theme.dart';
+import '../widgets/inspection_step_header.dart';
 
 class InspectionChecklistScreen extends StatefulWidget {
   final TaskItem task;
@@ -149,60 +134,15 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
           SafeArea(
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Row(
-                    children: [
-                      _GlassBackButton(onTap: () => handleInspectionExit(
-                        context,
-                        onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
-                        isReworkMode: context.read<InspectionProvider>().isReworkMode,
-                      )),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Zoning Checklist', style: InsightTheme.poppins(17, w: FontWeight.w700)),
-                            Text(widget.task.location, style: InsightTheme.inter(12, c: InsightTheme.ink2), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 6, decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(4)),
-                        child: FractionallySizedBox(
-                          alignment: Alignment.centerLeft, widthFactor: 4/6,
-                          child: Container(decoration: BoxDecoration(gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2]), borderRadius: BorderRadius.circular(4))),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Text('STEP 4 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5)),
-                          Text(' — VERIFY COMPLIANCE', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5)),
-                          const Spacer(),
-                          // Fix (deferred roadmap item, 2026-07): this
-                          // screen never displayed a live checklist count
-                          // at all — _doneCount/_totalCount were already
-                          // correct and already rebuilt instantly on every
-                          // toggle (setState in each _ChecklistItem's
-                          // onTap), the display just didn't exist yet.
-                          // Not a stale-data bug — a missing widget.
-                          Text(
-                            '$_doneCount of $_totalCount checked',
-                            style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.3),
-                          ),
-                        ],
-                      ),
-                    ],
+                InspectionStepHeader(
+                  title: 'Zoning Checklist',
+                  subtitle: widget.task.location,
+                  stepNumber: 4,
+                  stepSubtitle: 'VERIFY CRITERIA',
+                  onBack: () => handleInspectionExit(
+                    context,
+                    onSaveProgress: () => context.read<InspectionProvider>().saveStepChecklist(),
+                    isReworkMode: context.read<InspectionProvider>().isReworkMode,
                   ),
                 ),
                 Expanded(
@@ -348,22 +288,6 @@ class _ChecklistItem extends StatelessWidget {
             Expanded(child: Text(title, style: InsightTheme.inter(14, w: FontWeight.w500, c: InsightTheme.ink))),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _GlassBackButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _GlassBackButton({required this.onTap});
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42, height: 42,
-        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.white.withValues(alpha: 0.65)), boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 10, offset: Offset(0, 4))]),
-        child: ClipRRect(borderRadius: BorderRadius.circular(14), child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12), child: const Center(child: Padding(padding: EdgeInsets.only(left: 4), child: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: InsightTheme.ink))))),
       ),
     );
   }

@@ -13,19 +13,7 @@ import '../services/location_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
-class InsightTheme {
-  static const Color bg = Color(0xFFF2F4FB);
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-  static const Color line = Color(0x1A141628);
-
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
-}
+import '../../../core/theme/insight_theme.dart';
 
 /// Standalone Site Map viewer — full-bleed map showing only the
 /// inspector's own live position as a pulsing beacon marker. No route

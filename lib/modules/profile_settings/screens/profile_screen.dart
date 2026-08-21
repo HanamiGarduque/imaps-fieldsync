@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/models/user_profile.dart';
 import '../models/dashboard_stats.dart';
@@ -18,38 +17,7 @@ import '../widgets/dashboard_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 
 
-/// ==================================================================
-/// THEME COLORS & TOKENS (InSight Blue Glass & Gradient Theme)
-/// ==================================================================
-class InsightTheme {
-  static const Color bg = Color(0xFFF2F4FB);
-  static const Color surface = Colors.white;
-  static const Color surface2 = Color(0xFFEEF1FC);
-  
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
-  
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-  static const Color blueTint = Color(0xFFE7EDFF);
-  static const Color blueInk = Color(0xFF1A3FC4);
-  
-  static const Color amber = Color(0xFFFFB700);
-  static const Color green = Color(0xFF10B981);
-  static const Color coral = Color(0xFFE23B4E);
-  
-  static const Color line = Color(0x12141628); 
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
-      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
-      
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
-      GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
-}
+import '../../../core/theme/insight_theme.dart';
 
 /// ==================================================================
 /// SCREEN 17 — PROFILE
@@ -69,12 +37,21 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
   bool _isLoadingStats = true;
   bool _hasStatsError = false;
 
-  // Horizontally-swipeable analytics pager — replaces the old vertically
-  // stacked cards. viewportFraction < 1 leaves a sliver of the neighboring
-  // card peeking in on each side, which is what gives the snap gesture a
-  // visible target instead of feeling like a full-screen page flip.
-  final PageController _analyticsPageController = PageController(viewportFraction: 0.9);
-  int _analyticsPageIndex = 0;
+  // Analytics section state — tab index (0=Bars, 1=Activity, 2=Gauge, 3=Sectors)
+  // and timeframe toggle (week/month). Replaces the old PageView approach
+  // with a single card containing an internal segmented tab bar, matching
+  // the HTML reference design exactly.
+  int _analyticsTabIndex = 0;
+  bool _analyticsIsWeek = true;
+
+  // Drives the identity header's expand<->collapse crossfade as the user
+  // scrolls — see _IdentityHeaderDelegate. Tracked in the scroll controller
+  // (not a NotificationListener) since that's the more direct signal for a
+  // SliverPersistentHeader tied to a single CustomScrollView.
+  final ScrollController _scrollController = ScrollController();
+
+  static const double _expandedHeaderHeight = 220.0;
+  static const double _collapsedHeaderHeight = 78.0;
 
   @override
   void initState() {
@@ -86,7 +63,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
   @override
   void dispose() {
-    _analyticsPageController.dispose();
+    _scrollController.dispose();
     disposeSpringEntrance();
     super.dispose();
   }
@@ -144,7 +121,88 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     }
   }
 
-  Future<void> _handleSignOut(BuildContext context) async {
+  /// Shows the "Log out" confirmation modal. Required per the destructive-
+  /// action rule (specific-labeled buttons, no bare Yes/No) — sign out
+  /// previously fired with zero confirmation.
+  Future<void> _confirmSignOut(BuildContext context) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        // Declared here (not inside StatefulBuilder's builder) so it
+        // survives across setDialogState() calls for the life of this
+        // dialog instance.
+        bool isLoggingOut = false;
+
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return Dialog(
+              backgroundColor: InsightTheme.surface,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Log out', style: InsightTheme.poppins(18, w: FontWeight.w700)),
+                    const SizedBox(height: 10),
+                    Text(
+                      "You'll need to sign in again to continue your inspections.",
+                      style: InsightTheme.inter(13.5, c: InsightTheme.ink2, h: 1.4),
+                    ),
+                    const SizedBox(height: 22),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: isLoggingOut ? null : () => Navigator.pop(dialogContext),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          ),
+                          child: Text('Cancel', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink2)),
+                        ),
+                        const SizedBox(width: 4),
+                        ElevatedButton(
+                          onPressed: isLoggingOut
+                              ? null
+                              : () async {
+                                  setDialogState(() => isLoggingOut = true);
+                                  await _performSignOut(dialogContext);
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: InsightTheme.coral,
+                            disabledBackgroundColor: InsightTheme.coral.withOpacity(0.7),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: isLoggingOut
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                                )
+                              : Text('Log out', style: InsightTheme.inter(14, w: FontWeight.w700, c: Colors.white)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// The actual sign-out flow, triggered once the modal's "Log out" button
+  /// has already swapped into its loading state. Business logic here is
+  /// untouched from the original _handleSignOut — only the trigger point
+  /// (confirmation + loading UI) changed.
+  Future<void> _performSignOut(BuildContext dialogContext) async {
     HapticFeedback.mediumImpact();
 
     // Audit log must fire BEFORE signOut() — log_security_event is a
@@ -176,7 +234,14 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
       debugPrint('[SIGNOUT] AuthService.signOut error: $e');
     }
 
-    if (context.mounted) {
+    // Close the confirmation modal first (explicit, root navigator) so it
+    // can never linger behind the login screen regardless of navigator
+    // nesting elsewhere in the app.
+    if (dialogContext.mounted) {
+      Navigator.of(dialogContext, rootNavigator: true).pop();
+    }
+
+    if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (route) => false,
@@ -244,7 +309,6 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
           SafeArea(
             bottom: false,
-            // Removed the redundant Column and Padding header entirely
             child: RefreshIndicator(
               color: InsightTheme.blue1,
               onRefresh: () async {
@@ -253,335 +317,165 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                   _loadStats(),
                 ]);
               },
-              child: ListView(
-              // Added slightly more top padding so the card breathes below the status bar
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 140),
-              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-              children: [
-                // 1. IDENTITY CARD
-                SpringSlide(
-                  animation: springFor(0),
-                  beginOffset: const Offset(0, -30),
-                  child: Container(
-                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-                  decoration: BoxDecoration(
-                    color: InsightTheme.surface.withOpacity(0.75),
-                    borderRadius: BorderRadius.circular(32),
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: const [
-                      BoxShadow(color: Color(0x08141628), blurRadius: 30, offset: Offset(0, 10)),
-                    ],
+              // CustomScrollView + a pinned SliverPersistentHeader replaces
+              // the plain ListView so the identity card can collapse into a
+              // compact bar on scroll and expand back at the top — see
+              // _IdentityHeaderDelegate.
+              child: CustomScrollView(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                slivers: [
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _IdentityHeaderDelegate(
+                      expandedHeight: _expandedHeaderHeight,
+                      collapsedHeight: _collapsedHeaderHeight,
+                      avatarUrl: _currentProfile.avatarUrl,
+                      initials: initials,
+                      displayName: displayName,
+                      positionLabel: positionLabel,
+                      userEmail: userEmail,
+                      onEditTap: _openEditScreen,
+                    ),
                   ),
-                  child: Column(
-                    children: [
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: GestureDetector(
-                          onTap: _openEditScreen,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: InsightTheme.blueTint,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: InsightTheme.blue1.withOpacity(0.1)),
-                            ),
-                            child: const Icon(Icons.edit_outlined, size: 16, color: InsightTheme.blueInk),
-                          ),
-                        ),
-                      ),
-                      
-                      Container(
-                            width: 86, height: 86,
-                            margin: const EdgeInsets.only(top: 4, bottom: 16),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: const LinearGradient(
-                                colors: [InsightTheme.blue1, InsightTheme.blue2],
-                                begin: Alignment.topLeft, end: Alignment.bottomRight,
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 140),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+                        // 1. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
+                        // IntrinsicHeight guarantees both cards match the
+                        // taller one's height regardless of label wrapping.
+                        IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: SpringSlide(
+                                  animation: springFor(1),
+                                  beginOffset: const Offset(0, 34),
+                                  child: _buildStatCard(
+                                    'Pending / Ongoing',
+                                    _isLoadingStats ? '—' : '${_stats.tasksTodayOrPendingCount}',
+                                    Icons.access_time_rounded,
+                                    InsightTheme.surface2,
+                                    InsightTheme.blue1,
+                                  ),
+                                ),
                               ),
-                              boxShadow: [
-                                BoxShadow(color: InsightTheme.blue1.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 8))
-                              ],
-                              border: Border.all(color: Colors.white, width: 3.5),
-                              image: _currentProfile.avatarUrl != null
-                                  ? DecorationImage(image: NetworkImage(_currentProfile.avatarUrl!), fit: BoxFit.cover)
-                                  : null,
-                            ),
-                            alignment: Alignment.center,
-                            child: _currentProfile.avatarUrl == null
-                                ? Text(initials, style: InsightTheme.poppins(28, w: FontWeight.w700, c: Colors.white))
-                                : null,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: SpringSlide(
+                                  animation: springFor(2),
+                                  beginOffset: const Offset(0, 34),
+                                  child: _buildStatCard(
+                                    'Completed Inspections',
+                                    _isLoadingStats ? '—' : '${_stats.completedCount}',
+                                    Icons.check_circle_outline_rounded,
+                                    InsightTheme.blueTint,
+                                    InsightTheme.blueInk,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                      
-                      Text(displayName, style: InsightTheme.poppins(20, w: FontWeight.w700)),
-                      const SizedBox(height: 10),
-                      
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: InsightTheme.blue1.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: InsightTheme.blue1.withOpacity(0.15)),
                         ),
-                        child: Text(
-                          positionLabel.toUpperCase(),
-                          style: InsightTheme.jetBrains(10, w: FontWeight.w600, c: InsightTheme.blueInk, ls: 0.8),
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 18),
-                      
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.email_outlined, size: 15, color: InsightTheme.ink3),
-                          const SizedBox(width: 8),
-                          Text(userEmail, style: InsightTheme.inter(13, w: FontWeight.w500, c: InsightTheme.ink2)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                ),
-                
-                const SizedBox(height: 24),
 
-                // 2. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
-                Row(
-                  children: [
-                    Expanded(
-                      child: SpringSlide(
-                      animation: springFor(1),
-                      beginOffset: const Offset(0, 34),
-                      child: _buildStatCard(
-                      'Pending/Ongoing',
-                      _isLoadingStats ? '—' : '${_stats.tasksTodayOrPendingCount}',
-                      Icons.assignment_outlined,
-                      InsightTheme.amber,
-                      ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: SpringSlide(
-                      animation: springFor(2),
-                      beginOffset: const Offset(0, 34),
-                      child: _buildStatCard(
-                      'Completed Inspections',
-                      _isLoadingStats ? '—' : '${_stats.completedCount}',
-                      Icons.check_circle_outline_rounded,
-                      InsightTheme.green,
-                      ),
-                      ),
-                    ),
-                  ],
-                ),
+                        const SizedBox(height: 16),
 
-                const SizedBox(height: 16),
+                        // 2. PERFORMANCE ANALYTICS — single card with
+                        // internal segmented tab bar (Bars / Activity /
+                        // Gauge / Sectors) + Week/Month toggle.
+                        // Matches HTML reference design: no PageView swipe,
+                        // no separate section label, no dot indicators.
+                        if (_hasStatsError)
+                          _dashboardErrorCard()
+                        else if (_isLoadingStats)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 40),
+                            child: Center(child: CircularProgressIndicator(strokeWidth: 2.4)),
+                          )
+                        else
+                          _analyticsCard(),
 
-                // 3. ANALYTICS DASHBOARD — horizontally swipeable, one focus
-                // chart at a time instead of four squeezed into a vertical
-                // stack. Each page is a full-size version of the same card
-                // (_dashboardCard), so the visual identity is unchanged —
-                // only the layout direction and card size are.
-                if (_hasStatsError)
-                  _dashboardErrorCard()
-                else if (_isLoadingStats)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: Center(child: CircularProgressIndicator(strokeWidth: 2.4)),
-                  )
-                else ...[
-                  SpringSlide(
-                    animation: springFor(3),
-                    beginOffset: const Offset(46, 0),
-                    child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('ANALYTICS OVERVIEW',
-                            style: InsightTheme.jetBrains(11, w: FontWeight.w600, c: InsightTheme.ink2, ls: 0.8)),
-                        Row(
-                          children: [
-                            Icon(Icons.swipe_rounded, size: 14, color: InsightTheme.ink3),
-                            const SizedBox(width: 4),
-                            Text('Swipe', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
-                          ],
+                        const SizedBox(height: 24),
+
+                        // 3. GROUPED ACTION CARDS — split from one long list
+                        // into related groups, with Sign out separated by
+                        // whitespace rather than sharing a divider with
+                        // neutral settings rows (destructive actions get
+                        // visual distance, not just a color change).
+                        SpringSlide(
+                          animation: springFor(5),
+                          beginOffset: const Offset(0, 30),
+                          child: Column(
+                            children: [
+                              _actionGroupCard([
+                                _ActionTile(
+                                  icon: Icons.fingerprint_rounded,
+                                  title: 'Security & Biometrics',
+                                  subtitle: 'Biometric login, auto-lock & protection',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => SecuritySettingsScreen(profile: _currentProfile),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                _ActionTile(
+                                  icon: Icons.flag_outlined,
+                                  title: 'Diagnostics & Support',
+                                  subtitle: 'Report an issue to the MPDO team',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+                                    );
+                                  },
+                                ),
+                              ]),
+                              const SizedBox(height: 16),
+                              _actionGroupCard([
+                                _ActionTile(
+                                  icon: Icons.shield_outlined,
+                                  title: 'Privacy Policy',
+                                  subtitle: 'Legal information & policies',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const TermsPrivacyScreen()),
+                                    );
+                                  },
+                                ),
+                                _ActionTile(
+                                  icon: Icons.info_outline_rounded,
+                                  title: 'About InSight',
+                                  subtitle: 'Version 1.0.0',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const AboutInsightScreen()),
+                                    );
+                                  },
+                                ),
+                              ]),
+                              const SizedBox(height: 16),
+                              _actionGroupCard([
+                                _ActionTile(
+                                  icon: Icons.logout_rounded,
+                                  title: 'Sign out',
+                                  isDestructive: true,
+                                  onTap: () => _confirmSignOut(context),
+                                ),
+                              ]),
+                            ],
+                          ),
                         ),
-                      ],
+                      ]),
                     ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SpringSlide(
-                    animation: springFor(4),
-                    beginOffset: const Offset(60, 0),
-                    child: SizedBox(
-                    // Relative to screen height rather than a fixed pixel
-                    // value, clamped to a sensible range so it stays
-                    // comfortable on both small phones and tablets.
-                    height: (MediaQuery.of(context).size.height * 0.46).clamp(380.0, 480.0),
-                    child: PageView(
-                      controller: _analyticsPageController,
-                      onPageChanged: (i) => setState(() => _analyticsPageIndex = i),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: _dashboardCard(
-                            child: CompletionGaugeCard(
-                              rate: _stats.completionRate,
-                              totalApplications: _stats.totalAssigned,
-                              activeWorkload: _stats.activeWorkloadCount,
-                              trackColor: InsightTheme.surface2,
-                              fillColor: InsightTheme.blue1,
-                              textColor: InsightTheme.ink,
-                              mutedTextColor: InsightTheme.ink2,
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: _dashboardCard(
-                            child: WeeklyTrendCard(
-                              points: _stats.weeklyTrend,
-                              barColor: InsightTheme.blue1,
-                              textColor: InsightTheme.ink,
-                              mutedTextColor: InsightTheme.ink2,
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: _dashboardCard(
-                            child: ActivityHeatmapCard(
-                              activeDays: _stats.activeDaysThisMonth,
-                              month: _stats.currentMonth,
-                              year: _stats.currentYear,
-                              activeColor: InsightTheme.green,
-                              inactiveColor: InsightTheme.surface2,
-                              textColor: InsightTheme.ink,
-                              mutedTextColor: InsightTheme.ink2,
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: _dashboardCard(
-                            child: ZoningTypeBreakdownCard(
-                              entries: _stats.typeBreakdown,
-                              barColor: InsightTheme.blue1,
-                              trackColor: InsightTheme.surface2,
-                              textColor: InsightTheme.ink,
-                              mutedTextColor: InsightTheme.ink2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      for (int i = 0; i < 4; i++)
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 260),
-                          curve: Curves.easeOutCubic,
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          height: 7,
-                          width: i == _analyticsPageIndex ? 22 : 7,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(4),
-                            color: i == _analyticsPageIndex ? InsightTheme.blue1 : InsightTheme.line,
-                          ),
-                        ),
-                    ],
                   ),
                 ],
-
-                const SizedBox(height: 24),
-
-                // 4. UNIFIED ACTION CARD
-                Container(
-                  decoration: BoxDecoration(
-                    color: InsightTheme.surface,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: InsightTheme.line),
-                    boxShadow: const [
-                      BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      _ActionTile(
-                        icon: Icons.fingerprint_rounded,
-                        title: 'Security & Biometrics',
-                        subtitle: 'Biometric login, auto-lock & protection',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => SecuritySettingsScreen(profile: _currentProfile),
-                            ),
-                          );
-                        },
-                      ),
-                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
-
-                      _ActionTile(
-                        icon: Icons.info_outline_rounded,
-                        title: 'About InSight',
-                        subtitle: 'Version 1.0.0',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const AboutInsightScreen()),
-                          );
-                        },
-                      ),
-                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
-
-                      _ActionTile(
-                        icon: Icons.flag_outlined,
-                        title: 'Diagnostics & Support',
-                        subtitle: 'Report an issue to the MPDO team',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
-                          );
-                        },
-                      ),
-                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
-
-                      
-                      // RESTORED: Terms and Privacy Policy Action Tile
-                      _ActionTile(
-                        icon: Icons.shield_outlined,
-                        title: 'Privacy Policy',
-                        subtitle: 'Legal information & policies',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const TermsPrivacyScreen()),
-                          );
-                        },
-                      ),
-                      const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
-
-                      
-                      _ActionTile(
-                        icon: Icons.logout_rounded,
-                        title: 'Sign out',
-                        isDestructive: true,
-                        onTap: () => _handleSignOut(context),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               ),
             ),
           ),
@@ -595,8 +489,242 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     );
   }
 
+  // WIDGET: Performance Analytics — single card matching HTML reference.
+  // Header: title + subtitle left, Week/Month toggle right.
+  // Below: segmented tab bar (Bars / Activity / Gauge / Sectors).
+  // Chart body: AnimatedSwitcher fades between chart widgets.
+  Widget _analyticsCard() {
+    const tabs = [
+      (Icons.bar_chart_rounded, 'Bars'),
+      (Icons.grid_on_rounded, 'Activity'),
+      (Icons.pie_chart_outline_rounded, 'Gauge'),
+      (Icons.layers_outlined, 'Sectors'),
+    ];
+
+    final chartBody = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+      child: KeyedSubtree(
+        key: ValueKey(_analyticsTabIndex),
+        child: _buildAnalyticsBody(),
+      ),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: kCardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Header row ──────────────────────────────────────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Performance Analytics',
+                        style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.ink)),
+                    const SizedBox(height: 2),
+                    Text('MPDO Field Operational Metrics',
+                        style: InsightTheme.inter(10.5, c: InsightTheme.ink3)),
+                  ],
+                ),
+              ),
+              // Week / Month toggle pills
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface2,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _timeframePill('Week', _analyticsIsWeek, () => setState(() => _analyticsIsWeek = true)),
+                    _timeframePill('Month', !_analyticsIsWeek, () => setState(() => _analyticsIsWeek = false)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+
+          // ── Segmented tab bar ────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface2,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                for (int i = 0; i < tabs.length; i++)
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _analyticsTabIndex = i),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutCubic,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: _analyticsTabIndex == i ? InsightTheme.surface : Colors.transparent,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: _analyticsTabIndex == i
+                              ? const [BoxShadow(color: Color(0x0A141628), blurRadius: 6, offset: Offset(0, 2))]
+                              : null,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              tabs[i].$1,
+                              size: 14,
+                              color: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink3,
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              tabs[i].$2,
+                              style: InsightTheme.inter(
+                                10,
+                                w: _analyticsTabIndex == i ? FontWeight.w700 : FontWeight.w500,
+                                c: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          // ── Chart body ───────────────────────────────────────────────
+          // Dynamically adjust height: Activity calendar needs 340px, while
+          // Gauge, Bars, and Sectors fit compactly in ~250px to eliminate empty space.
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            height: _analyticsTabIndex == 1 ? 340.0 : 250.0,
+            child: chartBody,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _timeframePill(String label, bool active, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? InsightTheme.blue1 : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Text(
+          label,
+          style: InsightTheme.inter(
+            11,
+            w: FontWeight.w700,
+            c: active ? InsightTheme.surface : InsightTheme.ink2,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnalyticsBody() {
+    switch (_analyticsTabIndex) {
+      case 0:
+        return WeeklyTrendCard(
+          points: _stats.weeklyTrend,
+          barColor: InsightTheme.blue1,
+          textColor: InsightTheme.ink,
+          mutedTextColor: InsightTheme.ink2,
+        );
+      case 1:
+        return ActivityHeatmapCard(
+          activeDays: _stats.activeDaysThisMonth,
+          month: _stats.currentMonth,
+          year: _stats.currentYear,
+          activeColor: InsightTheme.green,
+          inactiveColor: InsightTheme.surface2,
+          textColor: InsightTheme.ink,
+          mutedTextColor: InsightTheme.ink2,
+        );
+      case 2:
+        return CompletionGaugeCard(
+          rate: _stats.completionRate,
+          totalApplications: _stats.totalAssigned,
+          activeWorkload: _stats.activeWorkloadCount,
+          trackColor: InsightTheme.surface2,
+          fillColor: InsightTheme.blue1,
+          textColor: InsightTheme.ink,
+          mutedTextColor: InsightTheme.ink2,
+        );
+      case 3:
+      default:
+        return ZoningTypeBreakdownCard(
+          entries: _stats.typeBreakdown,
+          barColor: InsightTheme.blue1,
+          trackColor: InsightTheme.surface2,
+          textColor: InsightTheme.ink,
+          mutedTextColor: InsightTheme.ink2,
+          segmentColors: const [
+            InsightTheme.blue1,
+            InsightTheme.green,
+            InsightTheme.amber,
+            InsightTheme.coral,
+            InsightTheme.blueInk,
+          ],
+        );
+    }
+  }
+
+  // WIDGET: wraps a set of _ActionTiles as one grouped card, dividers only
+  // between tiles sharing that card — never between separate cards (see
+  // "visually separate elements with whitespace").
+  Widget _actionGroupCard(List<_ActionTile> tiles) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: kCardShadow,
+      ),
+      child: Column(
+        children: [
+          for (int i = 0; i < tiles.length; i++) ...[
+            tiles[i],
+            if (i != tiles.length - 1)
+              const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+          ],
+        ],
+      ),
+    );
+  }
+
   // WIDGET: Dashboard card shell (consistent padding/border/shadow around
   // each analytics widget so the widgets themselves stay layout-agnostic).
+  // WIDGET: Dashboard card shell — plain container, no Expanded wrapper.
+  // Charts self-size via their own Column/mainAxisSize now that they live
+  // inside an AnimatedSwitcher rather than a fixed-height PageView.
   Widget _dashboardCard({required Widget child}) {
     return Container(
       width: double.infinity,
@@ -604,10 +732,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
       decoration: BoxDecoration(
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: InsightTheme.line),
-        boxShadow: const [
-          BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
-        ],
+        boxShadow: kCardShadow,
       ),
       child: child,
     );
@@ -635,33 +760,390 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     );
   }
 
-  // WIDGET: Stat Card
-  Widget _buildStatCard(String title, String count, IconData icon, Color color) {
+  // WIDGET: Stat Card — matches HTML reference: clean white surface card,
+  // neutral icon chip (surface2 for pending, blueTint for completed),
+  // no color tinting on the card background itself.
+  Widget _buildStatCard(String title, String count, IconData icon, Color iconBg, Color iconFg) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: InsightTheme.surface.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: InsightTheme.line),
-        boxShadow: const [
-          BoxShadow(color: Color(0x04141628), blurRadius: 10, offset: Offset(0, 4)),
-        ],
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: kCardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              shape: BoxShape.circle,
+              color: iconBg,
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: color, size: 20),
+            child: Icon(icon, size: 20, color: iconFg),
           ),
-          const SizedBox(height: 16),
-          Text(count, style: InsightTheme.poppins(24, w: FontWeight.w700)),
+          const SizedBox(height: 14),
+          Text(count,
+              style: InsightTheme.poppins(26, w: FontWeight.w800, c: InsightTheme.ink)),
           const SizedBox(height: 2),
-          Text(title, style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink2), overflow: TextOverflow.ellipsis, maxLines: 2),
+          Text(title,
+              style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink2),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+}
+
+/// ==================================================================
+/// IDENTITY HEADER — pinned SliverPersistentHeader that crossfades
+/// between the full identity card (expanded) and a compact bar
+/// (collapsed) as the user scrolls, then restores the full card once
+/// they scroll back to the top. Both states are always laid out; only
+/// their opacity/hit-testing swaps, which avoids any layout jump.
+/// ==================================================================
+class _IdentityHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final double expandedHeight;
+  final double collapsedHeight;
+  final String? avatarUrl;
+  final String initials;
+  final String displayName;
+  final String positionLabel;
+  final String userEmail;
+  final VoidCallback onEditTap;
+
+  _IdentityHeaderDelegate({
+    required this.expandedHeight,
+    required this.collapsedHeight,
+    required this.avatarUrl,
+    required this.initials,
+    required this.displayName,
+    required this.positionLabel,
+    required this.userEmail,
+    required this.onEditTap,
+  });
+
+  @override
+  double get minExtent => collapsedHeight;
+
+  @override
+  double get maxExtent => expandedHeight;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final range = expandedHeight - collapsedHeight;
+    final t = range <= 0 ? 0.0 : (shrinkOffset / range).clamp(0.0, 1.0);
+
+    // Smoothly interpolated values — single widget morphs, no dual-layer
+    // overlap artifact. Full card opacity drops to 0 in the first 60% of
+    // scroll; compact bar fades in from 40% onward. The two windows overlap
+    // briefly in the 40–60% band but each is below 0.5 opacity there, so
+    // the visual bleed is imperceptible. ClipRect prevents any overflow
+    // from the full card bleeding outside the header bounds during shrink.
+    final fullOpacity   = Curves.easeIn.transform((1 - t * 1.4).clamp(0.0, 1.0));
+    final compactOpacity = Curves.easeOut.transform(((t - 0.35) / 0.65).clamp(0.0, 1.0));
+
+    // Avatar size interpolates from 56 (expanded) → 36 (collapsed).
+    final avatarSize = lerpDouble(56.0, 36.0, t)!;
+    final avatarFontSize = lerpDouble(18.0, 12.0, t)!;
+
+    return ClipRect(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+        child: Stack(
+          children: [
+            // — Compact bar: fades in as user scrolls down —
+            Positioned.fill(
+              child: Opacity(
+                opacity: compactOpacity,
+                child: IgnorePointer(
+                  ignoring: t < 0.5,
+                  child: _CompactIdentityBar(
+                    avatarUrl: avatarUrl,
+                    initials: initials,
+                    displayName: displayName,
+                    positionLabel: positionLabel,
+                    onEditTap: onEditTap,
+                    avatarSize: avatarSize,
+                    avatarFontSize: avatarFontSize,
+                  ),
+                ),
+              ),
+            ),
+            // — Full card: fades out as user scrolls down —
+            // OverflowBox lets the card always lay out at the full expanded
+            // height so Flutter never measures it against the shrinking
+            // header height and emits the "bottom overflowed by N px" warning.
+            // ClipRect (above) already clips the visual output, so there is
+            // no visible change — only the yellow stripe is gone.
+            Positioned.fill(
+              child: Opacity(
+                opacity: fullOpacity,
+                child: IgnorePointer(
+                  ignoring: t > 0.5,
+                  child: OverflowBox(
+                    alignment: Alignment.topCenter,
+                    maxHeight: expandedHeight,
+                    child: _FullIdentityCard(
+                      avatarUrl: avatarUrl,
+                      initials: initials,
+                      displayName: displayName,
+                      positionLabel: positionLabel,
+                      userEmail: userEmail,
+                      onEditTap: onEditTap,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _IdentityHeaderDelegate oldDelegate) {
+    return oldDelegate.avatarUrl != avatarUrl ||
+        oldDelegate.initials != initials ||
+        oldDelegate.displayName != displayName ||
+        oldDelegate.positionLabel != positionLabel ||
+        oldDelegate.userEmail != userEmail ||
+        oldDelegate.expandedHeight != expandedHeight ||
+        oldDelegate.collapsedHeight != collapsedHeight;
+  }
+}
+
+/// WIDGET: Circular avatar — gradient fill + initials fallback, shared by
+/// both the full and compact identity states so they always agree visually.
+class _Avatar extends StatelessWidget {
+  final String? avatarUrl;
+  final String initials;
+  final double size;
+  final double fontSize;
+
+  const _Avatar({required this.avatarUrl, required this.initials, this.size = 56, this.fontSize = 18});
+
+  @override
+  Widget build(BuildContext context) {
+    // Border radius: rounded-2xl at full size (≈ size * 0.286 ≈ 16px for 56px),
+    // scales with size so it stays proportional in the compact bar.
+    final radius = (size * 0.286).clamp(10.0, 18.0);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: const LinearGradient(
+          colors: [InsightTheme.blue1, InsightTheme.blue2],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: InsightTheme.blue1.withOpacity(0.30),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+        border: Border.all(color: Colors.white, width: size > 44 ? 2.5 : 2),
+        image: avatarUrl != null
+            ? DecorationImage(image: NetworkImage(avatarUrl!), fit: BoxFit.cover)
+            : null,
+      ),
+      alignment: Alignment.center,
+      child: avatarUrl == null
+          ? Text(initials, style: InsightTheme.poppins(fontSize, w: FontWeight.w800, c: Colors.white))
+          : null,
+    );
+  }
+}
+
+/// WIDGET: Full identity card — matches HTML reference exactly:
+/// • Avatar is a rounded-2xl gradient square chip (not a circle)
+/// • Role shown in a blueTint pill with jetBrains uppercase text
+/// • Email row below divider
+/// • Edit button: icon + "Edit" text label
+class _FullIdentityCard extends StatelessWidget {
+  final String? avatarUrl;
+  final String initials;
+  final String displayName;
+  final String positionLabel;
+  final String userEmail;
+  final VoidCallback onEditTap;
+
+  const _FullIdentityCard({
+    required this.avatarUrl,
+    required this.initials,
+    required this.displayName,
+    required this.positionLabel,
+    required this.userEmail,
+    required this.onEditTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(color: Color(0x08141628), blurRadius: 20, offset: Offset(0, 6)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Gradient rounded-square avatar chip (matches HTML rounded-2xl)
+              _Avatar(avatarUrl: avatarUrl, initials: initials, size: 56, fontSize: 18),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(displayName,
+                        style: InsightTheme.poppins(16, w: FontWeight.w700, c: InsightTheme.ink),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 6),
+                    // Role badge pill — blueTint bg, blueInk jetBrains uppercase
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: InsightTheme.blueTint,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: InsightTheme.blue1.withOpacity(0.18)),
+                      ),
+                      child: Text(
+                        positionLabel.toUpperCase(),
+                        style: InsightTheme.jetBrains(9, w: FontWeight.w600, c: InsightTheme.blueInk, ls: 0.6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Edit button: icon + "Edit" label, blueTint bg
+              GestureDetector(
+                onTap: onEditTap,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.blueTint,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: InsightTheme.blue1.withOpacity(0.15)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.person_outline_rounded, size: 15, color: InsightTheme.blueInk),
+                      const SizedBox(width: 5),
+                      Text('Edit', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Divider(height: 1, color: InsightTheme.line),
+          const SizedBox(height: 12),
+          // Email row
+          Row(
+            children: [
+              const Icon(Icons.mail_outline_rounded, size: 14, color: InsightTheme.ink3),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  userEmail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: InsightTheme.inter(12.5, w: FontWeight.w500, c: InsightTheme.ink2),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// WIDGET: Compact identity bar shown once the user has scrolled — carries
+/// the same avatar/name identity forward instead of leaving a blank gap,
+/// echoing the requested "collapses into a slim bar" behavior but themed
+/// to this screen's light surface and without a non-functional back arrow
+/// (this screen is a bottom-nav tab, not a pushed route — a back affordance
+/// that did nothing would violate "never let users guess what happens next").
+class _CompactIdentityBar extends StatelessWidget {
+  final String? avatarUrl;
+  final String initials;
+  final String displayName;
+  final String positionLabel;
+  final VoidCallback onEditTap;
+  // Interpolated from the header delegate so the avatar size morphs
+  // continuously rather than snapping between two fixed sizes.
+  final double avatarSize;
+  final double avatarFontSize;
+
+  const _CompactIdentityBar({
+    required this.avatarUrl,
+    required this.initials,
+    required this.displayName,
+    required this.positionLabel,
+    required this.onEditTap,
+    this.avatarSize = 38,
+    this.avatarFontSize = 13,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(color: Color(0x08141628), blurRadius: 16, offset: Offset(0, 6)),
+        ],
+      ),
+      child: Row(
+        children: [
+          _Avatar(avatarUrl: avatarUrl, initials: initials, size: avatarSize, fontSize: avatarFontSize),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(displayName,
+                    style: InsightTheme.poppins(14.5, w: FontWeight.w700),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                Text(positionLabel,
+                    style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink2),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: onEditTap,
+            child: Container(
+              padding: const EdgeInsets.all(7),
+              decoration: const BoxDecoration(color: InsightTheme.blueTint, shape: BoxShape.circle),
+              child: const Icon(Icons.edit_outlined, size: 14, color: InsightTheme.blueInk),
+            ),
+          ),
         ],
       ),
     );
@@ -718,7 +1200,7 @@ class _ActionTile extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3.withOpacity(0.5), size: 20),
+            Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3, size: 20),
           ],
         ),
       ),

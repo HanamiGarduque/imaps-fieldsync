@@ -1,7 +1,5 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 
@@ -19,39 +17,7 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
 
-/// ==================================================================
-/// THEME COLORS & TOKENS (Strict Enterprise Theme)
-/// ==================================================================
-class InsightTheme {
-  static const Color bg = Color(0xFFF7F9FC); 
-  static const Color surface = Colors.white;
-  static const Color surface2 = Color(0xFFEDF1F5);
-  
-  static const Color ink = Color(0xFF0F172A);
-  static const Color ink2 = Color(0xFF475569);
-  static const Color ink3 = Color(0xFF94A3B8);
-  
-  static const Color blue1 = Color(0xFF2563EB); 
-  static const Color blue2 = Color(0xFF1D4ED8);
-  static const Color blueTint = Color(0xFFEFF6FF);
-  static const Color blueInk = Color(0xFF1E3A8A); 
-  
-  static const Color green = Color(0xFF16A34A);
-  static const Color greenTint = Color(0xFFF0FDF4);
-  static const Color greenInk = Color(0xFF14532D); 
-  
-  static const Color orange = Color(0xFFD97706);
-  static const Color orangeTint = Color(0xFFFFFBEB);
-  static const Color orangeInk = Color(0xFF78350F); 
-  
-  static const Color line = Color(0xFFE2E8F0); 
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
-      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
-}
+import '../../../core/theme/insight_theme.dart';
 
 /// ==================================================================
 /// CONSTANTS

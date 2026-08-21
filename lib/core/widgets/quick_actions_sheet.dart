@@ -218,18 +218,22 @@ class _QuickActionRowState extends State<_QuickActionRow> {
                     widget.action.title,
                     style: GoogleFonts.ibmPlexSans(
                       fontSize: 15.5,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                       color: QuickActionsSheet.ink,
+                      letterSpacing: -0.2,
                     ),
                   ),
                   if (subtitle != null && subtitle.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.ibmPlexSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: QuickActionsSheet.ink2,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w400,
+                        color: const Color(0xFF8A90A6),
+                        letterSpacing: 0.1,
                       ),
                     ),
                   ],

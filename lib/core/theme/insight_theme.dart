@@ -2,75 +2,142 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 /// ==================================================================
-/// PREMIUM INSIGHT DESIGN TOKENS
-/// Upgraded for Glassmorphism, richer shadows, and a Master Shell UI.
+/// CANONICAL INSIGHT LIGHT THEME & DESIGN SYSTEM
+/// Standardized against the Home Dashboard and Tasks screens.
 /// ==================================================================
-class InsightColors {
-  InsightColors._();
+class InsightTheme {
+  InsightTheme._();
 
-  // Base Backgrounds
-  static const bodyBg = Color(0xFF0A1119);
-  static const ink = Color(0xFF101B26);
-  
-  // Premium Panels & Glass
-  static const panel = Color(0xFF1B2A3A);
-  static const panel2 = Color(0x98203041); // #20304198 (panel-2, ARGB)
-  static const panelGlass = Color(0xB31B2A3A); // 70% opacity for frosted glass headers
-  static const panelTranslucent = Color(0x8C1B2A3A); // ~55% panel, for readouts
+  // Background & Surfaces
+  static const Color bg = Color(0xFFF4F6FB);
+  static const Color surface = Colors.white;
+  static const Color surface2 = Color(0xFFEDF0F7);
+  static const Color surfaceElevated = Color(0xFFFFFFFF);
 
-  // Lines & Borders
-  static const lineColor = Color(0x1E96AFC4); // rgba(150,175,196,0.12)
-  static const lineStrong = Color(0x3D96AFC4); // rgba(150,175,196,0.24)
+  // Typography Colors (Inks)
+  static const Color ink = Color(0xFF0F111A);
+  static const Color ink2 = Color(0xFF595E73);
+  static const Color ink3 = Color(0xFF969CB3);
 
-  // Typography Colors
-  static const parchment = Color(0xFFEDE7D9);
-  static const parchmentDim = Color(0xFFB9B2A0);
-  static const slate = Color(0xFF7C8AA0);
-  static const slateDim = Color(0xFF4C596B);
+  // Primary Brand Blues
+  static const Color blue1 = Color(0xFF3563FF);
+  static const Color blue2 = Color(0xFF0F32CA);
+  static const Color blueTint = Color(0xFFE4EBFF);
+  static const Color blueInk = Color(0xFF1336B8);
 
-  // Brand & Accents
-  static const surveyBlue = Color(0xFF5B9BC9);
-  static const surveyBlueDark = Color(0xFF3A729D); // Added for step indicators
-  static const amber = Color(0xFFE0A526);
-  static const amberDim = Color(0x29E0A526); // rgba(224,165,38,0.16)
-  static const green = Color(0xFF6FAE86);
-  static const greenDim = Color(0x296FAE86); // rgba(111,174,134,0.16)
-  static const coral = Color(0xFFD9765A);
-  static const coralDim = Color(0x29D9765A); // rgba(217,118,90,0.16)
+  // Semantics & Accents
+  static const Color red = Color(0xFFE23B4E);
+  static const Color redInk = Color(0xFFB72A3B);
+  static const Color redTint = Color(0xFFFFECEE);
 
-  // ==================================================================
-  // NEW PREMIUM TOKENS (For Master Shell & Stepper)
-  // ==================================================================
-  
-  static const primaryGradient = LinearGradient(
-    colors: [surveyBlue, surveyBlueDark],
+  static const Color green = Color(0xFF22C55E);
+  static const Color greenInk = Color(0xFF15803D);
+  static const Color greenTint = Color(0xFFEAF8F0);
+  static const Color greenDim = Color(0x296FAE86);
+
+  static const Color orange = Color(0xFFF59E0B);
+  static const Color orangeTint = Color(0xFFFEF3C7);
+  static const Color orangeInk = Color(0xFF78350F);
+  static const Color amber = Color(0xFFE0A526);
+  static const Color amberTint = Color(0xFFFEF3DE);
+  static const Color amberInk = Color(0xFFA66C00);
+  static const Color coral = Color(0xFFD9765A);
+
+  // Borders & Divider Lines
+  static const Color line = Color(0x15141628);
+  static const Color lineStrong = Color(0x25141628);
+
+  // Gradients
+  static const LinearGradient primaryGradient = LinearGradient(
+    colors: [blue1, blue2],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  static List<BoxShadow> get elegantShadow => [
+  static const LinearGradient accentGradient = LinearGradient(
+    colors: [blue1, Color(0xFF6B8EFF)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  // Typography Helpers
+  static TextStyle poppins(
+    double size, {
+    FontWeight w = FontWeight.w600,
+    Color? c,
+    double? h,
+    double? ls,
+  }) =>
+      GoogleFonts.poppins(
+        fontSize: size,
+        fontWeight: w,
+        color: c ?? ink,
+        height: h ?? 1.2,
+        letterSpacing: ls,
+      );
+
+  static TextStyle inter(
+    double size, {
+    FontWeight w = FontWeight.w400,
+    Color? c,
+    double? h,
+    double? ls,
+  }) =>
+      GoogleFonts.inter(
+        fontSize: size,
+        fontWeight: w,
+        color: c ?? ink2,
+        height: h ?? 1.5,
+        letterSpacing: ls,
+      );
+
+  static TextStyle jetBrains(
+    double size, {
+    FontWeight w = FontWeight.w500,
+    Color? c,
+    double? ls,
+  }) =>
+      GoogleFonts.jetBrainsMono(
+        fontSize: size,
+        fontWeight: w,
+        color: c ?? ink3,
+        letterSpacing: ls,
+      );
+
+  // Standard Dimension & Radii Tokens
+  static const double radiusSm = 12.0; // Inputs, badges, mini-pills
+  static const double radiusMd = 16.0; // Standard cards, action buttons
+  static const double radiusLg = 24.0; // Hero folders, big modal sheets
+
+  static final BorderRadius roundedSm = BorderRadius.circular(radiusSm);
+  static final BorderRadius roundedMd = BorderRadius.circular(radiusMd);
+  static final BorderRadius roundedLg = BorderRadius.circular(radiusLg);
+
+  // Standard Shadows
+  static const List<BoxShadow> cardShadow = [
     BoxShadow(
-      color: surveyBlue.withOpacity(0.12),
-      blurRadius: 24,
-      offset: const Offset(0, 12),
+      color: Color(0x08000000),
+      blurRadius: 12,
+      offset: Offset(0, 4),
+    ),
+  ];
+
+  static const List<BoxShadow> elevatedShadow = [
+    BoxShadow(
+      color: Color(0x0A141628),
+      blurRadius: 2,
+      offset: Offset(0, 1),
     ),
     BoxShadow(
-      color: Colors.black.withOpacity(0.4),
-      blurRadius: 8,
-      offset: const Offset(0, 4),
-    )
+      color: Color(0x0F141628),
+      blurRadius: 24,
+      offset: Offset(0, 8),
+    ),
   ];
 }
 
-class InsightText {
-  InsightText._();
+/// Global convenience constant for light card shadow
+const List<BoxShadow> kCardShadow = InsightTheme.cardShadow;
 
-  static TextStyle display(double size, {FontWeight w = FontWeight.w600, Color? c, double? h}) =>
-      GoogleFonts.spaceGrotesk(fontSize: size, fontWeight: w, color: c ?? InsightColors.parchment, height: h);
-
-  static TextStyle body(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) =>
-      GoogleFonts.ibmPlexSans(fontSize: size, fontWeight: w, color: c ?? InsightColors.parchment, height: h ?? 1.5);
-
-  static TextStyle mono(double size, {FontWeight w = FontWeight.w400, Color? c, double? ls}) =>
-      GoogleFonts.ibmPlexMono(fontSize: size, fontWeight: w, color: c ?? InsightColors.slate, letterSpacing: ls ?? 0.5);
-}
+/// Backwards compatibility alias
+typedef InsightColors = InsightTheme;

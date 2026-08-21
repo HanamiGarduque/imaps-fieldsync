@@ -682,31 +682,99 @@ class DBHelper {
   /// Paginated, newest-first fetch — the Notifications "Sync" tab loads
   /// this in pages (default 20) instead of the whole table at once, so a
   /// long-lived install with thousands of entries stays fast to open.
+  /// Automatically populates from historical `pending_actions` if
+  /// `sync_log_entries` was empty.
   static Future<List<Map<String, dynamic>>> getSyncLogEntries({
     int limit = 20,
     int offset = 0,
     String? jobId,
   }) async {
     final db = await database;
-    return db.query(
-      'sync_log_entries',
-      where: jobId != null ? 'job_id = ?' : null,
-      whereArgs: jobId != null ? [jobId] : null,
-      orderBy: 'created_at DESC',
-      limit: limit,
-      offset: offset,
-    );
+    try {
+      // Ensure sync_log_entries table exists
+      await db.execute(_syncLogEntriesSchema);
+    } catch (_) {}
+
+    try {
+      final totalLogs = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM sync_log_entries'),
+      ) ?? 0;
+
+      if (totalLogs == 0) {
+        // Backfill from pending_actions so past sync history is visible
+        final pastActions = await db.query(
+          'pending_actions',
+          orderBy: 'updated_at DESC',
+          limit: 50,
+        );
+        for (final a in pastActions) {
+          final type = a['type'] as String? ?? 'action';
+          final status = a['status'] as String? ?? 'synced';
+          final lastError = a['last_error'] as String?;
+          final updatedAt = a['updated_at'] as String? ??
+              a['created_at'] as String? ??
+              DateTime.now().toIso8601String();
+
+          String result = 'success';
+          if (status == 'failed') result = 'error';
+          if (status == 'conflict') result = 'warning';
+          if (status == 'pending' || status == 'syncing') result = 'info';
+
+          String actionTitle = 'Data Sync';
+          if (type == 'gps_confirm') actionTitle = 'GPS Confirmation';
+          if (type == 'checklist_update') actionTitle = 'Checklist Update';
+          if (type == 'submit_inspection') actionTitle = 'Inspection Submission';
+          if (type == 'status_change') actionTitle = 'Status Update';
+
+          final message = status == 'synced'
+              ? '$actionTitle synchronized successfully.'
+              : (status == 'failed'
+                  ? '$actionTitle sync failed: ${lastError ?? "Network error"}'
+                  : (status == 'conflict'
+                      ? '$actionTitle conflict detected.'
+                      : '$actionTitle queued for sync.'));
+
+          await db.insert('sync_log_entries', {
+            'id': a['id'] ?? const Uuid().v4(),
+            'pending_action_id': a['id'],
+            'job_id': a['job_id'],
+            'event_type': 'sync_${status}',
+            'result': result,
+            'message': message,
+            'technical_details': a['payload'],
+            'created_at': updatedAt,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
+      }
+    } catch (_) {}
+
+    try {
+      return await db.query(
+        'sync_log_entries',
+        where: jobId != null ? 'job_id = ?' : null,
+        whereArgs: jobId != null ? [jobId] : null,
+        orderBy: 'created_at DESC',
+        limit: limit,
+        offset: offset,
+      );
+    } catch (_) {
+      return [];
+    }
   }
 
   static Future<int> getSyncLogCount({String? jobId}) async {
     final db = await database;
-    final result = await db.rawQuery(
-      jobId != null
-          ? 'SELECT COUNT(*) as c FROM sync_log_entries WHERE job_id = ?'
-          : 'SELECT COUNT(*) as c FROM sync_log_entries',
-      jobId != null ? [jobId] : null,
-    );
-    return Sqflite.firstIntValue(result) ?? 0;
+    try {
+      final result = await db.rawQuery(
+        jobId != null
+            ? 'SELECT COUNT(*) as c FROM sync_log_entries WHERE job_id = ?'
+            : 'SELECT COUNT(*) as c FROM sync_log_entries',
+        jobId != null ? [jobId] : null,
+      );
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (_) {
+      return 0;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────
