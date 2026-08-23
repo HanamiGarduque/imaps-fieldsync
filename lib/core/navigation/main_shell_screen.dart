@@ -16,6 +16,7 @@ import '../../modules/profile_settings/screens/profile_edit_screen.dart';
 import '../../modules/profile_settings/screens/notifications_screen.dart';
 import '../../modules/inspection/screens/site_map_preview_screen.dart';
 import '../../modules/inspection/screens/compass_preview_screen.dart';
+import '../theme/insight_theme.dart';
 
 /// Single shell for the 4 primary tabs with fluid tab transitions
 /// and per-visit spring entrance animations.
@@ -292,7 +293,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
               imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
               child: Container(
                 width: 280, height: 280,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF3D6BFF).withValues(alpha: 0.16)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.16)),
               ),
             ),
           ),
@@ -302,7 +303,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
               imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
               child: Container(
                 width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF0B2FBF).withValues(alpha: 0.10)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue2.withValues(alpha: 0.10)),
               ),
             ),
           ),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/sync_outbox_service.dart';
 
+import '../theme/insight_theme.dart';
+
 /// Phase 5 — Sync Progress Indicator (compact variant).
 ///
 /// A thin, dismissible-feeling banner that shows live outbox-drain
@@ -25,7 +27,7 @@ class SyncProgressBanner extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          color: const Color(0xFF3D6BFF),
+          color: InsightTheme.blue1,
           child: SafeArea(
             bottom: false,
             child: Row(
@@ -42,11 +44,7 @@ class SyncProgressBanner extends StatelessWidget {
                 Expanded(
                   child: Text(
                     syncProgress.displayText,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: InsightTheme.inter(12.5, w: FontWeight.w600, c: Colors.white),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
