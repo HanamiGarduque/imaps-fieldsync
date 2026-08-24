@@ -15,6 +15,7 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
 import '../../../core/navigation/main_shell_screen.dart';
+import '../../../core/theme/insight_theme.dart';
 
 
 /// ==================================================================
@@ -28,9 +29,12 @@ class AppColors {
   static const ink2 = Color(0xFF666C82);
   static const ink3 = Color(0xFFA2A7BC);
   
-  static const blue1 = Color(0xFF3D6BFF);
-  static const blue2 = Color(0xFF0B2FBF);
-  static const blueInk = Color(0xFF1A3FC4);
+  // Brand blues now reference the canonical InsightTheme tokens - the old
+  // splash-local 3D6BFF/0B2FBF/1A3FC4 values were a second blue family that
+  // did not match the brand blues used across Home / Tasks / Inspection.
+  static const blue1 = InsightTheme.blue1;
+  static const blue2 = InsightTheme.blue2;
+  static const blueInk = InsightTheme.blueInk;
   
   static const amber = Color(0xFFFFB700);
   

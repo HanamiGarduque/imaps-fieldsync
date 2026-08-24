@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/insight_theme.dart';
 
 /// ==================================================================
 /// SHARED BOTTOM NAV — used by Home, Tasks, Updates, Profile.
@@ -98,8 +98,8 @@ class InsightBottomNav extends StatelessWidget {
   // Theme — existing InsightTheme values used across the app's screens,
   // not new hex. `_chipBg`/`_chipBorder` mirror the reference's neutral
   // slate-50/black-5% chip look using the app's own off-white tone.
-  static const _blue1 = Color(0xFF3D6BFF);
-  static const _blue2 = Color(0xFF0B2FBF);
+  static const _blue1 = InsightTheme.blue1; // canonical brand blue
+  static const _blue2 = InsightTheme.blue2;
   static const _inactiveIcon = Color.fromARGB(255, 100, 106, 122);
   static const _orange = Color(0xFFF59E0B); // InsightTheme.orange (== amber-500)
   static const _chipBg = Color(0xFFF2F4FB); // InsightTheme.bg
@@ -121,7 +121,7 @@ class InsightBottomNav extends StatelessWidget {
   static const _transitionDuration = Duration(milliseconds: 320);
   static const _transitionCurve = Curves.easeOutCubic;
 
-  static TextStyle get _labelStyle => GoogleFonts.spaceGrotesk(fontSize: 14, fontWeight: FontWeight.w500);
+  static TextStyle get _labelStyle => InsightTheme.inter(14, w: FontWeight.w500);
 
   double get _itemHeight => _railAndTriggerSize - _railInnerPad * 2; // 48, matches reference w-12/h-12
   double get _itemRadius => _itemHeight / 2; // rounded-full
@@ -412,7 +412,7 @@ class _NavPillItem extends StatelessWidget {
                     padding: const EdgeInsets.only(left: InsightBottomNav._labelGap),
                     child: Text(
                       item.label,
-                      style: GoogleFonts.spaceGrotesk(fontSize: 14, fontWeight: FontWeight.w500, color: Colors.white),
+                      style: InsightTheme.inter(14, w: FontWeight.w500, c: Colors.white),
                       maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.clip,

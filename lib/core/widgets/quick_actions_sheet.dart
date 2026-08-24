@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/insight_theme.dart';
 
 /// ==================================================================
 /// QUICK ACTIONS SHEET
@@ -11,9 +11,8 @@ import 'package:google_fonts/google_fonts.dart';
 /// — Master explicitly asked for the floating, inset, rounded-card look
 /// from the reference instead, with each row staggering in on open.
 ///
-/// Fonts: spaceGrotesk (title) / ibmPlexSans (row labels) — reused from
-/// the same pairing already established in
-/// active_assignments_folder_card.dart, not a new import.
+/// Fonts: Poppins (title) / Inter (rows) - the canonical pairing.
+
 /// ==================================================================
 
 class QuickAction {
@@ -67,7 +66,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
               children: [
                 Text(
                   'Quick actions',
-                  style: GoogleFonts.spaceGrotesk(fontSize: 20, fontWeight: FontWeight.w700, color: QuickActionsSheet.ink, letterSpacing: -0.3),
+                  style: InsightTheme.poppins(20, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.3),
                 ),
                 GestureDetector(
                   onTap: widget.onClose,
@@ -216,12 +215,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
                 children: [
                   Text(
                     widget.action.title,
-                    style: GoogleFonts.ibmPlexSans(
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w700,
-                      color: QuickActionsSheet.ink,
-                      letterSpacing: -0.2,
-                    ),
+                    style: InsightTheme.inter(15.5, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.2),
                   ),
                   if (subtitle != null && subtitle.isNotEmpty) ...[
                     const SizedBox(height: 2),
@@ -229,12 +223,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
                       subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.ibmPlexSans(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w400,
-                        color: const Color(0xFF8A90A6),
-                        letterSpacing: 0.1,
-                      ),
+                      style: InsightTheme.inter(11.5, w: FontWeight.w400, c: const Color(0xFF8A90A6), ls: 0.1),
                     ),
                   ],
                 ],

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/insight_theme.dart';
+
 enum ImapsLoadingState {
   syncingData,
   loadingMaps,
@@ -40,12 +42,15 @@ class _ImapsLoadingIndicatorState extends State<ImapsLoadingIndicator>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
-  static const _ringColors = [
-    Color(0xFFE7F0FF),
-    Color(0xFFA9C4FF),
-    Color(0xFF5A8CFF),
+  // Canonical blue ramp (InsightTheme tokens). Replaces the old private
+  // E7F0FF/A9C4FF/5A8CFF/255DFF family so every loading state shares the
+  // same brand blues as the rest of the app.
+  static final _ringColors = [
+    InsightTheme.blueTint,
+    InsightTheme.blue1.withValues(alpha: 0.55),
+    InsightTheme.blue1,
   ];
-  static const _centerColor = Color(0xFF255DFF);
+  static final _centerColor = InsightTheme.blue2;
 
   @override
   void initState() {
@@ -80,7 +85,7 @@ class _ImapsLoadingIndicatorState extends State<ImapsLoadingIndicator>
                   Container(
                     width: widget.size * 0.22,
                     height: widget.size * 0.22,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       color: _centerColor,
                       shape: BoxShape.circle,
                     ),
@@ -94,11 +99,7 @@ class _ImapsLoadingIndicatorState extends State<ImapsLoadingIndicator>
           const SizedBox(height: 12),
           Text(
             widget.label!,
-            style: const TextStyle(
-              color: Color(0xFF0D1B3D),
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
+            style: InsightTheme.inter(14, w: FontWeight.w500, c: InsightTheme.ink),
           ),
         ],
       ],

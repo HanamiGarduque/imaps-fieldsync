@@ -117,7 +117,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
               Navigator.pop(dialogContext);
               _removePhoto(index);
             },
-            child: const Text('Remove', style: TextStyle(color: Color(0xFFD1293D))),
+            child: const Text('Remove', style: TextStyle(color: InsightTheme.redInk)),
           ),
         ],
       ),
@@ -404,7 +404,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white.withValues(alpha: 0.1))),
-                child: Text(_geotagText, style: GoogleFonts.firaCode(color: Colors.white, fontSize: 11, height: 1.4)),
+                child: Text(_geotagText, style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 11, height: 1.4)),
               ),
             ),
             Align(

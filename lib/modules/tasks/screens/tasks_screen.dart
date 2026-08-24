@@ -948,7 +948,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 decoration: BoxDecoration(
                   color: InsightTheme.blue1,
                   borderRadius: BorderRadius.circular(16),
-                  boxShadow: const [BoxShadow(color: Color(0x1A2563EB), blurRadius: 16, offset: Offset(0, 6))],
+                  boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.10), blurRadius: 16, offset: const Offset(0, 6))],
                 ),
                 child: Column(
                   children: [
@@ -1665,10 +1665,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: isUrgent ? const Color(0xFFFEF2F2) : InsightTheme.surface,
+        color: isUrgent ? InsightTheme.redTint : InsightTheme.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isUrgent ? const Color(0xFFEF4444) : InsightTheme.line,
+          color: isUrgent ? InsightTheme.red : InsightTheme.line,
           width: isUrgent ? 1.4 : 1,
         ),
         boxShadow: const [BoxShadow(color: Color(0x06000000), blurRadius: 8, offset: Offset(0, 2))],
@@ -1822,11 +1822,11 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFFB45309)),
+                                      const Icon(Icons.schedule_rounded, size: 11, color: InsightTheme.orangeInk),
                                       const SizedBox(width: 4),
                                       Text(
                                         'Modified',
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: const Color(0xFFB45309)),
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk),
                                       ),
                                     ],
                                   ),
@@ -1836,7 +1836,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: widget.task.scheduleUrgency == 'Overdue'
-                                        ? const Color(0xFFFEE2E2)
+                                        ? InsightTheme.redTint
                                         : InsightTheme.orangeTint,
                                     borderRadius: BorderRadius.circular(999),
                                   ),
@@ -1846,7 +1846,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                       Icon(
                                         widget.task.scheduleUrgency == 'Overdue' ? Icons.warning_rounded : Icons.access_time_rounded,
                                         size: 11,
-                                        color: widget.task.scheduleUrgency == 'Overdue' ? const Color(0xFFB91C1C) : InsightTheme.orangeInk,
+                                        color: widget.task.scheduleUrgency == 'Overdue' ? InsightTheme.redInk : InsightTheme.orangeInk,
                                       ),
                                       const SizedBox(width: 4),
                                       Text(
@@ -1854,7 +1854,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                         style: InsightTheme.inter(
                                           10, w: FontWeight.w700,
                                           c: widget.task.scheduleUrgency == 'Overdue'
-                                              ? const Color(0xFFB91C1C)
+                                              ? InsightTheme.redInk
                                               : InsightTheme.orangeInk,
                                         ),
                                       ),
