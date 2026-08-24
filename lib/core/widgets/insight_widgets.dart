@@ -8,7 +8,7 @@ import '../theme/insight_theme.dart';
 /// so every placeholder screen looks consistent with the prototype.
 /// ==================================================================
 
-/// Wraps a screen body in the InSight dark scaffold background.
+/// Wraps a screen body in the InSight light scaffold background.
 class InsightScaffold extends StatelessWidget {
   final Widget? topBar;
   final Widget? stepBar;
@@ -28,14 +28,14 @@ class InsightScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: InsightColors.ink,
-      body: SafeArea(
+      backgroundColor: InsightTheme.bg,
+            body: SafeArea(
         child: Column(
           children: [
-            if (topBar != null) topBar!,
-            if (stepBar != null) stepBar!,
+            ?topBar,
+            ?stepBar,
             Expanded(child: Padding(padding: bodyPadding, child: body)),
-            if (bottomBar != null) bottomBar!,
+            ?bottomBar,
           ],
         ),
       ),
@@ -66,9 +66,9 @@ class InsightTopBar extends StatelessWidget implements PreferredSizeWidget {
             const SizedBox(width: 8),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(title, style: InsightText.display(17, w: FontWeight.w600)),
+            child: Text(title, style: InsightTheme.poppins(17, w: FontWeight.w600)),
           ),
-          if (trailing != null) trailing!,
+                    ?trailing,
         ],
       ),
     );
@@ -92,10 +92,10 @@ class InsightIconButton extends StatelessWidget {
         height: 32,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: InsightColors.lineStrong),
+          border: Border.all(color: InsightTheme.lineStrong),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon, size: 16, color: InsightColors.parchment),
+        child: Icon(icon, size: 16, color: InsightTheme.ink),
       ),
     );
   }
@@ -132,10 +132,10 @@ class InsightStepBar extends StatelessWidget {
                   height: 4,
                   decoration: BoxDecoration(
                     color: now
-                        ? InsightColors.amber
+                        ? InsightTheme.amber
                         : done
-                            ? InsightColors.surveyBlue
-                            : InsightColors.lineStrong,
+                            ? InsightTheme.blue1
+                            : InsightTheme.lineStrong,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -150,8 +150,8 @@ class InsightStepBar extends StatelessWidget {
             child: RichText(
               text: TextSpan(
                 children: [
-                  TextSpan(text: '$stepNumber  ', style: InsightText.mono(10, w: FontWeight.w600, c: InsightColors.amber, ls: 1.2)),
-                  TextSpan(text: caption.toUpperCase(), style: InsightText.mono(10, ls: 1.2)),
+                  TextSpan(text: '$stepNumber  ', style: InsightTheme.jetBrains(10, w: FontWeight.w600, c: InsightTheme.amber, ls: 1.2)),
+                  TextSpan(text: caption.toUpperCase(), style: InsightTheme.jetBrains(10, ls: 1.2)),
                 ],
               ),
             ),
@@ -177,8 +177,8 @@ class InsightCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 14),
       padding: padding,
       decoration: BoxDecoration(
-        color: bgColor ?? InsightColors.panel,
-        border: Border.all(color: borderColor ?? InsightColors.lineStrong),
+        color: bgColor ?? InsightTheme.surface,
+        border: Border.all(color: borderColor ?? InsightTheme.lineStrong),
         borderRadius: BorderRadius.circular(12),
       ),
       child: child,
@@ -194,7 +194,7 @@ class InsightSectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 18, bottom: 10),
-      child: Text(text.toUpperCase(), style: InsightText.mono(10, ls: 1.4)),
+      child: Text(text.toUpperCase(), style: InsightTheme.jetBrains(10, ls: 1.4)),
     );
   }
 }
@@ -227,7 +227,7 @@ class InsightListRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 13),
         decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: InsightColors.lineColor)),
+          border: Border(bottom: BorderSide(color: InsightTheme.line)),
         ),
         child: Row(
           children: [
@@ -236,21 +236,21 @@ class InsightListRow extends StatelessWidget {
               height: 36,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: InsightColors.panel,
-                border: Border.all(color: iconBorderColor ?? InsightColors.lineStrong),
+                color: InsightTheme.surface,
+                border: Border.all(color: iconBorderColor ?? InsightTheme.lineStrong),
                 borderRadius: BorderRadius.circular(9),
               ),
-              child: Icon(icon, size: 17, color: iconColor ?? InsightColors.surveyBlue),
+              child: Icon(icon, size: 17, color: iconColor ?? InsightTheme.blue1),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: InsightText.body(13.5, w: FontWeight.w500)),
+                  Text(title, style: InsightTheme.inter(13.5, w: FontWeight.w500)),
                   if (subtitle != null) ...[
                     const SizedBox(height: 2),
-                    Text(subtitle!, style: InsightText.body(11.5, c: InsightColors.slate)),
+                    Text(subtitle!, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
                   ],
                 ],
               ),
@@ -258,7 +258,7 @@ class InsightListRow extends StatelessWidget {
             if (trailing != null)
               trailing!
             else if (onTap != null)
-              const Icon(Icons.chevron_right_rounded, color: InsightColors.slateDim),
+              const Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3),
           ],
         ),
       ),
@@ -277,15 +277,15 @@ class InsightPill extends StatelessWidget {
   ({Color fg, Color bg, Color border}) get _palette {
     switch (kind) {
       case InsightPillKind.pending:
-        return (fg: InsightColors.slate, bg: InsightColors.panelTranslucent, border: InsightColors.lineStrong);
+        return (fg: InsightTheme.ink2, bg: InsightTheme.surface2, border: InsightTheme.lineStrong);
       case InsightPillKind.ongoing:
       case InsightPillKind.review:
-        return (fg: InsightColors.amber, bg: InsightColors.amberDim, border: InsightColors.amber);
+        return (fg: InsightTheme.amber, bg: InsightTheme.amberTint, border: InsightTheme.amber);
       case InsightPillKind.completed:
       case InsightPillKind.compliant:
-        return (fg: InsightColors.green, bg: InsightColors.greenDim, border: InsightColors.green);
+        return (fg: InsightTheme.green, bg: InsightTheme.greenDim, border: InsightTheme.green);
       case InsightPillKind.discrepancy:
-        return (fg: InsightColors.coral, bg: InsightColors.coralDim, border: InsightColors.coral);
+        return (fg: InsightTheme.coral, bg: InsightTheme.redTint, border: InsightTheme.coral);
     }
   }
 
@@ -299,7 +299,7 @@ class InsightPill extends StatelessWidget {
         border: Border.all(color: p.border),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(label.toUpperCase(), style: InsightText.mono(9.5, c: p.fg, w: FontWeight.w500, ls: 0.6)),
+      child: Text(label.toUpperCase(), style: InsightTheme.jetBrains(9.5, c: p.fg, w: FontWeight.w500, ls: 0.6)),
     );
   }
 }
@@ -318,7 +318,7 @@ class InsightPrimaryButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: loading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: InsightColors.amber,
+          backgroundColor: InsightTheme.amber,
           foregroundColor: const Color(0xFF241A05),
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -328,7 +328,7 @@ class InsightPrimaryButton extends StatelessWidget {
             ? const SizedBox(
                 width: 20, height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2.4, color: Color(0xFF241A05)))
-            : Text(label, style: InsightText.display(14.5, w: FontWeight.w600, c: const Color(0xFF241A05))),
+            : Text(label, style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: const Color(0xFF241A05))),
       ),
     );
   }
@@ -347,12 +347,12 @@ class InsightSecondaryButton extends StatelessWidget {
       child: OutlinedButton(
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
-          foregroundColor: InsightColors.parchment,
-          side: const BorderSide(color: InsightColors.lineStrong),
+          foregroundColor: InsightTheme.ink,
+          side: const BorderSide(color: InsightTheme.lineStrong),
           padding: const EdgeInsets.symmetric(vertical: 13),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        child: Text(label, style: InsightText.body(13.5, w: FontWeight.w500)),
+        child: Text(label, style: InsightTheme.inter(13.5, w: FontWeight.w500)),
       ),
     );
   }
@@ -371,8 +371,8 @@ class InsightReadout extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: InsightColors.panelTranslucent,
-        border: Border.all(color: InsightColors.lineStrong),
+        color: InsightTheme.surface2,
+        border: Border.all(color: InsightTheme.lineStrong),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -380,25 +380,25 @@ class InsightReadout extends StatelessWidget {
           Container(
             width: 8, height: 8,
             decoration: BoxDecoration(
-              color: InsightColors.green,
+              color: InsightTheme.green,
               shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: InsightColors.green.withOpacity(0.18), blurRadius: 6, spreadRadius: 3)],
+              boxShadow: [BoxShadow(color: InsightTheme.green.withValues(alpha: 0.18), blurRadius: 6, spreadRadius: 3)],
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: RichText(
               text: TextSpan(children: [
-                TextSpan(text: '$label1  ', style: InsightText.mono(9.5, ls: 0.6)),
-                TextSpan(text: value1, style: InsightText.mono(11.5, c: InsightColors.parchment)),
+                TextSpan(text: '$label1  ', style: InsightTheme.jetBrains(9.5, ls: 0.6)),
+                TextSpan(text: value1, style: InsightTheme.jetBrains(11.5, c: InsightTheme.ink)),
               ]),
             ),
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(accValue, style: InsightText.mono(13, c: InsightColors.surveyBlue, w: FontWeight.w500)),
-              Text(accLabel, style: InsightText.mono(9)),
+              Text(accValue, style: InsightTheme.jetBrains(13, c: InsightTheme.blue1, w: FontWeight.w500)),
+              Text(accLabel, style: InsightTheme.jetBrains(9)),
             ],
           ),
         ],
@@ -423,7 +423,7 @@ class InsightChecklistItem extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 13),
         decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: InsightColors.lineColor)),
+          border: Border(bottom: BorderSide(color: InsightTheme.line)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -432,21 +432,21 @@ class InsightChecklistItem extends StatelessWidget {
               width: 20, height: 20,
               margin: const EdgeInsets.only(top: 1),
               decoration: BoxDecoration(
-                color: checked ? InsightColors.green : Colors.transparent,
-                border: Border.all(color: checked ? InsightColors.green : InsightColors.lineStrong, width: 1.5),
+                color: checked ? InsightTheme.green : Colors.transparent,
+                border: Border.all(color: checked ? InsightTheme.green : InsightTheme.lineStrong, width: 1.5),
                 borderRadius: BorderRadius.circular(5),
               ),
-              child: checked ? const Icon(Icons.check_rounded, size: 13, color: InsightColors.ink) : null,
+              child: checked ? const Icon(Icons.check_rounded, size: 13, color: InsightTheme.surface) : null,
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: InsightText.body(13.5, w: FontWeight.w500)),
+                  Text(title, style: InsightTheme.inter(13.5, w: FontWeight.w500)),
                   if (subtitle != null) ...[
                     const SizedBox(height: 3),
-                    Text(subtitle!, style: InsightText.body(11.5, c: InsightColors.slate)),
+                    Text(subtitle!, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
                   ],
                 ],
               ),
@@ -471,16 +471,16 @@ class InsightCompareCell extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(11),
         decoration: BoxDecoration(
-          color: mismatch ? InsightColors.coralDim : InsightColors.panel,
-          border: Border.all(color: mismatch ? InsightColors.coral : InsightColors.lineStrong),
+          color: mismatch ? InsightTheme.redTint : InsightTheme.surface,
+          border: Border.all(color: mismatch ? InsightTheme.coral : InsightTheme.lineStrong),
           borderRadius: BorderRadius.circular(9),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label.toUpperCase(), style: InsightText.mono(9, ls: 0.6)),
+            Text(label.toUpperCase(), style: InsightTheme.jetBrains(9, ls: 0.6)),
             const SizedBox(height: 5),
-            Text(value, style: InsightText.body(13, w: FontWeight.w500, c: mismatch ? InsightColors.coral : InsightColors.parchment)),
+            Text(value, style: InsightTheme.inter(13, w: FontWeight.w500, c: mismatch ? InsightTheme.coral : InsightTheme.ink)),
           ],
         ),
       ),
@@ -505,8 +505,8 @@ class InsightResultOption extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
-          color: selected ? InsightColors.amberDim : Colors.transparent,
-          border: Border.all(color: selected ? InsightColors.amber : InsightColors.lineStrong),
+          color: selected ? InsightTheme.amberTint : Colors.transparent,
+          border: Border.all(color: selected ? InsightTheme.amber : InsightTheme.lineStrong),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
@@ -515,19 +515,19 @@ class InsightResultOption extends StatelessWidget {
               width: 18, height: 18,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: selected ? InsightColors.amber : Colors.transparent,
-                border: Border.all(color: selected ? InsightColors.amber : InsightColors.lineStrong, width: 1.5),
+                color: selected ? InsightTheme.amber : Colors.transparent,
+                border: Border.all(color: selected ? InsightTheme.amber : InsightTheme.lineStrong, width: 1.5),
               ),
-              child: selected ? Center(child: Container(width: 6, height: 6, decoration: const BoxDecoration(color: InsightColors.ink, shape: BoxShape.circle))) : null,
+              child: selected ? Center(child: Container(width: 6, height: 6, decoration: const BoxDecoration(color: InsightTheme.surface, shape: BoxShape.circle))) : null,
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: InsightText.body(13.5, w: FontWeight.w500)),
+                  Text(title, style: InsightTheme.inter(13.5, w: FontWeight.w500)),
                   const SizedBox(height: 2),
-                  Text(subtitle, style: InsightText.body(11, c: InsightColors.slate)),
+                  Text(subtitle, style: InsightTheme.inter(11, c: InsightTheme.ink2)),
                 ],
               ),
             ),
@@ -550,11 +550,11 @@ class InsightTextBlock extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
-        color: InsightColors.panel,
-        border: Border.all(color: InsightColors.lineStrong),
+        color: InsightTheme.surface,
+        border: Border.all(color: InsightTheme.lineStrong),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Text(text, style: InsightText.body(12.5, c: InsightColors.parchmentDim)),
+      child: Text(text, style: InsightTheme.inter(12.5, c: InsightTheme.ink3)),
     );
   }
 }
@@ -584,9 +584,9 @@ class InsightPhotoGrid extends StatelessWidget {
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: InsightColors.slate, style: BorderStyle.solid),
+                border: Border.all(color: InsightTheme.ink2, style: BorderStyle.solid),
               ),
-              child: const Icon(Icons.add_rounded, color: InsightColors.slate),
+              child: const Icon(Icons.add_rounded, color: InsightTheme.ink2),
             ),
           );
         }
@@ -595,7 +595,7 @@ class InsightPhotoGrid extends StatelessWidget {
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: InsightColors.lineStrong),
+            border: Border.all(color: InsightTheme.lineStrong),
             gradient: const LinearGradient(
               begin: Alignment.topLeft, end: Alignment.bottomRight,
               colors: [Color(0xFF233246), Color(0xFF1A2634)],
@@ -603,8 +603,8 @@ class InsightPhotoGrid extends StatelessWidget {
           ),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-            decoration: BoxDecoration(color: InsightColors.ink.withOpacity(0.6), borderRadius: BorderRadius.circular(4)),
-            child: Text(tags[i], style: InsightText.mono(8, c: InsightColors.parchmentDim)),
+            decoration: BoxDecoration(color: InsightTheme.ink.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(4)),
+            child: Text(tags[i], style: InsightTheme.jetBrains(8, c: InsightTheme.ink3)),
           ),
         );
       },
