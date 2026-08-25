@@ -78,6 +78,10 @@ class TaskItem {
   final String? applicantEmail;
   final int currentStep;
   final bool isSelfScheduled;
+  // F1 fix: real per-step saved times, parsed from field_jobs.step_timestamps
+  // ({"1": "2026-08-25T04:00:00.000Z", ...}). Keyed by step number so the
+  // Task Overview can show when each step was actually saved per task.
+  final Map<int, String> stepTimestamps;
   final String createdAt;
   final String? startedAt;
   // Rework redesign: non-null while a completed task has an unfinished
@@ -101,6 +105,7 @@ class TaskItem {
     this.checklistCompletedCount = 0, this.checklistTotalCount = 0, this.submittedAt,
     this.checklistData = const [], this.confirmedLatitude, this.confirmedLongitude,
     this.gpsAccuracyM, this.gpsConfirmedAt, this.isSelfScheduled = false,
+    this.stepTimestamps = const <int, String>{},
     this.applicantPhone, this.applicantEmail,
     this.currentStep = 0,
     this.createdAt = '',
@@ -155,6 +160,11 @@ class TaskItem {
       gpsConfirmedAt: job['gps_confirmed_at'] as String?,
       applicationType: application?['application_type'] as String?,
       isSelfScheduled: job['is_self_scheduled'] as bool? ?? false,
+      stepTimestamps: job['step_timestamps'] is Map
+          ? (job['step_timestamps'] as Map).map(
+              (k, v) => MapEntry(int.tryParse(k.toString()) ?? 0, v.toString()),
+            )
+          : const <int, String>{},
       currentStep: (job['current_step'] as num?)?.toInt() ?? 0,
       createdAt: job['created_at'] as String? ?? '',
       startedAt: job['started_at'] as String?,
@@ -212,7 +222,13 @@ class TaskItem {
   /// how urgent it now is, so it doesn't just quietly sit there once due —
   /// used for the "Due today" / "Overdue" badge in the Scheduled tab.
   String? get scheduleUrgency {
-    if (category != 'Scheduled' || scheduledDate.isEmpty) return null;
+    // Priority-color fix (approved 3-gate change): gate on isScheduledPlan,
+    // not category — a scheduled task that has already started (category
+    // short-circuits to 'Ongoing') still renders in the Pending tab's
+    // Scheduled section and must keep its Due today / Overdue indicator.
+    // scheduled_date (Visit) drives this indicator only; deadline_date
+    // drives the separate red urgency state (see isUrgentDeadline).
+    if (!isScheduledPlan || scheduledDate.isEmpty) return null;
     try {
       final due = DateTime.parse(scheduledDate);
       final today = DateTime.now();
@@ -243,6 +259,25 @@ class TaskItem {
       final dueDay = DateTime(due.year, due.month, due.day);
       final todayDay = DateTime(today.year, today.month, today.day);
       return dueDay.isAfter(todayDay); // booked for a future date
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// True when the deadline is today or tomorrow but NOT yet past — the
+  /// "approaching" band. Part of the disjoint urgency-filter model:
+  /// Urgent (approaching) and Overdue (past) no longer overlap, and each
+  /// matches its card badge ('Deadline today'/'Deadline tomorrow' vs
+  /// 'Overdue').
+  bool get isDueSoonDeadline {
+    if (deadlineDate == null || deadlineDate!.isEmpty) return false;
+    try {
+      final due = DateTime.parse(deadlineDate!);
+      final today = DateTime.now();
+      final dueDay = DateTime(due.year, due.month, due.day);
+      final todayDay = DateTime(today.year, today.month, today.day);
+      final diff = dueDay.difference(todayDay).inDays;
+      return diff == 0 || diff == 1;
     } catch (_) {
       return false;
     }
@@ -313,7 +348,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   DateTime? _customStartDate;
   DateTime? _customEndDate;
   String _selectedBarangay = 'All Barangays';
-  // 'All' | 'Overdue' | 'Due today' — new quick-filter inside the filter sheet.
+  // 'All' | 'Urgent' | 'Scheduled' | 'Overdue' — finalized urgency
+  // quick-filter inside the filter sheet (deadline-driven; see the
+  // switch in _categorizeAndFilter for each option's exact condition).
   String _urgencyFilter = 'All';
 
   // Internal categorization/sorting still uses all 4 real categories —
@@ -553,16 +590,21 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                       children: [
                         const SizedBox(height: 24),
 
-                        // PRIORITY / URGENCY SECTION — new, per request:
-                        // quick filter for Overdue and Due Today, using the
-                        // same task.scheduleUrgency values already computed
-                        // and already shown on the card badges — no new
-                        // data source.
+                        // URGENCY SECTION — disjoint filter model (revised
+                        // after testing showed Urgent ⊇ Overdue made the two
+                        // chips return identical counts): All / Urgent /
+                        // Scheduled / Overdue — Urgent = admin deadline_date
+                        // is today or tomorrow (approaching, NOT yet past),
+                        // Scheduled = on the schedule plan (orange), Overdue
+                        // = admin deadline already passed. No overlap between
+                        // Urgent and Overdue; each matches its card badge.
+                        // Visit date drives no filter option; Completed
+                        // never matches.
                         Row(
                           children: [
                             const Icon(Icons.priority_high_rounded, color: InsightTheme.ink3, size: 18),
                             const SizedBox(width: 8),
-                            Text('FILTER BY PRIORITY', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
+                            Text('FILTER BY URGENCY', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
                           ],
                         ),
                         const SizedBox(height: 12),
@@ -578,19 +620,35 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                             const SizedBox(width: 8),
                             Expanded(
                               child: _NativeFilterChip(
+                                label: 'Urgent',
+                                isSelected: tempUrgency == 'Urgent',
+                                onTap: () => setModalState(() => tempUrgency = 'Urgent'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _NativeFilterChip(
+                                label: 'Scheduled',
+                                isSelected: tempUrgency == 'Scheduled',
+                                onTap: () => setModalState(() => tempUrgency = 'Scheduled'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _NativeFilterChip(
                                 label: 'Overdue',
                                 isSelected: tempUrgency == 'Overdue',
                                 onTap: () => setModalState(() => tempUrgency = 'Overdue'),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Expanded(
-                              child: _NativeFilterChip(
-                                label: 'Due Today',
-                                isSelected: tempUrgency == 'Due today',
-                                onTap: () => setModalState(() => tempUrgency = 'Due today'),
-                              ),
-                            ),
+                            const Expanded(child: SizedBox()),
+                            const SizedBox(width: 8),
+                            const Expanded(child: SizedBox()),
                           ],
                         ),
                         const SizedBox(height: 24),
@@ -742,9 +800,13 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  // No divider between items (visual fix per
+                                  // user feedback): the per-row bottom border
+                                  // made the list look like a striped table.
+                                  // Selection is communicated by the tint +
+                                  // check icon alone.
                                   decoration: BoxDecoration(
                                     color: isSelected ? InsightTheme.blueTint : Colors.transparent,
-                                    border: Border(bottom: BorderSide(color: InsightTheme.line.withValues(alpha: 0.5))),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -827,7 +889,38 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         if (!task.location.toLowerCase().contains(_selectedBarangay.toLowerCase())) continue;
       }
       if (_urgencyFilter != 'All') {
-        if (task.scheduleUrgency != _urgencyFilter) continue;
+        // Disjoint urgency filter (revised): deadline-driven Urgent /
+        // Overdue that no longer overlap — Urgent = deadline today or
+        // tomorrow (isDueSoonDeadline), Overdue = deadline already past.
+        // Scheduled = plan membership. Completed tasks never match any
+        // option — they are not active urgency/priority items.
+        final bool isCompleted = task.category == 'Completed';
+        bool matches;
+        switch (_urgencyFilter) {
+          case 'Urgent':
+            matches = !isCompleted && task.isDueSoonDeadline;
+            break;
+          case 'Scheduled':
+            matches = !isCompleted && task.isScheduledPlan;
+            break;
+          case 'Overdue':
+            bool overdue = false;
+            if (!isCompleted && task.deadlineDate != null && task.deadlineDate!.isNotEmpty) {
+              try {
+                final due = DateTime.parse(task.deadlineDate!);
+                final now = DateTime.now();
+                overdue = DateTime(due.year, due.month, due.day)
+                    .isBefore(DateTime(now.year, now.month, now.day));
+              } catch (_) {
+                overdue = false;
+              }
+            }
+            matches = overdue;
+            break;
+          default:
+            matches = true;
+        }
+        if (!matches) continue;
       }
       if (_datePreset != null && task.scheduledDate.isNotEmpty) {
         try {
@@ -863,9 +956,14 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             final db = b.deadlineDate?.isNotEmpty == true ? b.deadlineDate! : '9999-12-31';
             return da.compareTo(db);
           case 'Completed':
+            // Newest-first (LIFO): the most recently submitted inspection
+            // is always the FIRST card in the Completed tab. submittedAt
+            // values are ISO-8601 strings, so a DESCENDING lexicographic
+            // compare equals newest-first. Tasks with no submittedAt yet
+            // carry an empty-string key and naturally sort last.
             final sa = a.submittedAt ?? '';
             final sb = b.submittedAt ?? '';
-            return sa.compareTo(sb);
+            return sb.compareTo(sa);
           default:
             return 0;
         }
@@ -1408,8 +1506,43 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Color _getStatusColor() {
     final cat = widget.task.category;
     if (cat == 'Completed') return InsightTheme.green;
+    // Final color semantics (approved lifecycle model): orange = Scheduled
+    // PENDING plan only. A scheduled task that has already started
+    // short-circuits to category 'Ongoing' and must stay BLUE there —
+    // orange must never become the primary Ongoing color.
     if (cat == 'Scheduled') return InsightTheme.orange;
     return InsightTheme.blue1;
+  }
+
+  /// Formats the real original submission timestamp (`field_jobs.submitted_at`,
+  /// mapped to TaskItem.submittedAt) as e.g. "Aug 26, 2026" for the Completed
+  /// card row. Deliberately NOT updated_at/Last-saved — those change during
+  /// rework and are owned by the Modified state, not the completion date.
+  String _formatCompletionDate(String iso) {
+    try {
+      final d = DateTime.parse(iso).toLocal();
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[d.month - 1]} ${d.day}, ${d.year}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  /// Deadline-driven urgency label for Ongoing cards (admin deadline_date;
+  /// same ≤1-day threshold as isUrgentDeadline, but with a human label).
+  String get _deadlineUrgencyLabel {
+    final dd = widget.task.deadlineDate;
+    if (dd == null || dd.isEmpty) return 'Deadline near';
+    try {
+      final due = DateTime.parse(dd);
+      final now = DateTime.now();
+      final diff = DateTime(due.year, due.month, due.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+      if (diff < 0) return 'Overdue';
+      if (diff == 0) return 'Deadline today';
+      return 'Deadline tomorrow';
+    } catch (_) {
+      return 'Deadline near';
+    }
   }
 
   // BUG FIX #1 (v2) — canLaunchUrl() itself was returning a null component
@@ -1643,8 +1776,27 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = _getStatusColor();
-    final isUrgent = widget.task.category == 'Scheduled' && widget.task.isUrgentDeadline;
+    // Border-signal priority color model (revised per field feedback): the
+    // card keeps its white surface in EVERY lifecycle state, but the BORDER
+    // now carries the priority — red when the deadline is urgent, orange
+    // when the task is on the schedule plan. The old accent-only model read
+    // as too quiet outdoors, and the standalone "Scheduled" pill was
+    // redundant inside the Scheduled section, so both were replaced by the
+    // border signal. Urgency is still driven by the admin deadline_date
+    // with the unchanged ≤1-day/overdue threshold.
+    final String taskCategory = widget.task.category;
+    // Orange border: the task is on the schedule plan (booked visit date)
+    // and isn't finished — Scheduled-PENDING and an In-Progress task living
+    // in the Scheduled section alike, so the whole section reads uniformly.
+    final bool showScheduleBorder =
+        widget.task.isScheduledPlan && taskCategory != 'Completed';
+    // Urgent gate: any active (non-Completed) task whose admin deadline is
+    // today/tomorrow/past. Drives ONLY the red avatar + red urgency pill —
+    // never a card fill or border.
+    final bool isUrgent = taskCategory != 'Completed' && widget.task.isUrgentDeadline;
+    // Red avatar for urgent (Scheduled and Ongoing alike); blue/orange/green
+    // otherwise via the unchanged _getStatusColor lifecycle mapping.
+    final statusColor = isUrgent ? InsightTheme.red : _getStatusColor();
     // Visual-only addition (approved Task 2 scope): a slim step-progress
     // bar under the badge row, matching the reference mockup. Reuses the
     // exact step math already used by the "In Progress" badge below —
@@ -1665,11 +1817,18 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: isUrgent ? InsightTheme.redTint : InsightTheme.surface,
+        // Border-signal model: surface stays white for sunlight readability;
+        // the border carries priority — red = urgent deadline (overrides),
+        // orange = on the schedule plan, neutral otherwise.
+        color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isUrgent ? InsightTheme.red : InsightTheme.line,
-          width: isUrgent ? 1.4 : 1,
+          color: isUrgent
+              ? InsightTheme.red
+              : showScheduleBorder
+                  ? InsightTheme.orange
+                  : InsightTheme.line,
+          width: (isUrgent || showScheduleBorder) ? 1.4 : 1,
         ),
         boxShadow: const [BoxShadow(color: Color(0x06000000), blurRadius: 8, offset: Offset(0, 2))],
       ),
@@ -1777,6 +1936,71 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               ),
                             ],
                           ),
+                          // F3 fix + Scheduled-section alignment fix: the
+                          // Pending tab's "Scheduled" section uses the
+                          // cross-cutting ScheduledActive bucket (any
+                          // non-Completed task on the schedule plan,
+                          // INCLUDING ones already In Progress). The Visit
+                          // row must use that SAME test — gating on
+                          // category == 'Scheduled' alone hid the Visit
+                          // date on In-Progress cards that still appear in
+                          // the Scheduled section.
+                          if (widget.task.isScheduledPlan &&
+                              widget.task.category != 'Completed' &&
+                              widget.task.scheduledDate.isNotEmpty) ...[
+                            const SizedBox(height: 5),
+                            Row(
+                              children: [
+                                const Icon(Icons.event_available_rounded, size: 13, color: InsightTheme.blue1),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Visit: ${widget.task.scheduledDate}',
+                                    style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (widget.task.category != 'Completed' && widget.task.deadlineDate != null && widget.task.deadlineDate!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.flag_rounded, size: 13, color: InsightTheme.orangeInk),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Deadline: ${widget.task.deadlineDate}',
+                                    style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          // Final lifecycle semantics: Completed cards show
+                          // the real original completion date from
+                          // field_jobs.submitted_at (never updated_at /
+                          // Last-saved — those belong to Modified/Rework).
+                          if (widget.task.category == 'Completed' &&
+                              widget.task.submittedAt != null &&
+                              widget.task.submittedAt!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.check_circle_rounded, size: 13, color: InsightTheme.green),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Completed: ${_formatCompletionDate(widget.task.submittedAt!)}',
+                                    style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           const SizedBox(height: 8),
                           // Status badges — same three conditions as before
                           // (Ongoing / Modified / scheduleUrgency), now
@@ -1787,6 +2011,12 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             spacing: 6,
                             runSpacing: 6,
                             children: [
+                              // NOTE: no standalone "Scheduled" pill — it was
+                              // redundant inside the Pending tab's Scheduled
+                              // section (the section header + orange border +
+                              // Visit row already say it) and added clutter
+                              // on urgent cards. Scheduled state is carried
+                              // by the orange border + avatar instead.
                               if (widget.task.category == 'Ongoing')
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1831,7 +2061,17 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                     ],
                                   ),
                                 ),
-                              if (widget.task.scheduleUrgency != null)
+                              // Double-Overdue fix: this pill (visit-date
+                              // driven) is suppressed when the deadline pill
+                              // below is already showing the exact same
+                              // label (e.g. both say "Overdue") — two
+                              // identical pills for different data sources
+                              // read as a rendering bug. Non-identical
+                              // labels ("Due today" vs "Deadline tomorrow")
+                              // still both render.
+                              if (widget.task.category != 'Completed' &&
+                                  widget.task.scheduleUrgency != null &&
+                                  !(isUrgent && _deadlineUrgencyLabel == widget.task.scheduleUrgency))
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
@@ -1857,6 +2097,32 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                               ? InsightTheme.redInk
                                               : InsightTheme.orangeInk,
                                         ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              // Deadline urgency pill (APPROVED accent
+                              // model): the PRIMARY urgent signal —
+                              // text-bearing, never color-alone. Extended
+                              // from Ongoing-only to ANY non-Completed
+                              // urgent task (Scheduled-pending included),
+                              // per the locked lifecycle matrix. Secondary
+                              // cue: red avatar square.
+                              if (isUrgent)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.redTint,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.warning_rounded, size: 11, color: InsightTheme.redInk),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _deadlineUrgencyLabel,
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.redInk),
                                       ),
                                     ],
                                   ),
