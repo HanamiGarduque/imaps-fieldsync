@@ -1,45 +1,40 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-
-import '../../../core/theme/insight_theme.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// iMAPS FieldSync - Active Assignments folder card (light iMAPS language)
+// iMAPS FieldSync • Active Assignments — Premium Glossy Folder Card
 //
 // Stack architecture:
-//   Layer 0 - White folder back (surface card, hairline border, kCardShadow)
-//   Layer 1 - (removed with the dark gloss treatment)
+//   Layer 0 — Deep Navy gradient folder back  (outer squircle shell)
+//   Layer 1 — Specular gloss highlight strip across the top-left of back
 //   Layer 2 — Document sheets fanning out from inside the folder
-//   Layer 3 - Light pocket (surface2, asymmetric folder-tab ClipPath kept)
-//   Layer 4 - (removed with the dark gloss treatment)
+//   Layer 3 — Glossy front pocket (ClipPath with asymmetric folder tab)
+//   Layer 4 — Radial shine overlay on pocket surface
 //   Layer 5 — Content: iMAPS FieldSync brand + assignment data
-//   Layer 6 - Status badge (canonical status tint/ink pair)
+//   Layer 6 — Status tab badge (top-right)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// One semantic status-color mapping, shared with the Tasks screen and the
-/// dashboard progress ring (canonical InsightTheme tokens):
-/// Ongoing = blue | Scheduled/Pending = orange | Completed = green.
 class _FolderAccent {
-  static Color tone(String status) {
+  static Color forStatus(String status) {
     switch (status) {
-      case 'Ongoing':   return InsightTheme.blue1;
-      case 'Completed': return InsightTheme.green;
-      default:          return InsightTheme.orange; // Pending & Scheduled
+      case 'Ongoing':   return const Color(0xFF60A5FA); // electric blue
+      case 'Scheduled': return const Color(0xFFA78BFA); // violet
+      case 'Completed': return const Color(0xFF34D399); // emerald
+      default:          return const Color(0xFFFBBF24); // amber — Pending
     }
   }
 
-  static Color tintOf(String status) {
+  static List<Color> gradientForStatus(String status) {
     switch (status) {
-      case 'Ongoing':   return InsightTheme.blueTint;
-      case 'Completed': return InsightTheme.greenTint;
-      default:          return InsightTheme.orangeTint;
-    }
-  }
-
-  static Color inkOf(String status) {
-    switch (status) {
-      case 'Ongoing':   return InsightTheme.blueInk;
-      case 'Completed': return InsightTheme.greenInk;
-      default:          return InsightTheme.orangeInk;
+      case 'Ongoing':
+        return [const Color(0xFF1E40AF), const Color(0xFF3B82F6)];
+      case 'Scheduled':
+        return [const Color(0xFF4C1D95), const Color(0xFF7C3AED)];
+      case 'Completed':
+        return [const Color(0xFF065F46), const Color(0xFF10B981)];
+      default: // Pending
+        return [const Color(0xFF92400E), const Color(0xFFF59E0B)];
     }
   }
 }
@@ -107,9 +102,8 @@ class _ActiveAssignmentsFolderCardState
 
   @override
   Widget build(BuildContext context) {
-    final accent   = _FolderAccent.tone(widget.status);
-    final tint   = _FolderAccent.tintOf(widget.status);
-    final ink    = _FolderAccent.inkOf(widget.status);
+    final accent   = _FolderAccent.forStatus(widget.status);
+    final gradient = _FolderAccent.gradientForStatus(widget.status);
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -120,23 +114,58 @@ class _ActiveAssignmentsFolderCardState
         scale: _scaleAnim,
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 6),
-          // Light iMAPS card language: white surface, hairline border,
-          // canonical soft shadow - same recipe as the dashboard group cards.
+          // ── Layer 0: Deep Navy gradient folder back ───────────────────────
           decoration: BoxDecoration(
-            color: InsightTheme.surface,
-            borderRadius: BorderRadius.circular(InsightTheme.radiusLg),
-            border: Border.all(color: InsightTheme.line, width: 1.2),
-            boxShadow: kCardShadow,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF0B1929), Color(0xFF0E2240), Color(0xFF091525)],
+              stops: [0.0, 0.55, 1.0],
+            ),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF000000).withValues(alpha: 0.55),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+              BoxShadow(
+                color: accent.withValues(alpha: 0.22),
+                blurRadius: 32,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(InsightTheme.radiusLg),
+            borderRadius: BorderRadius.circular(28),
             child: Stack(
               children: [
+                // ── Layer 1: Diagonal grain texture ────────────────────────
+                Positioned.fill(
+                  child: CustomPaint(painter: _GrainPainter()),
+                ),
+
+                // ── Layer 1b: Specular top-left gloss highlight ─────────────
+                Positioned(
+                  top: -40, left: -30,
+                  child: Container(
+                    width: 180, height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          Colors.white.withValues(alpha: 0.07),
+                          Colors.white.withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
 
                 // ── Layer 2: Document sheets fanning from top ───────────────
                 Positioned(
                   top: 16, left: 0, right: 0,
-                  child: _DocumentSheetRow(accent: accent),
+                  child: _DocumentSheetRow(accent: accent, gradient: gradient),
                 ),
 
                 // ── Layer 3 + 4 + 5: Glossy pocket + shine + content ───────
@@ -144,6 +173,7 @@ class _ActiveAssignmentsFolderCardState
                   bottom: 0, left: 0, right: 0,
                   child: _GlossyPocket(
                     accent: accent,
+                    gradient: gradient,
                     location: widget.location,
                     applicantName: widget.applicantName,
                     applicationType: widget.applicationType,
@@ -157,7 +187,7 @@ class _ActiveAssignmentsFolderCardState
                 // ── Layer 6: Status badge ───────────────────────────────────
                 Positioned(
                   top: 14, right: 14,
-                  child: _StatusBadge(status: widget.status, tint: tint, ink: ink),
+                  child: _StatusBadge(status: widget.status, accent: accent),
                 ),
               ],
             ),
@@ -173,7 +203,8 @@ class _ActiveAssignmentsFolderCardState
 // ─────────────────────────────────────────────────────────────────────────────
 class _DocumentSheetRow extends StatelessWidget {
   final Color accent;
-  const _DocumentSheetRow({required this.accent});
+  final List<Color> gradient;
+  const _DocumentSheetRow({required this.accent, required this.gradient});
 
   @override
   Widget build(BuildContext context) {
@@ -185,19 +216,19 @@ class _DocumentSheetRow extends StatelessWidget {
           Positioned(
             left: 46, bottom: 0,
             child: _Sheet(angle: -0.09, width: 86, height: 66,
-                accent: accent, lineWidths: [38, 55, 30]),
+                accent: accent, gradient: gradient, lineWidths: [38, 55, 30]),
           ),
           Positioned(
             left: 0, right: 0, bottom: 0,
             child: Center(
               child: _Sheet(angle: 0.0, width: 98, height: 78,
-                  accent: accent, lineWidths: [50, 66, 44, 58]),
+                  accent: accent, gradient: gradient, lineWidths: [50, 66, 44, 58]),
             ),
           ),
           Positioned(
             right: 46, bottom: 0,
             child: _Sheet(angle: 0.09, width: 84, height: 62,
-                accent: accent, lineWidths: [34, 52, 28]),
+                accent: accent, gradient: gradient, lineWidths: [34, 52, 28]),
           ),
         ],
       ),
@@ -210,6 +241,7 @@ class _Sheet extends StatelessWidget {
   final double width;
   final double height;
   final Color accent;
+  final List<Color> gradient;
   final List<double> lineWidths;
 
   const _Sheet({
@@ -217,6 +249,7 @@ class _Sheet extends StatelessWidget {
     required this.width,
     required this.height,
     required this.accent,
+    required this.gradient,
     required this.lineWidths,
   });
 
@@ -228,10 +261,20 @@ class _Sheet extends StatelessWidget {
         width: width,
         height: height,
         decoration: BoxDecoration(
-          color: InsightTheme.surface,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: InsightTheme.line),
-          boxShadow: kCardShadow,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.28),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+            BoxShadow(
+              color: accent.withValues(alpha: 0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,7 +283,7 @@ class _Sheet extends StatelessWidget {
             Container(
               height: 6,
               decoration: BoxDecoration(
-                color: accent,
+                gradient: LinearGradient(colors: gradient),
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
               ),
             ),
@@ -256,7 +299,7 @@ class _Sheet extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: i == 0
                           ? accent.withValues(alpha: 0.35)
-                          : InsightTheme.lineStrong,
+                          : const Color(0xFFCBD5E1).withValues(alpha: 0.70),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -275,6 +318,7 @@ class _Sheet extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _GlossyPocket extends StatelessWidget {
   final Color accent;
+  final List<Color> gradient;
   final String location;
   final String applicantName;
   final String applicationType;
@@ -285,6 +329,7 @@ class _GlossyPocket extends StatelessWidget {
 
   const _GlossyPocket({
     required this.accent,
+    required this.gradient,
     required this.location,
     required this.applicantName,
     required this.applicationType,
@@ -300,18 +345,54 @@ class _GlossyPocket extends StatelessWidget {
       clipper: _PocketClipper(),
       child: Container(
         height: 154,
-        // Pocket is tone-on-tone with the page background so the folder
-        // reads as paper in a light folder, not a glossy dark shell.
-        decoration: const BoxDecoration(
-          color: InsightTheme.surface2,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              gradient[0].withValues(alpha: 0.96),
+              gradient[1].withValues(alpha: 0.88),
+              const Color(0xFF071120),
+            ],
+            stops: const [0.0, 0.60, 1.0],
+          ),
         ),
         child: Stack(
           children: [
+            // ── Radial gloss orb (top-left of pocket) ──────────────────────
+            Positioned(
+              top: -20, left: 0,
+              child: Container(
+                width: 160, height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.14),
+                      Colors.white.withValues(alpha: 0.0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
-            // Hairline divider along the pocket top edge
+            // ── Gloss rim line at pocket top ────────────────────────────────
             Positioned(
               top: 0, left: 0, right: 0,
-              child: Container(height: 1, color: InsightTheme.line),
+              child: Container(
+                height: 1,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.0),
+                      Colors.white.withValues(alpha: 0.40),
+                      Colors.white.withValues(alpha: 0.12),
+                      Colors.white.withValues(alpha: 0.0),
+                    ],
+                    stops: const [0.0, 0.35, 0.65, 1.0],
+                  ),
+                ),
+              ),
             ),
 
             // ── Content ─────────────────────────────────────────────────────
@@ -328,22 +409,35 @@ class _GlossyPocket extends StatelessWidget {
                       Container(
                         width: 18, height: 18,
                         decoration: BoxDecoration(
-                          color: InsightTheme.blueTint,
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.white.withValues(alpha: 0.30),
+                              Colors.white.withValues(alpha: 0.10),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
                           borderRadius: BorderRadius.circular(5),
                           border: Border.all(
-                            color: InsightTheme.blue1.withValues(alpha: 0.15),
+                            color: Colors.white.withValues(alpha: 0.30),
+                            width: 0.8,
                           ),
                         ),
                         child: const Icon(
                           Icons.map_outlined,
                           size: 11,
-                          color: InsightTheme.blueInk,
+                          color: Colors.white,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
                         'iMAPS FieldSync',
-                        style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.8),
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white.withValues(alpha: 0.70),
+                          letterSpacing: 0.4,
+                        ),
                       ),
                       const Spacer(),
                       // Date pill
@@ -351,13 +445,20 @@ class _GlossyPocket extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 9, vertical: 3),
                         decoration: BoxDecoration(
-                          color: InsightTheme.surface,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: InsightTheme.line),
+                          color: Colors.white.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.18),
+                            width: 0.8,
+                          ),
                         ),
                         child: Text(
                           date,
-                          style: InsightTheme.jetBrains(9.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                          style: GoogleFonts.ibmPlexMono(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(alpha: 0.80),
+                          ),
                         ),
                       ),
                     ],
@@ -367,14 +468,24 @@ class _GlossyPocket extends StatelessWidget {
                   // Location — main title
                   Text(
                     location,
-                    style: InsightTheme.poppins(18, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4, h: 1.1),
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: -0.5,
+                      height: 1.1,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 3),
                   Text(
                     applicantName,
-                    style: InsightTheme.inter(11.5, w: FontWeight.w400, c: InsightTheme.ink2),
+                    style: GoogleFonts.ibmPlexSans(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w400,
+                      color: Colors.white.withValues(alpha: 0.60),
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -392,14 +503,23 @@ class _GlossyPocket extends StatelessWidget {
                           children: [
                             Text(
                               referenceNo,
-                              style: InsightTheme.jetBrains(12.5, w: FontWeight.w700, c: InsightTheme.ink, ls: 0.4),
+                              style: GoogleFonts.ibmPlexMono(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                letterSpacing: 0.4,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'ID: $inspectionId  ·  $applicationType',
-                              style: InsightTheme.inter(9.5, w: FontWeight.w400, c: InsightTheme.ink3),
+                              style: GoogleFonts.ibmPlexSans(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w400,
+                                color: Colors.white.withValues(alpha: 0.45),
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -413,13 +533,30 @@ class _GlossyPocket extends StatelessWidget {
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: InsightTheme.surface,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.white.withValues(alpha: 0.22),
+                              Colors.white.withValues(alpha: 0.08),
+                            ],
+                          ),
                           shape: BoxShape.circle,
-                          border: Border.all(color: InsightTheme.line),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: accent.withValues(alpha: 0.30),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
                         ),
-                        child: Icon(
+                        child: const Icon(
                           Icons.arrow_forward_rounded,
-                          color: accent,
+                          color: Colors.white,
                           size: 17,
                         ),
                       ),
@@ -440,27 +577,58 @@ class _GlossyPocket extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _StatusBadge extends StatelessWidget {
   final String status;
-  final Color tint; // canonical status tint (e.g. InsightTheme.blueTint)
-  final Color ink;  // matching deep ink variant for text and dot
-  const _StatusBadge({required this.status, required this.tint, required this.ink});
+  final Color accent;
+  const _StatusBadge({required this.status, required this.accent});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: tint,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: ink.withValues(alpha: 0.25)),
+        gradient: LinearGradient(
+          colors: [
+            accent.withValues(alpha: 0.25),
+            accent.withValues(alpha: 0.12),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withValues(alpha: 0.45), width: 0.8),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.18),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(color: ink, shape: BoxShape.circle)),
+          Container(
+            width: 6, height: 6,
+            decoration: BoxDecoration(
+              color: accent,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.60),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
           const SizedBox(width: 5),
           Text(
             status.toUpperCase(),
-            style: InsightTheme.jetBrains(9, w: FontWeight.w700, c: ink, ls: 0.8),
+            style: GoogleFonts.ibmPlexMono(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: accent,
+              letterSpacing: 0.8,
+            ),
           ),
         ],
       ),
@@ -492,4 +660,27 @@ class _PocketClipper extends CustomClipper<Path> {
 
   @override
   bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diagonal linen grain texture for the folder back
+// ─────────────────────────────────────────────────────────────────────────────
+class _GrainPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.028)
+      ..strokeWidth = 0.7
+      ..style = PaintingStyle.stroke;
+    for (double i = -size.height; i < size.width + size.height; i += 24) {
+      canvas.drawLine(
+        Offset(i, 0),
+        Offset(i + size.height * math.tan(math.pi / 4), size.height),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
 }
