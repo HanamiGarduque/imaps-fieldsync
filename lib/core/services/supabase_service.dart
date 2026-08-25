@@ -233,6 +233,7 @@ class SupabaseService {
       deadline_date,
       is_self_scheduled,
       current_step,
+      step_timestamps,
       rework_started_at,
       created_at,
       updated_at,

@@ -329,10 +329,18 @@ class SyncOutboxService {
   static Future<void> enqueueCurrentStepUpdate({
     required String jobId,
     required int step,
+    // F1 fix: optional per-step saved times ("1".."6" -> ISO8601), written
+    // to field_jobs.step_timestamps when this action drains. Kept in the
+    // SAME action (not a new type) so the existing dedup/retry machinery
+    // covers it and the latest offline state always wins.
+    Map<String, String>? stepTimestamps,
   }) async {
     final payload = await _withConflictSnapshot(
       jobId: jobId,
-      payload: {'currentStep': step},
+      payload: {
+        'currentStep': step,
+        if (stepTimestamps != null) 'stepTimestamps': stepTimestamps,
+      },
     );
     return DBHelper.enqueueAction(
       id: 'current_step_update_$jobId',
@@ -704,9 +712,17 @@ class SyncOutboxService {
         );
         break;
       case 'current_step_update':
+        // F1 fix: carry the per-step saved times through the offline queue
+        // so field_jobs.step_timestamps is updated by the same drain pass.
+        final stepTs = payload['stepTimestamps'];
         await SupabaseService.updateJobInspectionProgress(
           jobId: jobId,
-          updateData: {'current_step': payload['currentStep']},
+          updateData: {
+            'current_step': payload['currentStep'],
+            if (stepTs is Map)
+              'step_timestamps':
+                  stepTs.map((k, v) => MapEntry(k.toString(), v.toString())),
+          },
         );
         break;
       case 'photos_update':

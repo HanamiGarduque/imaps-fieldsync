@@ -117,7 +117,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 8,
+      version: 9,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -180,6 +180,16 @@ class DBHelper {
             'ALTER TABLE local_jobs ADD COLUMN rework_started_at TEXT',
           );
         }
+        if (oldVersion < 9) {
+          // Per-step completion timestamps (approved F1 fix): JSON map like
+          // {"1": "2026-08-25T04:00:00.000Z", ...} recording when each step
+          // was actually saved/proceeded, per task. Mirrors the new
+          // field_jobs.step_timestamps jsonb column so the Task Overview
+          // shows real saved times offline as well as online.
+          await db.execute(
+            'ALTER TABLE local_inspections ADD COLUMN step_timestamps TEXT',
+          );
+        }
       },
       onCreate: (db, version) async {
         // Table for caching assigned jobs
@@ -217,6 +227,7 @@ class DBHelper {
             checklist_json TEXT,
             boundary_status TEXT,
             current_step INTEGER DEFAULT 0,
+            step_timestamps TEXT,
             is_synced INTEGER DEFAULT 0,
             updated_at TEXT
           )

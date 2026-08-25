@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
@@ -32,6 +34,14 @@ class InspectionProgress extends ChangeNotifier {
 
   int _highestCompleted = 0; // 0 = nothing done yet
 
+  // F1 fix (per-step saved times): records the real moment each step's
+  // save/proceed button fired, for the ACTIVE task only. Keyed by step
+  // number (1-6), value is a UTC ISO8601 string. Persisted alongside
+  // current_step into both SQLite (local_inspections.step_timestamps) and
+  // Supabase (field_jobs.step_timestamps) so Task Overview can show real
+  // per-task, per-step times instead of simulated ones.
+  final Map<int, String> _stepCompletedAt = {};
+
   // Keyed by task.id (the real field_jobs primary key) — NOT inspectionNo
   // (reference_number). Reference numbers can repeat across different
   // field_jobs rows (e.g. two jobs pointing at the same application, which
@@ -63,11 +73,22 @@ class InspectionProgress extends ChangeNotifier {
   bool isLocked(int step) => step > currentStep;
   String get currentStepTitle => stepTitles[currentStep - 1];
 
+  /// Real saved time for a step of the ACTIVE task, if recorded this
+  /// session. Callers fall back to the task's stored step_timestamps for
+  /// times saved in earlier sessions.
+  String? completedAtFor(int step) => _stepCompletedAt[step];
+
+  Map<int, String> get stepCompletedAt => Map.unmodifiable(_stepCompletedAt);
+
   /// Call when a step's "Continue" action fires, right before navigating
   /// forward. Steps can only be completed in order.
   void markStepComplete(int step) {
     if (step == _highestCompleted + 1) {
       _highestCompleted = step;
+      // F1 fix: stamp the real moment this save/proceed happened. Every
+      // task gets its own times because this map is cleared whenever the
+      // active task changes and each entry is persisted per job id.
+      _stepCompletedAt[step] = DateTime.now().toUtc().toIso8601String();
       notifyListeners();
 
       if (_activeTaskId != null) {
@@ -94,13 +115,23 @@ class InspectionProgress extends ChangeNotifier {
   /// effort, if online). This gives us a real stored value alongside the
   /// derivedHighestStep heuristic — belt-and-suspenders, doesn't replace it.
   Future<void> _persistCurrentStep(String taskId, int step) async {
+    // F1 fix: persist the accumulated per-step saved times alongside the
+    // step number. Keys are stringified step numbers ("1".."6") so the map
+    // round-trips through JSON and Supabase's jsonb cleanly.
+    final timestampsJson = jsonEncode(
+      _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
+    );
     try {
       final db = await DBHelper.database;
       final existing = await DBHelper.getLocalInspection(taskId);
       if (existing != null) {
         await db.update(
           'local_inspections',
-          {'current_step': step, 'updated_at': DateTime.now().toIso8601String()},
+          {
+            'current_step': step,
+            'step_timestamps': timestampsJson,
+            'updated_at': DateTime.now().toIso8601String(),
+          },
           where: 'id = ?',
           whereArgs: [taskId],
         );
@@ -108,6 +139,7 @@ class InspectionProgress extends ChangeNotifier {
         await db.insert('local_inspections', {
           'id': taskId,
           'current_step': step,
+          'step_timestamps': timestampsJson,
           'is_synced': 0,
           'updated_at': DateTime.now().toIso8601String(),
         });
@@ -124,10 +156,19 @@ class InspectionProgress extends ChangeNotifier {
       if (online) {
         await SupabaseService.updateJobInspectionProgress(
           jobId: taskId,
-          updateData: {'current_step': step},
+          updateData: {
+            'current_step': step,
+            'step_timestamps':
+                _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
+          },
         );
       } else {
-        await SyncOutboxService.enqueueCurrentStepUpdate(jobId: taskId, step: step);
+        await SyncOutboxService.enqueueCurrentStepUpdate(
+          jobId: taskId,
+          step: step,
+          stepTimestamps:
+              _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
+        );
       }
     } catch (e) {
       // ROOT-CAUSE FIX (2026-07-23): this used to be a dead-end — if this
@@ -145,7 +186,12 @@ class InspectionProgress extends ChangeNotifier {
       // this is now the only writer of current_step.)
       debugPrint('_persistCurrentStep (Supabase) failed, queuing for retry — $e');
       try {
-        await SyncOutboxService.enqueueCurrentStepUpdate(jobId: taskId, step: step);
+        await SyncOutboxService.enqueueCurrentStepUpdate(
+          jobId: taskId,
+          step: step,
+          stepTimestamps:
+              _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
+        );
       } catch (e2) {
         debugPrint('_persistCurrentStep: failed to queue current_step update — $e2');
       }
@@ -178,6 +224,11 @@ class InspectionProgress extends ChangeNotifier {
     final isDifferentTask = _activeTaskId != taskId;
     _activeTaskId = taskId;
     _activeTaskLabel = label ?? _activeTaskLabel;
+    // F1 fix: per-step saved times belong to one task only — a different
+    // task must never inherit another task's timestamps.
+    if (isDifferentTask) {
+      _stepCompletedAt.clear();
+    }
     if (initialStep != null) {
       _highestCompleted = initialStep;
     } else if (isDifferentTask) {
@@ -191,6 +242,7 @@ class InspectionProgress extends ChangeNotifier {
     _highestCompleted = 0;
     _activeTaskId = null;
     _activeTaskLabel = null;
+    _stepCompletedAt.clear();
     notifyListeners();
   }
 
@@ -199,9 +251,12 @@ class InspectionProgress extends ChangeNotifier {
   /// unlike a fresh inspection, the inspector shouldn't have to redo step 1
   /// just to look at (or fix) step 5.
   void unlockAllForReview(String taskId, {String? label}) {
+    final isDifferentTask = _activeTaskId != taskId;
     _activeTaskId = taskId;
     _activeTaskLabel = label ?? _activeTaskLabel;
     _highestCompleted = totalSteps;
+    // F1 fix: same per-task isolation as ensureActiveInspection.
+    if (isDifferentTask) _stepCompletedAt.clear();
     notifyListeners();
   }
 }
