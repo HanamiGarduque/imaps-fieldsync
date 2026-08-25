@@ -1,11 +1,13 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../services/location_service.dart';
+import '../../../core/services/route_service.dart';
 import '../../../core/services/supabase_service.dart';
 import 'gps_verification_screen.dart';
 import '../../tasks/screens/tasks_screen.dart';
@@ -28,13 +30,17 @@ import '../widgets/inspection_step_header.dart';
 /// screen DOES have a real distance to compare (Step 2/GPS Verification
 /// uses the same number), so the route visual earns its place here.
 ///
-/// NOTE on the route line: there's no routing-service dependency in this
-/// project (no Directions API / OSRM, etc.), so the bent line is a
-/// stylized, geometrically-generated path between the two points — it
-/// reads as "not a straight line" the way a real route does, but it is
-/// NOT an actual road-network route. Flagging this rather than silently
-/// pretending it's real turn-by-turn routing; wiring an actual routing
-/// service would be a new dependency/backend decision, out of scope here.
+/// NOTE on the route line (Route Guidance, Phase 1): the polyline is now a
+/// REAL road-network route fetched from the free OSRM service (see
+/// RouteService — no API key, no billing; demo server in dev, self-hosted
+/// for production). When routing is unavailable (offline, timeout, error),
+/// the screen falls back to the previous stylized bent line + haversine
+/// distance so the screen never hard-fails on routing. The route loads
+/// ASYNCHRONOUSLY after the map is already usable: it is an enhancement,
+/// never a prerequisite for opening Step 1. Road-route distance/ETA are
+/// navigation/orientation aids ONLY; the authoritative Site Verification
+/// distance remains the parcel-boundary RPC / haversine number shown above
+/// and must never be replaced by road-route distance.
 ///
 ///   - Parcel coordinates: SupabaseService.fetchParcelDetails(parcelId)
 ///   - Device position: LocationService.getCurrentLocation()
@@ -57,6 +63,12 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
   ll.LatLng? _deviceLatLng;
   double? _distanceMeters;
   bool _retryingDeviceLocation = false;
+  // Route Guidance (Phase 1): real road route from OSRM. Null when routing
+  // is unavailable (offline/timeout/error) — the UI then falls back to the
+  // stylized bent line and the existing straight-line/RPC distance.
+  List<ll.LatLng>? _routePoints;
+  double? _routeDistanceMeters;
+  double? _routeDurationSeconds;
   final MapController _mapController = MapController();
 
   @override
@@ -95,10 +107,7 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
     if (_retryingDeviceLocation || _parcelLatLng == null) return;
     setState(() => _retryingDeviceLocation = true);
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
-      final online = connectivityResult is List
-          ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
-          : connectivityResult != ConnectivityResult.none;
+      final online = await _checkOnline();
       final pos = await LocationService.getCurrentLocation();
       final newDeviceLatLng = ll.LatLng(pos.latitude, pos.longitude);
       final newDistance = online
@@ -116,6 +125,9 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
         _retryingDeviceLocation = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+      // Refresh the road route from the new position asynchronously - the
+      // location retry must never wait on OSRM (same best-effort contract).
+      unawaited(_fetchRouteAndUpdate(online: online));
     } catch (_) {
       // Still unavailable — leave the badge as a retry target, no need to
       // surface a separate error for this secondary, best-effort fetch.
@@ -131,10 +143,7 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
         throw Exception('No parcel linked to this task.');
       }
 
-      final connectivityResult = await Connectivity().checkConnectivity();
-      final online = connectivityResult is List
-          ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
-          : connectivityResult != ConnectivityResult.none;
+      final online = await _checkOnline();
       double? lat;
       double? lng;
 
@@ -183,6 +192,11 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
       if (!mounted) return;
       setState(() => _loading = false);
       WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+
+      // Route Guidance: fetch the road route AFTER the map is usable -
+      // OSRM latency must never delay opening Step 1. Best-effort only:
+      // on any failure the bent line + straight-line/RPC distance remain.
+      unawaited(_fetchRouteAndUpdate(online: online));
     } catch (e) {
       if (!mounted) return;
       setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
@@ -218,6 +232,61 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
     return [start, p1, p2, p3, end];
   }
 
+  /// Single source of the online/offline decision for this screen. It only
+  /// gates whether ONLINE calls (Supabase RPC, OSRM route fetch) are
+  /// attempted; every network/routing operation itself lives in its service
+  /// (SupabaseService / LocationService / RouteService).
+  Future<bool> _checkOnline() async {
+    final dynamic connectivityResult = await Connectivity().checkConnectivity();
+    return connectivityResult is List
+        ? connectivityResult.any((r) => r != ConnectivityResult.none)
+        : connectivityResult != ConnectivityResult.none;
+  }
+
+  /// Post-paint route refresh (initial open + location retries): runs the
+  /// fetch off the critical path, then repaints whatever arrived. On any
+  /// failure [_fetchRoute] leaves the route fields null and the UI keeps
+  /// the bent line + straight-line/RPC distance. Road-route distance/ETA
+  /// are navigation/orientation aids only - the authoritative Site
+  /// Verification distance remains the boundary-RPC/haversine number.
+  Future<void> _fetchRouteAndUpdate({required bool online}) async {
+    await _fetchRoute(online: online);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  /// Fetches the real road route (device → target) via [RouteService]
+  /// (free OSRM demo server in dev - see RouteService cost/licensing notes).
+  /// On any failure the route fields are cleared so the UI falls back to
+  /// the stylized bent line and the existing straight-line/RPC distance.
+  Future<void> _fetchRoute({required bool online}) async {
+    if (!online || _deviceLatLng == null || _parcelLatLng == null) {
+      _routePoints = null;
+      _routeDistanceMeters = null;
+      _routeDurationSeconds = null;
+      return;
+    }
+    final result = await RouteService.fetchDrivingRoute(
+      start: _deviceLatLng!,
+      end: _parcelLatLng!,
+    );
+    _routePoints = result?.points;
+    _routeDistanceMeters = result?.distanceMeters;
+    _routeDurationSeconds = result?.durationSeconds;
+  }
+
+  String _formatRouteDistance(double meters) {
+    if (meters < 1000) return '${meters.round()} m';
+    return '${(meters / 1000).toStringAsFixed(meters < 10000 ? 1 : 0)} km';
+  }
+
+  String _formatRouteDuration(double seconds) {
+    final minutes = (seconds / 60).round();
+    if (minutes < 1) return 'less than a minute';
+    if (minutes < 60) return '$minutes min';
+    return '${minutes ~/ 60}h ${minutes % 60}m';
+  }
+
   @override
   Widget build(BuildContext context) {
     final task = widget.task;
@@ -251,7 +320,7 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                     PolylineLayer(
                       polylines: [
                         Polyline(
-                          points: _buildRoutePath(_deviceLatLng!, _parcelLatLng!),
+                          points: _routePoints ?? _buildRoutePath(_deviceLatLng!, _parcelLatLng!),
                           strokeWidth: 4,
                           color: InsightTheme.blue1.withValues(alpha: 0.75),
                           borderStrokeWidth: 1,
@@ -277,6 +346,14 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                           ),
                         ),
                     ],
+                  ),
+                  // Required attribution (OSM tile usage policy) — keep visible.
+                  RichAttributionWidget(
+                    attributions: [
+                      TextSourceAttribution('© OpenStreetMap contributors'),
+                    ],
+                    popupBackgroundColor: Colors.white,
+                    showFlutterMapAttribution: false,
                   ),
                 ],
               ),
@@ -354,6 +431,25 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                             ),
                           ],
                         ),
+                        // Route Guidance (Phase 1): road-route distance and
+                        // ETA from OSRM, shown alongside (not replacing) the
+                        // straight-line/RPC distance that Step 2 reuses.
+                        if (_routePoints != null && _routeDistanceMeters != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.route_rounded, size: 14, color: InsightTheme.blue1),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Road route: ${_formatRouteDistance(_routeDistanceMeters!)} · ~${_formatRouteDuration(_routeDurationSeconds ?? 0)}',
+                                    style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         const SizedBox(height: 14),
                         SizedBox(
                           width: double.infinity,
@@ -402,32 +498,6 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                 ),
               ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GlassPill extends StatelessWidget {
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-  const _GlassPill({required this.child, this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12)});
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
-            boxShadow: const [BoxShadow(color: Color(0x140B1440), blurRadius: 20, offset: Offset(0, 8))],
-          ),
-          child: child,
         ),
       ),
     );
