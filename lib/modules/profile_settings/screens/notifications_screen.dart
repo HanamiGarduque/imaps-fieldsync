@@ -527,52 +527,54 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           final entry = _syncLogs[i];
           final theme = _syncResultTheme(entry['result'] as String? ?? 'info');
           final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+          // Visual-unification fix (#5): adopt the Activity feed's exact row
+          // language — 40×40 rounded icon box, title 13.5 w600 ink, time
+          // 11.5 ink2, hairline divider instead of individual bordered cards —
+          // while keeping Sync History's expandable technical details.
+          return Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: Container(
               decoration: BoxDecoration(
-                color: InsightTheme.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: InsightTheme.line),
+                border: (i == _syncLogs.length - 1 && !_syncLogHasMore)
+                    ? null
+                    : const Border(bottom: BorderSide(color: InsightTheme.line)),
               ),
-              child: Theme(
-                // Removes the default ExpansionTile divider lines so it
-                // matches the rest of this screen's card styling.
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  enabled: hasDetails,
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                  leading: Container(
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(11)),
-                    child: Icon(theme['icon'] as IconData, size: 16, color: theme['fg'] as Color),
-                  ),
-                  title: Text(
-                    entry['message'] as String? ?? '',
-                    style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
-                  ),
-                  subtitle: Text(
+              child: ExpansionTile(
+                enabled: hasDetails,
+                tilePadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                leading: Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(13)),
+                  child: Icon(theme['icon'] as IconData, size: 18, color: theme['fg'] as Color),
+                ),
+                title: Text(
+                  entry['message'] as String? ?? '',
+                  style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
+                ),
+                subtitle: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
                     _timeAgo(entry['created_at'] as String?),
-                    style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                    style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
                   ),
-                  trailing: hasDetails
-                      ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
-                      : const SizedBox.shrink(),
-                  children: hasDetails
-                      ? [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                _formatTechnicalDetails(entry['technical_details'] as String?),
-                                style: InsightTheme.inter(11, c: InsightTheme.ink3, h: 1.5),
-                              ),
+                ),
+                trailing: hasDetails
+                    ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
+                    : const SizedBox.shrink(),
+                children: hasDetails
+                    ? [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 0, 4, 14),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _formatTechnicalDetails(entry['technical_details'] as String?),
+                              style: InsightTheme.inter(11, c: InsightTheme.ink3, h: 1.5),
                             ),
                           ),
-                        ]
-                      : const [],
-                ),
+                        ),
+                      ]
+                    : const [],
               ),
             ),
           );

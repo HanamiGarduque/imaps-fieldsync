@@ -329,12 +329,11 @@ class WeeklyTrendCard extends StatelessWidget {
             BarChartData(
               maxY: chartMax,
               alignment: BarChartAlignment.spaceAround,
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                horizontalInterval: (chartMax / 4).clamp(1, double.infinity),
-                getDrawingHorizontalLine: (_) => FlLine(color: mutedTextColor.withOpacity(0.08), strokeWidth: 1),
-              ),
+              // Manual-test fix (#4): the faint horizontal gridlines
+              // duplicated the full-height backDraw rods' structure and read
+              // as stray parallel reference lines. Removed; the bars plus the
+              // backDraw panels carry the chart.
+              gridData: const FlGridData(show: false),
               borderData: FlBorderData(show: false),
               titlesData: FlTitlesData(
                 leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),

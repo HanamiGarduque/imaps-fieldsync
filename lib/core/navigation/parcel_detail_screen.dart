@@ -57,53 +57,56 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     if (mounted) setState(() {});
   }
 
-  Widget _photoStepSection(TaskItem task) => _sectionShell(
+  Widget _photoStepSection(TaskItem task) {
+    // F2 fix (Task Overview photo refresh): the TaskItem snapshot is only
+    // as fresh as the last My Tasks fetch, so photos taken this session
+    // never appeared here. While THIS task is the active inspection, the
+    // provider's capturedPhotos is the live source (including freshly
+    // captured local paths); the task snapshot remains the fallback for
+    // previously-uploaded remote photos. Display-only change — the Phase 8
+    // persistence/outbox architecture is untouched.
+    final provider = context.watch<InspectionProvider>();
+    final bool sessionActive =
+        provider.activeTask?.id == task.id && provider.capturedPhotos.isNotEmpty;
+    final List<String> paths = sessionActive
+        ? provider.capturedPhotos
+            .map((p) => p['photoPath'] as String? ?? '')
+            .where((p) => p.isNotEmpty)
+            .toList()
+        : (task.photoDetails.isNotEmpty
+            ? task.photoDetails
+                .map((p) => p['photo_url'] as String? ?? '')
+                .where((p) => p.isNotEmpty)
+                .toList()
+            : task.photoPaths);
+    return _sectionShell(
         step: 3,
         title: 'Photos',
-        child: task.photoPaths.isEmpty
+        child: paths.isEmpty
             ? Text('No photos on file.', style: InsightTheme.inter(13))
             : SizedBox(
                 height: 90,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  itemCount: task.photoPaths.length,
+                  itemCount: paths.length,
                   separatorBuilder: (_, __) => const SizedBox(width: 8),
                   itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => _openFullscreenPhoto(task.photoPaths, i),
+                    onTap: () => _openFullscreenPhoto(paths, i),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        task.photoPaths[i],
+                      // AdaptivePhotoImage renders BOTH freshly-captured
+                      // local files and already-uploaded Storage URLs.
+                      child: SizedBox(
                         width: 90,
                         height: 90,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (_, child, progress) {
-                          if (progress == null) return child;
-                          return Container(
-                            width: 90,
-                            height: 90,
-                            color: InsightTheme.surface2,
-                            child: const Center(
-                              child: SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            ),
-                          );
-                        },
-                        errorBuilder: (_, __, ___) => Container(
-                          width: 90,
-                          height: 90,
-                          color: InsightTheme.surface2,
-                          child: const Icon(Icons.broken_image_outlined, size: 20, color: InsightTheme.ink3),
-                        ),
+                        child: AdaptivePhotoImage(path: paths[i]),
                       ),
                     ),
                   ),
                 ),
               ),
       );
+  }
 
   void _openFullscreenPhoto(List<String> photoPaths, int startIndex) {
     openFullscreenPhotoViewer(context, photoPaths, startIndex);
@@ -118,7 +121,13 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       return;
     }
     HapticFeedback.selectionClick();
-    Navigator.push(context, MaterialPageRoute(builder: builder));
+    // F2 fix (Task Overview photo refresh): rebuild when control returns
+    // from a step so sections backed by live provider state (e.g. Photos)
+    // reflect saves made inside the step — mirrors the Completed Summary's
+    // reload-on-return behavior without changing any persistence path.
+    Navigator.push(context, MaterialPageRoute(builder: builder)).then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _handleExitRework() {
@@ -307,6 +316,13 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                               _StepsTimelineCard(
                                 currentStep: currentStep,
                                 isComplete: progress.isComplete,
+                                // F1 fix: live times recorded this session for
+                                // the active task, merged over the persisted
+                                // step_timestamps fetched with the task.
+                                savedTimes: {
+                                  ...task.stepTimestamps,
+                                  ...InspectionProgress.instance.stepCompletedAt,
+                                },
                                 steps: [
                                   _StepInfo(
                                     index: 1, title: 'Site Verification', icon: Icons.map_rounded,
@@ -527,8 +543,15 @@ class _StepsTimelineCard extends StatelessWidget {
   final List<_StepInfo> steps;
   final int currentStep;
   final bool isComplete;
+  // F1 fix: real per-step saved times (step number -> ISO8601). Resolved
+  // by the parent: live InspectionProgress entries for the active task,
+  // falling back to the task's persisted step_timestamps.
+  final Map<int, String> savedTimes;
 
-  const _StepsTimelineCard({required this.steps, required this.currentStep, this.isComplete = false});
+  const _StepsTimelineCard({
+    required this.steps, required this.currentStep, this.isComplete = false,
+    this.savedTimes = const <int, String>{},
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -545,6 +568,7 @@ class _StepsTimelineCard extends StatelessWidget {
           isCurrent: isCurrent,
           isDone: isDone,
           isLocked: isLocked,
+          savedAt: savedTimes[step.index],
         );
       }),
     );
@@ -557,21 +581,29 @@ class _StepRow extends StatelessWidget {
   final bool isCurrent;
   final bool isDone;
   final bool isLocked;
+  // F1 fix: real saved time for this step (ISO8601), resolved by the
+  // parent from live InspectionProgress data or the task's stored
+  // step_timestamps. Replaces the old simulated "Verified on" text.
+  final String? savedAt;
 
   const _StepRow({
-    required this.step, required this.isLast, required this.isCurrent, 
-    required this.isDone, required this.isLocked,
+    required this.step, required this.isLast, required this.isCurrent,
+    required this.isDone, required this.isLocked, this.savedAt,
   });
 
-  String _getSimulatedTimestamp(int stepIndex) {
-    final now = DateTime.now();
-    final dt = now.subtract(Duration(minutes: (6 - stepIndex) * 12));
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final month = months[dt.month - 1];
-    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
-    final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-    final minute = dt.minute.toString().padLeft(2, '0');
-    return '$month ${dt.day}, $hour:$minute $amPm';
+  /// Formats a stored UTC ISO timestamp as e.g. "Aug 25, 3:45 PM".
+  String _formatSavedAt(String iso) {
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final month = months[dt.month - 1];
+      final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+      final amPm = dt.hour >= 12 ? 'PM' : 'AM';
+      final minute = dt.minute.toString().padLeft(2, '0');
+      return '$month ${dt.day}, $hour:$minute $amPm';
+    } catch (_) {
+      return iso;
+    }
   }
 
   @override
@@ -655,16 +687,23 @@ class _StepRow extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           if (isDone)
-                            Row(
-                              children: [
-                                const Icon(Icons.verified_rounded, size: 12, color: InsightTheme.greenInk),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Verified on ${_getSimulatedTimestamp(step.index)}',
-                                  style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.greenInk),
-                                ),
-                              ],
-                            )
+                             Row(
+                               children: [
+                                 const Icon(Icons.verified_rounded, size: 12, color: InsightTheme.greenInk),
+                                 const SizedBox(width: 4),
+                                 Expanded(
+                                   child: Text(
+                                     // F1 fix: real per-task, per-step saved
+                                     // time (replaces the old simulated text).
+                                     savedAt != null
+                                         ? 'Saved on ${_formatSavedAt(savedAt!)}'
+                                         : 'Completed',
+                                     style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.greenInk),
+                                     maxLines: 1, overflow: TextOverflow.ellipsis,
+                                   ),
+                                 ),
+                               ],
+                             )
                           else
                             Text(
                               step.description,

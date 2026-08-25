@@ -954,8 +954,13 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                // Overflow fix (#3): let the text column take
+                                // only the space left of the Sync button so a
+                                // long count ("Sync 10 Queued") can never push
+                                // the button past the header container edge.
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       'Sync Center',
@@ -1043,6 +1048,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     ),
                                   ],
                                 ),
+                                ),
+                                const SizedBox(width: 12),
                                 GestureDetector(
                                   onTap: (_syncingNow || _pendingRows.isEmpty) ? null : _handleSyncNow,
                                   child: Container(

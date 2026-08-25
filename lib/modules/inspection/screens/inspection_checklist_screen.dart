@@ -150,6 +150,21 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     physics: const BouncingScrollPhysics(),
                     children: [
+                      // GAP-9.5 fix: live checklist counter. _doneCount /
+                      // _totalCount were always correct and rebuilt instantly
+                      // on every toggle — they were simply never displayed.
+                      // Read directly from those existing getters; no new
+                      // data source, no persistence/behavior change.
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Text(
+                            '$_doneCount of $_totalCount checked',
+                            style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.5),
+                          ),
+                        ),
+                      ),
                       _SectionLabel(title: 'SITE CONDITION'),
                       const SizedBox(height: 12),
                       Container(
