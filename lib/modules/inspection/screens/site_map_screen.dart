@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../services/location_service.dart';
@@ -69,6 +70,16 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
   List<ll.LatLng>? _routePoints;
   double? _routeDistanceMeters;
   double? _routeDurationSeconds;
+  // Live GPS tracking (Phase B): the device marker and the authoritative
+  // distance update from the SAME shared LocationService stream that
+  // GPS Verification (Step 2) uses. The road-route polyline is still
+  // fetched once per open (rerouting is a later phase) so it does NOT
+  // follow the moving marker.
+  StreamSubscription<Position>? _positionSub;
+  bool _trackingActive = false;
+  bool _recomputingDistance = false;
+  DateTime _lastDistanceComputeAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _minDistanceRecalcInterval = Duration(seconds: 4);
   final MapController _mapController = MapController();
 
   @override
@@ -80,6 +91,7 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
 
   @override
   void dispose() {
+    _positionSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -94,8 +106,13 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
     // (e.g. returning from Settings) automatically retries the device
     // position if it wasn't available before, without needing a full
     // parcel/map reload or a manual back-and-forth.
-    if (state == AppLifecycleState.resumed && _deviceLatLng == null && !_loading) {
-      _retryDeviceLocation();
+    if (state == AppLifecycleState.resumed && !_loading) {
+      // Restart live tracking if the stream dropped since backgrounding
+      // (idempotent while tracking is already active).
+      _startLiveTracking();
+      if (_deviceLatLng == null) {
+        _retryDeviceLocation();
+      }
     }
   }
 
@@ -192,6 +209,7 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
       if (!mounted) return;
       setState(() => _loading = false);
       WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
+      _startLiveTracking();
 
       // Route Guidance: fetch the road route AFTER the map is usable -
       // OSRM latency must never delay opening Step 1. Best-effort only:
@@ -230,6 +248,68 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
     final p2 = ll.LatLng(start.latitude + dLat * 0.62, start.longitude + dLng * 0.52);
     final p3 = ll.LatLng(start.latitude + dLat * 0.62, start.longitude + dLng * 0.86);
     return [start, p1, p2, p3, end];
+  }
+
+  /// Starts live GPS tracking for this screen using the SAME shared
+  /// LocationService stream Step 2 uses (high accuracy, 4 m distance
+  /// filter). Idempotent: safe to call from load completion and on every
+  /// app-resume.
+  void _startLiveTracking() {
+    if (_trackingActive) return;
+    _trackingActive = true;
+    _positionSub = LocationService.getPositionStream().listen(
+      _onPositionUpdate,
+      onError: (Object e) {
+        // Stream died (e.g. location service switched off mid-session).
+        // Allow a later app-resume to restart it.
+        if (!mounted) return;
+        setState(() => _trackingActive = false);
+      },
+      cancelOnError: true,
+    );
+  }
+
+  /// Live position tick: moves the "You are here" marker on EVERY event
+  /// and refreshes the AUTHORITATIVE Site Verification distance (boundary
+  /// RPC online / haversine offline) behind a reentrancy guard plus a
+  /// minimum recalculation interval so rapid ticks cannot flood Supabase.
+  /// The road-route polyline is deliberately left untouched here - the
+  /// road route is orientation information fetched once per open; making
+  /// it follow the inspector (rerouting) is a separate later phase.
+  Future<void> _onPositionUpdate(Position pos) async {
+    if (!mounted || _parcelLatLng == null) return;
+    final newPos = ll.LatLng(pos.latitude, pos.longitude);
+    final shouldRecompute = !_recomputingDistance &&
+        DateTime.now().difference(_lastDistanceComputeAt) >= _minDistanceRecalcInterval;
+
+    // Move the marker immediately and repaint in EVERY path so the UI is
+    // never frozen behind a throttled or in-flight distance recompute.
+    _deviceLatLng = newPos;
+    setState(() {});
+
+    if (!shouldRecompute) {
+      return;
+    }
+    _recomputingDistance = true;
+    _lastDistanceComputeAt = DateTime.now();
+    try {
+      final online = await _checkOnline();
+      final dist = online
+          ? await SupabaseService.getDistanceToParcelBoundary(
+              parcelId: widget.task.parcelId!,
+              latitude: pos.latitude,
+              longitude: pos.longitude,
+            )
+          : SpatialOfflineService.haversineMeters(
+              pos.latitude, pos.longitude, _parcelLatLng!.latitude, _parcelLatLng!.longitude);
+      if (!mounted) return;
+      setState(() => _distanceMeters = dist);
+    } catch (_) {
+      // Transient failure: keep the previous authoritative value; the next
+      // qualifying tick retries. The marker was already painted above.
+    } finally {
+      _recomputingDistance = false;
+    }
   }
 
   /// Single source of the online/offline decision for this screen. It only
