@@ -81,6 +81,10 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
   DateTime _lastDistanceComputeAt = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _minDistanceRecalcInterval = Duration(seconds: 4);
   final MapController _mapController = MapController();
+  // Fullscreen map mode: hides the floating header/step bar and the bottom
+  // card so the map fills the whole screen (field visibility). The recenter
+  // control and the OSM attribution stay visible; the toggle flips icon.
+  bool _fullscreen = false;
 
   @override
   void initState() {
@@ -439,32 +443,48 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
               ),
 
             // ── Floating glass header — back button + title + step progress bar ───
-            SafeArea(
-              bottom: false,
-              child: InspectionStepHeader(
-                title: 'Site Verification',
-                subtitle: task.location,
-                stepNumber: 1,
-                stepSubtitle: 'LOCATE TARGET',
-                onBack: () => Navigator.pop(context),
+            if (!_fullscreen)
+              SafeArea(
+                bottom: false,
+                child: InspectionStepHeader(
+                  title: 'Site Verification',
+                  subtitle: task.location,
+                  stepNumber: 1,
+                  stepSubtitle: 'LOCATE TARGET',
+                  onBack: () => Navigator.pop(context),
+                ),
               ),
-            ),
 
             // ── Floating recenter button. ────────────────────────────────
-            if (!_loading && _error == null)
+            // ―― Floating map controls: fullscreen toggle + recenter. The
+            // controls slide up to the top corner in fullscreen mode since
+            // the header they used to sit below is hidden. ――
+            if (!_loading && _error == null) ...[
               Positioned(
                 right: 16,
-                top: 190,
+                top: _fullscreen ? 16 : 190,
+                child: SafeArea(
+                  bottom: false,
+                  child: _GlassIconButton(
+                    icon: _fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                    onTap: () => setState(() => _fullscreen = !_fullscreen),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 16,
+                top: (_fullscreen ? 16 : 190) + 56,
                 child: SafeArea(
                   bottom: false,
                   child: _GlassIconButton(icon: Icons.center_focus_strong_rounded, onTap: _fitBounds),
                 ),
               ),
+            ],
 
             // ── Floating bottom card — status row + CTA combined into one
             // modern card (matches reference picture 1's bottom-card
             // style) instead of a separate status pill + button below it.
-            if (!_loading && _error == null)
+            if (!_loading && _error == null && !_fullscreen)
               Positioned(
                 left: 16,
                 right: 16,

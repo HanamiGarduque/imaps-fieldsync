@@ -1,9 +1,7 @@
-import 'dart:ui';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -22,7 +20,6 @@ import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
-import '../widgets/inspection_step_header.dart';
 
 class GpsVerificationScreen extends StatefulWidget {
   final TaskItem task;
@@ -57,12 +54,6 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   String get _headingCardinal {
     if (_heading == null) return '--';
     return _cardinals[(((_heading! + 11.25) ~/ 22.5) % 16)];
-  }
-  String get _bearingLabel {
-    if (_bearingToParcel == null) return 'Direction unknown';
-    final bearing = _bearingToParcel!;
-    const labels = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'];
-    return '${labels[((bearing + 22.5) ~/ 45) % 8]} (${bearing.round()}°)';
   }
 
   @override
@@ -288,162 +279,266 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));
   }
 
+  // Fullscreen mode: hides the header block (back / title / step progress)
+  // so the compass and readings fill the screen. The verification card —
+  // which carries the screen's primary action — stays visible. In this
+  // mode the fullscreen-exit toggle floats top-right.
+  bool _fullscreen = false;
+
+  /// Distance formatted for the bottom card: metres below 1 km, otherwise
+  /// km (one decimal under 10 km) — mirrors the Site Verification map's
+  /// route-distance formatting so both screens read the same way.
+  String get _distanceText {
+    final d = _distance;
+    if (d == null) return '-- m';
+    if (d < 1000) return '${d.round()} m';
+    return '${(d / 1000).toStringAsFixed(d < 10000 ? 1 : 0)} km';
+  }
+
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return SensitiveScreen(child: PopScope(
-      canPop: !context.read<InspectionProvider>().isReworkMode && InspectionProgress.instance.currentStep > 1,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) {
-          _markOngoingWithFallback(widget.task.id);
-          return;
-        }
-        handleInspectionExit(
-          context,
-          onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
-          isReworkMode: context.read<InspectionProvider>().isReworkMode,
-        );
-      },
-      child: Scaffold(
-      backgroundColor: InsightTheme.bg,
-      body: Stack(
-        children: [
-          Positioned(top: -60, right: -60, child: ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40), child: Container(width: 260, height: 260, decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.20))))),
-          Positioned(bottom: -80, left: -80, child: ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40), child: Container(width: 220, height: 220, decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.10))))),
+    final isReworkMode = context.read<InspectionProvider>().isReworkMode;
+    final coords = (_latitude != null && _longitude != null)
+        ? "${_formatCoord(_latitude!, 'NS')}   ${_formatCoord(_longitude!, 'EW')}"
+        : null;
 
-          SafeArea(
-            child: Column(
+    return SensitiveScreen(
+      child: PopScope(
+        canPop: !isReworkMode && InspectionProgress.instance.currentStep > 1,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) {
+            _markOngoingWithFallback(widget.task.id);
+            return;
+          }
+          handleInspectionExit(
+            context,
+            onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
+            isReworkMode: isReworkMode,
+          );
+        },
+        child: Scaffold(
+          backgroundColor: InsightTheme.bg,
+          body: SafeArea(
+            child: Stack(
               children: [
-                InspectionStepHeader(
-                  title: 'GPS Verification',
-                  subtitle: widget.task.location,
-                  stepNumber: 2,
-                  stepSubtitle: 'VERIFY COORDINATES',
-                  onBack: () => handleInspectionExit(
-                    context,
-                    onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
-                    isReworkMode: context.read<InspectionProvider>().isReworkMode,
-                  ),
-                ),
+                Column(
+                  children: [
+                    // ── Header block: back + title card + fullscreen toggle,
+                    // then the step progress card. Hidden in fullscreen. ──
+                    if (!_fullscreen)
+                      _GpsHeader(
+                        location: widget.task.location,
+                        verified: _verified,
+                        onBack: () => handleInspectionExit(
+                          context,
+                          onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
+                          isReworkMode: isReworkMode,
+                        ),
+                        onToggleFullscreen: () => setState(() => _fullscreen = !_fullscreen),
+                      ),
 
-                Expanded(
-                  child: _loading
-                      ? const Center(child: _LoadingState())
-                      : _error != null
-                          ? Center(child: _ErrorState(message: _error!, onRetry: _checkLocation))
-                          : LayoutBuilder(
-                              builder: (context, constraints) {
-                                // Compass scales with the smaller of available width/height so it
-                                // never forces the column below it off-screen (landscape, small
-                                // devices) while staying a true circle.
-                                final compassSize = math.min(
-                                  constraints.maxWidth * 0.72,
-                                  math.min(constraints.maxHeight * 0.62, 268.0),
-                                ).clamp(160.0, 268.0).toDouble();
+                    // ── Compass + alignment tip. ────────────────────────
+                    Expanded(
+                      child: _loading
+                          ? const Center(child: _LoadingState())
+                          : _error != null
+                              ? Center(child: _ErrorState(message: _error!, onRetry: _checkLocation))
+                              : LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    // Compass scales with the smaller of available
+                                    // width/height so it never forces the card
+                                    // below it off-screen (small devices,
+                                    // landscape).
+                                    final compassSize = math.min(
+                                      constraints.maxWidth * 0.72,
+                                      math.min(constraints.maxHeight * 0.62, 268.0),
+                                    ).clamp(160.0, 268.0).toDouble();
 
-                                return SingleChildScrollView(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                                    child: Center(
+                                    return Center(
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          _Compass(
-                                            size: compassSize,
-                                            heading: _heading,
-                                            bearingToParcel: _bearingToParcel,
-                                            headingCardinal: _headingCardinal,
-                                            verified: _verified,
-                                          ),
-                                          const SizedBox(height: 14),
-                                          _DistanceBadge(distance: _distance, verified: _verified),
-                                          const SizedBox(height: 14),
-                                          if (_latitude != null && _longitude != null)
-                                            Padding(
-                                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                                              child: Text(
-                                                "${_formatCoord(_latitude!, 'NS')}   ${_formatCoord(_longitude!, 'EW')}",
-                                                textAlign: TextAlign.center,
-                                                softWrap: true,
-                                                style: InsightTheme.jetBrains(11.5, w: FontWeight.w600, c: InsightTheme.ink2, ls: 0.4),
+                                          Stack(
+                                            alignment: Alignment.topCenter,
+                                            children: [
+                                              // Fixed top heading pointer.
+                                              Positioned(
+                                                top: 0,
+                                                child: CustomPaint(
+                                                  size: Size(compassSize * 0.07, compassSize * 0.05),
+                                                  painter: _TopPointerPainter(color: InsightTheme.amber),
+                                                ),
                                               ),
-                                            ),
-                                          const SizedBox(height: 18),
-                                          _MetricsRow(
-                                            distance: _distance,
-                                            accuracy: _accuracy,
-                                            verified: _verified,
+                                              Padding(
+                                                padding: EdgeInsets.only(top: compassSize * 0.07),
+                                                child: _Compass(
+                                                  size: compassSize,
+                                                  heading: _heading,
+                                                  bearingToParcel: _bearingToParcel,
+                                                  headingCardinal: _headingCardinal,
+                                                  verified: _verified,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                          const SizedBox(height: 10),
-                                          if (_bearingToParcel != null)
-                                            Padding(
-                                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                                              child: Text(_bearingLabel, textAlign: TextAlign.center, softWrap: true, style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
-                                            ),
-                                          const SizedBox(height: 10),
-                                          if (_isLive || _heading != null)
-                                            Wrap(
-                                              alignment: WrapAlignment.center,
-                                              crossAxisAlignment: WrapCrossAlignment.center,
-                                              children: [
-                                                if (_isLive) ...[
-                                                  Container(
-                                                    width: 8, height: 8,
-                                                    decoration: BoxDecoration(
-                                                      shape: BoxShape.circle,
-                                                      color: InsightTheme.greenInk,
-                                                      boxShadow: [BoxShadow(color: InsightTheme.greenInk.withValues(alpha: 0.5), blurRadius: 6, spreadRadius: 1)],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text('LIVE TRACKING', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.greenInk, ls: 0.6)),
-                                                ],
-                                                if (_isLive && _heading != null) Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Text('•', style: InsightTheme.jetBrains(9.5, c: InsightTheme.ink3))),
-                                                if (_heading != null) Text('COMPASS ACTIVE', style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.6)),
-                                              ],
-                                            )
-                                          else if (_compassUnavailable)
-                                            Text('Compass unavailable on this device', style: InsightTheme.inter(11, c: InsightTheme.ink3)),
-                                          if (!_verified) ...[
-                                            const SizedBox(height: 16),
-                                            TextButton.icon(onPressed: _checkLocation, icon: const Icon(Icons.refresh_rounded, size: 16, color: InsightTheme.blueInk), label: Text('Recheck Location', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk))),
-                                          ],
+                                          const SizedBox(height: 14),
+                                          _AlignmentTip(
+                                            verified: _verified,
+                                            bearingToParcel: _bearingToParcel,
+                                            compassUnavailable: _compassUnavailable,
+                                          ),
                                         ],
                                       ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                                    );
+                                  },
+                                ),
+                    ),
+
+                    // ── Verification card. Stays visible in fullscreen —
+                    // confirming is the screen's primary action. ──────────
+                    if (!_loading && _error == null)
+                      _VerificationCard(
+                        distanceText: _distanceText,
+                        accuracy: _accuracy,
+                        verified: _verified,
+                        heading: _heading,
+                        headingCardinal: _headingCardinal,
+                        coords: coords,
+                        location: widget.task.location,
+                        submitting: _submitting,
+                        isReworkMode: isReworkMode,
+                        onConfirm: _startInspection,
+                      ),
+                  ],
                 ),
-                
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                  child: ElevatedButton(
-                    onPressed: (_verified && !_submitting) ? _startInspection : null,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ).copyWith(elevation: WidgetStateProperty.all(0)),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: _verified ? [InsightTheme.blue1, InsightTheme.blue2] : [InsightTheme.ink3, InsightTheme.ink3], begin: Alignment.topCenter, end: Alignment.bottomCenter),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: _verified ? [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))] : [],
+
+                // Fullscreen exit toggle — the header that used to carry it
+                // is hidden in this mode. Last Stack child = topmost hit
+                // target (lesson from the dead-button bug).
+                if (_fullscreen && !_loading && _error == null)
+                  Positioned(
+                    right: 16,
+                    top: 8,
+                    child: _HeaderButton(
+                      icon: Icons.fullscreen_exit_rounded,
+                      onTap: () => setState(() => _fullscreen = !_fullscreen),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ── Header block: back + title card + fullscreen toggle, step progress ──
+///
+/// Redesigned per the approved dual-state mockup: the fullscreen toggle
+/// lives INSIDE the header row (right of the title card), which removes
+/// the old floating-button z-order problem entirely. Accent colors follow
+/// the verification state (amber far from site, blue in zone).
+class _GpsHeader extends StatelessWidget {
+  final String location;
+  final bool verified;
+  final VoidCallback onBack;
+  final VoidCallback onToggleFullscreen;
+
+  const _GpsHeader({
+    required this.location,
+    required this.verified,
+    required this.onBack,
+    required this.onToggleFullscreen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = verified ? InsightTheme.blue1 : InsightTheme.amber;
+    final accentInk = verified ? InsightTheme.blueInk : InsightTheme.amberInk;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _HeaderButton(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack),
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(InsightTheme.radiusMd),
+                    border: Border.all(color: InsightTheme.line),
+                    boxShadow: InsightTheme.cardShadow,
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'GPS Verification',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: InsightTheme.poppins(13, w: FontWeight.w800, c: InsightTheme.ink),
                       ),
-                      child: Container(
-                        alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                        child: _submitting
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                            : Text(
-                                !_verified
-                                    ? 'Get closer to the site'
-                                    : (context.watch<InspectionProvider>().isReworkMode ? 'Save' : 'Confirm & Continue'),
-                                style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white),
-                              ),
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.location_on_rounded, size: 10, color: accent),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              location,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: InsightTheme.inter(10, w: FontWeight.w600, c: InsightTheme.ink2),
+                            ),
+                          ),
+                        ],
                       ),
+                    ],
+                  ),
+                ),
+              ),
+              _HeaderButton(icon: Icons.fullscreen_rounded, onTap: onToggleFullscreen),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface,
+              borderRadius: BorderRadius.circular(InsightTheme.radiusMd),
+              border: Border.all(color: InsightTheme.line),
+              boxShadow: InsightTheme.cardShadow,
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Text('STEP 2 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w800, ls: 0.5, c: accentInk)),
+                    Expanded(
+                      child: Text(
+                        'VERIFY COORDINATES',
+                        textAlign: TextAlign.right,
+                        style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: Container(
+                    height: 5,
+                    color: InsightTheme.surface2,
+                    child: FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: 2 / 6.0,
+                      child: Container(color: accent),
                     ),
                   ),
                 ),
@@ -452,100 +547,730 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
           ),
         ],
       ),
-      ),
-    ));
+    );
   }
 }
 
-/// Three compact, borderless metrics (Distance / Accuracy / Status) laid out
-/// as a single responsive row directly beneath the coordinates — no card,
-/// no background container. Each item is [Expanded] so the three share the
-/// row equally, and the value line uses [FittedBox] so arbitrarily long
-/// readings (e.g. "99999 m") scale down to fit instead of overflowing.
-class _MetricsRow extends StatelessWidget {
-  final double? distance;
-  final double? accuracy;
-  final bool verified;
-  const _MetricsRow({required this.distance, required this.accuracy, required this.verified});
+/// Square white icon button used for back / fullscreen in the header row
+/// and for the floating fullscreen-exit control in fullscreen mode.
+class _HeaderButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _HeaderButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final items = [
-      _MetricData(
-        icon: Icons.map_outlined,
-        value: distance != null ? '${distance!.round()} m' : '-- m',
-        label: 'Distance',
-        color: InsightTheme.blueInk,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: InsightTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: InsightTheme.line),
+          boxShadow: InsightTheme.cardShadow,
+        ),
+        child: Icon(icon, size: 16, color: InsightTheme.ink),
       ),
-      _MetricData(
-        icon: Icons.gps_fixed_rounded,
-        value: accuracy != null ? '±${accuracy!.round()} m' : '± -- m',
-        label: 'Accuracy',
-        color: InsightTheme.blueInk,
-      ),
-      _MetricData(
-        icon: verified ? Icons.check_circle_rounded : Icons.error_outline_rounded,
-        value: verified ? 'Verified' : 'Too far',
-        label: 'Status',
-        color: verified ? InsightTheme.greenInk : InsightTheme.ink2,
-      ),
-    ];
+    );
+  }
+}
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+/// ── Redesigned dual-state compass ─────────────────────────────────────
+///
+/// Tick dial (rotates with device heading), a bouncing SITE needle pinned
+/// at the RELATIVE bearing to the parcel (target − heading), and a digital
+/// center hub (cardinal + heading + target-bearing chip).
+///
+/// Dual state via [InsightTheme] tokens only:
+///   far from site → amber dial, dark slate hub (ink2→ink gradient)
+///   in zone       → blue dial, blue gradient hub (blue1→blue2)
+/// Only fixed-length content lives inside the fixed circle, so the layout
+/// never overflows; [size] is computed responsively by the caller.
+class _Compass extends StatelessWidget {
+  final double size;
+  final double? heading;
+  final double? bearingToParcel;
+  final String headingCardinal;
+  final bool verified;
+
+  const _Compass({
+    required this.size,
+    required this.heading,
+    required this.bearingToParcel,
+    required this.headingCardinal,
+    required this.verified,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hubSize = size * 0.47;
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          for (int i = 0; i < items.length; i++) ...[
-            if (i != 0) const SizedBox(width: 4),
-            Expanded(child: _MetricItem(data: items[i])),
-          ],
+          // Drop shadow behind the disc.
+          Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: (verified ? InsightTheme.blue2 : InsightTheme.amber).withValues(alpha: 0.18),
+                  blurRadius: 40,
+                  offset: const Offset(0, 16),
+                ),
+              ],
+            ),
+          ),
+
+          // Rotating dial (face + ticks + cardinal letters via painter).
+          AnimatedRotation(
+            turns: heading != null ? -(heading! / 360) : 0,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.linear,
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: InsightTheme.surface,
+                border: Border.all(color: InsightTheme.surface2, width: 4),
+              ),
+              child: CustomPaint(size: Size(size, size), painter: _DialPainter(verified: verified)),
+            ),
+          ),
+
+          // SITE needle at the relative bearing (target − heading).
+          if (heading != null && bearingToParcel != null)
+            Transform.rotate(
+              angle: (bearingToParcel! - heading!) * math.pi / 180.0,
+              child: SizedBox(
+                width: size,
+                height: size,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: size * 0.055),
+                    child: _GentleBounce(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: size * 0.095,
+                            height: size * 0.095,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: InsightTheme.blue1,
+                              border: Border.all(color: Colors.white, width: 2),
+                              boxShadow: const [BoxShadow(color: Color(0x330F111A), blurRadius: 6, offset: Offset(0, 2))],
+                            ),
+                            child: Icon(Icons.navigation_rounded, size: size * 0.048, color: Colors.white),
+                          ),
+                          SizedBox(height: size * 0.008),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: size * 0.016, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blueTint,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.35)),
+                            ),
+                            child: Text('SITE', style: InsightTheme.jetBrains(size * 0.032, w: FontWeight.w800, c: InsightTheme.blueInk)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // Center hub: cardinal + heading + target-bearing chip.
+          Container(
+            width: hubSize,
+            height: hubSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: verified
+                    ? const [InsightTheme.blue1, InsightTheme.blue2]
+                    : const [InsightTheme.ink2, InsightTheme.ink],
+              ),
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: [
+                BoxShadow(
+                  color: (verified ? InsightTheme.blue2 : InsightTheme.ink).withValues(alpha: 0.30),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  headingCardinal,
+                  style: InsightTheme.jetBrains(hubSize * 0.085, w: FontWeight.w800, ls: 1.5, c: Colors.white.withValues(alpha: 0.8)),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(heading != null ? '${heading!.round()}' : '--', style: InsightTheme.jetBrains(hubSize * 0.19, w: FontWeight.w800, c: Colors.white)),
+                    Text('°', style: InsightTheme.jetBrains(hubSize * 0.115, w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.75))),
+                  ],
+                ),
+                if (bearingToParcel != null) ...[
+                  SizedBox(height: hubSize * 0.03),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: hubSize * 0.07, vertical: hubSize * 0.018),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.28),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                    ),
+                    child: Text(
+                      'Target: ${bearingToParcel!.round()}°',
+                      style: InsightTheme.jetBrains(hubSize * 0.066, w: FontWeight.w600, c: Colors.white.withValues(alpha: 0.85)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _MetricData {
-  final IconData icon;
-  final String value;
-  final String label;
-  final Color color;
-  const _MetricData({required this.icon, required this.value, required this.label, required this.color});
+/// Soft vertical bounce for the SITE needle (mockup's animate-bounce).
+class _GentleBounce extends StatefulWidget {
+  final Widget child;
+  const _GentleBounce({required this.child});
+
+  @override
+  State<_GentleBounce> createState() => _GentleBounceState();
 }
 
-class _MetricItem extends StatelessWidget {
-  final _MetricData data;
-  const _MetricItem({required this.data});
+class _GentleBounceState extends State<_GentleBounce> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 800),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // FittedBox lets the icon+value line shrink as a unit rather than
-        // wrapping or overflowing when the value is unusually long
-        // (e.g. "12000 m", "99999 m").
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+    return AnimatedBuilder(
+      animation: _controller,
+      child: widget.child,
+      builder: (context, child) => Transform.translate(
+        offset: Offset(0, -4 * _controller.value),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Paints the compass dial face: radial wash ending in the state tint,
+/// outer accent ring, dashed inner circle, 10° ticks (30° majors) and the
+/// cardinal letters (N in red, per the mockup) + major degree labels.
+class _DialPainter extends CustomPainter {
+  final bool verified;
+  _DialPainter({required this.verified});
+
+  static const _cardinalAt = {0: 'N', 90: 'E', 180: 'S', 270: 'W'};
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    final tint = verified ? InsightTheme.blueTint : InsightTheme.amberTint;
+    final accent = verified ? InsightTheme.blue1 : InsightTheme.amber;
+
+    // Face: subtle radial wash ending in the state tint at the rim.
+    final face = Paint()
+      ..shader = RadialGradient(
+        colors: [Colors.white, const Color(0xFFF8FAFC), tint],
+        stops: const [0.0, 0.82, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: radius));
+    canvas.drawCircle(center, radius - 4, face);
+
+    // Outer accent ring.
+    canvas.drawCircle(
+      center,
+      radius - 4,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = accent.withValues(alpha: 0.55),
+    );
+
+    // Dashed inner circle (2-on / 3-off segments).
+    final dashPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = accent.withValues(alpha: 0.30);
+    final dashCircle = Path()..addOval(Rect.fromCircle(center: center, radius: radius * 0.72));
+    for (final metric in dashCircle.computeMetrics()) {
+      double dist = 0;
+      while (dist < metric.length) {
+        canvas.drawPath(metric.extractPath(dist, math.min(dist + 2, metric.length)), dashPaint);
+        dist += 5;
+      }
+    }
+
+    // Ticks + labels.
+    for (int deg = 0; deg < 360; deg += 10) {
+      final isMajor = deg % 30 == 0;
+      final isCardinal = _cardinalAt.containsKey(deg);
+      final angle = (deg - 90) * math.pi / 180.0;
+      final tickLen = isMajor ? radius * 0.066 : radius * 0.033;
+      final outer = Offset(center.dx + (radius - 9) * math.cos(angle), center.dy + (radius - 9) * math.sin(angle));
+      final inner = Offset(center.dx + (radius - 9 - tickLen) * math.cos(angle), center.dy + (radius - 9 - tickLen) * math.sin(angle));
+      canvas.drawLine(
+        inner,
+        outer,
+        Paint()
+          ..color = isMajor ? InsightTheme.ink2 : InsightTheme.ink3.withValues(alpha: 0.45)
+          ..strokeWidth = isMajor ? 2 : 1
+          ..strokeCap = StrokeCap.round,
+      );
+
+      if (isMajor) {
+        final isDegreeLabel = !isCardinal;
+        final label = _cardinalAt[deg] ?? '$deg°';
+        final labelRadius = radius * 0.60;
+        final pos = Offset(center.dx + labelRadius * math.cos(angle), center.dy + labelRadius * math.sin(angle));
+        final tp = TextPainter(
+          text: TextSpan(
+            text: label,
+            style: isCardinal
+                ? InsightTheme.poppins(size.width * 0.055, w: FontWeight.w800, c: deg == 0 ? InsightTheme.red : InsightTheme.ink2)
+                : InsightTheme.jetBrains(size.width * 0.036, w: FontWeight.w600, c: InsightTheme.ink3),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, pos - Offset(tp.width / 2, tp.height / 2));
+        // isDegreeLabel kept for readability of intent above.
+        assert(isDegreeLabel || _cardinalAt.containsKey(deg));
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DialPainter oldDelegate) => oldDelegate.verified != verified;
+}
+
+/// Fixed amber pointer above the dial marking "straight ahead" (heading 0°
+/// relative to the device's top edge).
+class _TopPointerPainter extends CustomPainter {
+  final Color color;
+  _TopPointerPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(size.width / 2, 0)
+      ..lineTo(0, size.height)
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawShadow(path, Colors.black.withValues(alpha: 0.2), 2, false);
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TopPointerPainter oldDelegate) => oldDelegate.color != color;
+}
+
+/// Direction-alignment pill under the compass: coaching text while far
+/// from the site, success text once inside the verification zone. Also
+/// surfaces the compass-unavailable case on devices without a magnetometer.
+class _AlignmentTip extends StatelessWidget {
+  final bool verified;
+  final double? bearingToParcel;
+  final bool compassUnavailable;
+
+  const _AlignmentTip({
+    required this.verified,
+    required this.bearingToParcel,
+    required this.compassUnavailable,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = verified ? InsightTheme.blueTint : InsightTheme.amberTint;
+    final fg = verified ? InsightTheme.blueInk : InsightTheme.amberInk;
+    final iconColor = verified ? InsightTheme.blue1 : InsightTheme.amber;
+
+    final String text;
+    if (compassUnavailable) {
+      text = 'Compass unavailable on this device';
+    } else if (verified) {
+      text = 'Aligned with site target! Ready to verify.';
+    } else if (bearingToParcel != null) {
+      text = 'Rotate towards target site (${bearingToParcel!.round()}°)';
+    } else {
+      text = 'Walk towards the site to start verification';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: fg.withValues(alpha: 0.18)),
+        boxShadow: const [BoxShadow(color: Color(0x0A0B1440), blurRadius: 8, offset: Offset(0, 3))],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            verified ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+            size: 12,
+            color: iconColor,
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 2,
+              softWrap: true,
+              textAlign: TextAlign.center,
+              style: InsightTheme.inter(11, w: FontWeight.w600, c: fg),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ── Unified bottom verification card ─────────────────────────────────
+///
+/// Four rows per the approved mockup: target site + live distance/zone,
+/// the Accuracy/Status/Heading metric grid, the tappable coordinates row
+/// (copies to clipboard), and the primary action button. Stays visible in
+/// fullscreen because confirming is the screen's primary action.
+class _VerificationCard extends StatelessWidget {
+  final String distanceText;
+  final double? accuracy;
+  final bool verified;
+  final double? heading;
+  final String headingCardinal;
+  final String? coords;
+  final String location;
+  final bool submitting;
+  final bool isReworkMode;
+  final VoidCallback onConfirm;
+
+  const _VerificationCard({
+    required this.distanceText,
+    required this.accuracy,
+    required this.verified,
+    required this.heading,
+    required this.headingCardinal,
+    required this.coords,
+    required this.location,
+    required this.submitting,
+    required this.isReworkMode,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = verified ? InsightTheme.blue1 : InsightTheme.amber;
+    final accentInk = verified ? InsightTheme.blueInk : InsightTheme.amberInk;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(InsightTheme.radiusLg),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: InsightTheme.cardShadow,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Row 1: target site + distance/zone.
+          Row(
             children: [
-              Icon(data.icon, size: 15, color: data.color),
-              const SizedBox(width: 4),
-              Text(data.value, style: InsightTheme.poppins(14, w: FontWeight.w700, c: data.color)),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: verified ? InsightTheme.blueTint : InsightTheme.amberTint,
+                  borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
+                  border: Border.all(color: accentInk.withValues(alpha: 0.15)),
+                ),
+                child: Icon(Icons.my_location_rounded, size: 14, color: accentInk),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('TARGET SITE', style: InsightTheme.jetBrains(8.5, w: FontWeight.w800, ls: 1, c: InsightTheme.ink3)),
+                    Text(
+                      location,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: InsightTheme.poppins(12, w: FontWeight.w700, c: InsightTheme.ink),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(distanceText, style: InsightTheme.jetBrains(15, w: FontWeight.w800, c: InsightTheme.ink)),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        verified ? 'In Zone (< 30 m)' : 'Outside Zone',
+                        style: InsightTheme.inter(10, w: FontWeight.w700, c: accentInk),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ],
           ),
+          const SizedBox(height: 10),
+
+          // Row 2: Accuracy / Status / Heading grid.
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: InsightTheme.bg,
+              borderRadius: BorderRadius.circular(InsightTheme.radiusMd),
+              border: Border.all(color: InsightTheme.line),
+            ),
+            child: Row(
+              children: [
+                _Metric(
+                  label: 'GPS ACCURACY',
+                  value: '±${accuracy?.round() ?? "--"} m',
+                  mono: true,
+                  valueColor: InsightTheme.ink,
+                ),
+                _verticalDivider,
+                _Metric(
+                  label: 'STATUS',
+                  value: verified ? 'In Range' : 'Too Far',
+                  mono: false,
+                  valueColor: accentInk,
+                ),
+                _verticalDivider,
+                _Metric(
+                  label: 'HEADING',
+                  value: heading != null ? '${heading!.round()}° ($headingCardinal)' : '--',
+                  mono: true,
+                  valueColor: verified ? InsightTheme.blueInk : InsightTheme.ink2,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Row 3: coordinates (tap to copy).
+          _CoordinatesRow(coords: coords),
+          const SizedBox(height: 12),
+
+          // Row 4: primary action button.
+          GestureDetector(
+            onTap: (verified && !submitting) ? onConfirm : null,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              height: 48,
+              decoration: BoxDecoration(
+                gradient: verified ? InsightTheme.primaryGradient : null,
+                color: verified ? null : InsightTheme.surface2,
+                borderRadius: BorderRadius.circular(InsightTheme.radiusMd),
+                border: Border.all(color: verified ? Colors.transparent : InsightTheme.line),
+                boxShadow: verified
+                    ? [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(0, 8))]
+                    : null,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (submitting)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  else
+                    Icon(
+                      verified ? Icons.verified_user_rounded : Icons.location_searching_rounded,
+                      size: 16,
+                      color: verified ? Colors.white : InsightTheme.ink3,
+                    ),
+                  const SizedBox(width: 8),
+                  Text(
+                    !verified
+                        ? 'Get closer to the site (< 30 m)'
+                        : (isReworkMode ? 'Save' : 'Verify GPS Location Now'),
+                    style: InsightTheme.inter(12, w: FontWeight.w800, ls: 0.8, c: verified ? Colors.white : InsightTheme.ink3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget get _verticalDivider => Container(width: 1, height: 24, color: InsightTheme.line);
+}
+
+/// One cell of the metric grid: tiny uppercase label over the value.
+/// [mono] renders the value in JetBrains Mono (readings), otherwise the
+/// sans face (word statuses). [FittedBox] lets long readings shrink
+/// instead of overflowing.
+class _Metric extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool mono;
+  final Color valueColor;
+
+  const _Metric({
+    required this.label,
+    required this.value,
+    required this.mono,
+    required this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: InsightTheme.jetBrains(8, w: FontWeight.w700, ls: 0.5, c: InsightTheme.ink3)),
+          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: mono
+                  ? InsightTheme.jetBrains(11.5, w: FontWeight.w800, c: valueColor)
+                  : InsightTheme.inter(11.5, w: FontWeight.w800, c: valueColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tappable coordinates row: copies the current fix to the clipboard and
+/// flashes a green "Copied" check for two seconds (mockup behaviour).
+class _CoordinatesRow extends StatefulWidget {
+  final String? coords;
+  const _CoordinatesRow({required this.coords});
+
+  @override
+  State<_CoordinatesRow> createState() => _CoordinatesRowState();
+}
+
+class _CoordinatesRowState extends State<_CoordinatesRow> {
+  bool _copied = false;
+  Timer? _resetTimer;
+
+  @override
+  void dispose() {
+    _resetTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    if (widget.coords == null) return;
+    await Clipboard.setData(ClipboardData(text: widget.coords!));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _resetTimer?.cancel();
+    _resetTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _copy,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: InsightTheme.bg,
+          borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
+          border: Border.all(color: InsightTheme.line),
         ),
-        const SizedBox(height: 4),
-        Text(
-          data.label,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: InsightTheme.jetBrains(9.5, c: InsightTheme.ink2, ls: 0.4),
+        child: Row(
+          children: [
+            const Icon(Icons.public_rounded, size: 12, color: InsightTheme.ink3),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                widget.coords ?? 'Coordinates unavailable',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: InsightTheme.jetBrains(10.5, w: FontWeight.w600, c: InsightTheme.ink2),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: InsightTheme.surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: InsightTheme.line),
+              ),
+              child: _copied
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.check_rounded, size: 10, color: InsightTheme.greenInk),
+                        const SizedBox(width: 3),
+                        Text('Copied', style: InsightTheme.inter(9, w: FontWeight.w800, c: InsightTheme.greenInk)),
+                      ],
+                    )
+                  : const Icon(Icons.copy_rounded, size: 10, color: InsightTheme.ink3),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -581,229 +1306,15 @@ class _ErrorState extends StatelessWidget {
   }
 }
 
-/// The circular compass ring + heading readout.
-///
-/// Only fixed-length content (cardinal letters, "NNW"; degrees, "0°"–"360°")
-/// lives inside the fixed circle, so its size never needs to react to
-/// variable-length data. [size] itself is computed responsively by the
-/// caller via LayoutBuilder, so the compass shrinks gracefully on small
-/// screens instead of relying on one hardcoded constant.
-class _Compass extends StatelessWidget {
-  final double size;
-  final double? heading;
-  final double? bearingToParcel;
-  final String headingCardinal;
-  final bool verified;
 
-  const _Compass({
-    required this.size,
-    required this.heading,
-    required this.bearingToParcel,
-    required this.headingCardinal,
-    required this.verified,
-  });
 
-  @override
-  Widget build(BuildContext context) {
-    // Proportions preserved from the original fixed-size design (250/268 and
-    // 148/268) but derived from [size] so they scale together.
-    final ringSize = size * (250 / 268);
-    final innerSize = size * (148 / 268);
-    final headingFontSize = (size / 268) * 34;
 
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(
-            width: ringSize,
-            height: ringSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.22), blurRadius: 46, spreadRadius: 4)],
-            ),
-          ),
-          AnimatedRotation(
-            turns: heading != null ? -(heading! / 360) : 0,
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.linear,
-            child: CustomPaint(size: Size(ringSize, ringSize), painter: _CompassRingPainter(verified: verified)),
-          ),
-          if (heading != null && bearingToParcel != null)
-            Transform.rotate(
-              angle: ((bearingToParcel! - heading!) * math.pi / 180.0),
-              child: CustomPaint(size: Size(ringSize, ringSize), painter: _TargetArrowPainter(verified: verified)),
-            ),
-          Positioned(
-            top: size * (2 / 268),
-            child: CustomPaint(size: Size(18 * size / 268, 14 * size / 268), painter: _ForwardMarkerPainter(verified: verified)),
-          ),
-          Container(
-            width: innerSize,
-            height: innerSize,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: verified ? const [InsightTheme.blue1, InsightTheme.blue2] : [InsightTheme.blue1.withValues(alpha: 0.85), InsightTheme.blue2],
-                begin: Alignment.topLeft, end: Alignment.bottomRight,
-              ),
-              boxShadow: [BoxShadow(color: InsightTheme.blue2.withValues(alpha: 0.35), blurRadius: 26, offset: const Offset(0, 12))],
-              border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
-            ),
-            // Fixed-length content only ("N"/"NNW", "0°"-"360°") — its font
-            // size already scales with [size] above, so it never needs to
-            // fight a fixed diameter the way the old variable-length
-            // distance text did.
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(headingCardinal, style: InsightTheme.poppins(math.max(12.0, headingFontSize * 15 / 34), w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.9), ls: 1.5)),
-                const SizedBox(height: 2),
-                Text(heading != null ? '${heading!.round()}°' : '--°', style: InsightTheme.poppins(headingFontSize, w: FontWeight.w800, c: Colors.white)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
-/// Distance readout pill. Lives outside the fixed compass circle in the
-/// normally-flowing part of the column, so a value with any number of
-/// digits (15 m ... 12345 m) simply grows the pill's intrinsic width and
-/// wraps to a second line on very narrow screens instead of overflowing.
-class _DistanceBadge extends StatelessWidget {
-  final double? distance;
-  final bool verified;
-  const _DistanceBadge({required this.distance, required this.verified});
 
-  @override
-  Widget build(BuildContext context) {
-    final label = distance != null ? '${distance!.round()}m from site' : '-- from site';
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width - 40),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: verified ? InsightTheme.greenTint : InsightTheme.blueTint,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          softWrap: true,
-          style: InsightTheme.inter(12, w: FontWeight.w600, c: verified ? InsightTheme.greenInk : InsightTheme.blueInk),
-        ),
-      ),
-    );
-  }
-}
 
-class _CompassRingPainter extends CustomPainter {
-  final bool verified;
-  _CompassRingPainter({required this.verified});
 
-  static const _cardinalAt = {0: 'N', 90: 'E', 180: 'S', 270: 'W'};
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-    final accent = verified ? InsightTheme.blue1 : const Color(0xFFE0A526);
 
-    final ringPaint = Paint()
-      ..shader = SweepGradient(
-        colors: [accent.withValues(alpha: 0.05), accent.withValues(alpha: 0.35), accent.withValues(alpha: 0.05)],
-        stops: const [0.0, 0.5, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: radius))
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    canvas.drawCircle(center, radius - 4, ringPaint);
 
-    for (int deg = 0; deg < 360; deg += 10) {
-      final isMajor = deg % 30 == 0;
-      final isCardinal = _cardinalAt.containsKey(deg);
-      final angle = (deg - 90) * math.pi / 180.0;
-      final tickLen = isCardinal ? 16.0 : (isMajor ? 11.0 : 6.0);
-      final outer = Offset(center.dx + (radius - 6) * math.cos(angle), center.dy + (radius - 6) * math.sin(angle));
-      final inner = Offset(center.dx + (radius - 6 - tickLen) * math.cos(angle), center.dy + (radius - 6 - tickLen) * math.sin(angle));
-      canvas.drawLine(
-        inner, outer,
-        Paint()
-          ..color = isCardinal ? accent : InsightTheme.ink3.withValues(alpha: isMajor ? 0.55 : 0.3)
-          ..strokeWidth = isCardinal ? 3 : (isMajor ? 2 : 1.2)
-          ..strokeCap = StrokeCap.round,
-      );
 
-      if (isMajor) {
-        final label = _cardinalAt[deg] ?? '$deg';
-        final labelRadius = radius - 30;
-        final pos = Offset(center.dx + labelRadius * math.cos(angle), center.dy + labelRadius * math.sin(angle));
-        final tp = TextPainter(
-          text: TextSpan(
-            text: label,
-            style: isCardinal
-                ? InsightTheme.poppins(15, w: FontWeight.w800, c: accent)
-                : InsightTheme.jetBrains(10, w: FontWeight.w600, c: InsightTheme.ink3),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        tp.paint(canvas, pos - Offset(tp.width / 2, tp.height / 2));
-      }
-    }
-  }
 
-  @override
-  bool shouldRepaint(covariant _CompassRingPainter oldDelegate) => oldDelegate.verified != verified;
-}
-
-class _ForwardMarkerPainter extends CustomPainter {
-  final bool verified;
-  _ForwardMarkerPainter({required this.verified});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final color = verified ? InsightTheme.blue1 : const Color(0xFFE0A526);
-    final path = Path()
-      ..moveTo(size.width / 2, 0)
-      ..lineTo(0, size.height)
-      ..lineTo(size.width, size.height)
-      ..close();
-    canvas.drawShadow(path, Colors.black.withValues(alpha: 0.2), 2, false);
-    canvas.drawPath(path, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(covariant _ForwardMarkerPainter oldDelegate) => oldDelegate.verified != verified;
-}
-
-class _TargetArrowPainter extends CustomPainter {
-  final bool verified;
-  _TargetArrowPainter({required this.verified});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-    final color = verified ? InsightTheme.greenInk : InsightTheme.blueInk;
-    final tip = Offset(center.dx, center.dy - (radius - 16));
-
-    final path = Path()
-      ..moveTo(tip.dx, tip.dy)
-      ..lineTo(tip.dx - 8, tip.dy + 18)
-      ..lineTo(tip.dx, tip.dy + 11)
-      ..lineTo(tip.dx + 8, tip.dy + 18)
-      ..close();
-    canvas.drawShadow(path, Colors.black.withValues(alpha: 0.25), 4, false);
-    canvas.drawPath(path, Paint()..color = color);
-    canvas.drawCircle(tip.translate(0, 6), 3, Paint()..color = Colors.white.withValues(alpha: 0.9));
-  }
-
-  @override
-  bool shouldRepaint(covariant _TargetArrowPainter oldDelegate) => oldDelegate.verified != verified;
-}

@@ -202,7 +202,7 @@ class _SplashScreenState extends State<SplashScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text('iMAPS', style: AppText.poppins(28, w: FontWeight.w800, c: Colors.white, ls: -0.01)),
-                          Text('inSight', style: AppText.poppins(14, w: FontWeight.w600, c: Colors.white.withValues(alpha: 0.72), ls: 0.02)),
+                          Text('FieldSync', style: AppText.poppins(14, w: FontWeight.w600, c: Colors.white.withValues(alpha: 0.72), ls: 0.02)),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -499,9 +499,12 @@ class _LoginScreenState extends State<LoginScreen> {
         // version. Fall back to the text-based guess only if connectivity
         // *looks* fine but the request still failed (e.g. connected to
         // Wi-Fi with no actual internet, or a Supabase outage).
-        final connectivityResult = await Connectivity().checkConnectivity();
+        // `dynamic` binding mirrors SiteMapScreen._checkOnline(): it keeps
+        // the dual-API shape (list vs single result) without the analyzer
+        // flagging the type check as always-true on connectivity_plus 6.x.
+        final dynamic connectivityResult = await Connectivity().checkConnectivity();
         final hasConnection = connectivityResult is List
-            ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+            ? connectivityResult.any((r) => r != ConnectivityResult.none)
             : connectivityResult != ConnectivityResult.none;
         final msg = e.toString().toLowerCase();
         final looksLikeNetworkError = msg.contains('socketexception') ||
@@ -608,7 +611,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text('iMAPS', style: AppText.poppins(24, w: FontWeight.w800, ls: -0.01)),
-                        Text('inSight', style: AppText.poppins(12, w: FontWeight.w600, c: AppColors.blueInk, ls: 0.02)),
+                        Text('FieldSync', style: AppText.poppins(12, w: FontWeight.w600, c: AppColors.blueInk, ls: 0.02)),
                       ],
                     ),
                     const SizedBox(height: 8),

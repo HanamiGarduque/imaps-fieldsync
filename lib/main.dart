@@ -56,7 +56,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
-      title: 'InSight — iMAPS FieldSync',
+      title: 'iMAPS:FieldSync',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.indigo, useMaterial3: true),
       home: const SplashScreen(),

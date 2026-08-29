@@ -90,7 +90,7 @@ class AboutInsightScreen extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 20),
-                        Text('InSight Field Unit', style: InsightTheme.poppins(22, w: FontWeight.w700)),
+                        Text('iMAPS:FieldSync', style: InsightTheme.poppins(22, w: FontWeight.w700)),
                         const SizedBox(height: 4),
                         Text('Version 1.0.0', style: InsightTheme.jetBrains(12, c: InsightTheme.ink2, ls: 0.5)),
 
@@ -113,7 +113,7 @@ class AboutInsightScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                'InSight (iMAPS) is an intelligent geospatial analytics and zoning application designed specifically for the Municipal Planning and Development Office of Rosario, Batangas.\n\nThis application facilitates active monitoring and analytics reporting of land use and zoning compliance directly from the field unit.',
+                                'iMAPS:FieldSync is an intelligent geospatial analytics and zoning application designed specifically for the Municipal Planning and Development Office of Rosario, Batangas.\n\nThis application facilitates active monitoring and analytics reporting of land use and zoning compliance directly from the field unit.',
                                 style: InsightTheme.inter(13.5, h: 1.6),
                               ),
                             ],

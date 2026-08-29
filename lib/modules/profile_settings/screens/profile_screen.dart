@@ -450,7 +450,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                 ),
                                 _ActionTile(
                                   icon: Icons.info_outline_rounded,
-                                  title: 'About InSight',
+                                  title: 'About iMAPS',
                                   subtitle: 'Version 1.0.0',
                                   onTap: () {
                                     Navigator.push(
@@ -1168,9 +1168,10 @@ class _ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fgColor = isDestructive ? InsightTheme.coral : InsightTheme.ink;
-    final iconBgColor = isDestructive ? InsightTheme.coral.withOpacity(0.1) : InsightTheme.blueTint;
-    final iconColor = isDestructive ? InsightTheme.coral : InsightTheme.blueInk;
+    // Destructive actions (Sign out) use the theme RED — per design
+    // feedback the softer coral read as a normal accent, not a warning.
+    final fgColor = isDestructive ? InsightTheme.red : InsightTheme.ink;
+    final iconColor = isDestructive ? InsightTheme.red : InsightTheme.blueInk;
 
     return InkWell(
       onTap: () {
@@ -1182,12 +1183,11 @@ class _ActionTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
-            Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(color: iconBgColor, borderRadius: BorderRadius.circular(14)),
-              child: Icon(icon, size: 18, color: iconColor),
-            ),
-            const SizedBox(width: 14),
+            // Bare icon — the old rounded tinted chip behind each icon was
+            // removed per design feedback (icons now sit directly on the
+            // card, like the rest of the system's list rows).
+            Icon(icon, size: 22, color: iconColor),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

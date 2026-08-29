@@ -132,12 +132,12 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
         _PolicySection(
           icon: Icons.gavel_rounded,
           title: '1. Acceptance of Terms',
-          body: 'By accessing and using the InSight application, you agree to comply with these Terms and Conditions. This application is designated exclusively for authorized Zoning Officers and Administrative personnel.',
+          body: 'By accessing and using the iMAPS:FieldSync application, you agree to comply with these Terms and Conditions. This application is designated exclusively for authorized Zoning Officers and Administrative personnel.',
         ),
         _PolicySection(
           icon: Icons.business_center_rounded,
           title: '2. Official Use Only',
-          body: 'InSight is an enterprise tool built to manage active zoning workloads, track field findings, and streamline the inspection checklist process. Unauthorized distribution or personal use of this software is strictly prohibited.',
+          body: 'iMAPS:FieldSync is an enterprise tool built to manage active zoning workloads, track field findings, and streamline the inspection checklist process. Unauthorized distribution or personal use of this software is strictly prohibited.',
         ),
         _PolicySection(
           icon: Icons.verified_user_rounded,
@@ -169,7 +169,7 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
         _PolicySection(
           icon: Icons.data_usage_rounded,
           title: '1. Information We Collect',
-          body: 'To facilitate field operations, InSight collects specific operational and personal data:\n\n'
+          body: 'To facilitate field operations, iMAPS:FieldSync collects specific operational and personal data:\n\n'
                 '• Profile Data: Full name, email address, and phone.\n'
                 '• Location Data: Real-time GPS coordinates during verification.\n'
                 '• Media: Site photos captured directly within the app.\n'
@@ -188,7 +188,7 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
         _PolicySection(
           icon: Icons.shield_rounded,
           title: '4. Data Sharing & Retention',
-          body: 'Information gathered through InSight is shared exclusively with the local MPDO database and authorized administrative users. All data processing conforms strictly to the Data Privacy Act of 2012 of the Philippines.',
+          body: 'Information gathered through iMAPS:FieldSync is shared exclusively with the local MPDO database and authorized administrative users. All data processing conforms strictly to the Data Privacy Act of 2012 of the Philippines.',
           isLast: true,
         ),
       ],
