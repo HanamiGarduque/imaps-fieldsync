@@ -261,7 +261,7 @@ class DBHelper {
   }
 
   static const String _pendingActionsSchema = '''
-    CREATE TABLE pending_actions(
+    CREATE TABLE IF NOT EXISTS pending_actions(
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL,
       job_id TEXT NOT NULL,
@@ -300,7 +300,7 @@ class DBHelper {
   //   entries from one inspection can never bleed into another's history.
   // ─────────────────────────────────────────────────────────────────────
   static const String _syncLogEntriesSchema = '''
-    CREATE TABLE sync_log_entries(
+    CREATE TABLE IF NOT EXISTS sync_log_entries(
       id TEXT PRIMARY KEY,
       pending_action_id TEXT,
       job_id TEXT,
@@ -752,7 +752,15 @@ class DBHelper {
             'event_type': 'sync_${status}',
             'result': result,
             'message': message,
-            'technical_details': a['payload'],
+            // Sanitization rule (Sync DB audit): never copy the raw outbox
+            // payload here — it holds inspector notes, findings text,
+            // checklist data, and photo metadata/local file paths (PII).
+            // Log only non-personal action metadata.
+            'technical_details': jsonEncode({
+              'actionType': type,
+              'retryCount': a['retry_count'] ?? 0,
+              if (lastError != null) 'lastError': lastError,
+            }),
             'created_at': updatedAt,
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }

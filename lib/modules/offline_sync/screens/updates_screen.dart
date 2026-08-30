@@ -223,13 +223,13 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 child: Icon(Icons.delete_outline_rounded, color: InsightTheme.redInk, size: 20),
               ),
               const SizedBox(height: 12),
-              Text('Clear cached photo files?', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+              Text('Clear cached photo files?', style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink)),
               const SizedBox(height: 6),
               Text(
                 'This will remove $_syncedPhotoFileCount photo file(s) already backed up to the '
                 'server (${_formatBytes(_clearableBytes.toDouble())}) from this device. '
                 'Unsynced photos are never touched.',
-                style: InsightTheme.inter(12.5, c: InsightTheme.ink2, h: 1.4),
+                style: InsightTheme.openSans(13, c: InsightTheme.ink2, h: 1.4),
               ),
               const SizedBox(height: 20),
               Row(
@@ -241,9 +241,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                     ),
                     onPressed: () => Navigator.pop(ctx, false),
-                    child: Text('Keep Photo Cache', style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.ink2)),
+                    child: Text('Keep Photo Cache', style: InsightTheme.openSans(13, w: FontWeight.w600, c: InsightTheme.ink2)),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 8),
                   FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: InsightTheme.red,
@@ -252,7 +252,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () => Navigator.pop(ctx, true),
-                    child: Text('Delete $_syncedPhotoFileCount Files', style: InsightTheme.inter(12.5, w: FontWeight.w700, c: Colors.white)),
+                    child: Text('Delete $_syncedPhotoFileCount Files', style: InsightTheme.openSans(13, w: FontWeight.w700, c: Colors.white)),
                   ),
                 ],
               ),
@@ -419,7 +419,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           ),
                           child: Text(
                             initial,
-                            style: InsightTheme.poppins(12, w: FontWeight.w700, c: InsightTheme.blue1),
+                            style: InsightTheme.urbanist(13, w: FontWeight.w700, c: InsightTheme.blue1),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -429,13 +429,13 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                             children: [
                               Text(
                                 applicant.isNotEmpty ? applicant : 'Job $jobId',
-                                style: InsightTheme.inter(12.5, w: FontWeight.w700, c: InsightTheme.ink),
+                                style: InsightTheme.urbanist(13.5, w: FontWeight.w700, c: InsightTheme.ink),
                                 overflow: TextOverflow.ellipsis,
                               ),
                               if (barangay.isNotEmpty)
                                 Text(
                                   barangay,
-                                  style: InsightTheme.inter(11, c: InsightTheme.ink2),
+                                  style: InsightTheme.openSans(12, c: InsightTheme.ink2),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                             ],
@@ -450,7 +450,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           ),
                           child: Text(
                             rows.length == 1 ? '1 update' : '${rows.length} updates',
-                            style: InsightTheme.jetBrains(10, c: InsightTheme.ink3),
+                            style: InsightTheme.jetBrains(12, c: InsightTheme.ink2),
                           ),
                         ),
                       ],
@@ -498,7 +498,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           onPressed: () => _handleReviewConflict(
                             rows.firstWhere((r) => r['status'] == 'conflict'),
                           ),
-                          child: Text('Review conflict', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk)),
+                          child: Text('Review conflict', style: InsightTheme.openSans(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
                         ),
                         const SizedBox(width: 8),
                         TextButton(
@@ -512,7 +512,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           onPressed: () => _handleForceSync(
                             rows.firstWhere((r) => r['status'] == 'conflict'),
                           ),
-                          child: Text('Force overwrite', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.amberInk)),
+                          child: Text('Force overwrite', style: InsightTheme.openSans(13, w: FontWeight.w700, c: InsightTheme.amberInk)),
                         ),
                       ],
                     ),
@@ -548,7 +548,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                               : const Icon(Icons.sync_rounded, size: 16),
                           label: Text(
                             isSyncingThisJob ? 'Syncing…' : 'Sync Inspection (${rows.length})',
-                            style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blue1),
+                            style: InsightTheme.openSans(13, w: FontWeight.w700, c: InsightTheme.blue1),
                           ),
                         ),
                       ],
@@ -694,11 +694,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 child: Icon(Icons.warning_amber_rounded, color: InsightTheme.amberInk, size: 20),
               ),
               const SizedBox(height: 12),
-              Text('Sync Conflict Review', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+              Text('Sync Conflict Review', style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink)),
               const SizedBox(height: 6),
               Text(
                 'This job record was modified on the remote server after local offline changes were saved.',
-                style: InsightTheme.inter(12.5, c: InsightTheme.ink2, h: 1.4),
+                style: InsightTheme.openSans(13, c: InsightTheme.ink2, h: 1.4),
               ),
               const SizedBox(height: 12),
               Container(
@@ -714,12 +714,12 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                   children: [
                     Text(
                       'Local Offline Snapshot: ${cachedUpdatedAt ?? 'Unknown'}',
-                      style: InsightTheme.jetBrains(10.5, c: InsightTheme.ink2),
+                      style: InsightTheme.jetBrains(12, c: InsightTheme.ink2),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Server Timestamp: $serverUpdatedAt',
-                      style: InsightTheme.jetBrains(10.5, c: InsightTheme.ink2),
+                      style: InsightTheme.jetBrains(12, c: InsightTheme.ink2),
                     ),
                   ],
                 ),
@@ -735,7 +735,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () => Navigator.of(ctx).pop(),
-                  child: Text('Close Review Window', style: InsightTheme.inter(12.5, w: FontWeight.w700, c: Colors.white)),
+                  child: Text('Close Review Window', style: InsightTheme.openSans(13, w: FontWeight.w700, c: Colors.white)),
                 ),
               ),
             ],
@@ -821,7 +821,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 child: const Icon(Icons.insights_rounded, size: 16, color: InsightTheme.blue1),
               ),
               const SizedBox(width: 10),
-              Text('Sync Performance', style: InsightTheme.poppins(14, w: FontWeight.w700)),
+              Text('Sync Performance', style: InsightTheme.urbanist(14, w: FontWeight.w700, c: InsightTheme.ink)),
             ],
           ),
           const SizedBox(height: 16),
@@ -859,8 +859,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Queue Record Distribution', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink2)),
-              Text('$totalItems total', style: InsightTheme.jetBrains(10, c: InsightTheme.ink3)),
+              Text('Queue Record Distribution', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink2)),
+              Text('$totalItems total', style: InsightTheme.jetBrains(12, c: InsightTheme.ink3)),
             ],
           ),
           const SizedBox(height: 6),
@@ -964,9 +964,10 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   children: [
                                     Text(
                                       'Sync Center',
-                                      style: InsightTheme.poppins(
+                                      style: InsightTheme.urbanist(
                                         24,
                                         w: FontWeight.w700,
+                                        c: InsightTheme.ink,
                                       ),
                                     ),
                                     const SizedBox(height: 4),
@@ -985,16 +986,16 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                         const SizedBox(width: 8),
                                         Text(
                                           _isOnline ? 'Online' : 'Offline',
-                                          style: InsightTheme.inter(
+                                          style: InsightTheme.openSans(
                                             12,
-                                            w: FontWeight.w500,
+                                            w: FontWeight.w600,
                                             c: InsightTheme.ink2,
                                           ),
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
                                           '· Last sync: ${_relativeTime(_lastSync)}',
-                                          style: InsightTheme.inter(
+                                          style: InsightTheme.openSans(
                                             12,
                                             w: FontWeight.w500,
                                             c: InsightTheme.ink3,
@@ -1032,9 +1033,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                               Flexible(
                                                 child: Text(
                                                   syncProgress.displayText,
-                                                  style: InsightTheme.inter(
-                                                    11.5,
-                                                    w: FontWeight.w500,
+                                                  style: InsightTheme.openSans(
+                                                    12,
+                                                    w: FontWeight.w600,
                                                     c: InsightTheme.blueInk,
                                                   ),
                                                   maxLines: 1,
@@ -1098,9 +1099,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                               : _pendingRows.isEmpty
                                                   ? 'All Synced'
                                                   : 'Sync ${_pendingRows.length} Queued',
-                                          style: InsightTheme.inter(
-                                            12.5,
-                                            w: FontWeight.w600,
+                                          style: InsightTheme.openSans(
+                                            13,
+                                            w: FontWeight.w700,
                                             c: Colors.white,
                                           ),
                                         ),
@@ -1164,7 +1165,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   Expanded(
                                     child: Text(
                                       'Synchronization Audit History',
-                                      style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.ink),
+                                      style: InsightTheme.openSans(13, w: FontWeight.w600, c: InsightTheme.ink),
                                     ),
                                   ),
                                   const Icon(Icons.chevron_right_rounded, size: 18, color: InsightTheme.ink3),
@@ -1200,12 +1201,12 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     Expanded(
                                       child: Text(
                                         'OFFLINE STORAGE CACHE',
-                                        style: InsightTheme.jetBrains(10.5, w: FontWeight.w700, ls: 0.6, c: InsightTheme.ink2),
+                                        style: InsightTheme.jetBrains(12, w: FontWeight.w700, ls: 0.6, c: InsightTheme.ink2),
                                       ),
                                     ),
                                     Text(
                                       'SQLite Active',
-                                      style: InsightTheme.inter(10.5, w: FontWeight.w500, c: InsightTheme.ink3),
+                                      style: InsightTheme.openSans(12, w: FontWeight.w500, c: InsightTheme.ink3),
                                     ),
                                   ],
                                 ),
@@ -1265,7 +1266,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                                 _clearableBytes > 0
                                                     ? 'Clear ${_formatBytes(_clearableBytes.toDouble())} Photo Cache'
                                                     : 'Photo Cache Clear',
-                                                style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                                                style: InsightTheme.openSans(13, w: FontWeight.w600, c: InsightTheme.ink2),
                                               ),
                                             ],
                                           ),
@@ -1309,7 +1310,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     Text(
                                       'WAITING TO SYNC',
                                       style: InsightTheme.jetBrains(
-                                        10,
+                                        12,
                                         w: FontWeight.w700,
                                         ls: 1.2,
                                         c: InsightTheme.ink2,
@@ -1336,7 +1337,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   Text(
                                     'COMPLETED AUDIT LOG',
                                     style: InsightTheme.jetBrains(
-                                      10,
+                                      12,
                                       w: FontWeight.w700,
                                       ls: 1.2,
                                       c: InsightTheme.ink3,
@@ -1358,9 +1359,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   ),
                                   child: Text(
                                     'No synced items yet. Once a queued item finishes syncing, it will show up here.',
-                                    style: InsightTheme.inter(
-                                      12.5,
-                                      c: InsightTheme.ink3,
+                                    style: InsightTheme.openSans(
+                                      13,
+                                      c: InsightTheme.ink2,
                                     ),
                                   ),
                                 )
@@ -1469,7 +1470,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                         Expanded(
                           child: Text(
                             _toastMessage!,
-                            style: InsightTheme.inter(12.5, w: FontWeight.w500, c: Colors.white),
+                            style: InsightTheme.openSans(13, w: FontWeight.w600, c: Colors.white),
                           ),
                         ),
                         GestureDetector(
@@ -1522,12 +1523,12 @@ class _StorageStatItem extends StatelessWidget {
       children: [
         Text(
           label,
-          style: InsightTheme.jetBrains(8.5, c: InsightTheme.ink3, ls: 0.3),
+          style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3, ls: 0.3),
         ),
         const SizedBox(height: 4),
         Text(
           value,
-          style: InsightTheme.poppins(14, w: FontWeight.w700, c: valueColor ?? InsightTheme.ink),
+          style: InsightTheme.urbanist(14, w: FontWeight.w700, c: valueColor ?? InsightTheme.ink),
         ),
       ],
     );
@@ -1546,9 +1547,9 @@ class _PerfMetric extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: InsightTheme.jetBrains(8.5, w: FontWeight.w600, c: InsightTheme.ink3, ls: 0.3)),
+        Text(label, style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3, ls: 0.3)),
         const SizedBox(height: 3),
-        Text(value, style: InsightTheme.poppins(15, w: FontWeight.w800, c: color)),
+        Text(value, style: InsightTheme.urbanist(15, w: FontWeight.w800, c: color)),
       ],
     );
   }
@@ -1577,11 +1578,11 @@ class _PerfLegendItem extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink2),
+              style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink2),
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text('$value', style: InsightTheme.jetBrains(11, w: FontWeight.w700, c: InsightTheme.ink)),
+          Text('$value', style: InsightTheme.jetBrains(12, w: FontWeight.w700, c: InsightTheme.ink)),
         ],
       ),
     );
@@ -1656,9 +1657,9 @@ class _LogDataRow extends StatelessWidget {
                     Expanded(
                       child: Text(
                         title,
-                        style: InsightTheme.inter(
+                        style: InsightTheme.openSans(
                           13.5,
-                          w: FontWeight.w600,
+                          w: FontWeight.w700,
                           c: InsightTheme.ink,
                         ),
                         maxLines: 1,
@@ -1669,7 +1670,7 @@ class _LogDataRow extends StatelessWidget {
                     Text(
                       dataSize,
                       style: InsightTheme.jetBrains(
-                        10.5,
+                        12,
                         w: FontWeight.w600,
                         c: InsightTheme.ink2,
                       ),
@@ -1683,7 +1684,7 @@ class _LogDataRow extends StatelessWidget {
                     Expanded(
                       child: Text(
                         dataType,
-                        style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                        style: InsightTheme.openSans(12, c: InsightTheme.ink2),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1694,13 +1695,13 @@ class _LogDataRow extends StatelessWidget {
                           if (isConflict) ...[
                             Icon(
                               Icons.warning_rounded,
-                              size: 10,
+                              size: 11,
                               color: InsightTheme.amberInk,
                             ),
                           ] else if (!isFailed) ...[
                             const SizedBox(
-                              width: 8,
-                              height: 8,
+                              width: 9,
+                              height: 9,
                               child: CircularProgressIndicator(
                                 strokeWidth: 1.5,
                                 color: InsightTheme.amberInk,
@@ -1709,7 +1710,7 @@ class _LogDataRow extends StatelessWidget {
                           ] else ...[
                             Icon(
                               Icons.error_rounded,
-                              size: 10,
+                              size: 11,
                               color: InsightTheme.redInk,
                             ),
                           ],
@@ -1717,16 +1718,16 @@ class _LogDataRow extends StatelessWidget {
                         ] else ...[
                           const Icon(
                             Icons.check_circle_rounded,
-                            size: 10,
+                            size: 11,
                             color: InsightTheme.greenInk,
                           ),
                           const SizedBox(width: 4),
                         ],
                         Text(
                           statusText,
-                          style: InsightTheme.inter(
-                            10.5,
-                            w: FontWeight.w500,
+                          style: InsightTheme.openSans(
+                            12,
+                            w: FontWeight.w600,
                             c: isPending ? accentInk : InsightTheme.ink3,
                           ),
                         ),
