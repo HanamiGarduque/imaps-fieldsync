@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../../../core/theme/insight_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // iMAPS FieldSync • Active Assignments — Premium Glossy Folder Card
@@ -432,11 +432,11 @@ class _GlossyPocket extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text(
                         'iMAPS FieldSync',
-                        style: GoogleFonts.spaceGrotesk(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white.withValues(alpha: 0.70),
-                          letterSpacing: 0.4,
+                        style: InsightTheme.urbanist(
+                          12,
+                          w: FontWeight.w700,
+                          c: Colors.white.withValues(alpha: 0.70),
+                          ls: 0.4,
                         ),
                       ),
                       const Spacer(),
@@ -454,10 +454,10 @@ class _GlossyPocket extends StatelessWidget {
                         ),
                         child: Text(
                           date,
-                          style: GoogleFonts.ibmPlexMono(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white.withValues(alpha: 0.80),
+                          style: InsightTheme.mono(
+                            12,
+                            w: FontWeight.w600,
+                            c: Colors.white.withValues(alpha: 0.80),
                           ),
                         ),
                       ),
@@ -468,12 +468,12 @@ class _GlossyPocket extends StatelessWidget {
                   // Location — main title
                   Text(
                     location,
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                      letterSpacing: -0.5,
-                      height: 1.1,
+                    style: InsightTheme.urbanist(
+                      18,
+                      w: FontWeight.w800,
+                      c: Colors.white,
+                      ls: -0.5,
+                      h: 1.1,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -481,10 +481,10 @@ class _GlossyPocket extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     applicantName,
-                    style: GoogleFonts.ibmPlexSans(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w400,
-                      color: Colors.white.withValues(alpha: 0.60),
+                    style: InsightTheme.inter(
+                      12,
+                      w: FontWeight.w400,
+                      c: Colors.white.withValues(alpha: 0.60),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -503,11 +503,11 @@ class _GlossyPocket extends StatelessWidget {
                           children: [
                             Text(
                               referenceNo,
-                              style: GoogleFonts.ibmPlexMono(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                                letterSpacing: 0.4,
+                              style: InsightTheme.mono(
+                                12.5,
+                                w: FontWeight.w700,
+                                c: Colors.white,
+                                ls: 0.4,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -515,10 +515,10 @@ class _GlossyPocket extends StatelessWidget {
                             const SizedBox(height: 2),
                             Text(
                               'ID: $inspectionId  ·  $applicationType',
-                              style: GoogleFonts.ibmPlexSans(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w400,
-                                color: Colors.white.withValues(alpha: 0.45),
+                              style: InsightTheme.inter(
+                                12,
+                                w: FontWeight.w400,
+                                c: Colors.white.withValues(alpha: 0.55),
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -623,11 +623,11 @@ class _StatusBadge extends StatelessWidget {
           const SizedBox(width: 5),
           Text(
             status.toUpperCase(),
-            style: GoogleFonts.ibmPlexMono(
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              color: accent,
-              letterSpacing: 0.8,
+            style: InsightTheme.mono(
+              12,
+              w: FontWeight.w700,
+              c: accent,
+              ls: 0.8,
             ),
           ),
         ],

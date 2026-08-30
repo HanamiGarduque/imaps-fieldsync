@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../../core/models/user_profile.dart';
@@ -457,7 +456,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 boxShadow: kCardShadow,
                               ),
                               alignment: Alignment.center,
-                              child: Text(initials, style: InsightTheme.poppins(13, w: FontWeight.w700, c: Colors.white)),
+                              child: Text(initials, style: InsightTheme.urbanist(13, w: FontWeight.w700, c: Colors.white)),
                             ),
                           ),
                           const Spacer(),
@@ -479,7 +478,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 ),
                                 const SizedBox(width: 6),
                                 Text(_isOnline ? 'ONLINE' : 'OFFLINE', 
-                                     style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: _isOnline ? InsightTheme.green : InsightTheme.red)),
+                                     style: InsightTheme.mono(12, w: FontWeight.w700, c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk)),
                               ],
                             ),
                           ),
@@ -509,7 +508,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                         beginOffset: const Offset(0, -20),
                         child: Text.rich(
                           TextSpan(children: [
-                            TextSpan(text: '$greeting, $firstName ', style: InsightTheme.poppins(22, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4)),
+                            TextSpan(text: '$greeting, $firstName ', style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4)),
                             const TextSpan(text: '👋', style: TextStyle(fontSize: 19)),
                           ]),
                         ),
@@ -531,7 +530,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(_fullMonthNames[_calendarMonth.month - 1],
-                                style: InsightTheme.poppins(19, w: FontWeight.w800, c: InsightTheme.ink)),
+                                style: InsightTheme.urbanist(19, w: FontWeight.w800, c: InsightTheme.ink)),
                             const _LiveClock(),
                           ],
                         ),
@@ -617,8 +616,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                         child: Column(
                                           mainAxisAlignment: MainAxisAlignment.center,
                                           children: [
-                                            Text('$day', style: InsightTheme.poppins(14, w: FontWeight.w800, c: isSelected ? Colors.white : InsightTheme.ink)),
-                                            Text(weekdayAbbr[weekday - 1], style: InsightTheme.inter(9, w: FontWeight.w600, c: isSelected ? Colors.white.withOpacity(0.85) : InsightTheme.ink3)),
+                                            Text('$day', style: InsightTheme.urbanist(14, w: FontWeight.w800, c: isSelected ? Colors.white : InsightTheme.ink)),
+                                            Text(weekdayAbbr[weekday - 1], style: InsightTheme.openSans(12, w: FontWeight.w600, c: isSelected ? Colors.white.withOpacity(0.9) : InsightTheme.ink3)),
                                             const SizedBox(height: 4),
                                             Container(
                                               width: 5, height: 5,
@@ -663,7 +662,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                             children: [
                               Text(
                                 _showFullCalendar ? 'Hide full calendar' : 'View full calendar',
-                                style: InsightTheme.inter(11.5, w: FontWeight.w700, c: _showFullCalendar ? InsightTheme.blue2 : InsightTheme.ink2),
+                                style: InsightTheme.openSans(12, w: FontWeight.w700, c: _showFullCalendar ? InsightTheme.blueInk : InsightTheme.ink2),
                               ),
                               const SizedBox(width: 4),
                               AnimatedRotation(
@@ -711,7 +710,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   beginOffset: const Offset(0, 16),
                   child: Text(
                     "Here's what's on your schedule today.",
-                    style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
+                    style: InsightTheme.openSans(13.5, w: FontWeight.w600, c: InsightTheme.ink),
                   ),
                 ),
               ),
@@ -733,7 +732,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 const SizedBox(height: 10),
                                 Text(
                                   'No active assignments.',
-                                  style: InsightTheme.inter(13, c: InsightTheme.ink2),
+                                  style: InsightTheme.openSans(13, c: InsightTheme.ink2),
                                 ),
                               ],
                             ),
@@ -1057,7 +1056,7 @@ class _LiveClockState extends State<_LiveClock> {
   Widget build(BuildContext context) {
     final hour12 = _now.hour % 12 == 0 ? 12 : _now.hour % 12;
     final text = '${hour12.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')} ${_now.hour < 12 ? 'AM' : 'PM'}';
-    return Text(text, style: InsightTheme.poppins(19, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.3));
+    return Text(text, style: InsightTheme.urbanist(19, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.3));
   }
 }
 
@@ -1130,7 +1129,7 @@ class _SectionLabel extends StatelessWidget {
             // Bumped from ink3 (muted) to ink (full contrast) — the icon
             // now carries the "secondary/label" weight, so the text can
             // read as the actual heading it is.
-            Text(title, style: InsightTheme.poppins(12.5, w: FontWeight.w800, ls: 0.8, c: InsightTheme.ink)),
+            Text(title, style: InsightTheme.urbanist(12.5, w: FontWeight.w800, ls: 0.8, c: InsightTheme.ink)),
           ],
         ),
         if (trailing != null) trailing!,
@@ -1162,9 +1161,9 @@ class _SectionActionButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: InsightTheme.inter(11.5, w: FontWeight.w700, c: InsightTheme.blue2)),
+            Text(label, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk)),
             const SizedBox(width: 3),
-            Icon(Icons.arrow_forward_rounded, size: 12, color: InsightTheme.blue2),
+            Icon(Icons.arrow_forward_rounded, size: 12, color: InsightTheme.blueInk),
           ],
         ),
       ),
@@ -1225,7 +1224,7 @@ class _ActivityFilterChip extends StatelessWidget {
                 Text(
                   label,
                   style: InsightTheme.inter(
-                    11.5,
+                    12,
                     w: FontWeight.w700,
                     c: selected ? Colors.white : InsightTheme.ink2,
                   ),
@@ -1309,12 +1308,22 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
                       ),
                     ),
                   ),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('${widget.total}', style: InsightTheme.poppins(26, w: FontWeight.w800, c: InsightTheme.ink)),
-                    Text('Tasks', style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink3)),
-                  ],
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 54),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('${widget.total}', style: InsightTheme.urbanist(26, w: FontWeight.w800, c: InsightTheme.ink)),
+                      ),
+                      const SizedBox(height: 2),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('Tasks', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3)),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1330,10 +1339,12 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
                   Text(
                     widget.labels[i],
                     textAlign: TextAlign.center,
-                    style: InsightTheme.inter(10.5, w: FontWeight.w700, c: InsightTheme.ink3),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: InsightTheme.openSans(12, w: FontWeight.w700, c: InsightTheme.ink3),
                   ),
                   const SizedBox(height: 4),
-                  Text('${widget.counts[i]}', style: InsightTheme.poppins(17, w: FontWeight.w800, c: InsightTheme.ink)),
+                  Text('${widget.counts[i]}', style: InsightTheme.urbanist(17, w: FontWeight.w800, c: InsightTheme.ink)),
                   const SizedBox(height: 8),
                   // Same icon-in-circle treatment already used for Recent
                   // Activity tiles — reusing that pattern here too.
@@ -1410,7 +1421,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(headerLabel, style: InsightTheme.poppins(14.5, w: FontWeight.w700, c: InsightTheme.ink)),
+                child: Text(headerLabel, style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
               ),
               GestureDetector(
                 onTap: onPrevMonth,
@@ -1438,7 +1449,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
             children: _weekdayAbbrSunStart.map((d) {
               return Expanded(
                 child: Center(
-                  child: Text(d.substring(0, 3), style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.ink3)),
+                  child: Text(d.substring(0, 3), style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)),
                 ),
               );
             }).toList(),
@@ -1606,31 +1617,31 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(widget.icon, size: 11, color: widget.color),
+                                Icon(widget.icon, size: 13, color: widget.color),
                                 const SizedBox(width: 4),
-                                Text(widget.categoryLabel, style: InsightTheme.inter(9.5, w: FontWeight.w700, c: widget.color)),
+                                Text(widget.categoryLabel, style: InsightTheme.inter(12, w: FontWeight.w700, c: widget.color)),
                               ],
                             ),
                           ),
-                          Text(widget.time, style: InsightTheme.jetBrains(9.5, w: FontWeight.w600, c: InsightTheme.ink2)),
+                          Text(widget.time, style: InsightTheme.mono(12, w: FontWeight.w600, c: InsightTheme.ink2)),
                         ],
                       ),
                       const SizedBox(height: 9),
                       // Title + accent underline, per the reference shape.
-                      Text(widget.title, style: InsightTheme.poppins(12, w: FontWeight.w700, c: InsightTheme.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(widget.title, style: InsightTheme.urbanist(13, w: FontWeight.w700, c: InsightTheme.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 5),
                       Container(width: 32, height: 2, decoration: BoxDecoration(color: widget.color.withOpacity(0.5), borderRadius: BorderRadius.circular(2))),
                       if (widget.subtitle.isNotEmpty) ...[
                         const SizedBox(height: 6),
-                        Text(widget.subtitle, style: InsightTheme.inter(10, w: FontWeight.w500, c: InsightTheme.ink2)),
+                        Text(widget.subtitle, style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2)),
                       ],
                       if (_expanded && _exactTimestamp.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            Icon(Icons.schedule_rounded, size: 11, color: InsightTheme.ink2),
+                            Icon(Icons.schedule_rounded, size: 13, color: InsightTheme.ink2),
                             const SizedBox(width: 6),
-                            Text(_exactTimestamp, style: InsightTheme.jetBrains(10.5, w: FontWeight.w500, c: InsightTheme.ink2)),
+                            Text(_exactTimestamp, style: InsightTheme.mono(12, w: FontWeight.w500, c: InsightTheme.ink2)),
                           ],
                         ),
                       ],
