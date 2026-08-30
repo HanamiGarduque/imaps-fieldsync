@@ -753,7 +753,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                         
                         // Local Search Bar inside Sheet
                         Container(
-                          height: 42,
+                          height: 44,
                           decoration: BoxDecoration(
                             color: InsightTheme.bg,
                             borderRadius: BorderRadius.circular(10),
@@ -1104,7 +1104,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                   children: [
                                     Expanded(
                                       child: Container(
-                                        height: 42,
+                                        height: 44,
                                         decoration: BoxDecoration(
                                           color: InsightTheme.bg,
                                           borderRadius: BorderRadius.circular(10),
@@ -1139,7 +1139,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                         clipBehavior: Clip.none,
                                         children: [
                                           Container(
-                                            height: 42, width: 42,
+                                            height: 44, width: 44,
                                             decoration: BoxDecoration(
                                               color: InsightTheme.surface,
                                               border: Border.all(color: InsightTheme.line),
