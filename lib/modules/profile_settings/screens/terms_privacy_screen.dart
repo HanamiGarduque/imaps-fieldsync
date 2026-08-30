@@ -211,13 +211,13 @@ class _HeaderSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: InsightTheme.poppins(18, w: FontWeight.w700, c: InsightTheme.blueInk, ls: -0.3)),
+        Text(title, style: InsightTheme.urbanist(18, w: FontWeight.w700, c: InsightTheme.blueInk, ls: -0.3)),
         const SizedBox(height: 4),
         Row(
           children: [
             const Icon(Icons.update_rounded, size: 12, color: InsightTheme.ink3),
             const SizedBox(width: 4),
-            Text('Effective Date: $date', style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3)),
+            Text('Effective Date: $date', style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink3)),
           ],
         ),
       ],
@@ -262,7 +262,7 @@ class _PolicySection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 1),
-                Text(title, style: InsightTheme.poppins(13.5, w: FontWeight.w600, c: InsightTheme.ink)),
+                Text(title, style: InsightTheme.urbanist(14, w: FontWeight.w600, c: InsightTheme.ink)),
                 const SizedBox(height: 4),
                 Text(body, style: InsightTheme.inter(12.5, w: FontWeight.w400, c: InsightTheme.ink2, h: 1.5)),
               ],
@@ -289,9 +289,8 @@ class _PremiumSegmentControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Reduced height from 52 to 42
     return Container(
-      height: 42,
+      height: 44,
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.6),
@@ -409,11 +408,10 @@ class _GlassBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Reduced size from 42 to 36
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 36, height: 36,
+        width: 44, height: 44,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.6),
           borderRadius: BorderRadius.circular(12),

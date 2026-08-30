@@ -145,7 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Log out', style: InsightTheme.poppins(18, w: FontWeight.w700)),
+                    Text('Log out', style: InsightTheme.urbanist(18, w: FontWeight.w700, c: InsightTheme.ink)),
                     const SizedBox(height: 10),
                     Text(
                       "You'll need to sign in again to continue your inspections.",
@@ -158,11 +158,12 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                         TextButton(
                           onPressed: isLoggingOut ? null : () => Navigator.pop(dialogContext),
                           style: TextButton.styleFrom(
+                            minimumSize: const Size(60, 44),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           ),
                           child: Text('Cancel', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink2)),
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 8),
                         ElevatedButton(
                           onPressed: isLoggingOut
                               ? null
@@ -175,6 +176,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                             disabledBackgroundColor: InsightTheme.coral.withOpacity(0.7),
                             foregroundColor: Colors.white,
                             elevation: 0,
+                            minimumSize: const Size(90, 44),
                             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
@@ -534,10 +536,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('Performance Analytics',
-                        style: InsightTheme.poppins(14, w: FontWeight.w700, c: InsightTheme.ink)),
+                        style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
                     const SizedBox(height: 2),
                     Text('MPDO Field Operational Metrics',
-                        style: InsightTheme.inter(10.5, c: InsightTheme.ink3)),
+                        style: InsightTheme.inter(12, c: InsightTheme.ink2)),
                   ],
                 ),
               ),
@@ -574,10 +576,13 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                   Expanded(
                     child: GestureDetector(
                       onTap: () => setState(() => _analyticsTabIndex = i),
+                      behavior: HitTestBehavior.opaque,
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         curve: Curves.easeOutCubic,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        constraints: const BoxConstraints(minHeight: 44),
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(vertical: 6),
                         decoration: BoxDecoration(
                           color: _analyticsTabIndex == i ? InsightTheme.surface : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
@@ -590,16 +595,16 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                           children: [
                             Icon(
                               tabs[i].$1,
-                              size: 14,
-                              color: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink3,
+                              size: 16,
+                              color: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink2,
                             ),
                             const SizedBox(height: 3),
                             Text(
                               tabs[i].$2,
                               style: InsightTheme.inter(
-                                10,
+                                12,
                                 w: _analyticsTabIndex == i ? FontWeight.w700 : FontWeight.w500,
-                                c: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink3,
+                                c: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink2,
                               ),
                             ),
                           ],
@@ -630,8 +635,11 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
   Widget _timeframePill(String label, bool active, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
+        constraints: const BoxConstraints(minHeight: 44, minWidth: 44),
+        alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: active ? InsightTheme.blue1 : Colors.transparent,
@@ -640,7 +648,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         child: Text(
           label,
           style: InsightTheme.inter(
-            11,
+            12,
             w: FontWeight.w700,
             c: active ? InsightTheme.surface : InsightTheme.ink2,
           ),
@@ -747,13 +755,18 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
             children: [
               const Icon(Icons.error_outline_rounded, color: InsightTheme.coral, size: 18),
               const SizedBox(width: 8),
-              Text('Couldn\'t load your analytics', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink)),
+              Text('Couldn\'t load your analytics', style: InsightTheme.urbanist(14, w: FontWeight.w600, c: InsightTheme.ink)),
             ],
           ),
           const SizedBox(height: 10),
           GestureDetector(
             onTap: _loadStats,
-            child: Text('Tap to retry', style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 44),
+              alignment: Alignment.centerLeft,
+              child: Text('Tap to retry', style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
+            ),
           ),
         ],
       ),
@@ -786,10 +799,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
           ),
           const SizedBox(height: 14),
           Text(count,
-              style: InsightTheme.poppins(26, w: FontWeight.w800, c: InsightTheme.ink)),
+              style: InsightTheme.urbanist(26, w: FontWeight.w800, c: InsightTheme.ink)),
           const SizedBox(height: 2),
           Text(title,
-              style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink2),
+              style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
               maxLines: 2,
               overflow: TextOverflow.ellipsis),
         ],
@@ -956,7 +969,7 @@ class _Avatar extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: avatarUrl == null
-          ? Text(initials, style: InsightTheme.poppins(fontSize, w: FontWeight.w800, c: Colors.white))
+          ? Text(initials, style: InsightTheme.urbanist(fontSize, w: FontWeight.w800, c: Colors.white))
           : null,
     );
   }
@@ -1011,7 +1024,7 @@ class _FullIdentityCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(displayName,
-                        style: InsightTheme.poppins(16, w: FontWeight.w700, c: InsightTheme.ink),
+                        style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 6),
@@ -1025,17 +1038,20 @@ class _FullIdentityCard extends StatelessWidget {
                       ),
                       child: Text(
                         positionLabel.toUpperCase(),
-                        style: InsightTheme.jetBrains(9, w: FontWeight.w600, c: InsightTheme.blueInk, ls: 0.6),
+                        style: InsightTheme.mono(12, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5),
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
-              // Edit button: icon + "Edit" label, blueTint bg
+              // Edit button: icon + "Edit" label, blueTint bg (min 44x44 touch target)
               GestureDetector(
                 onTap: onEditTap,
+                behavior: HitTestBehavior.opaque,
                 child: Container(
+                  constraints: const BoxConstraints(minHeight: 44, minWidth: 44),
+                  alignment: Alignment.center,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: InsightTheme.blueTint,
@@ -1045,9 +1061,9 @@ class _FullIdentityCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.person_outline_rounded, size: 15, color: InsightTheme.blueInk),
+                      const Icon(Icons.person_outline_rounded, size: 16, color: InsightTheme.blueInk),
                       const SizedBox(width: 5),
-                      Text('Edit', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                      Text('Edit', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
                     ],
                   ),
                 ),
@@ -1060,14 +1076,14 @@ class _FullIdentityCard extends StatelessWidget {
           // Email row
           Row(
             children: [
-              const Icon(Icons.mail_outline_rounded, size: 14, color: InsightTheme.ink3),
+              const Icon(Icons.mail_outline_rounded, size: 15, color: InsightTheme.ink2),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   userEmail,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: InsightTheme.inter(12.5, w: FontWeight.w500, c: InsightTheme.ink2),
+                  style: InsightTheme.inter(13, w: FontWeight.w500, c: InsightTheme.ink2),
                 ),
               ),
             ],
@@ -1108,7 +1124,7 @@ class _CompactIdentityBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(20),
@@ -1126,11 +1142,11 @@ class _CompactIdentityBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(displayName,
-                    style: InsightTheme.poppins(14.5, w: FontWeight.w700),
+                    style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
                 Text(positionLabel,
-                    style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink2),
+                    style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
               ],
@@ -1138,10 +1154,13 @@ class _CompactIdentityBar extends StatelessWidget {
           ),
           GestureDetector(
             onTap: onEditTap,
+            behavior: HitTestBehavior.opaque,
             child: Container(
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+              alignment: Alignment.center,
               padding: const EdgeInsets.all(7),
               decoration: const BoxDecoration(color: InsightTheme.blueTint, shape: BoxShape.circle),
-              child: const Icon(Icons.edit_outlined, size: 14, color: InsightTheme.blueInk),
+              child: const Icon(Icons.edit_outlined, size: 16, color: InsightTheme.blueInk),
             ),
           ),
         ],
@@ -1179,29 +1198,33 @@ class _ActionTile extends StatelessWidget {
         onTap();
       },
       borderRadius: BorderRadius.circular(24),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Row(
-          children: [
-            // Bare icon — the old rounded tinted chip behind each icon was
-            // removed per design feedback (icons now sit directly on the
-            // card, like the rest of the system's list rows).
-            Icon(icon, size: 22, color: iconColor),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: InsightTheme.inter(14, w: FontWeight.w600, c: fgColor)),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle!, style: InsightTheme.inter(11.5, c: InsightTheme.ink3)),
-                  ]
-                ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 52),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              // Bare icon — the old rounded tinted chip behind each icon was
+              // removed per design feedback (icons now sit directly on the
+              // card, like the rest of the system's list rows).
+              Icon(icon, size: 22, color: iconColor),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title, style: InsightTheme.urbanist(15, w: FontWeight.w600, c: fgColor)),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(subtitle!, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                    ]
+                  ],
+                ),
               ),
-            ),
-            Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3, size: 20),
-          ],
+              const Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3, size: 20),
+            ],
+          ),
         ),
       ),
     );
