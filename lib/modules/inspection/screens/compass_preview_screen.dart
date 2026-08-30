@@ -3,62 +3,52 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 
 import '../../../core/widgets/sensitive_screen.dart';
-
-/// Local theme for this screen — identical values to the InsightTheme
-/// class already defined inside gps_verification_screen.dart (and
-/// standalone_site_map_screen.dart), kept as its own private copy here
-/// rather than importing across screen files. Same reasoning as
-/// standalone_site_map_screen.dart's doc comment: this mirrors the
-/// already-established "map/compass UI" pattern in this app, distinct
-/// from the app's main dark shell theme on purpose.
-class _CompassUITheme {
-  static const Color bg = Color(0xFFF2F4FB);
-  static const Color surface = Colors.white;
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) =>
-      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h, double? ls}) =>
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5, letterSpacing: ls);
-  static TextStyle jetBrains(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) =>
-      GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? ink3, letterSpacing: ls);
-}
+import '../../../core/theme/insight_theme.dart';
 
 /// Standalone Compass — reached from the nav bar's Quick Actions sheet.
 ///
-/// This is the same screen shell, background, header treatment, and
-/// compass dial as Step 2 of the inspection flow
-/// (gps_verification_screen.dart) — same sizing formula, same painters,
-/// same glass background blobs. The only thing removed is everything that
-/// depended on comparing the device's position against a parcel target:
-/// no distance badge, no lat/long readout, no bearing-to-target arrow, no
-/// verified/unverified threshold, no live-tracking position stream, no
-/// submit button. What remains is exactly one piece of information — the
-/// live heading shown inside the compass dial itself — with nothing to
-/// verify against, because there's no task here.
+/// Shares the canonical compass dial face, painters, typography tokens,
+/// and responsive proportions with Step 2 of the inspection flow
+/// (`gps_verification_screen.dart`).
+///
+/// Removed from the standalone mode: task-bound target parcel metrics
+/// (distance threshold, SITE relative needle, authoritative Haversine check,
+/// and verification confirmation buttons) since there is no active inspection
+/// task in standalone navigation.
 class StandaloneCompassScreen extends StatefulWidget {
   const StandaloneCompassScreen({super.key});
 
   @override
-  State<StandaloneCompassScreen> createState() => _StandaloneCompassScreenState();
+  State<StandaloneCompassScreen> createState() =>
+      _StandaloneCompassScreenState();
 }
 
 class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
   StreamSubscription<CompassEvent>? _compassSub;
   double? _heading;
+  double? _accuracy;
   bool _compassUnavailable = false;
 
   static const _cardinals = [
-    'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW',
+    'N',
+    'NNE',
+    'NE',
+    'ENE',
+    'E',
+    'ESE',
+    'SE',
+    'SSE',
+    'S',
+    'SSW',
+    'SW',
+    'WSW',
+    'W',
+    'WNW',
+    'NW',
+    'NNW',
   ];
 
   String get _headingCardinal {
@@ -85,8 +75,14 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
       return;
     }
     _compassSub = events.listen((event) {
-      if (!mounted || event.heading == null) return;
-      setState(() => _heading = event.heading);
+      if (!mounted) return;
+      if (event.heading == null) {
+        return;
+      }
+      setState(() {
+        _heading = event.heading;
+        _accuracy = event.accuracy;
+      });
     });
   }
 
@@ -96,99 +92,182 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
 
     return SensitiveScreen(
       child: Scaffold(
-        backgroundColor: _CompassUITheme.bg,
+        backgroundColor: InsightTheme.bg,
         body: Stack(
           children: [
+            // Atmospheric background glow elements
             Positioned(
               top: -60,
               right: -60,
               child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+                imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
                 child: Container(
                   width: 260,
                   height: 260,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _CompassUITheme.blue1.withValues(alpha: 0.20),
+                    color: InsightTheme.blue1.withValues(alpha: 0.12),
                   ),
                 ),
               ),
             ),
             Positioned(
-              bottom: -80,
+              bottom: 120,
               left: -80,
               child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+                imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
                 child: Container(
-                  width: 220,
-                  height: 220,
+                  width: 240,
+                  height: 240,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _CompassUITheme.blue1.withValues(alpha: 0.10),
+                    color: InsightTheme.blue2.withValues(alpha: 0.08),
                   ),
                 ),
               ),
             ),
+
             SafeArea(
               child: Column(
                 children: [
+                  // App Bar / Top Navigation
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                     child: Row(
                       children: [
-                        _GlassBackButton(onTap: () => Navigator.pop(context)),
+                        _GlassIconButton(
+                          icon: Icons.arrow_back_ios_new_rounded,
+                          onTap: () => Navigator.pop(context),
+                        ),
                         const SizedBox(width: 14),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text('Compass', style: _CompassUITheme.poppins(17, w: FontWeight.w700)),
                               Text(
-                                'Live heading',
-                                style: _CompassUITheme.inter(12, c: _CompassUITheme.ink2),
+                                'Compass',
+                                style: InsightTheme.poppins(
+                                  18,
+                                  w: FontWeight.w700,
+                                  c: InsightTheme.ink,
+                                ),
+                              ),
+                              Text(
+                                'Live orientation',
+                                style: InsightTheme.inter(
+                                  12,
+                                  c: InsightTheme.ink2,
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
                         ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: InsightTheme.blueTint,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: InsightTheme.blue1.withValues(alpha: 0.25),
+                            ),
+                          ),
+                          child: Text(
+                            'STANDALONE',
+                            style: InsightTheme.jetBrains(
+                              9,
+                              w: FontWeight.w800,
+                              c: InsightTheme.blueInk,
+                              ls: 0.5,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  // Deliberately no step progress bar here (see
-                  // gps_verification_screen.dart's "STEP 2 OF 6" block) —
-                  // this screen isn't part of the 6-step inspection flow.
+
+                  // Center Compass Dial Area
                   Expanded(
                     child: _compassUnavailable
                         ? Center(
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 24),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.explore_off_rounded, size: 40, color: _CompassUITheme.ink3),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'Compass sensor is not available on this device.',
-                                    textAlign: TextAlign.center,
-                                    style: _CompassUITheme.inter(13, c: _CompassUITheme.ink2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                              ),
+                              child: Container(
+                                padding: const EdgeInsets.all(24),
+                                decoration: BoxDecoration(
+                                  color: InsightTheme.surface,
+                                  borderRadius: BorderRadius.circular(
+                                    InsightTheme.radiusLg,
                                   ),
-                                ],
+                                  border: Border.all(color: InsightTheme.line),
+                                  boxShadow: InsightTheme.cardShadow,
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 48,
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        color: InsightTheme.amberTint,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: InsightTheme.amber.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.explore_off_rounded,
+                                        size: 24,
+                                        color: InsightTheme.amber,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    Text(
+                                      'Compass sensor unavailable',
+                                      style: InsightTheme.poppins(
+                                        15,
+                                        w: FontWeight.w700,
+                                        c: InsightTheme.ink,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'A magnetometer sensor was not detected on this hardware. Orientation data cannot be provided.',
+                                      textAlign: TextAlign.center,
+                                      style: InsightTheme.inter(
+                                        12,
+                                        c: InsightTheme.ink2,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           )
                         : LayoutBuilder(
                             builder: (context, constraints) {
-                              // Exact same sizing formula as gps_verification_screen.dart's
-                              // _Compass usage — smaller of width/height so it stays a true
-                              // circle and never forces content off-screen.
-                              final compassSize = math.min(
-                                constraints.maxWidth * 0.72,
-                                math.min(constraints.maxHeight * 0.62, 268.0),
-                              ).clamp(160.0, 268.0).toDouble();
+                              final compassSize = math
+                                  .min(
+                                    constraints.maxWidth * 0.76,
+                                    math.min(
+                                      constraints.maxHeight * 0.70,
+                                      270.0,
+                                    ),
+                                  )
+                                  .clamp(160.0, 270.0)
+                                  .toDouble();
 
                               return Center(
-                                child: _Compass(
+                                child: _StandaloneCompassDial(
                                   size: compassSize,
                                   heading: _heading,
                                   headingCardinal: _headingCardinal,
@@ -197,7 +276,17 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                             },
                           ),
                   ),
-                  const SizedBox(height: 24),
+
+                  // Bottom Orientation Metrics Card
+                  if (!_compassUnavailable)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: _StandaloneOrientationCard(
+                        heading: _heading,
+                        headingCardinal: _headingCardinal,
+                        accuracy: _accuracy,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -208,19 +297,14 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
   }
 }
 
-/// The circular compass ring + heading readout — same dial, same
-/// proportions, same painters as gps_verification_screen.dart's _Compass.
-/// Removed: the [bearingToParcel] parameter and its target arrow (nothing
-/// to point to without a parcel), and the [verified] threshold that used
-/// to switch the ring/marker between blue ("searching") and amber/green
-/// accents. Standalone mode has no verification concept, so it's always
-/// rendered in the one consistent accent color.
-class _Compass extends StatelessWidget {
+/// Standalone Compass Dial component matching the canonical
+/// `_Compass` visual design from `gps_verification_screen.dart`.
+class _StandaloneCompassDial extends StatelessWidget {
   final double size;
   final double? heading;
   final String headingCardinal;
 
-  const _Compass({
+  const _StandaloneCompassDial({
     required this.size,
     required this.heading,
     required this.headingCardinal,
@@ -228,9 +312,7 @@ class _Compass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ringSize = size * (250 / 268);
-    final innerSize = size * (148 / 268);
-    final headingFontSize = (size / 268) * 34;
+    final hubSize = size * 0.47;
 
     return SizedBox(
       width: size,
@@ -238,60 +320,132 @@ class _Compass extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
+          // Drop shadow behind the disc.
           Container(
-            width: ringSize,
-            height: ringSize,
+            width: size,
+            height: size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               boxShadow: [
-                BoxShadow(color: _CompassUITheme.blue1.withValues(alpha: 0.22), blurRadius: 46, spreadRadius: 4),
+                BoxShadow(
+                  color: InsightTheme.blue2.withValues(alpha: 0.18),
+                  blurRadius: 40,
+                  offset: const Offset(0, 16),
+                ),
               ],
             ),
           ),
+
+          // Rotating dial (face + ticks + cardinal letters via painter).
           AnimatedRotation(
             turns: heading != null ? -(heading! / 360) : 0,
             duration: const Duration(milliseconds: 180),
             curve: Curves.linear,
-            child: CustomPaint(size: Size(ringSize, ringSize), painter: _CompassRingPainter()),
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: InsightTheme.surface,
+                border: Border.all(color: InsightTheme.surface2, width: 4),
+              ),
+              child: CustomPaint(
+                size: Size(size, size),
+                painter: _DialPainter(verified: true),
+              ),
+            ),
           ),
+
+          // Top forward pointer marking straight-ahead device orientation.
           Positioned(
-            top: size * (2 / 268),
-            child: CustomPaint(size: Size(18 * size / 268, 14 * size / 268), painter: _ForwardMarkerPainter()),
+            top: 0,
+            child: CustomPaint(
+              size: Size(16 * size / 268, 12 * size / 268),
+              painter: _TopPointerPainter(color: InsightTheme.blue1),
+            ),
           ),
+
+          // Central Hub
           Container(
-            width: innerSize,
-            height: innerSize,
-            alignment: Alignment.center,
+            width: hubSize,
+            height: hubSize,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: const LinearGradient(
-                colors: [_CompassUITheme.blue1, _CompassUITheme.blue2],
+                colors: [InsightTheme.blue1, InsightTheme.blue2],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               boxShadow: [
-                BoxShadow(color: _CompassUITheme.blue2.withValues(alpha: 0.35), blurRadius: 26, offset: const Offset(0, 12)),
+                BoxShadow(
+                  color: InsightTheme.blue2.withValues(alpha: 0.35),
+                  blurRadius: 26,
+                  offset: const Offset(0, 12),
+                ),
               ],
-              border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.4),
+                width: 2,
+              ),
             ),
-            // Fixed-length content only ("N"/"NNW", "0°"-"360°"), same as
-            // the original — font size already scales with [size].
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   headingCardinal,
-                  style: _CompassUITheme.poppins(
-                    math.max(12.0, headingFontSize * 15 / 34),
-                    w: FontWeight.w700,
-                    c: Colors.white.withValues(alpha: 0.9),
+                  style: InsightTheme.jetBrains(
+                    hubSize * 0.085,
+                    w: FontWeight.w800,
+                    ls: 1.5,
+                    c: Colors.white.withValues(alpha: 0.8),
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  heading != null ? '${heading!.round()}°' : '--°',
-                  style: _CompassUITheme.poppins(headingFontSize, w: FontWeight.w800, c: Colors.white),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      heading != null ? '${heading!.round()}' : '--',
+                      style: InsightTheme.jetBrains(
+                        hubSize * 0.19,
+                        w: FontWeight.w800,
+                        c: Colors.white,
+                      ),
+                    ),
+                    Text(
+                      '°',
+                      style: InsightTheme.jetBrains(
+                        hubSize * 0.115,
+                        w: FontWeight.w700,
+                        c: Colors.white.withValues(alpha: 0.75),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: hubSize * 0.03),
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: hubSize * 0.07,
+                    vertical: hubSize * 0.018,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Text(
+                    'LIVE',
+                    style: InsightTheme.jetBrains(
+                      hubSize * 0.066,
+                      w: FontWeight.w700,
+                      ls: 1,
+                      c: Colors.white.withValues(alpha: 0.9),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -302,66 +456,126 @@ class _Compass extends StatelessWidget {
   }
 }
 
-class _CompassRingPainter extends CustomPainter {
+/// Paints the canonical compass dial face: radial wash ending in the state tint,
+/// outer accent ring, dashed inner circle, 10° ticks (30° majors) and cardinal letters
+/// (N in red `#EF4444`, E/S/W in dark ink) + major degree labels.
+class _DialPainter extends CustomPainter {
+  final bool verified;
+  _DialPainter({required this.verified});
+
   static const _cardinalAt = {0: 'N', 90: 'E', 180: 'S', 270: 'W'};
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
-    const accent = _CompassUITheme.blue1;
+    final tint = verified ? InsightTheme.blueTint : InsightTheme.amberTint;
+    final accent = verified ? InsightTheme.blue1 : InsightTheme.amber;
 
-    final ringPaint = Paint()
-      ..shader = SweepGradient(
-        colors: [accent.withValues(alpha: 0.05), accent.withValues(alpha: 0.35), accent.withValues(alpha: 0.05)],
-        stops: const [0.0, 0.5, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: radius))
+    // Face: subtle radial wash ending in the state tint at the rim.
+    final face = Paint()
+      ..shader = RadialGradient(
+        colors: [Colors.white, const Color(0xFFF8FAFC), tint],
+        stops: const [0.0, 0.82, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: radius));
+    canvas.drawCircle(center, radius - 4, face);
+
+    // Outer accent ring.
+    canvas.drawCircle(
+      center,
+      radius - 4,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = accent.withValues(alpha: 0.55),
+    );
+
+    // Dashed inner circle (2-on / 3-off segments).
+    final dashPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    canvas.drawCircle(center, radius - 4, ringPaint);
+      ..strokeWidth = 1
+      ..color = accent.withValues(alpha: 0.30);
+    final dashCircle = Path()
+      ..addOval(Rect.fromCircle(center: center, radius: radius * 0.72));
+    for (final metric in dashCircle.computeMetrics()) {
+      double dist = 0;
+      while (dist < metric.length) {
+        canvas.drawPath(
+          metric.extractPath(dist, math.min(dist + 2, metric.length)),
+          dashPaint,
+        );
+        dist += 5;
+      }
+    }
 
+    // Ticks + labels.
     for (int deg = 0; deg < 360; deg += 10) {
       final isMajor = deg % 30 == 0;
       final isCardinal = _cardinalAt.containsKey(deg);
       final angle = (deg - 90) * math.pi / 180.0;
-      final tickLen = isCardinal ? 16.0 : (isMajor ? 11.0 : 6.0);
-      final outer = Offset(center.dx + (radius - 6) * math.cos(angle), center.dy + (radius - 6) * math.sin(angle));
-      final inner = Offset(center.dx + (radius - 6 - tickLen) * math.cos(angle), center.dy + (radius - 6 - tickLen) * math.sin(angle));
+      final tickLen = isMajor ? radius * 0.066 : radius * 0.033;
+      final outer = Offset(
+        center.dx + (radius - 9) * math.cos(angle),
+        center.dy + (radius - 9) * math.sin(angle),
+      );
+      final inner = Offset(
+        center.dx + (radius - 9 - tickLen) * math.cos(angle),
+        center.dy + (radius - 9 - tickLen) * math.sin(angle),
+      );
       canvas.drawLine(
         inner,
         outer,
         Paint()
-          ..color = isCardinal ? accent : _CompassUITheme.ink3.withValues(alpha: isMajor ? 0.55 : 0.3)
-          ..strokeWidth = isCardinal ? 3 : (isMajor ? 2 : 1.2)
+          ..color = isMajor
+              ? InsightTheme.ink2
+              : InsightTheme.ink3.withValues(alpha: 0.45)
+          ..strokeWidth = isMajor ? 2 : 1
           ..strokeCap = StrokeCap.round,
       );
 
       if (isMajor) {
-        final label = _cardinalAt[deg] ?? '$deg';
-        final labelRadius = radius - 30;
-        final pos = Offset(center.dx + labelRadius * math.cos(angle), center.dy + labelRadius * math.sin(angle));
+        final isDegreeLabel = !isCardinal;
+        final label = _cardinalAt[deg] ?? '$deg°';
+        final labelRadius = radius * 0.60;
+        final pos = Offset(
+          center.dx + labelRadius * math.cos(angle),
+          center.dy + labelRadius * math.sin(angle),
+        );
         final tp = TextPainter(
           text: TextSpan(
             text: label,
             style: isCardinal
-                ? _CompassUITheme.poppins(15, w: FontWeight.w800, c: accent)
-                : _CompassUITheme.jetBrains(10, w: FontWeight.w600, c: _CompassUITheme.ink3),
+                ? InsightTheme.poppins(
+                    size.width * 0.055,
+                    w: FontWeight.w800,
+                    c: deg == 0 ? InsightTheme.red : InsightTheme.ink2,
+                  )
+                : InsightTheme.jetBrains(
+                    size.width * 0.036,
+                    w: FontWeight.w600,
+                    c: InsightTheme.ink3,
+                  ),
           ),
           textDirection: TextDirection.ltr,
         )..layout();
         tp.paint(canvas, pos - Offset(tp.width / 2, tp.height / 2));
+        assert(isDegreeLabel || _cardinalAt.containsKey(deg));
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _CompassRingPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _DialPainter oldDelegate) =>
+      oldDelegate.verified != verified;
 }
 
-class _ForwardMarkerPainter extends CustomPainter {
+/// Fixed pointer above the dial marking "straight ahead" (heading 0° relative to device).
+class _TopPointerPainter extends CustomPainter {
+  final Color color;
+  _TopPointerPainter({required this.color});
+
   @override
   void paint(Canvas canvas, Size size) {
-    const color = _CompassUITheme.blue1;
     final path = Path()
       ..moveTo(size.width / 2, 0)
       ..lineTo(0, size.height)
@@ -372,36 +586,238 @@ class _ForwardMarkerPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ForwardMarkerPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _TopPointerPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
-class _GlassBackButton extends StatelessWidget {
+/// Bottom Orientation Information Card for Standalone View
+class _StandaloneOrientationCard extends StatelessWidget {
+  final double? heading;
+  final String headingCardinal;
+  final double? accuracy;
+
+  const _StandaloneOrientationCard({
+    required this.heading,
+    required this.headingCardinal,
+    required this.accuracy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(InsightTheme.radiusLg),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: InsightTheme.cardShadow,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: InsightTheme.blueTint,
+                  borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
+                  border: Border.all(
+                    color: InsightTheme.blueInk.withValues(alpha: 0.15),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.explore_rounded,
+                  size: 16,
+                  color: InsightTheme.blueInk,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'ORIENTATION DATA',
+                      style: InsightTheme.jetBrains(
+                        8.5,
+                        w: FontWeight.w800,
+                        ls: 1,
+                        c: InsightTheme.ink3,
+                      ),
+                    ),
+                    Text(
+                      'Live Device Magnetometer',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: InsightTheme.poppins(
+                        13.5,
+                        w: FontWeight.w700,
+                        c: InsightTheme.ink,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: InsightTheme.greenTint,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: InsightTheme.green.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: InsightTheme.green,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'ACTIVE',
+                      style: InsightTheme.jetBrains(
+                        9,
+                        w: FontWeight.w700,
+                        c: InsightTheme.green,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(height: 1, color: InsightTheme.line),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _MetricTile(
+                  label: 'HEADING',
+                  value: heading != null ? '${heading!.round()}°' : '--',
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MetricTile(label: 'CARDINAL', value: headingCardinal),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MetricTile(
+                  label: 'ACCURACY',
+                  value: accuracy != null ? '±${accuracy!.round()}°' : 'High',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: InsightTheme.blueTint,
+              borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
+              border: Border.all(
+                color: InsightTheme.blue1.withValues(alpha: 0.15),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.info_outline_rounded,
+                  size: 13,
+                  color: InsightTheme.blue1,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Rotate your device to observe real-time bearing in the field.',
+                    style: InsightTheme.inter(
+                      11,
+                      w: FontWeight.w500,
+                      c: InsightTheme.blueInk,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+  const _MetricTile({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface2,
+        borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
+        border: Border.all(color: InsightTheme.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: InsightTheme.jetBrains(
+              8,
+              w: FontWeight.w700,
+              ls: 0.8,
+              c: InsightTheme.ink3,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: InsightTheme.jetBrains(
+              13,
+              w: FontWeight.w800,
+              c: InsightTheme.ink,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GlassIconButton extends StatelessWidget {
+  final IconData icon;
   final VoidCallback onTap;
-  const _GlassBackButton({required this.onTap});
+  const _GlassIconButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
-          boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 10, offset: Offset(0, 4))],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: _CompassUITheme.ink),
-              ),
-            ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: InsightTheme.glassIconButtonDecoration(),
+            child: Icon(icon, size: 18, color: InsightTheme.ink),
           ),
         ),
       ),

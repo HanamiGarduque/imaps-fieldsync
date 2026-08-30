@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:geolocator/geolocator.dart';
@@ -37,7 +36,8 @@ class SiteMapPreviewScreen extends StatefulWidget {
   State<SiteMapPreviewScreen> createState() => _SiteMapPreviewScreenState();
 }
 
-class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen> with WidgetsBindingObserver {
+class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
+    with WidgetsBindingObserver {
   bool _loading = true;
   String? _error;
   Position? _position;
@@ -46,8 +46,9 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen> with Widget
   StreamSubscription<CompassEvent>? _compassSub;
   double? _heading;
 
-  ll.LatLng? get _deviceLatLng =>
-      _position == null ? null : ll.LatLng(_position!.latitude, _position!.longitude);
+  ll.LatLng? get _deviceLatLng => _position == null
+      ? null
+      : ll.LatLng(_position!.latitude, _position!.longitude);
 
   @override
   void initState() {
@@ -81,16 +82,24 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen> with Widget
   }
 
   Future<void> _loadLocation() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final pos = await LocationService.getCurrentLocation();
       _position = pos;
       if (!mounted) return;
       setState(() => _loading = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) => _mapController.move(_deviceLatLng!, 17));
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _mapController.move(_deviceLatLng!, 17),
+      );
     } catch (e) {
       if (!mounted) return;
-      setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
+      setState(() {
+        _error = e.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+      });
     }
   }
 
@@ -123,7 +132,8 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen> with Widget
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.imaps.fieldsync',
                   ),
                   MarkerLayer(
@@ -189,7 +199,13 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen> with Widget
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(24),
-                      boxShadow: const [BoxShadow(color: Color(0x1F0B1440), blurRadius: 32, offset: Offset(0, 16))],
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x1F0B1440),
+                          blurRadius: 32,
+                          offset: Offset(0, 16),
+                        ),
+                      ],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -198,12 +214,28 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen> with Widget
                         Row(
                           children: [
                             Container(
-                              width: 34, height: 34,
-                              decoration: BoxDecoration(color: InsightTheme.blue1.withValues(alpha: 0.12), shape: BoxShape.circle),
-                              child: const Icon(Icons.my_location_rounded, size: 17, color: InsightTheme.blue1),
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: InsightTheme.blue1.withValues(
+                                  alpha: 0.12,
+                                ),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.my_location_rounded,
+                                size: 17,
+                                color: InsightTheme.blue1,
+                              ),
                             ),
                             const SizedBox(width: 12),
-                            Text('Your current location', style: InsightTheme.poppins(15, w: FontWeight.w700)),
+                            Text(
+                              'Your current location',
+                              style: InsightTheme.poppins(
+                                15,
+                                w: FontWeight.w700,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 14),
@@ -237,7 +269,9 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen> with Widget
                             Expanded(
                               child: _InfoField(
                                 label: 'HEADING',
-                                value: _heading != null ? '${_heading!.round()}°' : '—',
+                                value: _heading != null
+                                    ? '${_heading!.round()}°'
+                                    : '—',
                               ),
                             ),
                           ],
@@ -264,9 +298,24 @@ class _InfoField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: InsightTheme.jetBrains(9.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.4)),
+        Text(
+          label,
+          style: InsightTheme.jetBrains(
+            9.5,
+            w: FontWeight.w700,
+            c: InsightTheme.ink3,
+            ls: 0.4,
+          ),
+        ),
         const SizedBox(height: 3),
-        Text(value, style: InsightTheme.jetBrains(14, w: FontWeight.w700, c: InsightTheme.ink)),
+        Text(
+          value,
+          style: InsightTheme.jetBrains(
+            14,
+            w: FontWeight.w700,
+            c: InsightTheme.ink,
+          ),
+        ),
       ],
     );
   }
@@ -282,7 +331,8 @@ class _PulsingLocationBeacon extends StatefulWidget {
   State<_PulsingLocationBeacon> createState() => _PulsingLocationBeaconState();
 }
 
-class _PulsingLocationBeaconState extends State<_PulsingLocationBeacon> with SingleTickerProviderStateMixin {
+class _PulsingLocationBeaconState extends State<_PulsingLocationBeacon>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1800),
@@ -321,7 +371,10 @@ class _PulsingLocationBeaconState extends State<_PulsingLocationBeacon> with Sin
                     height: 60,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.55), width: 2),
+                      border: Border.all(
+                        color: InsightTheme.blue1.withValues(alpha: 0.55),
+                        width: 2,
+                      ),
                     ),
                   ),
                 ),
@@ -333,7 +386,11 @@ class _PulsingLocationBeaconState extends State<_PulsingLocationBeacon> with Sin
               angle: widget.heading! * math.pi / 180,
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 34),
-                child: Icon(Icons.navigation_rounded, size: 18, color: InsightTheme.blue1.withValues(alpha: 0.85)),
+                child: Icon(
+                  Icons.navigation_rounded,
+                  size: 18,
+                  color: InsightTheme.blue1.withValues(alpha: 0.85),
+                ),
               ),
             ),
           Container(
@@ -343,7 +400,13 @@ class _PulsingLocationBeaconState extends State<_PulsingLocationBeacon> with Sin
               color: InsightTheme.blue1,
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
-              boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.5), blurRadius: 10, spreadRadius: 1)],
+              boxShadow: [
+                BoxShadow(
+                  color: InsightTheme.blue1.withValues(alpha: 0.5),
+                  blurRadius: 10,
+                  spreadRadius: 1,
+                ),
+              ],
             ),
           ),
         ],
@@ -368,12 +431,7 @@ class _GlassIconButton extends StatelessWidget {
           child: Container(
             width: 44,
             height: 44,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.85),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
-              boxShadow: const [BoxShadow(color: Color(0x140B1440), blurRadius: 20, offset: Offset(0, 8))],
-            ),
+            decoration: InsightTheme.glassIconButtonDecoration(),
             child: Icon(icon, size: 18, color: InsightTheme.ink),
           ),
         ),
@@ -395,9 +453,17 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.location_off_rounded, size: 40, color: InsightTheme.ink3),
+            const Icon(
+              Icons.location_off_rounded,
+              size: 40,
+              color: InsightTheme.ink3,
+            ),
             const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: InsightTheme.inter(13, c: InsightTheme.ink2),
+            ),
             const SizedBox(height: 16),
             OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
           ],

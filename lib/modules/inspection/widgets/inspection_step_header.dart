@@ -47,7 +47,11 @@ class InspectionStepHeader extends StatelessWidget {
                     children: [
                       Text(
                         title,
-                        style: InsightTheme.poppins(15, w: FontWeight.w700, c: InsightTheme.ink),
+                        style: InsightTheme.poppins(
+                          15,
+                          w: FontWeight.w700,
+                          c: InsightTheme.ink,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -97,12 +101,21 @@ class InspectionStepHeader extends StatelessWidget {
                   children: [
                     Text(
                       'STEP $stepNumber OF 6',
-                      style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5),
+                      style: InsightTheme.jetBrains(
+                        10,
+                        w: FontWeight.w700,
+                        c: InsightTheme.blueInk,
+                        ls: 0.5,
+                      ),
                     ),
                     Expanded(
                       child: Text(
                         ' — ${stepSubtitle.toUpperCase()}',
-                        style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5),
+                        style: InsightTheme.jetBrains(
+                          10,
+                          c: InsightTheme.ink3,
+                          ls: 0.5,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -140,7 +153,11 @@ class _StepGlassPill extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
             boxShadow: const [
-              BoxShadow(color: Color(0x140B1440), blurRadius: 20, offset: Offset(0, 8)),
+              BoxShadow(
+                color: Color(0x140B1440),
+                blurRadius: 20,
+                offset: Offset(0, 8),
+              ),
             ],
           ),
           child: child,
@@ -154,10 +171,7 @@ class _StepGlassIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
 
-  const _StepGlassIconButton({
-    required this.icon,
-    required this.onTap,
-  });
+  const _StepGlassIconButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -170,13 +184,8 @@ class _StepGlassIconButton extends StatelessWidget {
           child: Container(
             width: 44,
             height: 44,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.88),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
-              boxShadow: const [
-                BoxShadow(color: Color(0x140B1440), blurRadius: 20, offset: Offset(0, 8)),
-              ],
+            decoration: InsightTheme.glassIconButtonDecoration(
+              fill: Colors.white.withValues(alpha: 0.88),
             ),
             child: Icon(icon, size: 18, color: InsightTheme.ink),
           ),

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../services/location_service.dart';
 import '../services/geotag_service.dart';
@@ -404,7 +403,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white.withValues(alpha: 0.1))),
-                child: Text(_geotagText, style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 11, height: 1.4)),
+                child: Text(_geotagText, style: InsightTheme.mono(12, c: Colors.white, ls: 0.1)),
               ),
             ),
             Align(

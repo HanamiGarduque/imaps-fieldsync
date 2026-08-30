@@ -56,7 +56,8 @@ class SiteMapScreen extends StatefulWidget {
   State<SiteMapScreen> createState() => _SiteMapScreenState();
 }
 
-class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserver {
+class _SiteMapScreenState extends State<SiteMapScreen>
+    with WidgetsBindingObserver {
   bool _loading = true;
   String? _error;
 
@@ -138,7 +139,11 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
               longitude: pos.longitude,
             )
           : SpatialOfflineService.haversineMeters(
-              pos.latitude, pos.longitude, _parcelLatLng!.latitude, _parcelLatLng!.longitude);
+              pos.latitude,
+              pos.longitude,
+              _parcelLatLng!.latitude,
+              _parcelLatLng!.longitude,
+            );
       if (!mounted) return;
       setState(() {
         _deviceLatLng = newDeviceLatLng;
@@ -158,7 +163,10 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
   }
 
   Future<void> _loadMapData() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       if (widget.task.parcelId == null) {
         throw Exception('No parcel linked to this task.');
@@ -169,7 +177,9 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
       double? lng;
 
       if (online) {
-        final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
+        final parcel = await SupabaseService.fetchParcelDetails(
+          widget.task.parcelId!,
+        );
         lat = (parcel?['latitude'] as num?)?.toDouble();
         lng = (parcel?['longitude'] as num?)?.toDouble();
       } else {
@@ -186,9 +196,11 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
       }
 
       if (lat == null || lng == null) {
-        throw Exception(online
-            ? 'This parcel has no recorded coordinates yet.'
-            : 'No cached coordinates for this site yet — connect to the internet once so it can be saved for offline use.');
+        throw Exception(
+          online
+              ? 'This parcel has no recorded coordinates yet.'
+              : 'No cached coordinates for this site yet — connect to the internet once so it can be saved for offline use.',
+        );
       }
       _parcelLatLng = ll.LatLng(lat, lng);
 
@@ -204,7 +216,12 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                 latitude: pos.latitude,
                 longitude: pos.longitude,
               )
-            : SpatialOfflineService.haversineMeters(pos.latitude, pos.longitude, lat, lng);
+            : SpatialOfflineService.haversineMeters(
+                pos.latitude,
+                pos.longitude,
+                lat,
+                lng,
+              );
       } catch (_) {
         _deviceLatLng = null;
         _distanceMeters = null;
@@ -221,7 +238,10 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
       unawaited(_fetchRouteAndUpdate(online: online));
     } catch (e) {
       if (!mounted) return;
-      setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
+      setState(() {
+        _error = e.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+      });
     }
   }
 
@@ -237,7 +257,10 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
       // header and bottom card now sit ON TOP of the full-bleed map
       // instead of squeezing it into a smaller container, so bounds
       // fitting needs more clearance to keep both pins clear of them.
-      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.fromLTRB(50, 160, 50, 220)),
+      CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.fromLTRB(50, 160, 50, 220),
+      ),
     );
   }
 
@@ -248,9 +271,18 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
   List<ll.LatLng> _buildRoutePath(ll.LatLng start, ll.LatLng end) {
     final dLat = end.latitude - start.latitude;
     final dLng = end.longitude - start.longitude;
-    final p1 = ll.LatLng(start.latitude + dLat * 0.10, start.longitude + dLng * 0.52);
-    final p2 = ll.LatLng(start.latitude + dLat * 0.62, start.longitude + dLng * 0.52);
-    final p3 = ll.LatLng(start.latitude + dLat * 0.62, start.longitude + dLng * 0.86);
+    final p1 = ll.LatLng(
+      start.latitude + dLat * 0.10,
+      start.longitude + dLng * 0.52,
+    );
+    final p2 = ll.LatLng(
+      start.latitude + dLat * 0.62,
+      start.longitude + dLng * 0.52,
+    );
+    final p3 = ll.LatLng(
+      start.latitude + dLat * 0.62,
+      start.longitude + dLng * 0.86,
+    );
     return [start, p1, p2, p3, end];
   }
 
@@ -283,8 +315,10 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
   Future<void> _onPositionUpdate(Position pos) async {
     if (!mounted || _parcelLatLng == null) return;
     final newPos = ll.LatLng(pos.latitude, pos.longitude);
-    final shouldRecompute = !_recomputingDistance &&
-        DateTime.now().difference(_lastDistanceComputeAt) >= _minDistanceRecalcInterval;
+    final shouldRecompute =
+        !_recomputingDistance &&
+        DateTime.now().difference(_lastDistanceComputeAt) >=
+            _minDistanceRecalcInterval;
 
     // Move the marker immediately and repaint in EVERY path so the UI is
     // never frozen behind a throttled or in-flight distance recompute.
@@ -305,7 +339,11 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
               longitude: pos.longitude,
             )
           : SpatialOfflineService.haversineMeters(
-              pos.latitude, pos.longitude, _parcelLatLng!.latitude, _parcelLatLng!.longitude);
+              pos.latitude,
+              pos.longitude,
+              _parcelLatLng!.latitude,
+              _parcelLatLng!.longitude,
+            );
       if (!mounted) return;
       setState(() => _distanceMeters = dist);
     } catch (_) {
@@ -397,14 +435,17 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.imaps.fieldsync',
                   ),
                   if (_deviceLatLng != null)
                     PolylineLayer(
                       polylines: [
                         Polyline(
-                          points: _routePoints ?? _buildRoutePath(_deviceLatLng!, _parcelLatLng!),
+                          points:
+                              _routePoints ??
+                              _buildRoutePath(_deviceLatLng!, _parcelLatLng!),
                           strokeWidth: 4,
                           color: InsightTheme.blue1.withValues(alpha: 0.75),
                           borderStrokeWidth: 1,
@@ -416,17 +457,42 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                     markers: [
                       Marker(
                         point: _parcelLatLng!,
-                        width: 32, height: 32,
+                        width: 32,
+                        height: 32,
                         child: Container(
-                          decoration: BoxDecoration(color: InsightTheme.red, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: [BoxShadow(color: InsightTheme.red.withValues(alpha: 0.4), blurRadius: 8)]),
+                          decoration: BoxDecoration(
+                            color: InsightTheme.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                            boxShadow: [
+                              BoxShadow(
+                                color: InsightTheme.red.withValues(alpha: 0.4),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       if (_deviceLatLng != null)
                         Marker(
                           point: _deviceLatLng!,
-                          width: 34, height: 34,
+                          width: 34,
+                          height: 34,
                           child: Container(
-                            decoration: BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.4), blurRadius: 10, spreadRadius: 2)]),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blue1,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 3),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: InsightTheme.blue1.withValues(
+                                    alpha: 0.4,
+                                  ),
+                                  blurRadius: 10,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                     ],
@@ -466,7 +532,9 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                 child: SafeArea(
                   bottom: false,
                   child: _GlassIconButton(
-                    icon: _fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                    icon: _fullscreen
+                        ? Icons.fullscreen_exit_rounded
+                        : Icons.fullscreen_rounded,
                     onTap: () => setState(() => _fullscreen = !_fullscreen),
                   ),
                 ),
@@ -476,7 +544,10 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                 top: (_fullscreen ? 16 : 190) + 56,
                 child: SafeArea(
                   bottom: false,
-                  child: _GlassIconButton(icon: Icons.center_focus_strong_rounded, onTap: _fitBounds),
+                  child: _GlassIconButton(
+                    icon: Icons.center_focus_strong_rounded,
+                    onTap: _fitBounds,
+                  ),
                 ),
               ),
             ],
@@ -497,7 +568,13 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(24),
-                      boxShadow: const [BoxShadow(color: Color(0x1F0B1440), blurRadius: 32, offset: Offset(0, 16))],
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x1F0B1440),
+                          blurRadius: 32,
+                          offset: Offset(0, 16),
+                        ),
+                      ],
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -505,46 +582,86 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(children: [const Icon(Icons.circle, size: 10, color: InsightTheme.red), const SizedBox(width: 6), Text('Target Site', style: InsightTheme.inter(12, w: FontWeight.w600))]),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.circle,
+                                  size: 10,
+                                  color: InsightTheme.red,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Target Site',
+                                  style: InsightTheme.inter(
+                                    12,
+                                    w: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                             GestureDetector(
-                              onTap: _deviceLatLng == null && !_retryingDeviceLocation
+                              onTap:
+                                  _deviceLatLng == null &&
+                                      !_retryingDeviceLocation
                                   ? _retryDeviceLocation
                                   : null,
-                              child: Row(children: [
-                                const Icon(Icons.circle, size: 10, color: InsightTheme.blue1),
-                                const SizedBox(width: 6),
-                                if (_retryingDeviceLocation)
-                                  const SizedBox(
-                                    width: 12, height: 12,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                else
-                                  Text(
-                                    _deviceLatLng == null
-                                        ? 'Location unavailable — tap to retry'
-                                        : _distanceMeters != null
-                                            ? 'You (${_distanceMeters!.round()}m)'
-                                            : 'You',
-                                    style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.circle,
+                                    size: 10,
+                                    color: InsightTheme.blue1,
                                   ),
-                              ]),
+                                  const SizedBox(width: 6),
+                                  if (_retryingDeviceLocation)
+                                    const SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  else
+                                    Text(
+                                      _deviceLatLng == null
+                                          ? 'Location unavailable — tap to retry'
+                                          : _distanceMeters != null
+                                          ? 'You (${_distanceMeters!.round()}m)'
+                                          : 'You',
+                                      style: InsightTheme.inter(
+                                        12,
+                                        w: FontWeight.w600,
+                                        c: InsightTheme.ink2,
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
                         // Route Guidance (Phase 1): road-route distance and
                         // ETA from OSRM, shown alongside (not replacing) the
                         // straight-line/RPC distance that Step 2 reuses.
-                        if (_routePoints != null && _routeDistanceMeters != null)
+                        if (_routePoints != null &&
+                            _routeDistanceMeters != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 10),
                             child: Row(
                               children: [
-                                const Icon(Icons.route_rounded, size: 14, color: InsightTheme.blue1),
+                                const Icon(
+                                  Icons.route_rounded,
+                                  size: 14,
+                                  color: InsightTheme.blue1,
+                                ),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
                                     'Road route: ${_formatRouteDistance(_routeDistanceMeters!)} · ~${_formatRouteDuration(_routeDurationSeconds ?? 0)}',
-                                    style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
+                                    style: InsightTheme.inter(
+                                      12,
+                                      w: FontWeight.w600,
+                                      c: InsightTheme.ink2,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -556,7 +673,9 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                           child: ElevatedButton(
                             onPressed: () {
                               HapticFeedback.selectionClick();
-                              final isReworkMode = context.read<InspectionProvider>().isReworkMode;
+                              final isReworkMode = context
+                                  .read<InspectionProvider>()
+                                  .isReworkMode;
                               if (isReworkMode) {
                                 // Issue 2 fix (Completed Category enhancement):
                                 // this screen has no editable data of its own
@@ -568,25 +687,60 @@ class _SiteMapScreenState extends State<SiteMapScreen> with WidgetsBindingObserv
                                 return;
                               }
                               InspectionProgress.instance.markStepComplete(1);
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => GpsVerificationScreen(task: task)));
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      GpsVerificationScreen(task: task),
+                                ),
+                              );
                             },
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 16),
-                              backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              backgroundColor: Colors.transparent,
+                              shadowColor: Colors.transparent,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
                             ).copyWith(elevation: WidgetStateProperty.all(0)),
                             child: Ink(
                               decoration: BoxDecoration(
-                                gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    InsightTheme.blue1,
+                                    InsightTheme.blue2,
+                                  ],
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                ),
                                 borderRadius: BorderRadius.circular(16),
-                                boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: InsightTheme.blue1.withValues(
+                                      alpha: 0.32,
+                                    ),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 8),
+                                  ),
+                                ],
                               ),
                               child: Container(
-                                alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
+                                alignment: Alignment.center,
+                                constraints: const BoxConstraints(
+                                  minHeight: 52,
+                                ),
                                 width: double.infinity,
                                 child: Text(
-                                  context.watch<InspectionProvider>().isReworkMode ? 'Save' : 'Proceed to Location',
-                                  style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white),
+                                  context
+                                          .watch<InspectionProvider>()
+                                          .isReworkMode
+                                      ? 'Save'
+                                      : 'Proceed to Location',
+                                  style: InsightTheme.poppins(
+                                    15,
+                                    w: FontWeight.w600,
+                                    c: Colors.white,
+                                  ),
                                 ),
                               ),
                             ),
@@ -620,12 +774,7 @@ class _GlassIconButton extends StatelessWidget {
           child: Container(
             width: 44,
             height: 44,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.85),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
-              boxShadow: const [BoxShadow(color: Color(0x140B1440), blurRadius: 20, offset: Offset(0, 8))],
-            ),
+            decoration: InsightTheme.glassIconButtonDecoration(),
             child: Icon(icon, size: 18, color: InsightTheme.ink),
           ),
         ),
@@ -649,11 +798,22 @@ class _ErrorState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.location_off_rounded, size: 40, color: InsightTheme.ink3),
+              const Icon(
+                Icons.location_off_rounded,
+                size: 40,
+                color: InsightTheme.ink3,
+              ),
               const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: InsightTheme.inter(13, c: InsightTheme.ink2),
+              ),
               const SizedBox(height: 16),
-              OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+              OutlinedButton(
+                onPressed: onRetry,
+                child: const Text('Try again'),
+              ),
             ],
           ),
         ),
