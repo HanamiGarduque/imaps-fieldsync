@@ -72,14 +72,14 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         backgroundColor: _kBg,
         elevation: 0,
         foregroundColor: _kInk,
-        title: const Text('Diagnostics & Support',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17, color: _kInk)),
+        title: Text('Diagnostics & Support',
+            style: InsightTheme.urbanist(17, w: FontWeight.w700, c: _kInk)),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openSubmitSheet,
         backgroundColor: _kBlue,
         icon: const Icon(Icons.flag_outlined, color: Colors.white),
-        label: const Text('Report an Issue', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        label: Text('Report an Issue', style: InsightTheme.inter(14, w: FontWeight.w600, c: Colors.white)),
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,
@@ -95,9 +95,9 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   const SizedBox(height: 120),
                   Icon(Icons.cloud_off_rounded, size: 40, color: _kInk2.withOpacity(0.4)),
                   const SizedBox(height: 12),
-                  const Center(
+                  Center(
                     child: Text('Couldn\'t load your reports.\nPull down to try again.',
-                        textAlign: TextAlign.center, style: TextStyle(color: _kInk2)),
+                        textAlign: TextAlign.center, style: InsightTheme.inter(14, c: _kInk2)),
                   ),
                 ],
               );
@@ -109,13 +109,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   const SizedBox(height: 100),
                   Icon(Icons.task_alt_rounded, size: 44, color: _kInk2.withOpacity(0.35)),
                   const SizedBox(height: 12),
-                  const Center(
+                  Center(
                     child: Padding(
                       padding: EdgeInsets.symmetric(horizontal: 40),
                       child: Text(
                         'No issues reported yet. If something in the app isn\'t working right, tap "Report an Issue" below.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: _kInk2),
+                        style: InsightTheme.inter(14, c: _kInk2),
                       ),
                     ),
                   ),
@@ -163,7 +163,7 @@ class _ReportCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(report.title,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: _kInk)),
+                        style: InsightTheme.urbanist(15, w: FontWeight.w700, c: _kInk)),
                   ),
                   _StatusPill(status: report.status),
                 ],
@@ -173,7 +173,7 @@ class _ReportCard extends StatelessWidget {
                 report.summary,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _kInk2, fontSize: 13),
+                style: InsightTheme.inter(13, c: _kInk2),
               ),
               const SizedBox(height: 10),
               Row(
@@ -181,15 +181,15 @@ class _ReportCard extends StatelessWidget {
                   if (report.module != null) ...[
                     Icon(Icons.apps_rounded, size: 13, color: _kInk2.withOpacity(0.7)),
                     const SizedBox(width: 4),
-                    Text(report.module!, style: TextStyle(fontSize: 11, color: _kInk2.withOpacity(0.8))),
+                    Text(report.module!, style: InsightTheme.inter(12, c: _kInk2.withOpacity(0.8))),
                     const SizedBox(width: 12),
                   ],
                   Icon(Icons.schedule_rounded, size: 13, color: _kInk2.withOpacity(0.7)),
                   const SizedBox(width: 4),
-                  Text(_formatDate(report.createdAt), style: TextStyle(fontSize: 11, color: _kInk2.withOpacity(0.8))),
+                  Text(_formatDate(report.createdAt), style: InsightTheme.inter(12, c: _kInk2.withOpacity(0.8))),
                   const Spacer(),
                   Text(report.referenceCode,
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _kBlue)),
+                      style: InsightTheme.inter(12, w: FontWeight.w600, c: _kBlue)),
                 ],
               ),
             ],
@@ -231,7 +231,7 @@ class _StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
-      child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+      child: Text(label, style: InsightTheme.inter(12, w: FontWeight.w700, c: color)),
     );
   }
 }
@@ -254,7 +254,7 @@ class _ReportDetailScreen extends StatelessWidget {
           elevation: 0,
           foregroundColor: _kInk,
           title: Text(report.referenceCode,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: _kInk)),
+              style: InsightTheme.urbanist(15, w: FontWeight.w700, c: _kInk)),
         ),
         body: ListView(
           padding: const EdgeInsets.all(20),
@@ -292,7 +292,7 @@ class _ReportDetailScreen extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Not yet reviewed by the MPDO team. You\'ll see more detail here once someone looks into it.',
-                        style: TextStyle(color: _kInk2, fontSize: 13),
+                        style: InsightTheme.inter(13, c: _kInk2),
                       ),
                     ),
                   ],
@@ -333,7 +333,7 @@ class _DetailSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label.toUpperCase(),
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _kInk2, letterSpacing: 0.6)),
+            style: InsightTheme.inter(12, w: FontWeight.w700, c: _kInk2, ls: 0.6)),
         const SizedBox(height: 6),
         Text(
           content,
@@ -424,12 +424,12 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            const Text('Report an Issue',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: _kInk)),
+            Text('Report an Issue',
+                style: InsightTheme.urbanist(18, w: FontWeight.w800, c: _kInk)),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Describe what happened in your own words — no need to include technical details, the MPDO team will follow up.',
-              style: TextStyle(color: _kInk2, fontSize: 13),
+              style: InsightTheme.inter(13, c: _kInk2),
             ),
             const SizedBox(height: 20),
             TextField(
@@ -449,7 +449,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: const TextStyle(color: _kCoral, fontSize: 13)),
+              Text(_error!, style: InsightTheme.inter(13, c: _kCoral)),
             ],
             const SizedBox(height: 20),
             SizedBox(
@@ -464,7 +464,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
                 child: _submitting
                     ? const SizedBox(width: 20, height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Submit Report', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                    : Text('Submit Report', style: InsightTheme.inter(14, w: FontWeight.w700, c: Colors.white)),
               ),
             ),
           ],

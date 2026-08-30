@@ -148,7 +148,12 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: InsightTheme.inspectionCardShadow,
+                        ),
                         child: Column(
                           children: [
                             _SummaryRow(label: 'Site Location', value: widget.task.location),
@@ -177,15 +182,21 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                       disabledBackgroundColor: Colors.transparent,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ).copyWith(elevation: WidgetStateProperty.all(0)),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: _submitting ? [InsightTheme.blue1.withValues(alpha: 0.5), InsightTheme.blue2.withValues(alpha: 0.5)] : [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: _submitting ? [] : [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
-                      ),
-                      child: Container(
-                        alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                        child: _submitting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : Text('Submit Inspection', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(colors: _submitting ? [InsightTheme.blue1.withValues(alpha: 0.5), InsightTheme.blue2.withValues(alpha: 0.5)] : [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: _submitting ? [] : [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
+                        ),
+                        child: Container(
+                          width: double.infinity,
+                          alignment: Alignment.center,
+                          constraints: const BoxConstraints(minHeight: 52),
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
+                          child: _submitting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)) : Text('Submit Inspection', textAlign: TextAlign.center, style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                        ),
                       ),
                     ),
                   ),

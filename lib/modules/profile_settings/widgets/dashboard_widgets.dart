@@ -18,9 +18,6 @@ import '../../../core/theme/insight_theme.dart';
 /// — only what's inside is different.
 /// ==================================================================
 
-const _kLabelStyle = TextStyle(fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.8);
-const _kCaptionStyle = TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500);
-
 /// Shared footer: 2-4 stat items in a row, hairline dividers between
 /// them. Every card ends on one of these — same primitive, different
 /// content — so the four cards read as one family, not one-off layouts.
@@ -46,9 +43,9 @@ class _StatRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(value, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: textColor)),
+              Text(value, style: InsightTheme.inter(17, w: FontWeight.w800, c: textColor)),
               const SizedBox(height: 2),
-              Text(label, style: _kCaptionStyle.copyWith(color: mutedTextColor), maxLines: 2, overflow: TextOverflow.clip),
+              Text(label, style: InsightTextStyles.caption(color: mutedTextColor), maxLines: 2, overflow: TextOverflow.ellipsis),
             ],
           ),
         ),
@@ -114,12 +111,15 @@ class CompletionGaugeCard extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      percentLabel,
-                      style: InsightTheme.poppins(
-                        26,
-                        w: FontWeight.w800,
-                        c: textColor,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        percentLabel,
+                        style: InsightTheme.urbanist(
+                          26,
+                          w: FontWeight.w800,
+                          c: textColor,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -156,11 +156,15 @@ class CompletionGaugeCard extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            'Applications',
-                            style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Applications',
+                              style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -200,11 +204,15 @@ class CompletionGaugeCard extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            'Workload',
-                            style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Workload',
+                              style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -320,9 +328,9 @@ class WeeklyTrendCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('WEEKLY PERFORMANCE', style: _kLabelStyle.copyWith(color: mutedTextColor)),
+        Text('WEEKLY PERFORMANCE', style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor)),
         const SizedBox(height: 4),
-        Text('Inspections submitted per day', style: _kCaptionStyle.copyWith(color: mutedTextColor)),
+        Text('Inspections submitted per day', style: InsightTextStyles.caption(color: mutedTextColor)),
         const SizedBox(height: 14),
         Expanded(
           child: BarChart(
@@ -450,17 +458,17 @@ class ActivityHeatmapCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('ACTIVITY TRACKER', style: _kLabelStyle.copyWith(color: mutedTextColor)),
+        Text('ACTIVITY TRACKER', style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor)),
         const SizedBox(height: 4),
         Text('${activeDays.length} of $daysInMonth days completed',
-            style: TextStyle(fontSize: 14.5, color: textColor, fontWeight: FontWeight.w600)),
+            style: InsightTheme.inter(14.5, w: FontWeight.w600, c: textColor)),
         const SizedBox(height: 12),
         Row(
           children: [
             for (final d in const ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
               Expanded(
                 child: Center(
-                  child: Text(d, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: mutedTextColor)),
+                  child: Text(d, style: InsightTheme.inter(12, w: FontWeight.w700, c: mutedTextColor)),
                 ),
               ),
           ],
@@ -490,7 +498,7 @@ class ActivityHeatmapCard extends StatelessWidget {
                 child: Text(
                   '$day',
                   style: TextStyle(
-                    fontSize: 11.5,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: isActive ? Colors.white : mutedTextColor,
                   ),
@@ -559,13 +567,13 @@ class ZoningTypeBreakdownCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('ZONING DISTRIBUTION', style: _kLabelStyle.copyWith(color: mutedTextColor)),
+                  Text('ZONING DISTRIBUTION', style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor)),
                   const SizedBox(height: 4),
-                  Text('Share of assigned applications', style: _kCaptionStyle.copyWith(color: mutedTextColor)),
+                  Text('Share of assigned applications', style: InsightTextStyles.caption(color: mutedTextColor)),
                 ],
               ),
             ),
-            Text('$total total', style: _kCaptionStyle.copyWith(color: mutedTextColor)),
+            Text('$total total', style: InsightTextStyles.caption(color: mutedTextColor)),
           ],
         ),
         const SizedBox(height: 18),
@@ -620,7 +628,7 @@ class ZoningTypeBreakdownCard extends StatelessWidget {
                           style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor)),
                     ),
                     Text('${(e.share * 100).round()}%',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: mutedTextColor)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: mutedTextColor)),
                     const SizedBox(width: 10),
                     SizedBox(
                       width: 24,

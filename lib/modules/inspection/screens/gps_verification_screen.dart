@@ -481,7 +481,7 @@ class _GpsHeader extends StatelessWidget {
                         'GPS Verification',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: InsightTheme.poppins(13, w: FontWeight.w800, c: InsightTheme.ink),
+                        style: InsightTheme.urbanist(13, w: FontWeight.w800, c: InsightTheme.ink),
                       ),
                       const SizedBox(height: 2),
                       Row(
@@ -519,12 +519,12 @@ class _GpsHeader extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text('STEP 2 OF 6', style: InsightTheme.jetBrains(10, w: FontWeight.w800, ls: 0.5, c: accentInk)),
+                    Text('STEP 2 OF 6', style: InsightTheme.mono(10, w: FontWeight.w800, ls: 0.5, c: accentInk)),
                     Expanded(
                       child: Text(
                         'VERIFY COORDINATES',
                         textAlign: TextAlign.right,
-                        style: InsightTheme.jetBrains(10, c: InsightTheme.ink3, ls: 0.5),
+                        style: InsightTheme.mono(10, c: InsightTheme.ink3, ls: 0.5),
                       ),
                     ),
                   ],
@@ -681,7 +681,7 @@ class _Compass extends StatelessWidget {
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.35)),
                             ),
-                            child: Text('SITE', style: InsightTheme.jetBrains(size * 0.032, w: FontWeight.w800, c: InsightTheme.blueInk)),
+                            child: Text('SITE', style: InsightTheme.mono(size * 0.032, w: FontWeight.w800, c: InsightTheme.blueInk)),
                           ),
                         ],
                       ),
@@ -719,15 +719,15 @@ class _Compass extends StatelessWidget {
               children: [
                 Text(
                   headingCardinal,
-                  style: InsightTheme.jetBrains(hubSize * 0.085, w: FontWeight.w800, ls: 1.5, c: Colors.white.withValues(alpha: 0.8)),
+                  style: InsightTheme.mono(hubSize * 0.085, w: FontWeight.w800, ls: 1.5, c: Colors.white.withValues(alpha: 0.8)),
                 ),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
                   children: [
-                    Text(heading != null ? '${heading!.round()}' : '--', style: InsightTheme.jetBrains(hubSize * 0.19, w: FontWeight.w800, c: Colors.white)),
-                    Text('°', style: InsightTheme.jetBrains(hubSize * 0.115, w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.75))),
+                    Text(heading != null ? '${heading!.round()}' : '--', style: InsightTheme.mono(hubSize * 0.19, w: FontWeight.w800, c: Colors.white)),
+                    Text('°', style: InsightTheme.mono(hubSize * 0.115, w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.75))),
                   ],
                 ),
                 if (bearingToParcel != null) ...[
@@ -741,7 +741,7 @@ class _Compass extends StatelessWidget {
                     ),
                     child: Text(
                       'Target: ${bearingToParcel!.round()}°',
-                      style: InsightTheme.jetBrains(hubSize * 0.066, w: FontWeight.w600, c: Colors.white.withValues(alpha: 0.85)),
+                      style: InsightTheme.mono(hubSize * 0.066, w: FontWeight.w600, c: Colors.white.withValues(alpha: 0.85)),
                     ),
                   ),
                 ],
@@ -862,8 +862,8 @@ class _DialPainter extends CustomPainter {
           text: TextSpan(
             text: label,
             style: isCardinal
-                ? InsightTheme.poppins(size.width * 0.055, w: FontWeight.w800, c: deg == 0 ? InsightTheme.red : InsightTheme.ink2)
-                : InsightTheme.jetBrains(size.width * 0.036, w: FontWeight.w600, c: InsightTheme.ink3),
+                ? InsightTheme.urbanist(size.width * 0.055, w: FontWeight.w800, c: deg == 0 ? InsightTheme.red : InsightTheme.ink2)
+                : InsightTheme.mono(size.width * 0.036, w: FontWeight.w600, c: InsightTheme.ink3),
           ),
           textDirection: TextDirection.ltr,
         )..layout();
@@ -1029,12 +1029,12 @@ class _VerificationCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('TARGET SITE', style: InsightTheme.jetBrains(8.5, w: FontWeight.w800, ls: 1, c: InsightTheme.ink3)),
+                    Text('TARGET SITE', style: InsightTheme.mono(8.5, w: FontWeight.w800, ls: 1, c: InsightTheme.ink3)),
                     Text(
                       location,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: InsightTheme.poppins(12, w: FontWeight.w700, c: InsightTheme.ink),
+                      style: InsightTheme.urbanist(12, w: FontWeight.w700, c: InsightTheme.ink),
                     ),
                   ],
                 ),
@@ -1043,7 +1043,7 @@ class _VerificationCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(distanceText, style: InsightTheme.jetBrains(15, w: FontWeight.w800, c: InsightTheme.ink)),
+                  Text(distanceText, style: InsightTheme.mono(15, w: FontWeight.w800, c: InsightTheme.ink)),
                   const SizedBox(height: 2),
                   Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1077,7 +1077,7 @@ class _VerificationCard extends StatelessWidget {
             child: Row(
               children: [
                 _Metric(
-                  label: 'GPS ACCURACY',
+                  label: 'ACCURACY',
                   value: '±${accuracy?.round() ?? "--"} m',
                   mono: true,
                   valueColor: InsightTheme.ink,
@@ -1111,6 +1111,7 @@ class _VerificationCard extends StatelessWidget {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 300),
               height: 48,
+              width: double.infinity,
               decoration: BoxDecoration(
                 gradient: verified ? InsightTheme.primaryGradient : null,
                 color: verified ? null : InsightTheme.surface2,
@@ -1120,30 +1121,37 @@ class _VerificationCard extends StatelessWidget {
                     ? [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.35), blurRadius: 20, offset: const Offset(0, 8))]
                     : null,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (submitting)
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  else
-                    Icon(
-                      verified ? Icons.verified_user_rounded : Icons.location_searching_rounded,
-                      size: 16,
-                      color: verified ? Colors.white : InsightTheme.ink3,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.max,
+                  children: [
+                    if (submitting)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    else
+                      Icon(
+                        verified ? Icons.verified_user_rounded : Icons.location_searching_rounded,
+                        size: 16,
+                        color: verified ? Colors.white : InsightTheme.ink3,
+                      ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        !verified
+                            ? 'Approach site (< 30 m)'
+                            : (isReworkMode ? 'Save' : 'Verify GPS Location Now'),
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: InsightTheme.inter(12, w: FontWeight.w800, ls: 0.8, c: verified ? Colors.white : InsightTheme.ink3),
+                      ),
                     ),
-                  const SizedBox(width: 8),
-                  Text(
-                    !verified
-                        ? 'Get closer to the site (< 30 m)'
-                        : (isReworkMode ? 'Save' : 'Verify GPS Location Now'),
-                    style: InsightTheme.inter(12, w: FontWeight.w800, ls: 0.8, c: verified ? Colors.white : InsightTheme.ink3),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1178,14 +1186,14 @@ class _Metric extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: InsightTheme.jetBrains(8, w: FontWeight.w700, ls: 0.5, c: InsightTheme.ink3)),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: InsightTheme.mono(8, w: FontWeight.w700, ls: 0.5, c: InsightTheme.ink3)),
           const SizedBox(height: 3),
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
               value,
               style: mono
-                  ? InsightTheme.jetBrains(11.5, w: FontWeight.w800, c: valueColor)
+                  ? InsightTheme.mono(11.5, w: FontWeight.w800, c: valueColor)
                   : InsightTheme.inter(11.5, w: FontWeight.w800, c: valueColor),
             ),
           ),
@@ -1246,7 +1254,7 @@ class _CoordinatesRowState extends State<_CoordinatesRow> {
                 widget.coords ?? 'Coordinates unavailable',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: InsightTheme.jetBrains(10.5, w: FontWeight.w600, c: InsightTheme.ink2),
+                style: InsightTheme.mono(10.5, w: FontWeight.w600, c: InsightTheme.ink2),
               ),
             ),
             const SizedBox(width: 8),

@@ -168,7 +168,12 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       _SectionLabel(title: 'SITE CONDITION'),
                       const SizedBox(height: 12),
                       Container(
-                        decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: InsightTheme.inspectionCardShadow,
+                        ),
                         child: Column(
                           children: _siteCondition.entries.toList().asMap().entries.map((entry) {
                             var e = entry.value;
@@ -184,7 +189,12 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       _SectionLabel(title: 'ZONING OBSERVATIONS'),
                       const SizedBox(height: 12),
                       Container(
-                        decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: InsightTheme.inspectionCardShadow,
+                        ),
                         child: Column(
                           children: _zoningObservations.entries.toList().asMap().entries.map((entry) {
                             var e = entry.value;
@@ -237,6 +247,8 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                             backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           ).copyWith(elevation: WidgetStateProperty.all(0)),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
                           child: Ink(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
@@ -244,8 +256,12 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                               boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
                             ),
                             child: Container(
-                              alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                              child: Text('Continue to Findings', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                              width: double.infinity,
+                              alignment: Alignment.center,
+                              constraints: const BoxConstraints(minHeight: 52),
+                              padding: const EdgeInsets.symmetric(horizontal: 18),
+                              child: Text('Continue to Findings', textAlign: TextAlign.center, style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                            ),
                             ),
                           ),
                         ),

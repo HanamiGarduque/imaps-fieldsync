@@ -10,6 +10,7 @@ import 'modules/auth_startup/services/secure_prefs_service.dart';
 import './modules/inspection/providers/inspection_provider.dart';
 import 'modules/auth_startup/screens/splash_screen.dart';
 import 'modules/auth_startup/widgets/debug_screenshot_toggle.dart';
+import 'core/theme/insight_theme.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -58,7 +59,22 @@ class MyApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       title: 'iMAPS:FieldSync',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(primarySwatch: Colors.indigo, useMaterial3: true),
+      theme: ThemeData(
+        useMaterial3: true,
+        primaryColor: InsightTheme.blue1,
+        colorScheme: ColorScheme.light(
+          primary: InsightTheme.blue1,
+          secondary: InsightTheme.blue2,
+          surface: InsightTheme.surface,
+          error: InsightTheme.red,
+        ),
+        scaffoldBackgroundColor: InsightTheme.bg,
+        appBarTheme: AppBarTheme(
+          backgroundColor: InsightTheme.surface,
+          foregroundColor: InsightTheme.ink,
+          elevation: 0,
+        ),
+      ),
       home: const SplashScreen(),
       // Phase 3b (debug-only, see AUTH_SECURITY_MASTER_DOC.md and
       // widgets/debug_screenshot_toggle.dart): DebugScreenshotToggle

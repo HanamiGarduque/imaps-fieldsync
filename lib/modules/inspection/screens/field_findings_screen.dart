@@ -149,7 +149,12 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: InsightTheme.inspectionCardShadow,
+                        ),
                         child: TextField(controller: _notesController, maxLines: 4, minLines: 3, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Describe what you observed on-site — structure condition, land use, notable features...')),
                       ),
                       if (widget.capturedPhotos.isNotEmpty || widget.checklistTotal > 0) ...[
@@ -162,7 +167,12 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: InsightTheme.inspectionCardShadow,
+                        ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -185,7 +195,12 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: InsightTheme.line), boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 10, offset: Offset(0, 4))]),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: InsightTheme.line),
+                          boxShadow: InsightTheme.inspectionCardShadow,
+                        ),
                         child: TextField(controller: _recommendationsController, maxLines: 3, minLines: 2, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Enter recommendation for this application (e.g., required permits, follow-up actions)...')),
                       ),
                     ],
@@ -227,6 +242,8 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                             backgroundColor: Colors.transparent, shadowColor: Colors.transparent,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                           ).copyWith(elevation: WidgetStateProperty.all(0)),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
                           child: Ink(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(colors: [InsightTheme.blue1, InsightTheme.blue2], begin: Alignment.topCenter, end: Alignment.bottomCenter),
@@ -234,8 +251,12 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                               boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 20, offset: const Offset(0, 8))],
                             ),
                             child: Container(
-                              alignment: Alignment.center, constraints: const BoxConstraints(minHeight: 52),
-                              child: Text('Continue to Review', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                              width: double.infinity,
+                              alignment: Alignment.center,
+                              constraints: const BoxConstraints(minHeight: 52),
+                              padding: const EdgeInsets.symmetric(horizontal: 18),
+                              child: Text('Continue to Review', textAlign: TextAlign.center, style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                            ),
                             ),
                           ),
                         ),
