@@ -33,11 +33,11 @@ class QuickActionsSheet extends StatefulWidget {
     required this.onClose,
   });
 
-  static const blue1 = Color(0xFF3563FF);
-  static const ink = Color(0xFF0F111A);
-  static const ink2 = Color(0xFF595E73);
-  static const blueTint = Color(0xFFE4EBFF);
-  static const line = Color(0x15141628);
+  static const blue1 = InsightTheme.blue1;
+  static const ink = InsightTheme.ink;
+  static const ink2 = InsightTheme.ink2;
+  static const blueTint = InsightTheme.blueTint;
+  static const line = InsightTheme.line;
 
   @override
   State<QuickActionsSheet> createState() => _QuickActionsSheetState();
@@ -66,19 +66,20 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
               children: [
                 Text(
                   'Quick actions',
-                  style: InsightTheme.poppins(20, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.3),
+                  style: InsightTheme.urbanist(20, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.3),
                 ),
                 GestureDetector(
                   onTap: widget.onClose,
                   behavior: HitTestBehavior.opaque,
                   child: Container(
-                    width: 38,
-                    height: 38,
+                    width: 44,
+                    height: 44,
+                    alignment: Alignment.center,
                     decoration: const BoxDecoration(
                       color: Color(0xFFF1F2F8),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.close_rounded, size: 18, color: QuickActionsSheet.ink2),
+                    child: const Icon(Icons.close_rounded, size: 20, color: QuickActionsSheet.ink2),
                   ),
                 ),
               ],
@@ -223,7 +224,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
                       subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: InsightTheme.inter(11.5, w: FontWeight.w400, c: const Color(0xFF8A90A6), ls: 0.1),
+                      style: InsightTheme.inter(12, w: FontWeight.w400, c: InsightTheme.ink3, ls: 0.1),
                     ),
                   ],
                 ],
