@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/models/user_profile.dart';
 import '../services/biometric_service.dart';
@@ -102,7 +101,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       SnackBar(
         content: Text(
           msg,
-          style: GoogleFonts.inter(fontSize: 13, color: Colors.white),
+          style: InsightTheme.inter(13, c: Colors.white),
         ),
         backgroundColor: _Colors.ink,
         behavior: SnackBarBehavior.floating,
@@ -121,10 +120,10 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         surfaceTintColor: Colors.transparent,
         title: Text(
           'Security & Protection',
-          style: GoogleFonts.poppins(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: _Colors.ink,
+          style: InsightTheme.urbanist(
+            18,
+            w: FontWeight.w700,
+            c: _Colors.ink,
           ),
         ),
         iconTheme: const IconThemeData(color: _Colors.ink),
@@ -148,10 +147,10 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                     activeTrackColor: _Colors.blue1,
                     title: Text(
                       'Enable $_biometricLabel Login',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: _Colors.ink,
+                      style: InsightTheme.inter(
+                        14,
+                        w: FontWeight.w600,
+                        c: _Colors.ink,
                       ),
                     ),
                     subtitle: Text(
@@ -162,7 +161,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                                   : 'Enrolled — log in with your password once to activate')
                               : 'Uses your phone OS registered $_biometricLabel')
                           : 'Hardware not available or biometrics not enrolled in phone OS Settings',
-                      style: GoogleFonts.inter(fontSize: 12, color: _Colors.ink2),
+                      style: InsightTheme.inter(12.5, c: _Colors.ink2),
                     ),
                   ),
 
@@ -173,14 +172,14 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFB8860B)),
+                          const Icon(Icons.info_outline_rounded, size: 18, color: InsightTheme.amberInk),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'One more step: sign in with your email and passcode once. '
                               '$_biometricLabel unlock won\'t be offered anywhere until that '
                               'confirms it\'s really you.',
-                              style: GoogleFonts.inter(fontSize: 11.5, color: const Color(0xFFB8860B), height: 1.4),
+                              style: InsightTheme.inter(12, c: InsightTheme.amberInk, h: 1.4),
                             ),
                           ),
                         ],
@@ -192,11 +191,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                     const Divider(height: 1, indent: 16, endIndent: 16),
                     ListTile(
                       leading: const Icon(Icons.fingerprint, color: _Colors.blue1),
-                      title: Text('Test / Re-verify Sensor', style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w500)),
-                      subtitle: Text('Scan fingerprint / face to verify hardware response', style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink2)),
+                      title: Text('Test / Re-verify Sensor', style: InsightTheme.inter(14, w: FontWeight.w600, c: _Colors.ink)),
+                      subtitle: Text('Scan fingerprint / face to verify hardware response', style: InsightTheme.inter(12, c: _Colors.ink2)),
                       trailing: TextButton(
+                        style: TextButton.styleFrom(minimumSize: const Size(60, 44)),
                         onPressed: _testBiometric,
-                        child: Text('Test Scan', style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w700, color: _Colors.blue1)),
+                        child: Text('Test Scan', style: InsightTheme.inter(13, w: FontWeight.w700, c: _Colors.blue1)),
                       ),
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
@@ -209,15 +209,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                       activeTrackColor: _Colors.blue1,
                       title: Text(
                         'Require When Opening App',
-                        style: GoogleFonts.inter(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w500,
-                          color: _Colors.ink,
+                        style: InsightTheme.inter(
+                          14,
+                          w: FontWeight.w600,
+                          c: _Colors.ink,
                         ),
                       ),
                       subtitle: Text(
                         'Prompt biometric verification on app launch',
-                        style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink2),
+                        style: InsightTheme.inter(12, c: _Colors.ink2),
                       ),
                     ),
                   ],
@@ -232,15 +232,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                     ListTile(
                       title: Text(
                         'Auto-Lock Inactivity Period',
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: _Colors.ink,
+                        style: InsightTheme.inter(
+                          14,
+                          w: FontWeight.w600,
+                          c: _Colors.ink,
                         ),
                       ),
                       subtitle: Text(
                         'Lock app after period in background or idle',
-                        style: GoogleFonts.inter(fontSize: 12, color: _Colors.ink2),
+                        style: InsightTheme.inter(12, c: _Colors.ink2),
                       ),
                     ),
                     Padding(
@@ -261,13 +261,14 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
 
                 const SizedBox(height: 24),
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.security_rounded, size: 16, color: _Colors.ink3),
+                    const Icon(Icons.security_rounded, size: 18, color: _Colors.ink3),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Biometric credentials are managed by your device\'s secure hardware (Keystore/Secure Enclave) and never transmitted to external servers — iMAPS FieldSync never sees or stores them.',
-                        style: GoogleFonts.inter(fontSize: 11.5, color: _Colors.ink3, height: 1.4),
+                        style: InsightTheme.inter(12, c: _Colors.ink3, h: 1.4),
                       ),
                     ),
                   ],
@@ -319,10 +320,10 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
               children: [
                 Text(
                   _bioEnrolled ? '$_biometricLabel Active' : 'Protection Disabled',
-                  style: GoogleFonts.poppins(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
+                  style: InsightTheme.urbanist(
+                    16,
+                    w: FontWeight.w700,
+                    c: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -330,9 +331,9 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                   _bioEnrolled
                       ? 'Keystore Protected · ${_requireOnOpen ? "Auto-Lock On" : "Standard"}'
                       : 'Toggle switch below to register $_biometricLabel',
-                  style: GoogleFonts.inter(
-                    fontSize: 11.5,
-                    color: Colors.white.withValues(alpha: 0.8),
+                  style: InsightTheme.inter(
+                    12,
+                    c: Colors.white.withValues(alpha: 0.85),
                   ),
                 ),
               ],
@@ -346,11 +347,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   Widget _sectionHeader(String text) {
     return Text(
       text,
-      style: GoogleFonts.jetBrainsMono(
-        fontSize: 10.5,
-        fontWeight: FontWeight.w700,
-        color: _Colors.ink3,
-        letterSpacing: 0.8,
+      style: InsightTheme.inter(
+        12,
+        w: FontWeight.w700,
+        c: _Colors.ink3,
+        ls: 0.6,
       ),
     );
   }
@@ -372,10 +373,10 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       label: Text(label),
       selected: selected,
       selectedColor: _Colors.blue1,
-      labelStyle: GoogleFonts.inter(
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-        color: selected ? Colors.white : _Colors.ink2,
+      labelStyle: InsightTheme.inter(
+        12.5,
+        w: FontWeight.w600,
+        c: selected ? Colors.white : _Colors.ink2,
       ),
       onSelected: (val) async {
         if (val) {

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
@@ -19,38 +18,36 @@ import '../../../core/theme/insight_theme.dart';
 
 
 /// ==================================================================
-/// EXACT MATCH DESIGN TOKENS
+/// EXACT MATCH DESIGN TOKENS (Canonical Urbanist + Inter)
 /// ==================================================================
 class AppColors {
-  static const bg = Color(0xFFF2F4FB);
-  static const surface = Color(0xFFFFFFFF);
+  static const bg = InsightTheme.bg;
+  static const surface = InsightTheme.surface;
   
-  static const ink = Color(0xFF12141F);
-  static const ink2 = Color(0xFF666C82);
-  static const ink3 = Color(0xFFA2A7BC);
+  static const ink = InsightTheme.ink;
+  static const ink2 = InsightTheme.ink2;
+  static const ink3 = InsightTheme.ink3;
+  static const inkMuted = InsightTheme.inkMuted;
   
-  // Brand blues now reference the canonical InsightTheme tokens - the old
-  // splash-local 3D6BFF/0B2FBF/1A3FC4 values were a second blue family that
-  // did not match the brand blues used across Home / Tasks / Inspection.
   static const blue1 = InsightTheme.blue1;
   static const blue2 = InsightTheme.blue2;
   static const blueInk = InsightTheme.blueInk;
   
-  static const amber = Color(0xFFFFB700);
+  static const amber = InsightTheme.amber;
   
-  static const line = Color(0x12141628);
-  static const lineStrong = Color(0x21141628);
+  static const line = InsightTheme.line;
+  static const lineStrong = InsightTheme.lineStrong;
 }
 
 class AppText {
   static TextStyle poppins(double size, {FontWeight w = FontWeight.w700, Color? c, double? ls}) => 
-      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? AppColors.ink, letterSpacing: ls);
+      InsightTheme.urbanist(size < 12.0 ? 12.0 : size, w: w, c: c ?? AppColors.ink, ls: ls);
       
   static TextStyle inter(double size, {FontWeight w = FontWeight.w600, Color? c, double? ls, double? lh}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? AppColors.ink, letterSpacing: ls, height: lh);
+      InsightTheme.inter(size < 12.0 ? 12.0 : size, w: w, c: c ?? AppColors.ink, ls: ls, h: lh);
       
   static TextStyle mono(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
-      GoogleFonts.jetBrainsMono(fontSize: size, fontWeight: w, color: c ?? AppColors.ink3, letterSpacing: ls);
+      InsightTheme.mono(size < 12.0 ? 12.0 : size, w: w, c: c ?? AppColors.ink3, ls: ls);
 }
 
 /// ==================================================================
@@ -610,22 +607,22 @@ class _LoginScreenState extends State<LoginScreen> {
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('iMAPS', style: AppText.poppins(24, w: FontWeight.w800, ls: -0.01)),
-                        Text('FieldSync', style: AppText.poppins(12, w: FontWeight.w600, c: AppColors.blueInk, ls: 0.02)),
+                        Text('iMAPS', style: AppText.poppins(28, w: FontWeight.w800, ls: -0.5)),
+                        Text('FieldSync', style: AppText.poppins(14, w: FontWeight.w600, c: AppColors.blueInk, ls: 0.2)),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppColors.blue1.withValues(alpha: 0.06),
+                        color: AppColors.blue1.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.blue1.withValues(alpha: 0.1)),
+                        border: Border.all(color: AppColors.blue1.withValues(alpha: 0.15)),
                       ),
                       child: Text(
                         'ZONING & LAND USE VERIFICATION',
-                        style: AppText.mono(9.5, ls: 0.8, c: AppColors.blue2),
+                        style: AppText.inter(12, ls: 0.5, w: FontWeight.w700, c: AppColors.blue2),
                       ),
                     ),
                   ],
@@ -637,14 +634,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     Container(
                       width: 10, 
-                      height: 2.5, 
+                      height: 3, 
                       decoration: BoxDecoration(
                         color: AppColors.blue1, 
                         borderRadius: BorderRadius.circular(1.5),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text('LOG IN TO CONTINUE', style: AppText.mono(10, w: FontWeight.w600, ls: 1.0)),
+                    Text('LOG IN TO CONTINUE', style: AppText.inter(12.5, w: FontWeight.w700, ls: 0.8, c: AppColors.ink2)),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -708,16 +705,16 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
                           onPressed: _isLoading ? null : _handleBiometricLogin,
-                          icon: const Icon(Icons.fingerprint_rounded, size: 20),
+                          icon: const Icon(Icons.fingerprint_rounded, size: 22),
                           label: Text(
                             'Sign in with $_biometricLabel',
-                            style: AppText.inter(13, w: FontWeight.w600, c: AppColors.blue1),
+                            style: AppText.inter(14, w: FontWeight.w600, c: AppColors.blue1),
                           ),
                           style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
                             side: const BorderSide(color: AppColors.blue1, width: 1.2),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            minimumSize: const Size(double.infinity, 44),
+                            minimumSize: const Size(double.infinity, 50),
                           ),
                         ),
                       ],
@@ -736,7 +733,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         onTap: _isLoading ? null : _handleForgotPasscode,
                         child: Text(
                           'Forgot passcode?',
-                          style: AppText.inter(13, w: FontWeight.w600, c: AppColors.blueInk),
+                          style: AppText.inter(13.5, w: FontWeight.w600, c: AppColors.blueInk),
                         ),
                       ),
                     ],
@@ -747,18 +744,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (_errorMessage != null) ...[
                   const SizedBox(height: 16),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE23B4E).withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFE23B4E).withValues(alpha: 0.2)),
+                      color: InsightTheme.redTint,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: InsightTheme.red.withValues(alpha: 0.25)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline, color: Color(0xFFE23B4E), size: 16),
-                        const SizedBox(width: 8),
+                        const Icon(Icons.error_outline_rounded, color: InsightTheme.redInk, size: 18),
+                        const SizedBox(width: 10),
                         Expanded(
-                          child: Text(_errorMessage!, style: AppText.inter(12, w: FontWeight.w600, c: const Color(0xFFE23B4E))),
+                          child: Text(_errorMessage!, style: AppText.inter(12.5, w: FontWeight.w600, c: InsightTheme.redInk)),
                         ),
                       ],
                     ),
@@ -768,14 +765,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 28),
                 
                 Container(
-                  height: 48,
+                  height: 52,
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       colors: [AppColors.blue1, AppColors.blue2],
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                     ),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                     boxShadow: [
                       BoxShadow(
                         color: AppColors.blue1.withValues(alpha: 0.32),
@@ -788,12 +785,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     onPressed: _isLoading ? null : _handleLogin,
                     child: _isLoading 
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.0, color: Colors.white))
-                        : Text('Sign in', style: AppText.poppins(14, w: FontWeight.w600, c: Colors.white)),
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
+                        : Text('Sign in', style: AppText.inter(15, w: FontWeight.w700, c: Colors.white)),
                   ),
                 ),
               ],
@@ -805,7 +802,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildFieldLabel(String text) {
-    return Text(text, style: AppText.mono(10, ls: 0.6, w: FontWeight.w600, c: AppColors.ink2));
+    return Text(text, style: AppText.inter(13, ls: 0.3, w: FontWeight.w700, c: AppColors.ink2));
   }
 
   Widget _buildTextField({
@@ -819,21 +816,21 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: controller,
       obscureText: obscureText,
       obscuringCharacter: '•',
-      style: AppText.inter(13, w: FontWeight.w600, c: AppColors.ink),
+      style: AppText.inter(14, w: FontWeight.w600, c: AppColors.ink),
       cursorColor: AppColors.blue1,
       decoration: InputDecoration(
         hintText: hintText,
-        hintStyle: AppText.inter(13, w: FontWeight.w500, c: AppColors.ink3),
+        hintStyle: AppText.inter(14, w: FontWeight.w400, c: AppColors.ink3),
         filled: true,
         fillColor: AppColors.bg.withValues(alpha: 0.6),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        prefixIcon: Icon(icon, color: AppColors.ink3, size: 18),
+        prefixIcon: Icon(icon, color: AppColors.ink3, size: 20),
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(
                   obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                   color: AppColors.ink3,
-                  size: 18,
+                  size: 20,
                 ),
                 onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
               )

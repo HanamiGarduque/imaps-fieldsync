@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/services/auth_service.dart';
 import '../services/biometric_service.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/theme/insight_theme.dart';
 import 'splash_screen.dart' show LoginScreen;
 
 /// Shown two places: (1) app-resume, per the original §5d design, and
@@ -101,7 +102,7 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
       canPop: false,
       child: SensitiveScreen(
         child: Scaffold(
-          backgroundColor: const Color(0xFFF2F4FB),
+          backgroundColor: InsightTheme.bg,
           body: SafeArea(
             child: Center(
               child: Padding(
@@ -113,15 +114,15 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
                       width: 72,
                       height: 72,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF3D6BFF),
+                        color: InsightTheme.blue1,
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.lock_outline_rounded, size: 34, color: Colors.white),
                     ),
                     const SizedBox(height: 24),
-                    const Text(
+                    Text(
                       'App Locked',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Color(0xFF12141F)),
+                      style: InsightTheme.urbanist(22, w: FontWeight.w700, c: InsightTheme.ink),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -129,32 +130,42 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
                           ? 'That didn\'t match. Try again with $_bioLabel.'
                           : 'Use $_bioLabel to continue',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 14, color: Color(0xFF666C82)),
+                      style: InsightTheme.inter(14, w: FontWeight.w400, c: InsightTheme.ink2),
                     ),
                     const SizedBox(height: 28),
                     SizedBox(
                       width: double.infinity,
-                      height: 50,
+                      height: 52,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF3D6BFF),
+                          backgroundColor: InsightTheme.blue1,
                           foregroundColor: Colors.white,
+                          elevation: 2,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         ),
                         onPressed: _checking ? null : _attempt,
                         child: _checking
                             ? const SizedBox(
-                                height: 18,
-                                width: 18,
+                                height: 20,
+                                width: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                               )
-                            : Text('Unlock with $_bioLabel'),
+                            : Text(
+                                'Unlock with $_bioLabel',
+                                style: InsightTheme.inter(15, w: FontWeight.w600, c: Colors.white),
+                              ),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextButton(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(120, 44),
+                      ),
                       onPressed: _checking ? null : _signOutInstead,
-                      child: const Text('Sign Out Instead', style: TextStyle(color: Color(0xFF666C82))),
+                      child: Text(
+                        'Sign Out Instead',
+                        style: InsightTheme.inter(14, w: FontWeight.w500, c: InsightTheme.ink3),
+                      ),
                     ),
                   ],
                 ),
