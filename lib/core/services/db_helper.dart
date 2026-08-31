@@ -365,7 +365,7 @@ class DBHelper {
     );
     if (rows.isEmpty) return null;
     final value = rows.first['cached_updated_at'];
-    return value == null ? null : value.toString();
+    return value?.toString();
   }
 
   // --- LOCAL INSPECTIONS ---
@@ -749,7 +749,7 @@ class DBHelper {
             'id': a['id'] ?? const Uuid().v4(),
             'pending_action_id': a['id'],
             'job_id': a['job_id'],
-            'event_type': 'sync_${status}',
+            'event_type': 'sync_$status',
             'result': result,
             'message': message,
             // Sanitization rule (Sync DB audit): never copy the raw outbox
@@ -759,7 +759,7 @@ class DBHelper {
             'technical_details': jsonEncode({
               'actionType': type,
               'retryCount': a['retry_count'] ?? 0,
-              if (lastError != null) 'lastError': lastError,
+              'lastError': ?lastError,
             }),
             'created_at': updatedAt,
           }, conflictAlgorithm: ConflictAlgorithm.ignore);

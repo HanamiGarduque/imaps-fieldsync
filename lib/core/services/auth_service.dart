@@ -171,10 +171,11 @@ class AuthService {
   /// connectivity_plus's checkConnectivity() return type changed between
   /// major versions (single ConnectivityResult pre-v5, List<> from v5+).
   static Future<bool> hasConnectivity() async {
-    final result = await Connectivity().checkConnectivity();
-    return result is List
-        ? (result as List).any((r) => r != ConnectivityResult.none)
-        : result != ConnectivityResult.none;
+    final dynamic result = await Connectivity().checkConnectivity();
+    if (result is List) {
+      return result.any((r) => r != ConnectivityResult.none);
+    }
+    return result != ConnectivityResult.none;
   }
 
   /// True if [error] looks like a connectivity failure rather than a

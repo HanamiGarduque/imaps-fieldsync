@@ -367,10 +367,12 @@ class InspectionProvider extends ChangeNotifier {
             draft['checklist_json'],
           );
           checklist.forEach((key, value) {
-            if (_siteCondition.containsKey(key))
+            if (_siteCondition.containsKey(key)) {
               _siteCondition[key] = value == true;
-            if (_zoningObservations.containsKey(key))
+            }
+            if (_zoningObservations.containsKey(key)) {
               _zoningObservations[key] = value == true;
+            }
           });
         } catch (e) {
           debugPrint('Error decoding local checklist: $e');

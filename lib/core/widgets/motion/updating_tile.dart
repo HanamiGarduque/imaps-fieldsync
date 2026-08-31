@@ -64,7 +64,7 @@ class UpdatingTile extends StatelessWidget {
       // previous content doesn't briefly reflow the list underneath it.
       layoutBuilder: (currentChild, previousChildren) => Stack(
         alignment: Alignment.topCenter,
-        children: [...previousChildren, if (currentChild != null) currentChild],
+        children: [...previousChildren, ?currentChild],
       ),
       child: KeyedSubtree(key: ValueKey('$itemKey::$signature'), child: child),
     );

@@ -26,14 +26,14 @@ class AdaptivePhotoImage extends StatelessWidget {
       return Image.network(
         path,
         fit: fit,
-        errorBuilder: (_, __, ___) =>
+        errorBuilder: (_, _, _) =>
             errorBuilder?.call(context) ?? const _BrokenImageFallback(),
       );
     }
     return Image.file(
       File(path),
       fit: fit,
-      errorBuilder: (_, __, ___) =>
+      errorBuilder: (_, _, _) =>
           errorBuilder?.call(context) ?? const _BrokenImageFallback(),
     );
   }

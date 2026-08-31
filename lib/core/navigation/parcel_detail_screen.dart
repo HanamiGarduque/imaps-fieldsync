@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../modules/tasks/screens/tasks_screen.dart'; 
@@ -89,7 +88,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: paths.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (_, i) => GestureDetector(
                     onTap: () => _openFullscreenPhoto(paths, i),
                     child: ClipRRect(
@@ -135,65 +134,10 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     Navigator.pop(context);
   }
 
-  void _showSupportSheet(BuildContext context) {
-    HapticFeedback.lightImpact();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: const BoxDecoration(
-          color: InsightTheme.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36, height: 4,
-                decoration: BoxDecoration(color: InsightTheme.line, borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text('Support & Options', style: InsightTheme.poppins(16, w: FontWeight.w700)),
-            const SizedBox(height: 16),
-            _SupportActionTile(
-              icon: Icons.person_off_outlined,
-              title: 'Reassign Task',
-              subtitle: 'Send this inspection to another available officer.',
-              color: InsightTheme.ink,
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Requesting task reassignment...', style: InsightTheme.inter(12, c: Colors.white))));
-              },
-            ),
-            const Divider(color: InsightTheme.line),
-            _SupportActionTile(
-              icon: Icons.flag_outlined,
-              title: 'Report Issue',
-              subtitle: 'Flag an operational blocker to the MPDO.',
-              color: Colors.red.shade700,
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Flagging issue to monitoring system...', style: InsightTheme.inter(12, c: Colors.white))));
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final currentStep = progress.currentStep;
-    
-    int remainingSteps = progress.isComplete ? 0 : (InspectionProgress.totalSteps - currentStep + 1);
-    int estTimeMinutes = remainingSteps * 5; 
 
     final isReworkMode = context.watch<InspectionProvider>().isReworkMode;
 
@@ -461,43 +405,6 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SupportActionTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _SupportActionTile({required this.icon, required this.title, required this.subtitle, required this.color, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        child: Row(
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: InsightTheme.poppins(14, w: FontWeight.w600, c: color)),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
-                ],
-              ),
-            )
-          ],
-        ),
       ),
     );
   }

@@ -9,7 +9,7 @@ class SupabaseService {
   static Future<void> initialize() async {
     await Supabase.initialize(
       url: dotenv.env['SUPABASE_URL']!,
-      anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+      publishableKey: dotenv.env['SUPABASE_PUBLISHABLE_KEY']!,
     );
   }
 
@@ -270,7 +270,7 @@ class SupabaseService {
         .eq('id', jobId)
         .single();
     final updatedAt = response['updated_at'];
-    return updatedAt == null ? null : updatedAt.toString();
+    return updatedAt?.toString();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -460,7 +460,8 @@ class SupabaseService {
   }) async {
     final photoKey = _stablePhotoKey(localPath);
     final storagePath = 'inspections/$jobId/photo_$photoKey.jpg';
-    final rowId = const Uuid().v5(Uuid.NAMESPACE_URL, storagePath);
+    const namespaceUrl = '6ba7b811-9dad-11d1-80b4-00c04fd430c8';
+    final rowId = const Uuid().v5(namespaceUrl, storagePath);
     try {
       await client.storage.from('inspection-photos').remove([storagePath]);
     } catch (e) {
@@ -504,7 +505,7 @@ class SupabaseService {
       if (path == null) continue;
       final photoKey = _stablePhotoKey(path);
       final storagePath = 'inspections/$jobId/photo_$photoKey.jpg';
-      final rowId = const Uuid().v5(Uuid.NAMESPACE_URL, storagePath);
+      final rowId = const Uuid().v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', storagePath);
       pathToStoragePath[path] = storagePath;
       pathToRowId[path] = rowId;
     }
@@ -649,14 +650,14 @@ class SupabaseService {
             'findings': findings,
             'is_compliant': isCompliant,
             'inspection_result': inspectionResult,
-            if (observations != null) 'observations': observations,
-            if (discrepancies != null) 'discrepancies': discrepancies,
-            if (recommendations != null) 'recommendations': recommendations,
-            if (inspectorNotes != null) 'inspector_notes': inspectorNotes,
-            if (checklistData != null) 'checklist_data': checklistData,
+            'observations': ?observations,
+            'discrepancies': ?discrepancies,
+            'recommendations': ?recommendations,
+            'inspector_notes': ?inspectorNotes,
+            'checklist_data': ?checklistData,
             'checklist_completed_count': checklistCompletedCount,
             'checklist_total_count': checklistTotalCount,
-            if (photoPaths != null) 'photo_paths': photoPaths,
+            'photo_paths': ?photoPaths,
             'photo_count': photoCount,
             'submitted_at': DateTime.now().toUtc().toIso8601String(),
             // Rework redesign: Review & Submit is the one finalize point,

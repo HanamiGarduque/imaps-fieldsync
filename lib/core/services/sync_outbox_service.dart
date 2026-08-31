@@ -125,7 +125,7 @@ class SyncOutboxService {
   };
 
   /// Live progress of the current drain pass. Any widget can do
-  /// `ValueListenableBuilder<SyncProgress?>(valueListenable:
+  /// `ValueListenableBuilder&lt;SyncProgress?&gt;(valueListenable:
   /// SyncOutboxService.progress, ...)` to show live sync status without
   /// polling. `null` while idle/not draining.
   static final ValueNotifier<SyncProgress?> progress =
@@ -339,7 +339,7 @@ class SyncOutboxService {
       jobId: jobId,
       payload: {
         'currentStep': step,
-        if (stepTimestamps != null) 'stepTimestamps': stepTimestamps,
+        'stepTimestamps': ?stepTimestamps,
       },
     );
     return DBHelper.enqueueAction(
@@ -431,7 +431,7 @@ class SyncOutboxService {
         message: total == 1
             ? 'Synchronization started — 1 item to send.'
             : 'Synchronization started — $total items to send.',
-        technicalDetails: {'trigger': trigger, 'itemCount': total, if (onlyJobId != null) 'onlyJobId': onlyJobId},
+        technicalDetails: {'trigger': trigger, 'itemCount': total, 'onlyJobId': ?onlyJobId},
       );
 
       var successCount = 0;

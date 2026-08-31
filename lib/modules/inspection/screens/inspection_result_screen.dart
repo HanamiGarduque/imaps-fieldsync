@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/widgets/sensitive_screen.dart';
 
@@ -56,7 +55,7 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
                 height: 260,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withOpacity(0.20),
+                  color: InsightTheme.blue1.withValues(alpha: 0.20),
                 ),
               ),
             ),
@@ -71,7 +70,7 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
                 height: 220,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withOpacity(0.10),
+                  color: InsightTheme.blue1.withValues(alpha: 0.10),
                 ),
               ),
             ),
@@ -185,7 +184,7 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
                         ),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
-                          BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10)),
+                          BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 22, offset: const Offset(0, 10)),
                         ],
                       ),
                       child: Container(
@@ -263,7 +262,7 @@ class _ResultOption extends StatelessWidget {
           color: isSelected ? null : InsightTheme.surface,
           border: isSelected ? null : Border.all(color: InsightTheme.line, width: 1.5),
           boxShadow: isSelected ? [
-            BoxShadow(color: InsightTheme.blue1.withOpacity(0.3), blurRadius: 22, offset: const Offset(0, 10))
+            BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.3), blurRadius: 22, offset: const Offset(0, 10))
           ] : [
             const BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1))
           ],
@@ -276,7 +275,7 @@ class _ResultOption extends StatelessWidget {
               width: 22, height: 22,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isSelected ? Colors.white.withOpacity(0.9) : Colors.transparent,
+                color: isSelected ? Colors.white.withValues(alpha: 0.9) : Colors.transparent,
                 border: Border.all(
                   color: isSelected ? Colors.white : InsightTheme.lineStrong,
                   width: isSelected ? 5 : 2, // 5 creates the inner dot effect when filled with semi-transparent white
@@ -295,7 +294,7 @@ class _ResultOption extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: InsightTheme.inter(11.5, c: isSelected ? Colors.white.withOpacity(0.85) : InsightTheme.ink2),
+                    style: InsightTheme.inter(11.5, c: isSelected ? Colors.white.withValues(alpha: 0.85) : InsightTheme.ink2),
                   ),
                 ],
               ),
@@ -319,9 +318,9 @@ class _GlassBackButton extends StatelessWidget {
         width: 38,
         height: 38,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.5),
+          color: Colors.white.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: Colors.white.withOpacity(0.65)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
           boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 14, offset: Offset(0, 4))],
         ),
         child: ClipRRect(

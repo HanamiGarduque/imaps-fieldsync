@@ -227,6 +227,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                               setState(() => _isSaving = true);
                               final ok = await _syncControllersAndSave();
                               if (!mounted) return;
+                              if (!context.mounted) return;
                               setState(() => _isSaving = false);
                               // Issue 2 fix (Completed Category enhancement):
                               // single Save button during rework, returns

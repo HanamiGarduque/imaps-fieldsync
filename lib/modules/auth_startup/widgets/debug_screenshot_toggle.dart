@@ -60,6 +60,7 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
                   final next = !_disabled;
                   await ScreenProtectionService.setDebugOverride(next);
                   if (!mounted) return;
+                  if (!context.mounted) return;
                   setState(() => _disabled = next);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(

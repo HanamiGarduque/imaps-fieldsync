@@ -40,7 +40,7 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 width: 220, height: 220,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.18)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.18)),
               ),
             ),
           ),
@@ -50,7 +50,7 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
               imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
               child: Container(
                 width: 180, height: 180,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue2.withOpacity(0.12)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue2.withValues(alpha: 0.12)),
               ),
             ),
           ),
@@ -293,7 +293,7 @@ class _PremiumSegmentControl extends StatelessWidget {
       height: 44,
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.6),
+        color: Colors.white.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white, width: 1.5),
         boxShadow: const [BoxShadow(color: Color(0x05141628), blurRadius: 10, offset: Offset(0, 4))],
@@ -390,7 +390,7 @@ class _GlassCard extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 22), // Shrunk padding
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.75),
+              color: Colors.white.withValues(alpha: 0.75),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Colors.white, width: 2), // Shrunk border width
             ),
@@ -413,7 +413,7 @@ class _GlassBackButton extends StatelessWidget {
       child: Container(
         width: 44, height: 44,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.6),
+          color: Colors.white.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white, width: 1.5),
           boxShadow: const [BoxShadow(color: Color(0x08141628), blurRadius: 10, offset: Offset(0, 4))],

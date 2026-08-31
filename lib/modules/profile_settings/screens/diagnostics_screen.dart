@@ -5,7 +5,6 @@ import '../../../core/theme/insight_theme.dart';
 
 // Mapped to standard canonical InsightTheme design tokens
 const _kBlue = InsightTheme.blue1;
-const _kBlueTint = InsightTheme.blueTint;
 const _kInk = InsightTheme.ink;
 const _kInk2 = InsightTheme.ink2;
 const _kLine = InsightTheme.line;
@@ -93,7 +92,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               return ListView(
                 children: [
                   const SizedBox(height: 120),
-                  Icon(Icons.cloud_off_rounded, size: 40, color: _kInk2.withOpacity(0.4)),
+                  Icon(Icons.cloud_off_rounded, size: 40, color: _kInk2.withValues(alpha: 0.4)),
                   const SizedBox(height: 12),
                   Center(
                     child: Text('Couldn\'t load your reports.\nPull down to try again.',
@@ -107,7 +106,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               return ListView(
                 children: [
                   const SizedBox(height: 100),
-                  Icon(Icons.task_alt_rounded, size: 44, color: _kInk2.withOpacity(0.35)),
+                  Icon(Icons.task_alt_rounded, size: 44, color: _kInk2.withValues(alpha: 0.35)),
                   const SizedBox(height: 12),
                   Center(
                     child: Padding(
@@ -125,7 +124,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             return ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               itemCount: reports.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, i) => _ReportCard(report: reports[i]),
             );
           },
@@ -179,14 +178,14 @@ class _ReportCard extends StatelessWidget {
               Row(
                 children: [
                   if (report.module != null) ...[
-                    Icon(Icons.apps_rounded, size: 13, color: _kInk2.withOpacity(0.7)),
+                    Icon(Icons.apps_rounded, size: 13, color: _kInk2.withValues(alpha: 0.7)),
                     const SizedBox(width: 4),
-                    Text(report.module!, style: InsightTheme.inter(12, c: _kInk2.withOpacity(0.8))),
+                    Text(report.module!, style: InsightTheme.inter(12, c: _kInk2.withValues(alpha: 0.8))),
                     const SizedBox(width: 12),
                   ],
-                  Icon(Icons.schedule_rounded, size: 13, color: _kInk2.withOpacity(0.7)),
+                  Icon(Icons.schedule_rounded, size: 13, color: _kInk2.withValues(alpha: 0.7)),
                   const SizedBox(width: 4),
-                  Text(_formatDate(report.createdAt), style: InsightTheme.inter(12, c: _kInk2.withOpacity(0.8))),
+                  Text(_formatDate(report.createdAt), style: InsightTheme.inter(12, c: _kInk2.withValues(alpha: 0.8))),
                   const Spacer(),
                   Text(report.referenceCode,
                       style: InsightTheme.inter(12, w: FontWeight.w600, c: _kBlue)),
@@ -230,7 +229,7 @@ class _StatusPill extends StatelessWidget {
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
       child: Text(label, style: InsightTheme.inter(12, w: FontWeight.w700, c: color)),
     );
   }
@@ -281,9 +280,9 @@ class _ReportDetailScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: _kAmber.withOpacity(0.08),
+                  color: _kAmber.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: _kAmber.withOpacity(0.25)),
+                  border: Border.all(color: _kAmber.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   children: [
@@ -476,7 +475,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
   InputDecoration _inputDecoration(String label, String hint) => InputDecoration(
         labelText: label,
         hintText: hint,
-        hintStyle: TextStyle(color: _kInk2.withOpacity(0.5), fontSize: 13),
+        hintStyle: TextStyle(color: _kInk2.withValues(alpha: 0.5), fontSize: 13),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kLine)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kLine)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kBlue, width: 1.5)),

@@ -149,9 +149,9 @@ class InspectionProgress extends ChangeNotifier {
     }
 
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
+      final dynamic connectivityResult = await Connectivity().checkConnectivity();
       final online = connectivityResult is List
-          ? (connectivityResult as List).any((r) => r != ConnectivityResult.none)
+          ? connectivityResult.any((r) => r != ConnectivityResult.none)
           : connectivityResult != ConnectivityResult.none;
       if (online) {
         await SupabaseService.updateJobInspectionProgress(

@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/inspection_provider.dart';
@@ -336,8 +335,11 @@ class SubmissionSuccessScreen extends StatelessWidget {
                           InspectionProgress.instance.reset();
                           final profileMap = await SupabaseService.fetchMyProfile();
                           if (!context.mounted) return;
-                          if (profileMap != null) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => MainShellScreen(profile: UserProfile.fromMap(profileMap), initialIndex: 1)), (route) => false);
-                          else Navigator.of(context).popUntil((route) => route.isFirst);
+                          if (profileMap != null) {
+                            Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => MainShellScreen(profile: UserProfile.fromMap(profileMap), initialIndex: 1)), (route) => false);
+                          } else {
+                            Navigator.of(context).popUntil((route) => route.isFirst);
+                          }
                         },
                         style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: Colors.transparent, shadowColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))).copyWith(elevation: WidgetStateProperty.all(0)),
                         child: Ink(

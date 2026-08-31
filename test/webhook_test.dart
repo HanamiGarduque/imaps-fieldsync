@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -8,18 +9,21 @@ import 'dart:math';
 // Complete mock for shared_preferences MethodChannel
 class SharedPrefsMock {
   static void register() {
-    const MethodChannel('plugins.flutter.io/shared_preferences')
-        .setMockMethodCallHandler((MethodCall methodCall) async {
-      if (methodCall.method == 'getAll') {
-        return <String, Object>{};
-      }
-      if (methodCall.method.startsWith('set') || 
-          methodCall.method == 'remove' || 
-          methodCall.method == 'clear') {
-        return true;
-      }
-      return null;
-    });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/shared_preferences'),
+          (MethodCall methodCall) async {
+            if (methodCall.method == 'getAll') {
+              return <String, Object>{};
+            }
+            if (methodCall.method.startsWith('set') ||
+                methodCall.method == 'remove' ||
+                methodCall.method == 'clear') {
+              return true;
+            }
+            return null;
+          },
+        );
   }
 }
 
@@ -38,15 +42,15 @@ void main() {
     
     final client = Supabase.instance.client;
     
-    print('Signing in as admin...');
+    debugPrint('Signing in as admin...');
     final authRes = await client.auth.signInWithPassword(
       email: 'admin@test.com',
       password: 'AdminPassword2026!',
     );
-    print('Admin sign in succeeded! User: ${authRes.user?.email}');
+    debugPrint('Admin sign in succeeded! User: ${authRes.user?.email}');
     
     // 1. Fetch inspector profile
-    print('Fetching inspector profile from profiles table...');
+    debugPrint('Fetching inspector profile from profiles table...');
     final profilesRes = await client
         .from('profiles')
         .select()
@@ -59,10 +63,10 @@ void main() {
     
     final inspectorId = profilesRes.first['id'];
     final inspectorName = profilesRes.first['full_name'] ?? 'Inspector';
-    print('Found Inspector: $inspectorName (ID: $inspectorId)');
+    debugPrint('Found Inspector: $inspectorName (ID: $inspectorId)');
     
     // 2. Fetch a zoning application to link the job to
-    print('Fetching a zoning application to link the assignment...');
+    debugPrint('Fetching a zoning application to link the assignment...');
     final appsRes = await client
         .from('supabase_zoning_applications')
         .select()
@@ -75,27 +79,27 @@ void main() {
     final appId = appsRes.first['id'];
     final applicantName = appsRes.first['applicant_name'];
     final barangay = appsRes.first['barangay'];
-    print('Found Zoning Application: $applicantName in $barangay (ID: $appId)');
+    debugPrint('Found Zoning Application: $applicantName in $barangay (ID: $appId)');
     
     // 3. Check for device subscriptions
-    print('Checking device subscriptions for the inspector...');
+    debugPrint('Checking device subscriptions for the inspector...');
     final devicesRes = await client
         .from('inspector_device_subscriptions')
         .select()
         .eq('inspector_id', inspectorId);
         
-    print('Active subscription tokens found: ${devicesRes.length}');
+    debugPrint('Active subscription tokens found: ${devicesRes.length}');
     for (final d in devicesRes) {
-      print(' - Token: ${d['device_token']}');
+      debugPrint(' - Token: ${d['device_token']}');
     }
     
     if (devicesRes.isEmpty) {
-      print('WARNING: No active push tokens found for this inspector. The webhook will skip sending the push notification.');
+      debugPrint('WARNING: No active push tokens found for this inspector. The webhook will skip sending the push notification.');
     }
     
     // 4. Insert the job record
     final testLocalId = Random().nextInt(999999);
-    print('Inserting test job in field_jobs (local_inspection_id: $testLocalId)...');
+    debugPrint('Inserting test job in field_jobs (local_inspection_id: $testLocalId)...');
     
     final insertRes = await client.from('field_jobs').insert({
       'assigned_inspector_id': inspectorId,
@@ -105,8 +109,8 @@ void main() {
       'local_inspection_id': testLocalId,
     }).select();
     
-    print('Job successfully inserted!');
-    print(insertRes);
-    print('Webhook should now be triggered! Check Supabase Edge Function logs for status 200.');
+    debugPrint('Job successfully inserted!');
+    debugPrint(insertRes.toString());
+    debugPrint('Webhook should now be triggered! Check Supabase Edge Function logs for status 200.');
   });
 }
