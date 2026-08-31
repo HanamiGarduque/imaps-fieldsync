@@ -160,6 +160,15 @@ class SecurePrefsService {
     return int.tryParse(raw ?? '0') ?? 0;
   }
 
+  static bool shouldLockAfterElapsed({
+    required int minutes,
+    required Duration elapsed,
+  }) {
+    if (minutes == 0) return false;
+    if (minutes < 0) return true;
+    return elapsed >= Duration(minutes: minutes);
+  }
+
   static Future<void> setBioAutoLockMins(int minutes) =>
       _storage.write(key: _kBioAutoLockMins, value: minutes.toString());
 
