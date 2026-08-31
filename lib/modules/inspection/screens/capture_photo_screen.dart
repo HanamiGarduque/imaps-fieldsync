@@ -303,67 +303,233 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Widget _buildCameraMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final hasCapturedPhoto = _capturedPhotoPath != null;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      resizeToAvoidBottomInset: true,
+      backgroundColor: const Color(0xFF0D1B2A),
       body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  IconButton(icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28), onPressed: () => setState(() { _isCameraMode = false; _capturedPhotoPath = null; })),
-                  const SizedBox(width: 8),
-                  Text('Capture Site Photo', style: InsightTheme.poppins(18, w: FontWeight.w600, c: Colors.white)),
-                ],
+        child: GestureDetector(
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF0B1623), Color(0xFF111D2D), Color(0xFF0D1B2A)],
               ),
             ),
-            Expanded(
-              flex: 5,
-              child: Container(
-                width: double.infinity, margin: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(24)),
-                clipBehavior: Clip.antiAlias,
-                child: _buildCameraPreviewArea(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              flex: 4,
-              child: Container(
-                width: double.infinity, padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
-                decoration: const BoxDecoration(color: InsightTheme.surface, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Inspection Notes', style: InsightTheme.poppins(15, w: FontWeight.w700, c: InsightTheme.ink)),
-                    const SizedBox(height: 16),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: InsightTheme.bg, borderRadius: BorderRadius.circular(16), border: Border.all(color: InsightTheme.line)),
-                        child: TextField(
-                          controller: _notesController, maxLines: null, expands: true,
-                          style: InsightTheme.inter(14, c: InsightTheme.ink),
-                          decoration: InputDecoration(border: InputBorder.none, hintText: 'Add field observations here...', hintStyle: InsightTheme.inter(14, c: InsightTheme.ink3)),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final previewHeight = (constraints.maxHeight * (hasCapturedPhoto ? 0.50 : 0.72)).clamp(280.0, 540.0);
+
+                return SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: EdgeInsets.only(bottom: keyboardInset > 0 ? keyboardInset : 18),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                              ),
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 24),
+                                onPressed: () => setState(() { _isCameraMode = false; _capturedPhotoPath = null; }),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Capture Site Photo',
+                                style: InsightTheme.poppins(18, w: FontWeight.w700, c: Colors.white),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _savePhotoAndReturnToGrid,
-                        style: ElevatedButton.styleFrom(backgroundColor: InsightTheme.blue1, padding: const EdgeInsets.symmetric(vertical: 18), elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                        child: Text('Save Photo', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Container(
+                          width: double.infinity,
+                          height: previewHeight,
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 1.2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.32),
+                                blurRadius: 28,
+                                spreadRadius: 1,
+                                offset: const Offset(0, 14),
+                              ),
+                            ],
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Stack(
+                            children: [
+                              Positioned.fill(child: _buildCameraPreviewArea()),
+                              if (!hasCapturedPhoto)
+                                Positioned(
+                                  left: 16,
+                                  bottom: 18,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.52),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                                    ),
+                                    child: Text(
+                                      _geotagText,
+                                      style: InsightTheme.mono(12, c: Colors.white, ls: 0.08),
+                                    ),
+                                  ),
+                                ),
+                              if (hasCapturedPhoto)
+                                Positioned(
+                                  top: 16,
+                                  right: 16,
+                                  child: GestureDetector(
+                                    onTap: _retakePhoto,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.62),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.refresh_rounded, color: Colors.white, size: 16),
+                                          const SizedBox(width: 8),
+                                          Text('Retake', style: InsightTheme.poppins(13, w: FontWeight.w600, c: Colors.white)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (!hasCapturedPhoto)
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  top: 0,
+                                  child: Container(
+                                    height: 110,
+                                    decoration: const BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [Colors.black, Colors.transparent],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
+                      if (!hasCapturedPhoto)
+                        const SizedBox(height: 8),
+                      if (hasCapturedPhoto) ...[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE7F3FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFB9D8FF)),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.info_outline_rounded, color: Color(0xFF1F6FEB), size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Save the photo evidence before leaving this screen or it will disappear.',
+                                    style: InsightTheme.inter(12, c: const Color(0xFF1D4ED8), w: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                          decoration: const BoxDecoration(
+                            color: InsightTheme.surface,
+                            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Inspection Notes', style: InsightTheme.poppins(17, w: FontWeight.w700, c: InsightTheme.ink)),
+                              const SizedBox(height: 14),
+                              Container(
+                                width: double.infinity,
+                                constraints: const BoxConstraints(minHeight: 120, maxHeight: 240),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: InsightTheme.bg,
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(color: InsightTheme.line),
+                                ),
+                                child: TextField(
+                                  controller: _notesController,
+                                  keyboardType: TextInputType.multiline,
+                                  textInputAction: TextInputAction.newline,
+                                  minLines: 4,
+                                  maxLines: 8,
+                                  style: InsightTheme.inter(14, c: InsightTheme.ink),
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    hintText: 'Add field observations here...',
+                                    hintStyle: InsightTheme.inter(14, c: InsightTheme.ink3),
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: _savePhotoAndReturnToGrid,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: InsightTheme.blue1,
+                                    padding: const EdgeInsets.symmetric(vertical: 18),
+                                    elevation: 0,
+                                    shadowColor: Colors.transparent,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                                  ),
+                                  child: Text('Save Photo', style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -398,24 +564,16 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
           fit: StackFit.expand,
           children: [
             CameraPreview(_cameraController!),
-            Positioned(
-              left: 16, bottom: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white.withValues(alpha: 0.1))),
-                child: Text(_geotagText, style: InsightTheme.mono(12, c: Colors.white, ls: 0.1)),
-              ),
-            ),
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 24),
+                padding: const EdgeInsets.only(bottom: 26),
                 child: GestureDetector(
                   onTap: _capturePhoto,
                   child: Container(
-                    width: 72, height: 72,
+                    width: 78, height: 78,
                     decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4), color: Colors.white.withValues(alpha: 0.2)),
-                    child: Center(child: _isCapturing ? const CircularProgressIndicator(color: Colors.white) : Container(width: 56, height: 56, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle))),
+                    child: Center(child: _isCapturing ? const CircularProgressIndicator(color: Colors.white) : Container(width: 58, height: 58, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle))),
                   ),
                 ),
               ),

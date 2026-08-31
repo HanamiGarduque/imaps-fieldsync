@@ -1252,7 +1252,8 @@ class _CoordinatesRowState extends State<_CoordinatesRow> {
             Expanded(
               child: Text(
                 widget.coords ?? 'Coordinates unavailable',
-                maxLines: 1,
+                maxLines: 2,
+                softWrap: true,
                 overflow: TextOverflow.ellipsis,
                 style: InsightTheme.mono(10.5, w: FontWeight.w600, c: InsightTheme.ink2),
               ),

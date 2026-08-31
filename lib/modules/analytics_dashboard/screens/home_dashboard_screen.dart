@@ -333,19 +333,63 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     return {'Urgent': urgent, 'Pending': pending, 'Ongoing': ongoing, 'Completed': completed};
   }
 
-  // Which day-of-month numbers (in `month`) have at least one task
-  // scheduled — backs the small dot under each day in the calendar strip
-  // and the full month grid. Uses the real scheduledDate field.
+  // Which day-of-month numbers (in `month`) have at least one active task
+  // scheduled — backs the dot under each day in the calendar strip and the
+  // full month grid. Uses the real scheduledDate field, and only active jobs
+  // (not Completed) are treated as calendar assignments.
   Set<int> _taskDaysInMonth(DateTime month) {
     final days = <int>{};
     for (final t in _allTasks) {
-      if (t.scheduledDate.isEmpty) continue;
+      if (t.category == 'Completed' || t.scheduledDate.isEmpty) continue;
       try {
         final d = DateTime.parse(t.scheduledDate);
         if (d.year == month.year && d.month == month.month) days.add(d.day);
       } catch (_) {}
     }
     return days;
+  }
+
+  Map<int, List<TaskItem>> _tasksByDayInMonth(DateTime month) {
+    final map = <int, List<TaskItem>>{};
+    for (final t in _allTasks) {
+      if (t.category == 'Completed' || t.scheduledDate.isEmpty) continue;
+      try {
+        final d = DateTime.parse(t.scheduledDate);
+        if (d.year == month.year && d.month == month.month) {
+          map.putIfAbsent(d.day, () => <TaskItem>[]).add(t);
+        }
+      } catch (_) {}
+    }
+    for (final items in map.values) {
+      items.sort((a, b) {
+        final priorityA = _calendarPriorityKey(a);
+        final priorityB = _calendarPriorityKey(b);
+        if (priorityA != priorityB) return priorityA.compareTo(priorityB);
+        return (a.inspectionNo).compareTo(b.inspectionNo);
+      });
+    }
+    return map;
+  }
+
+  int _calendarPriorityKey(TaskItem task) {
+    if (task.isUrgentDeadline) return 0;
+    if (task.isDueSoonDeadline) return 1;
+    return 2;
+  }
+
+  List<Color> _calendarDotColorsForDay(DateTime month, int day) {
+    final tasks = _tasksByDayInMonth(month)[day] ?? const <TaskItem>[];
+    final colors = <Color>{};
+    for (final task in tasks) {
+      if (task.isUrgentDeadline) {
+        colors.add(InsightTheme.red);
+      } else if (task.isDueSoonDeadline) {
+        colors.add(InsightTheme.orange);
+      } else {
+        colors.add(InsightTheme.blue1);
+      }
+    }
+    return colors.toList();
   }
 
   // Tasks tab index in MainShellScreen's own _items list (see
@@ -398,6 +442,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final firstName = _firstName(widget.profile.fullName);
     final greeting = _greeting(_now);
     final taskDays = _taskDaysInMonth(_calendarMonth);
+    final tasksByDay = _tasksByDayInMonth(_calendarMonth);
+    final selectedDayTasks = tasksByDay[_selectedDay] ?? const <TaskItem>[];
     final daysInMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1, 0).day;
     const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
@@ -567,6 +613,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   month: _calendarMonth,
                                   selectedDay: _selectedDay,
                                   taskDaysForMonth: _taskDaysInMonth,
+                                  tasksByDayInMonth: tasksByDay,
                                   onPrevMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
                                   onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
                                   onPick: _onFullCalendarPick,
@@ -585,6 +632,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                     final weekday = DateTime(_calendarMonth.year, _calendarMonth.month, day).weekday; // 1=Mon..7=Sun
                                     final isSelected = day == _selectedDay;
                                     final hasTask = taskDays.contains(day);
+                                    final dotColors = _calendarDotColorsForDay(_calendarMonth, day);
                                     return GestureDetector(
                                       onTap: () {
                                         setState(() => _selectedDay = day);
@@ -619,13 +667,27 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                             Text('$day', style: InsightTheme.urbanist(14, w: FontWeight.w800, c: isSelected ? Colors.white : InsightTheme.ink)),
                                             Text(weekdayAbbr[weekday - 1], style: InsightTheme.openSans(12, w: FontWeight.w600, c: isSelected ? Colors.white.withOpacity(0.9) : InsightTheme.ink3)),
                                             const SizedBox(height: 4),
-                                            Container(
-                                              width: 5, height: 5,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: hasTask ? (isSelected ? Colors.white : InsightTheme.blue1) : Colors.transparent,
+                                            if (hasTask)
+                                              Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: dotColors.take(3).map((dotColor) {
+                                                  return Container(
+                                                    width: 5,
+                                                    height: 5,
+                                                    margin: const EdgeInsets.symmetric(horizontal: 1.2),
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: isSelected ? Colors.white : dotColor,
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              )
+                                            else
+                                              Container(
+                                                width: 5,
+                                                height: 5,
+                                                decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.transparent),
                                               ),
-                                            ),
                                           ],
                                         ),
                                       ),
@@ -1376,6 +1438,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
   final DateTime month;
   final int selectedDay;
   final Set<int> Function(DateTime month) taskDaysForMonth;
+  final Map<int, List<TaskItem>> tasksByDayInMonth;
   final VoidCallback onPrevMonth;
   final VoidCallback onNextMonth;
   final void Function(DateTime month, int day) onPick;
@@ -1384,6 +1447,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
     required this.month,
     required this.selectedDay,
     required this.taskDaysForMonth,
+    required this.tasksByDayInMonth,
     required this.onPrevMonth,
     required this.onNextMonth,
     required this.onPick,
@@ -1406,6 +1470,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
     final selectedDate = DateTime(month.year, month.month, clampedDay);
     final headerLabel =
         '$clampedDay ${_monthAbbr[month.month - 1]} ${(month.year % 100).toString().padLeft(2, '0')}, ${_fullWeekdayNames[selectedDate.weekday - 1]}';
+    final selectedTasks = tasksByDayInMonth[clampedDay] ?? const <TaskItem>[];
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
@@ -1458,11 +1523,11 @@ class _InlineFullCalendarCard extends StatelessWidget {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
+            padding: const EdgeInsets.only(bottom: 4),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
-              mainAxisSpacing: 2,
-              crossAxisSpacing: 2,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
               childAspectRatio: 1,
             ),
             itemCount: daysInMonth + leadingBlanks,
@@ -1471,9 +1536,14 @@ class _InlineFullCalendarCard extends StatelessWidget {
               final day = i - leadingBlanks + 1;
               final isSelected = day == selectedDay;
               final hasTask = taskDays.contains(day);
-              // 44px+ tap target floor (UDAS §2.3) — the 34px visible dot
-              // sits inside a full grid cell, so the actual tap area
-              // comfortably clears the minimum.
+              final dotColors = (tasksByDayInMonth[day] ?? const <TaskItem>[])
+                  .map((task) => task.isUrgentDeadline
+                      ? InsightTheme.red
+                      : task.isDueSoonDeadline
+                          ? InsightTheme.orange
+                          : InsightTheme.blue1)
+                  .toSet()
+                  .toList();
               return GestureDetector(
                 onTap: () => onPick(month, day),
                 behavior: HitTestBehavior.opaque,
@@ -1491,13 +1561,19 @@ class _InlineFullCalendarCard extends StatelessWidget {
                       children: [
                         Text('$day', style: InsightTheme.inter(12.5, w: FontWeight.w700, c: isSelected ? Colors.white : InsightTheme.ink)),
                         if (hasTask)
-                          Container(
-                            margin: const EdgeInsets.only(top: 1),
-                            width: 4, height: 4,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: isSelected ? Colors.white : InsightTheme.blue1,
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: dotColors.take(3).map((dotColor) {
+                              return Container(
+                                margin: const EdgeInsets.symmetric(horizontal: 1),
+                                width: 4,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isSelected ? Colors.white : dotColor,
+                                ),
+                              );
+                            }).toList(),
                           ),
                       ],
                     ),
@@ -1506,6 +1582,64 @@ class _InlineFullCalendarCard extends StatelessWidget {
               );
             },
           ),
+          if (selectedTasks.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: InsightTheme.surface2,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Tasks for $clampedDay ${_monthAbbr[month.month - 1]}',
+                    style: InsightTheme.urbanist(12, w: FontWeight.w700, c: InsightTheme.ink),
+                  ),
+                  const SizedBox(height: 8),
+                  ...selectedTasks.take(4).map((task) {
+                    final color = task.isUrgentDeadline
+                        ? InsightTheme.red
+                        : task.isDueSoonDeadline
+                            ? InsightTheme.orange
+                            : InsightTheme.blue1;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(top: 6, right: 8),
+                            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  task.inspectionNo,
+                                  style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink),
+                                ),
+                                Text(
+                                  task.name,
+                                  style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink2),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

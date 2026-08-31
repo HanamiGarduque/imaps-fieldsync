@@ -24,7 +24,15 @@ import '../../../core/theme/insight_theme.dart';
 /// ==================================================================
 class ProfileScreen extends StatefulWidget {
   final UserProfile profile;
-  const ProfileScreen({super.key, required this.profile});
+  final bool initialAnalyticsOpen;
+  final VoidCallback? onAnalyticsHandled;
+
+  const ProfileScreen({
+    super.key,
+    required this.profile,
+    this.initialAnalyticsOpen = false,
+    this.onAnalyticsHandled,
+  });
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -43,6 +51,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
   // the HTML reference design exactly.
   int _analyticsTabIndex = 0;
   bool _analyticsIsWeek = true;
+  final GlobalKey _analyticsSectionKey = GlobalKey();
 
   // Drives the identity header's expand<->collapse crossfade as the user
   // scrolls — see _IdentityHeaderDelegate. Tracked in the scroll controller
@@ -59,6 +68,20 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     _currentProfile = widget.profile;
     _refreshProfileFromServer();
     _loadStats();
+    if (widget.initialAnalyticsOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = _analyticsSectionKey.currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(
+            ctx,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic,
+            alignment: 0.1,
+          );
+        }
+        widget.onAnalyticsHandled?.call();
+      });
+    }
   }
 
   @override
@@ -173,7 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                 },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: InsightTheme.coral,
-                            disabledBackgroundColor: InsightTheme.coral.withOpacity(0.7),
+                            disabledBackgroundColor: InsightTheme.coral.withValues(alpha: 0.7),
                             foregroundColor: Colors.white,
                             elevation: 0,
                             minimumSize: const Size(90, 44),
@@ -294,7 +317,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.20)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.20)),
               ),
             ),
           ),
@@ -304,7 +327,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 width: 220, height: 220,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.10)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.10)),
               ),
             ),
           ),
@@ -397,7 +420,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                             child: Center(child: CircularProgressIndicator(strokeWidth: 2.4)),
                           )
                         else
-                          _analyticsCard(),
+                          KeyedSubtree(
+                            key: _analyticsSectionKey,
+                            child: _analyticsCard(),
+                          ),
 
                         const SizedBox(height: 24),
 
@@ -414,7 +440,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                               _actionGroupCard([
                                 _ActionTile(
                                   icon: Icons.fingerprint_rounded,
-                                  title: 'Security & Biometrics',
+                                  title: 'Security & Protection',
                                   subtitle: 'Biometric login, auto-lock & protection',
                                   onTap: () {
                                     Navigator.push(
@@ -619,12 +645,15 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
           const SizedBox(height: 14),
 
           // ── Chart body ───────────────────────────────────────────────
-          // Dynamically adjust height: Activity calendar needs 340px, while
-          // Gauge, Bars, and Sectors fit compactly in ~250px to eliminate empty space.
+          // IMPORTANT: the Activity calendar must size to its own content.
+          // A fixed parent height clips the grid when the month spans more
+          // rows than the assumed 340px placeholder. Only the non-calendar
+          // charts use the compact fixed height; the activity heatmap should
+          // grow naturally with the real number of calendar weeks.
           AnimatedContainer(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
-            height: _analyticsTabIndex == 1 ? 340.0 : 250.0,
+            height: _analyticsTabIndex == 1 ? null : 250.0,
             child: chartBody,
           ),
         ],
@@ -782,6 +811,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
       decoration: BoxDecoration(
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: InsightTheme.line, width: 1),
         boxShadow: kCardShadow,
       ),
       child: Column(
@@ -957,7 +987,7 @@ class _Avatar extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: InsightTheme.blue1.withOpacity(0.30),
+            color: InsightTheme.blue1.withValues(alpha: 0.30),
             blurRadius: 14,
             offset: const Offset(0, 5),
           ),
@@ -1034,7 +1064,7 @@ class _FullIdentityCard extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: InsightTheme.blueTint,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: InsightTheme.blue1.withOpacity(0.18)),
+                        border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.18)),
                       ),
                       child: Text(
                         positionLabel.toUpperCase(),
@@ -1056,7 +1086,7 @@ class _FullIdentityCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: InsightTheme.blueTint,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: InsightTheme.blue1.withOpacity(0.15)),
+                    border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.15)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,

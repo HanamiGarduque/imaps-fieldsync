@@ -408,6 +408,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                       border: Border(bottom: BorderSide(color: InsightTheme.line)),
                     ),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
                           width: 30,
@@ -430,13 +431,26 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                               Text(
                                 applicant.isNotEmpty ? applicant : 'Job $jobId',
                                 style: InsightTheme.urbanist(13.5, w: FontWeight.w700, c: InsightTheme.ink),
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               if (barangay.isNotEmpty)
-                                Text(
-                                  barangay,
-                                  style: InsightTheme.openSans(12, c: InsightTheme.ink2),
-                                  overflow: TextOverflow.ellipsis,
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    barangay,
+                                    style: InsightTheme.openSans(12, c: InsightTheme.ink2),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              if (rows.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    rows.length == 1 ? '1 update' : '${rows.length} updates',
+                                    style: InsightTheme.openSans(11, w: FontWeight.w600, c: InsightTheme.ink3),
+                                  ),
                                 ),
                             ],
                           ),
@@ -449,8 +463,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            rows.length == 1 ? '1 update' : '${rows.length} updates',
-                            style: InsightTheme.jetBrains(12, c: InsightTheme.ink2),
+                            isSyncingThisJob ? 'Syncing' : (hasConflict ? 'Review' : 'Queued'),
+                            style: InsightTheme.jetBrains(11, c: InsightTheme.ink2),
                           ),
                         ),
                       ],
@@ -970,7 +984,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                         c: InsightTheme.ink,
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
+                                    const SizedBox(height: 6),
                                     Row(
                                       children: [
                                         Container(
@@ -992,16 +1006,16 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                             c: InsightTheme.ink2,
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '· Last sync: ${_relativeTime(_lastSync)}',
-                                          style: InsightTheme.openSans(
-                                            12,
-                                            w: FontWeight.w500,
-                                            c: InsightTheme.ink3,
-                                          ),
-                                        ),
                                       ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Last sync: ${_relativeTime(_lastSync)}',
+                                      style: InsightTheme.openSans(
+                                        12,
+                                        w: FontWeight.w500,
+                                        c: InsightTheme.ink3,
+                                      ),
                                     ),
                                     // Phase 5: live drain progress, e.g.
                                     // "Submitting inspection (2 of 5) —
@@ -1656,39 +1670,13 @@ class _LogDataRow extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        title,
-                        style: InsightTheme.openSans(
-                          13.5,
-                          w: FontWeight.w700,
-                          c: InsightTheme.ink,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      dataSize,
-                      style: InsightTheme.jetBrains(
-                        12,
-                        w: FontWeight.w600,
-                        c: InsightTheme.ink2,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
                         dataType,
                         style: InsightTheme.openSans(12, c: InsightTheme.ink2),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Row(
                       children: [
                         if (isPending) ...[
@@ -1733,6 +1721,36 @@ class _LogDataRow extends StatelessWidget {
                         ),
                       ],
                     ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: InsightTheme.openSans(
+                          13.5,
+                          w: FontWeight.w700,
+                          c: InsightTheme.ink,
+                        ),
+                        maxLines: 2,
+                        softWrap: true,
+                        overflow: TextOverflow.visible,
+                      ),
+                    ),
+                    if (dataSize != '—' && dataSize.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        dataSize,
+                        style: InsightTheme.jetBrains(
+                          12,
+                          w: FontWeight.w600,
+                          c: InsightTheme.ink2,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],

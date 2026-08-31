@@ -256,12 +256,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       Expanded(
                         child: Text('Edit profile', style: InsightTheme.poppins(17, w: FontWeight.w700)),
                       ),
-                      GestureDetector(
-                        onTap: _isLoading ? null : () { _updateProfile(); },
-                        child: _isLoading
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text('Save', style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.blueInk)),
-                      ),
                     ],
                   ),
                 ),
@@ -347,23 +341,26 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       shadowColor: Colors.transparent,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     ).copyWith(elevation: WidgetStateProperty.all(0)),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [InsightTheme.blue1, InsightTheme.blue2],
-                          begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [InsightTheme.blue1, InsightTheme.blue2],
+                            begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10)),
+                          ],
                         ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10)),
-                        ],
-                      ),
-                      child: Container(
-                        alignment: Alignment.center,
-                        constraints: const BoxConstraints(minHeight: 50),
-                        child: _isLoading
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : Text('Save changes', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
+                        child: Container(
+                          alignment: Alignment.center,
+                          constraints: const BoxConstraints(minHeight: 50),
+                          child: _isLoading
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : Text('Save changes', style: InsightTheme.poppins(14.5, w: FontWeight.w600, c: Colors.white)),
+                        ),
                       ),
                     ),
                   ),

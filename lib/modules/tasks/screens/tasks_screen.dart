@@ -844,7 +844,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                       Navigator.pop(context);
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: InsightTheme.ink,
+                      backgroundColor: InsightTheme.blue1,
+                      foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
@@ -1896,7 +1897,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                 child: Text(
                                   widget.task.name,
                                   style: InsightTheme.poppins(14.5, w: FontWeight.w700, c: InsightTheme.ink),
-                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               const SizedBox(width: 6),

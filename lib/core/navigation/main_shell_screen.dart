@@ -53,6 +53,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
 
   // ── Quick Actions sheet ───────────────────────────────────────────────
   bool _quickActionsOpen = false;
+  bool _profileAnalyticsRequested = false;
 
   // ── Tasks-tab badge ──────────────────────────────────────────────────
   // ASSUMPTION (flagged to Master — no existing "new since last viewed"
@@ -155,9 +156,10 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
         icon: Icons.bar_chart_rounded,
         title: 'Analytics overview',
         subtitle: 'Track performance metrics',
-        // Existing page, not a new one: this IS the Home dashboard —
-        // jumps to the Home tab rather than pushing a duplicate screen.
-        onTap: () => _openTab(0),
+        onTap: () {
+          setState(() => _profileAnalyticsRequested = true);
+          _openTab(3);
+        },
       ),
       QuickAction(
         icon: Icons.history_rounded,
@@ -267,6 +269,8 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
         return ProfileScreen(
           key: ValueKey('profile_tab_$index'),
           profile: widget.profile,
+          initialAnalyticsOpen: _profileAnalyticsRequested,
+          onAnalyticsHandled: () => setState(() => _profileAnalyticsRequested = false),
         );
       default:
         return HomeDashboardScreen(

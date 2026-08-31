@@ -44,6 +44,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     with TickerProviderStateMixin, SpringEntrance {
   late int _mode; // 0 = Activity, 1 = Sync — top-level switch (Phase 6)
   int _currentTabIndex = 0; // 0 = All, 1 = Unread — only used within Activity mode
+  bool _syncUnreadOnly = false;
   bool _isLoading = true;
   String? _error;
   List<Map<String, dynamic>> _activity = [];
@@ -136,9 +137,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   int get _unreadCount => _activity.where((a) => a['is_read'] != true).length;
+  int get _syncUnreadCount => _syncLogs.where((entry) => entry['is_read'] != true).length;
 
   List<Map<String, dynamic>> get _visibleActivity =>
       _currentTabIndex == 1 ? _activity.where((a) => a['is_read'] != true).toList() : _activity;
+
+  List<Map<String, dynamic>> get _visibleSyncLogs =>
+      _syncUnreadOnly ? _syncLogs.where((entry) => entry['is_read'] != true).toList() : _syncLogs;
 
   Future<void> _markAllRead() async {
     if (_unreadCount == 0) return;
@@ -157,6 +162,95 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       _activity = _activity.map((a) => a['id'] == item['id'] ? {...a, 'is_read': true} : a).toList();
     });
     await SupabaseService.markActivityRead(id);
+  }
+
+  Future<void> _markSyncEntryRead(Map<String, dynamic> entry) async {
+    if (entry['is_read'] == true) return;
+    setState(() {
+      _syncLogs = _syncLogs.map((item) => item['id'] == entry['id'] ? {...item, 'is_read': true} : item).toList();
+    });
+  }
+
+  Future<void> _openNotificationDetail(Map<String, dynamic> item) async {
+    await _markOneRead(item);
+    if (!mounted) return;
+
+    final title = item['title']?.toString() ?? 'Activity update';
+    final subtitle = item['subtitle']?.toString() ?? 'No additional details available.';
+    final occurredAt = item['occurred_at']?.toString();
+    final eventType = (item['event_type']?.toString() ?? 'activity').replaceAll('_', ' ');
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Container(
+          margin: const EdgeInsets.only(top: 40),
+          decoration: const BoxDecoration(
+            color: InsightTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 48,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: InsightTheme.line,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    title,
+                    style: InsightTheme.poppins(18, w: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    eventType,
+                    style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    subtitle,
+                    style: InsightTheme.inter(14, c: InsightTheme.ink, h: 1.5),
+                  ),
+                  if (occurredAt != null && occurredAt.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    Text(
+                      'Received: ${_timeAgo(occurredAt)}',
+                      style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: InsightTheme.blue1,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _deleteOne(Map<String, dynamic> item) async {
@@ -188,20 +282,22 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Future<void> _clearAll() async {
-    if (_activity.isEmpty) return;
+    final targetCount = _mode == 0 ? _activity.length : _syncLogs.length;
+    if (targetCount == 0) return;
     HapticFeedback.mediumImpact();
-    final count = _activity.length;
     if (!mounted) return;
-    
-    // Show confirmation
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: InsightTheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Clear all notifications?', style: InsightTheme.poppins(16, w: FontWeight.w700)),
+        title: Text(
+          _mode == 0 ? 'Clear all notifications?' : 'Clear all sync history?',
+          style: InsightTheme.poppins(16, w: FontWeight.w700),
+        ),
         content: Text(
-          'This will permanently remove all $count notification(s).',
+          'This will permanently remove all $targetCount item(s).',
           style: InsightTheme.inter(13, c: InsightTheme.ink2),
         ),
         actions: [
@@ -219,21 +315,39 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
     if (confirmed != true || !mounted) return;
 
-    setState(() {
-      _activity.clear();
-    });
-    try {
-      await SupabaseService.clearAllActivity();
-    } catch (e) {
-      if (mounted) {
-        // Reload from server to undo optimistic clear
-        _load();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to clear all: $e'),
-            backgroundColor: InsightTheme.redInk,
-          ),
-        );
+    if (_mode == 0) {
+      setState(() {
+        _activity.clear();
+      });
+      try {
+        await SupabaseService.clearAllActivity();
+      } catch (e) {
+        if (mounted) {
+          _load();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to clear all: $e'),
+              backgroundColor: InsightTheme.redInk,
+            ),
+          );
+        }
+      }
+    } else {
+      setState(() {
+        _syncLogs.clear();
+      });
+      try {
+        await DBHelper.clearSyncLogEntries();
+      } catch (e) {
+        if (mounted) {
+          _loadSyncLogs(reset: true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to clear sync history: $e'),
+              backgroundColor: InsightTheme.redInk,
+            ),
+          );
+        }
       }
     }
   }
@@ -318,7 +432,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                             style: InsightTheme.poppins(17, w: FontWeight.w700),
                           ),
                         ),
-                        if (_mode == 0 && _activity.isNotEmpty)
+                        if ((_mode == 0 && _activity.isNotEmpty) || (_mode == 1 && _syncLogs.isNotEmpty))
                           GestureDetector(
                             onTap: _clearAll,
                             child: Container(
@@ -368,8 +482,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 ),
                 const SizedBox(height: 10),
 
-                // ── All/Unread pills — only meaningful within Activity ──
-                if (_mode == 0)
+                // ── All/Unread pills — meaningful for both Activity and Sync logs ──
+                if (_mode == 0 || _mode == 1)
                 SpringSlide(
                   animation: springFor(2),
                   beginOffset: const Offset(0, 20),
@@ -378,9 +492,17 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Row(
                       children: [
-                        _TabPill(text: "All · ${_activity.length}", isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
+                        _TabPill(
+                          text: _mode == 0 ? "All · ${_activity.length}" : "All · ${_syncLogs.length}",
+                          isActive: _mode == 0 ? _currentTabIndex == 0 : !_syncUnreadOnly,
+                          onTap: () => _mode == 0 ? setState(() => _currentTabIndex = 0) : setState(() => _syncUnreadOnly = false),
+                        ),
                         const SizedBox(width: 8),
-                        _TabPill(text: "Unread · $_unreadCount", isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
+                        _TabPill(
+                          text: _mode == 0 ? "Unread · $_unreadCount" : "Unread · $_syncUnreadCount",
+                          isActive: _mode == 0 ? _currentTabIndex == 1 : _syncUnreadOnly,
+                          onTap: () => _mode == 0 ? setState(() => _currentTabIndex = 1) : setState(() => _syncUnreadOnly = true),
+                        ),
                       ],
                     ),
                   ),
@@ -475,7 +597,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                             time: _timeAgo(item['occurred_at'] as String?),
                                             isUnread: item['is_read'] != true,
                                             isLast: i == visible.length - 1,
-                                            onTap: () => _markOneRead(item),
+                                            onTap: () => _openNotificationDetail(item),
                                           ),
                                         ),
                                       );
@@ -503,14 +625,29 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         ),
       );
     }
+    final visibleSyncLogs = _visibleSyncLogs;
     return RefreshIndicator(
       onRefresh: () => _loadSyncLogs(reset: true),
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-        itemCount: _syncLogs.length + (_syncLogHasMore ? 1 : 0),
-        itemBuilder: (context, i) {
-          if (i == _syncLogs.length) {
+      child: visibleSyncLogs.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.sync_rounded, size: 40, color: InsightTheme.ink3),
+                  const SizedBox(height: 12),
+                  Text(
+                    _syncUnreadOnly ? 'No unread sync activity.' : 'No synchronization activity yet.',
+                    style: InsightTheme.inter(13, c: InsightTheme.ink2),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+              itemCount: visibleSyncLogs.length + (_syncLogHasMore ? 1 : 0),
+              itemBuilder: (context, i) {
+          if (i == visibleSyncLogs.length) {
             // "Load more" footer — keeps this screen fast to open even
             // with thousands of historical entries (Performance
             // requirement from the Phase 6 spec).
@@ -524,24 +661,26 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               ),
             );
           }
-          final entry = _syncLogs[i];
+          final entry = visibleSyncLogs[i];
           final theme = _syncResultTheme(entry['result'] as String? ?? 'info');
           final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
-          // Visual-unification fix (#5): adopt the Activity feed's exact row
-          // language — 40×40 rounded icon box, title 13.5 w600 ink, time
-          // 11.5 ink2, hairline divider instead of individual bordered cards —
-          // while keeping Sync History's expandable technical details.
+          final isEntryUnread = entry['is_read'] != true;
           return Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: Container(
               decoration: BoxDecoration(
-                border: (i == _syncLogs.length - 1 && !_syncLogHasMore)
+                border: (i == visibleSyncLogs.length - 1 && !_syncLogHasMore)
                     ? null
                     : const Border(bottom: BorderSide(color: InsightTheme.line)),
               ),
               child: ExpansionTile(
                 enabled: hasDetails,
                 tilePadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                onExpansionChanged: (expanded) {
+                  if (expanded && isEntryUnread) {
+                    _markSyncEntryRead(entry);
+                  }
+                },
                 leading: Container(
                   width: 40, height: 40,
                   decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(13)),
@@ -558,9 +697,22 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
                   ),
                 ),
-                trailing: hasDetails
-                    ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
-                    : const SizedBox.shrink(),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isEntryUnread)
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle),
+                      ),
+                    if (hasDetails)
+                      const SizedBox(width: 8),
+                    hasDetails
+                        ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
+                        : const SizedBox.shrink(),
+                  ],
+                ),
                 children: hasDetails
                     ? [
                         Padding(

@@ -451,6 +451,10 @@ class ActivityHeatmapCard extends StatelessWidget {
     final daysInMonth = DateTime(year, month + 1, 0).day;
     final firstWeekday = DateTime(year, month, 1).weekday; // 1 = Mon .. 7 = Sun
     final leadingBlanks = firstWeekday - 1;
+    final totalCells = leadingBlanks + daysInMonth;
+    final calendarWeeks = ((totalCells + 6) / 7).ceil();
+    final cellSize = 24.0;
+    final gridHeight = (calendarWeeks * cellSize) + ((calendarWeeks - 1) * 6.0) + 4.0;
     final today = DateTime.now();
     final isCurrentMonth = today.year == year && today.month == month;
     final monthlyPct = daysInMonth == 0 ? 0 : ((activeDays.length / daysInMonth) * 100).round();
@@ -474,14 +478,18 @@ class ActivityHeatmapCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        Expanded(
+        SizedBox(
+          height: gridHeight,
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
-            itemCount: leadingBlanks + daysInMonth,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            itemCount: totalCells,
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
               mainAxisSpacing: 6,
               crossAxisSpacing: 6,
+              childAspectRatio: 1,
             ),
             itemBuilder: (context, index) {
               if (index < leadingBlanks) return const SizedBox.shrink();

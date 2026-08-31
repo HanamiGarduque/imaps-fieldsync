@@ -917,4 +917,9 @@ class DBHelper {
       )
     ''', [keep]);
   }
+
+  static Future<void> clearSyncLogEntries() async {
+    final db = await database;
+    await db.delete('sync_log_entries');
+  }
 }

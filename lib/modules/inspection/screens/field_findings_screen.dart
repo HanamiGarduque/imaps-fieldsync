@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'review_submit_screen.dart';
 import '../../tasks/screens/tasks_screen.dart';
@@ -181,7 +180,18 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                             Expanded(
                               child: Column(
                                 children: [
-                                  TextField(controller: _discrepancyTitleController, style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Issue title (leave blank if none found)')),
+                                  TextField(
+                                    controller: _discrepancyTitleController,
+                                    maxLines: 2,
+                                    minLines: 1,
+                                    style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink),
+                                    decoration: const InputDecoration(
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      border: InputBorder.none,
+                                      hintText: 'Issue title (leave blank if none found)',
+                                    ),
+                                  ),
                                   const SizedBox(height: 6),
                                   TextField(controller: _discrepancyDetailController, style: InsightTheme.inter(13, c: InsightTheme.ink2), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Location or details')),
                                 ],
@@ -257,8 +267,8 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 18),
                               child: Text('Continue to Review', textAlign: TextAlign.center, style: InsightTheme.poppins(15, w: FontWeight.w600, c: Colors.white)),
                             ),
-                            ),
                           ),
+                        ),
                         ),
                       ),
                       ],
