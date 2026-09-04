@@ -74,14 +74,18 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   double? _routeDurationSeconds;
   // Live GPS tracking (Phase B): the device marker and the authoritative
   // distance update from the SAME shared LocationService stream that
-  // GPS Verification (Step 2) uses. The road-route polyline is still
-  // fetched once per open (rerouting is a later phase) so it does NOT
-  // follow the moving marker.
+  // GPS Verification (Step 2) uses.
   StreamSubscription<Position>? _positionSub;
   bool _trackingActive = false;
   bool _recomputingDistance = false;
   DateTime _lastDistanceComputeAt = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _minDistanceRecalcInterval = Duration(seconds: 4);
+  ll.LatLng? _routeOrigin;
+  bool _routeRequestInFlight = false;
+  int _routeRequestVersion = 0;
+  DateTime _lastRouteRequestAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const double _routeRefreshMovementMeters = 50.0;
+  static const Duration _routeRefreshCooldown = Duration(seconds: 30);
   final MapController _mapController = MapController();
   // Fullscreen map mode: hides the floating header/step bar and the bottom
   // card so the map fills the whole screen (field visibility). The recenter
@@ -332,6 +336,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     // never frozen behind a throttled or in-flight distance recompute.
     _deviceLatLng = newPos;
     setState(() {});
+    unawaited(_maybeRefreshRoute(newPos));
 
     if (!shouldRecompute) {
       return;
@@ -373,36 +378,63 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         : connectivityResult != ConnectivityResult.none;
   }
 
-  /// Post-paint route refresh (initial open + location retries): runs the
-  /// fetch off the critical path, then repaints whatever arrived. On any
-  /// failure [_fetchRoute] leaves the route fields null and the UI keeps
-  /// the bent line + straight-line/RPC distance. Road-route distance/ETA
-  /// are navigation/orientation aids only - the authoritative Site
-  /// Verification distance remains the boundary-RPC/haversine number.
+  /// Post-paint route request (initial open, location retries, and controlled
+  /// movement refreshes). Road-route distance/ETA are navigation/orientation
+  /// aids only - the authoritative Site Verification distance remains the
+  /// boundary-RPC/haversine number.
   Future<void> _fetchRouteAndUpdate({required bool online}) async {
-    await _fetchRoute(online: online);
+    if (!online || _deviceLatLng == null || _parcelLatLng == null) return;
+    await _fetchRoute(start: _deviceLatLng!);
     if (!mounted) return;
     setState(() {});
   }
 
-  /// Fetches the real road route (device → target) via [RouteService]
-  /// (free OSRM demo server in dev - see RouteService cost/licensing notes).
-  /// On any failure the route fields are cleared so the UI falls back to
-  /// the stylized bent line and the existing straight-line/RPC distance.
-  Future<void> _fetchRoute({required bool online}) async {
-    if (!online || _deviceLatLng == null || _parcelLatLng == null) {
-      _routePoints = null;
-      _routeDistanceMeters = null;
-      _routeDurationSeconds = null;
+  Future<void> _maybeRefreshRoute(ll.LatLng currentPosition) async {
+    if (_routeRequestInFlight ||
+        DateTime.now().difference(_lastRouteRequestAt) <
+            _routeRefreshCooldown) {
       return;
     }
-    final result = await RouteService.fetchDrivingRoute(
-      start: _deviceLatLng!,
-      end: _parcelLatLng!,
-    );
-    _routePoints = result?.points;
-    _routeDistanceMeters = result?.distanceMeters;
-    _routeDurationSeconds = result?.durationSeconds;
+
+    if (_routeOrigin != null) {
+      final movedMeters = Geolocator.distanceBetween(
+        _routeOrigin!.latitude,
+        _routeOrigin!.longitude,
+        currentPosition.latitude,
+        currentPosition.longitude,
+      );
+      if (movedMeters < _routeRefreshMovementMeters) return;
+    }
+    if (!await _checkOnline() || !mounted) return;
+
+    await _fetchRoute(start: currentPosition);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  /// Fetches a route through [RouteService]. A failed refresh preserves the
+  /// last successful route, while the request version prevents an older
+  /// asynchronous response from replacing a newer one.
+  Future<void> _fetchRoute({required ll.LatLng start}) async {
+    if (_parcelLatLng == null || _routeRequestInFlight) return;
+    _routeRequestInFlight = true;
+    final requestVersion = ++_routeRequestVersion;
+    _lastRouteRequestAt = DateTime.now();
+    _routeOrigin = start;
+    try {
+      final result = await RouteService.fetchDrivingRoute(
+        start: start,
+        end: _parcelLatLng!,
+      );
+      if (result == null || requestVersion != _routeRequestVersion) return;
+      _routePoints = result.points;
+      _routeDistanceMeters = result.distanceMeters;
+      _routeDurationSeconds = result.durationSeconds;
+    } finally {
+      if (requestVersion == _routeRequestVersion) {
+        _routeRequestInFlight = false;
+      }
+    }
   }
 
   String _formatRouteDistance(double meters) {
