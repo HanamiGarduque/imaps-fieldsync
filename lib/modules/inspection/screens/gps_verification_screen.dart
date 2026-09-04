@@ -1045,7 +1045,10 @@ class _VerificationCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(distanceText, style: InsightTheme.mono(15, w: FontWeight.w800, c: InsightTheme.ink)),
+                  Text(
+                    heading != null ? '${heading!.round()}°' : '--',
+                    style: InsightTheme.mono(15, w: FontWeight.w800, c: InsightTheme.ink),
+                  ),
                   const SizedBox(height: 2),
                   Row(
                     mainAxisSize: MainAxisSize.min,

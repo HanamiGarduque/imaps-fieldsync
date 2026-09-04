@@ -164,8 +164,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       debugPrint('Error loading tasks: $e');
     }
 
-    final upcoming = tasks.where((t) => t.category != 'Completed').toList()
-      ..sort((a, b) => a.scheduledDate.compareTo(b.scheduledDate));
+    final upcoming = tasks.where((t) => t.category == 'Scheduled' || t.category == 'Pending').toList()
+      ..sort((a, b) {
+        final aDate = _calendarDateForTask(a) ?? '9999-12-31';
+        final bDate = _calendarDateForTask(b) ?? '9999-12-31';
+        return aDate.compareTo(bDate);
+      });
 
     if (mounted) {
       setState(() {
@@ -303,15 +307,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   }
 
   // ----------------------------------------------------------------
-  // TASK COMPLETION FLOW — Urgent / Pending / Ongoing / Completed
+  // TASK COMPLETION FLOW — Scheduled / Pending / Ongoing / Completed
   // ----------------------------------------------------------------
-  // Real fields only (TaskItem.category, TaskItem.isUrgentDeadline) — no
-  // invented statuses. "Urgent" isn't its own category in the data model,
-  // so it's carved out of the not-yet-started tasks (Pending or Scheduled)
-  // whose deadline is imminent, keeping all four buckets mutually
-  // exclusive and summing to the full task count — same as the reference.
-  // ASSUMPTION flagged for Master: Scheduled tasks are folded into
-  // Pending/Urgent here since the reference only has 4 rows, not 5.
+  // Real category values only (TaskItem.category) — the four buckets are
+  // mutually exclusive and sum to the full task count.
   Map<String, int> get _completionCounts {
     int scheduled = 0, pending = 0, ongoing = 0, completed = 0;
     for (final t in _allTasks) {
@@ -334,15 +333,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   }
 
   // Which day-of-month numbers (in `month`) have at least one active task
-  // scheduled — backs the dot under each day in the calendar strip and the
-  // full month grid. Uses the real scheduledDate field, and only active jobs
-  // (not Completed) are treated as calendar assignments.
+  // All active tasks back the dots under each day in both calendar views.
+  // Scheduled tasks use their Visit date; Available Anytime and Ongoing tasks
+  // use their admin Deadline date.
+  String? _calendarDateForTask(TaskItem task) {
+    if (task.category == 'Completed') return null;
+    if (task.category == 'Scheduled') {
+      return task.scheduledDate.isEmpty ? null : task.scheduledDate;
+    }
+    return task.deadlineDate?.isNotEmpty == true ? task.deadlineDate : null;
+  }
+
   Set<int> _taskDaysInMonth(DateTime month) {
     final days = <int>{};
     for (final t in _allTasks) {
-      if (t.category == 'Completed' || t.scheduledDate.isEmpty) continue;
+      final calendarDate = _calendarDateForTask(t);
+      if (calendarDate == null) continue;
       try {
-        final d = DateTime.parse(t.scheduledDate);
+        final d = DateTime.parse(calendarDate);
         if (d.year == month.year && d.month == month.month) days.add(d.day);
       } catch (_) {}
     }
@@ -352,9 +360,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   Map<int, List<TaskItem>> _tasksByDayInMonth(DateTime month) {
     final map = <int, List<TaskItem>>{};
     for (final t in _allTasks) {
-      if (t.category == 'Completed' || t.scheduledDate.isEmpty) continue;
+      final calendarDate = _calendarDateForTask(t);
+      if (calendarDate == null) continue;
       try {
-        final d = DateTime.parse(t.scheduledDate);
+        final d = DateTime.parse(calendarDate);
         if (d.year == month.year && d.month == month.month) {
           map.putIfAbsent(d.day, () => <TaskItem>[]).add(t);
         }
@@ -372,8 +381,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   }
 
   int _calendarPriorityKey(TaskItem task) {
-    if (task.isUrgentDeadline) return 0;
-    if (task.isDueSoonDeadline) return 1;
+    return _calendarVisitPriority(task);
+  }
+
+  int _calendarVisitPriority(TaskItem task) {
+    try {
+      final calendarDate = _calendarDateForTask(task);
+      if (calendarDate == null) return 2;
+      final visit = DateTime.parse(calendarDate);
+      final today = DateTime.now();
+      final taskDay = DateTime(visit.year, visit.month, visit.day);
+      final todayDay = DateTime(today.year, today.month, today.day);
+      final daysUntilTask = taskDay.difference(todayDay).inDays;
+      if (task.category == 'Scheduled') {
+        if (daysUntilTask <= 1) return 0;
+        if (daysUntilTask <= 3) return 1;
+      } else {
+        if (daysUntilTask <= 1) return 0;
+        if (daysUntilTask <= 3) return 1;
+      }
+    } catch (_) {}
     return 2;
   }
 
@@ -381,15 +408,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final tasks = _tasksByDayInMonth(month)[day] ?? const <TaskItem>[];
     final colors = <Color>{};
     for (final task in tasks) {
-      if (task.isUrgentDeadline) {
-        colors.add(InsightTheme.red);
-      } else if (task.isDueSoonDeadline) {
-        colors.add(InsightTheme.orange);
-      } else {
-        colors.add(InsightTheme.blue1);
-      }
+      colors.add(_calendarDotColor(task));
     }
     return colors.toList();
+  }
+
+  Color _calendarDotColor(TaskItem task) {
+    switch (_calendarVisitPriority(task)) {
+      case 0:
+        return InsightTheme.red;
+      case 1:
+        return InsightTheme.orange;
+      default:
+        return InsightTheme.blue1;
+    }
   }
 
   // Tasks tab index in MainShellScreen's own _items list (see
@@ -431,9 +463,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     setState(() {
       _calendarMonth = month;
       _selectedDay = day;
-      _showFullCalendar = false; // picking a day closes the drawer back to the strip
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollDayStripToSelected());
   }
 
   @override
@@ -614,6 +644,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   selectedDay: _selectedDay,
                                   taskDaysForMonth: _taskDaysInMonth,
                                   tasksByDayInMonth: tasksByDay,
+                                  dotColorForTask: _calendarDotColor,
                                   onPrevMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
                                   onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
                                   onPick: _onFullCalendarPick,
@@ -837,8 +868,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                     child: ActiveAssignmentsFolderCard(
                                       inspectionId: _formatShortId(_upcomingTasks[index].id),
                                       referenceNo: _upcomingTasks[index].inspectionNo,
-                                      date: _upcomingTasks[index].scheduledDate.isNotEmpty
-                                          ? _formatScheduledDate(_upcomingTasks[index].scheduledDate)
+                                        date: _calendarDateForTask(_upcomingTasks[index]) != null
+                                          ? _formatScheduledDate(_calendarDateForTask(_upcomingTasks[index])!)
                                           : '—',
                                       location: _upcomingTasks[index].location,
                                       applicantName: _upcomingTasks[index].name,
@@ -1463,6 +1494,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
   final int selectedDay;
   final Set<int> Function(DateTime month) taskDaysForMonth;
   final Map<int, List<TaskItem>> tasksByDayInMonth;
+  final Color Function(TaskItem task) dotColorForTask;
   final VoidCallback onPrevMonth;
   final VoidCallback onNextMonth;
   final void Function(DateTime month, int day) onPick;
@@ -1472,6 +1504,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
     required this.selectedDay,
     required this.taskDaysForMonth,
     required this.tasksByDayInMonth,
+    required this.dotColorForTask,
     required this.onPrevMonth,
     required this.onNextMonth,
     required this.onPick,
@@ -1560,12 +1593,9 @@ class _InlineFullCalendarCard extends StatelessWidget {
               final day = i - leadingBlanks + 1;
               final isSelected = day == selectedDay;
               final hasTask = taskDays.contains(day);
-              final dotColors = (tasksByDayInMonth[day] ?? const <TaskItem>[])
-                  .map((task) => task.isUrgentDeadline
-                      ? InsightTheme.red
-                      : task.isDueSoonDeadline
-                          ? InsightTheme.orange
-                          : InsightTheme.blue1)
+              final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
+              final dotColors = dayTasks
+                  .map(dotColorForTask)
                   .toSet()
                   .toList();
               return GestureDetector(
@@ -1623,11 +1653,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   ...selectedTasks.take(4).map((task) {
-                    final color = task.isUrgentDeadline
-                        ? InsightTheme.red
-                        : task.isDueSoonDeadline
-                            ? InsightTheme.orange
-                            : InsightTheme.blue1;
+                    final color = dotColorForTask(task);
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(

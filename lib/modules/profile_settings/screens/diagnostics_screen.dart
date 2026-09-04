@@ -427,7 +427,7 @@ class _SubmitReportSheetState extends State<_SubmitReportSheet> {
                 style: InsightTheme.urbanist(18, w: FontWeight.w800, c: _kInk)),
             const SizedBox(height: 4),
             Text(
-              'Describe what happened in your own words — no need to include technical details, the MPDO team will follow up.',
+              'Describe what happened in your own words. Include what you were trying to do and what happened. The MPDO team will follow up.',
               style: InsightTheme.inter(13, c: _kInk2),
             ),
             const SizedBox(height: 20),

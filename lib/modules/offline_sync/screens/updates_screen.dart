@@ -5,7 +5,6 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/models/user_profile.dart';
 import '../../../core/services/db_helper.dart';
@@ -83,6 +82,37 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     _toastTimer = Timer(const Duration(milliseconds: 3500), () {
       if (mounted) setState(() => _toastMessage = null);
     });
+  }
+
+  Widget _sectionHelpButton({required String title, required String message}) {
+    return InkWell(
+      onTap: () => _showSectionHelp(title: title, message: message),
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: 22,
+        height: 22,
+        alignment: Alignment.center,
+        decoration: const BoxDecoration(
+          color: InsightTheme.blue1,
+          shape: BoxShape.circle,
+        ),
+        child: const Text('!', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+      ),
+    );
+  }
+
+  Future<void> _showSectionHelp({required String title, required String message}) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title, style: InsightTheme.urbanist(18, w: FontWeight.w700, c: InsightTheme.ink)),
+        content: Text(message, style: InsightTheme.openSans(13, c: InsightTheme.ink2)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
+        ],
+      ),
+    );
   }
 
 
@@ -835,7 +865,13 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 child: const Icon(Icons.insights_rounded, size: 16, color: InsightTheme.blue1),
               ),
               const SizedBox(width: 10),
-              Text('Sync Performance', style: InsightTheme.urbanist(14, w: FontWeight.w700, c: InsightTheme.ink)),
+              Expanded(
+                child: Text('Sync Performance', style: InsightTheme.urbanist(14, w: FontWeight.w700, c: InsightTheme.ink)),
+              ),
+              _sectionHelpButton(
+                title: 'Sync Performance',
+                message: 'This section summarizes how much inspection data has been synchronized and what is still waiting to be uploaded.\n\nSynced Items means data successfully synchronized with the server. Pending Queue means data waiting to be synchronized. Pending Size is the total size of pending data. Queue Record Distribution shows how pending and synchronized records are distributed by data type, such as inspection data, photos, checklists, and GPS coordinates.',
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -976,13 +1012,23 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      'Sync Center',
-                                      style: InsightTheme.urbanist(
-                                        24,
-                                        w: FontWeight.w700,
-                                        c: InsightTheme.ink,
-                                      ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Sync Center',
+                                          style: InsightTheme.urbanist(
+                                            24,
+                                            w: FontWeight.w700,
+                                            c: InsightTheme.ink,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        _sectionHelpButton(
+                                          title: 'Sync Center',
+                                          message: 'This page shows the current synchronization status of your inspection data, pending uploads, local storage, and recent sync activity.\n\nOnline means the app can communicate with the server. Last sync shows when the latest successful synchronization happened. Use All Synced to manually synchronize pending data.',
+                                        ),
+                                      ],
                                     ),
                                     const SizedBox(height: 6),
                                     Row(
@@ -1182,6 +1228,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                       style: InsightTheme.openSans(13, w: FontWeight.w600, c: InsightTheme.ink),
                                     ),
                                   ),
+                                  _sectionHelpButton(
+                                    title: 'Synchronization Audit History',
+                                    message: 'View previous synchronization activities performed by the app, including the type of data synchronized, the related record, and whether the operation succeeded or failed.',
+                                  ),
+                                  const SizedBox(width: 8),
                                   const Icon(Icons.chevron_right_rounded, size: 18, color: InsightTheme.ink3),
                                 ],
                               ),
@@ -1218,6 +1269,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                         style: InsightTheme.jetBrains(12, w: FontWeight.w700, ls: 0.6, c: InsightTheme.ink2),
                                       ),
                                     ),
+                                    _sectionHelpButton(
+                                      title: 'Offline Storage Cache',
+                                      message: 'This shows data currently stored on the device for offline use. Cached jobs allow inspection work to remain available without an active connection.\n\nCached Jobs are inspections currently stored locally. Unsynced Files are locally stored files that have not yet been uploaded. Reclaimable is storage space that can potentially be freed by clearing eligible cached files. SQLite Active indicates that the local database used for offline storage is available. Photo Cache Clear removes locally cached photos to free device storage. It does not remove photos that have already been successfully synchronized to the server.',
+                                    ),
+                                    const SizedBox(width: 10),
                                     Text(
                                       'SQLite Active',
                                       style: InsightTheme.openSans(12, w: FontWeight.w500, c: InsightTheme.ink3),
@@ -1356,6 +1412,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                       ls: 1.2,
                                       c: InsightTheme.ink3,
                                     ),
+                                  ),
+                                  const Spacer(),
+                                  _sectionHelpButton(
+                                    title: 'Completed Audit Log',
+                                    message: 'This section shows recent synchronization activities that have completed successfully. Each entry identifies the synchronization action, the related inspection or record, and when the operation was completed.',
                                   ),
                                 ],
                               ),
