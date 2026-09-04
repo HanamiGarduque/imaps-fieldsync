@@ -195,51 +195,60 @@ class TaskItem {
   String get category {
     final s = status.toLowerCase();
     if (s.contains('complete') || s.contains('done')) return 'Completed';
+    if (isSelfScheduled) return 'Scheduled';
     if (s.contains('progress') || s.contains('ongoing')) return 'Ongoing';
-    // "Scheduled" == the inspector has actively booked a date for this job
-    // (via the Schedule action / long-press on a Pending card) — this is
-    // sticky (isSelfScheduled) so the task stays here even once that date
-    // arrives or passes, instead of disappearing back into Pending and
-    // losing the "this was planned" signal. A merely-future scheduled_date
-    // that was only ever the admin's default assignment date also counts,
-    // since that's still "not due yet."
-    // "Pending" is the default: no plan locked in, so it can be done
-    // whenever there's a slot — due-today/overdue included.
-    if (isScheduledPlan) return 'Scheduled';
     return 'Pending';
   }
 
-  /// Whether this task is "on the schedule plan" at all — independent of
-  /// its current workflow status. Used both by `category` above (Pending
-  /// vs Scheduled, only reached once not Ongoing/Completed) and by the
-  /// cross-cutting "ScheduledActive" bucket in _categorizeAndFilter(),
-  /// which needs this same test WITHOUT the Ongoing/Completed short-circuit
-  /// — so a task can be "on the schedule plan" and "in progress" at the
-  /// same time (see Scheduled-vs-Ongoing UX fix).
-  bool get isScheduledPlan => isSelfScheduled || _isScheduledAhead;
+  /// A task remains "Scheduled" whenever it carries a visit date, even if it
+  /// has already started. This preserves the approved model: started scheduled
+  /// tasks stay under Pending → Scheduled and do not move to Ongoing.
+  bool get isScheduledPlan => scheduledDate.isNotEmpty || isSelfScheduled;
 
-  /// Null when a Scheduled task's date hasn't arrived yet. Otherwise flags
-  /// how urgent it now is, so it doesn't just quietly sit there once due —
-  /// used for the "Due today" / "Overdue" badge in the Scheduled tab.
-  String? get scheduleUrgency {
-    // Priority-color fix (approved 3-gate change): gate on isScheduledPlan,
-    // not category — a scheduled task that has already started (category
-    // short-circuits to 'Ongoing') still renders in the Pending tab's
-    // Scheduled section and must keep its Due today / Overdue indicator.
-    // scheduled_date (Visit) drives this indicator only; deadline_date
-    // drives the separate red urgency state (see isUrgentDeadline).
-    if (!isScheduledPlan || scheduledDate.isEmpty) return null;
+  String? get forReschedule {
+    if (scheduledDate.isEmpty) return null;
     try {
-      final due = DateTime.parse(scheduledDate);
+      final visitDate = DateTime.parse(scheduledDate);
       final today = DateTime.now();
-      final dueDay = DateTime(due.year, due.month, due.day);
+      final visitDay = DateTime(visitDate.year, visitDate.month, visitDate.day);
       final todayDay = DateTime(today.year, today.month, today.day);
-      if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
-      if (dueDay.isBefore(todayDay)) return 'Overdue';
-      return null; // still in the future — no urgency badge needed yet
+      if (!visitDay.isBefore(todayDay)) return null;
+      if (deadlineDate == null || deadlineDate!.isEmpty) return 'For Reschedule';
+      final deadline = DateTime.parse(deadlineDate!);
+      final deadlineDay = DateTime(deadline.year, deadline.month, deadline.day);
+      if (deadlineDay.isAfter(todayDay)) return 'For Reschedule';
     } catch (_) {
       return null;
     }
+    return null;
+  }
+
+  /// Due Today / Overdue is split across the same getter used by the card tags.
+  /// - Due today is based on the scheduled visit date when present, otherwise the
+  ///   admin deadline for Available Anytime / Ongoing tasks.
+  /// - Overdue is based on the admin deadline passing.
+  String? get scheduleUrgency {
+    final today = DateTime.now();
+    final todayDay = DateTime(today.year, today.month, today.day);
+
+    if (scheduledDate.isNotEmpty) {
+      try {
+        final due = DateTime.parse(scheduledDate);
+        final dueDay = DateTime(due.year, due.month, due.day);
+        if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
+      } catch (_) {}
+    }
+
+    if (deadlineDate != null && deadlineDate!.isNotEmpty) {
+      try {
+        final due = DateTime.parse(deadlineDate!);
+        final dueDay = DateTime(due.year, due.month, due.day);
+        if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
+        if (dueDay.isBefore(todayDay)) return 'Overdue';
+      } catch (_) {}
+    }
+
+    return null;
   }
 
   IconData get typeIcon {
@@ -249,19 +258,6 @@ class TaskItem {
     if (t.contains('agri')) return Icons.grass_rounded;
     if (t.contains('institutional')) return Icons.account_balance_rounded;
     return Icons.home_rounded;
-  }
-
-  bool get _isScheduledAhead {
-    if (scheduledDate.isEmpty) return false;
-    try {
-      final due = DateTime.parse(scheduledDate);
-      final today = DateTime.now();
-      final dueDay = DateTime(due.year, due.month, due.day);
-      final todayDay = DateTime(today.year, today.month, today.day);
-      return dueDay.isAfter(todayDay); // booked for a future date
-    } catch (_) {
-      return false;
-    }
   }
 
   /// True when the deadline is today or tomorrow but NOT yet past — the
@@ -283,17 +279,18 @@ class TaskItem {
     }
   }
 
-  /// True when the deadline is tomorrow, today, or already past — used to
-  /// visually flag a Scheduled card as urgent so the inspector can spot it
-  /// at a glance, like a filling-up warning.
+  /// Visit-date urgency for Scheduled tasks. Red is kept for the visit day and
+  /// any passed visit date until the task reaches deadline overdue. Orange is
+  /// used for 2-3 days away; blue is the normal/default state.
   bool get isUrgentDeadline {
-    if (deadlineDate == null || deadlineDate!.isEmpty) return false;
+    if (!isScheduledPlan || scheduledDate.isEmpty) return false;
     try {
-      final due = DateTime.parse(deadlineDate!);
+      final due = DateTime.parse(scheduledDate);
       final today = DateTime.now();
       final dueDay = DateTime(due.year, due.month, due.day);
       final todayDay = DateTime(today.year, today.month, today.day);
-      return dueDay.difference(todayDay).inDays <= 1;
+      final diff = dueDay.difference(todayDay).inDays;
+      return diff <= 1 || dueDay.isBefore(todayDay);
     } catch (_) {
       return false;
     }
@@ -864,59 +861,32 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   Map<String, List<TaskItem>> _categorizeAndFilter() {
     final map = <String, List<TaskItem>>{
       for (final t in _tabOrder) t: <TaskItem>[],
-      // Design decision (Scheduled vs Ongoing UX, validated before
-      // implementing): a task that's on today's/self-scheduled plan
-      // AND already in progress should still surface in the Pending
-      // tab's "Scheduled" section — not just the Ongoing tab (both,
-      // per instruction) — even though its `category` is 'Ongoing' and
-      // it's therefore NOT in the `map['Scheduled']` bucket above.
-      // This bucket is that cross-cutting view: same "is this on the
-      // schedule plan" test as `category`, but without excluding
-      // Ongoing tasks — only Completed is excluded, since a finished
-      // inspection has nothing left to plan around.
-      'ScheduledActive': <TaskItem>[],
     };
-    
+
     for (final task in _allTasks) {
       if (_searchQuery.isNotEmpty) {
         final query = _searchQuery.toLowerCase();
-        if (!task.name.toLowerCase().contains(query) && 
+        if (!task.name.toLowerCase().contains(query) &&
             !task.location.toLowerCase().contains(query) &&
             !task.inspectionNo.toLowerCase().contains(query)) {
-          continue; 
+          continue;
         }
       }
       if (_selectedBarangay != 'All Barangays') {
         if (!task.location.toLowerCase().contains(_selectedBarangay.toLowerCase())) continue;
       }
       if (_urgencyFilter != 'All') {
-        // Disjoint urgency filter (revised): deadline-driven Urgent /
-        // Overdue that no longer overlap — Urgent = deadline today or
-        // tomorrow (isDueSoonDeadline), Overdue = deadline already past.
-        // Scheduled = plan membership. Completed tasks never match any
-        // option — they are not active urgency/priority items.
         final bool isCompleted = task.category == 'Completed';
         bool matches;
         switch (_urgencyFilter) {
           case 'Urgent':
-            matches = !isCompleted && task.isDueSoonDeadline;
+            matches = !isCompleted && (task.scheduleUrgency == 'Due today' || task.isUrgentDeadline);
             break;
           case 'Scheduled':
-            matches = !isCompleted && task.isScheduledPlan;
+            matches = task.isScheduledPlan && task.category != 'Ongoing';
             break;
           case 'Overdue':
-            bool overdue = false;
-            if (!isCompleted && task.deadlineDate != null && task.deadlineDate!.isNotEmpty) {
-              try {
-                final due = DateTime.parse(task.deadlineDate!);
-                final now = DateTime.now();
-                overdue = DateTime(due.year, due.month, due.day)
-                    .isBefore(DateTime(now.year, now.month, now.day));
-              } catch (_) {
-                overdue = false;
-              }
-            }
-            matches = overdue;
+            matches = !isCompleted && task.scheduleUrgency == 'Overdue';
             break;
           default:
             matches = true;
@@ -937,9 +907,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         } catch (_) {}
       }
       map[task.category]!.add(task);
-      if (task.isScheduledPlan && task.category != 'Completed') {
-        map['ScheduledActive']!.add(task);
-      }
     }
 
     for (final category in map.keys) {
@@ -952,16 +919,10 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             final sb = b.startedAt ?? b.createdAt;
             return sa.compareTo(sb);
           case 'Scheduled':
-          case 'ScheduledActive':
             final da = a.deadlineDate?.isNotEmpty == true ? a.deadlineDate! : '9999-12-31';
             final db = b.deadlineDate?.isNotEmpty == true ? b.deadlineDate! : '9999-12-31';
             return da.compareTo(db);
           case 'Completed':
-            // Newest-first (LIFO): the most recently submitted inspection
-            // is always the FIRST card in the Completed tab. submittedAt
-            // values are ISO-8601 strings, so a DESCENDING lexicographic
-            // compare equals newest-first. Tasks with no submittedAt yet
-            // carry an empty-string key and naturally sort last.
             final sa = a.submittedAt ?? '';
             final sb = b.submittedAt ?? '';
             return sb.compareTo(sa);
@@ -978,19 +939,11 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     final categorized = _categorizeAndFilter();
     final ongoing = categorized['Ongoing'] ?? [];
     final pending = categorized['Pending'] ?? [];
-    // Scheduled vs Ongoing UX fix: use the cross-cutting bucket (includes
-    // today's/self-scheduled tasks that are already In Progress), not the
-    // plain category bucket — see _categorizeAndFilter(). The Ongoing tab
-    // below still uses the plain `ongoing` bucket unchanged, so an active
-    // scheduled task appears in both, by design (validated: "show in both").
-    final scheduled = categorized['ScheduledActive'] ?? [];
+    final scheduled = categorized['Scheduled'] ?? [];
     final completed = categorized['Completed'] ?? [];
 
     final selectedCategory = _visibleTabOrder[_currentTabIndex];
     final bool isPendingTab = selectedCategory == 'Pending';
-    // Phase 3: Pending tab now shows both real-Pending and Scheduled tasks
-    // together, split into two headed sections below — but as one combined
-    // list for the empty-state check and non-Pending tabs.
     final selectedTasks = isPendingTab
         ? [...scheduled, ...pending]
         : (categorized[selectedCategory] ?? []);
@@ -1507,12 +1460,95 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Color _getStatusColor() {
     final cat = widget.task.category;
     if (cat == 'Completed') return InsightTheme.green;
-    // Final color semantics (approved lifecycle model): orange = Scheduled
-    // PENDING plan only. A scheduled task that has already started
-    // short-circuits to category 'Ongoing' and must stay BLUE there —
-    // orange must never become the primary Ongoing color.
-    if (cat == 'Scheduled') return InsightTheme.orange;
+    if (cat == 'Scheduled') {
+      final scheduledDate = widget.task.scheduledDate;
+      if (scheduledDate.isEmpty) return InsightTheme.blue1;
+      try {
+        final due = DateTime.parse(scheduledDate);
+        final today = DateTime.now();
+        final dueDay = DateTime(due.year, due.month, due.day);
+        final todayDay = DateTime(today.year, today.month, today.day);
+        final diff = dueDay.difference(todayDay).inDays;
+        if (diff <= 1 || dueDay.isBefore(todayDay)) return InsightTheme.red;
+        if (diff >= 2 && diff <= 3) return InsightTheme.orange;
+      } catch (_) {}
+      return InsightTheme.blue1;
+    }
     return InsightTheme.blue1;
+  }
+
+  Future<void> _showContextualInfo() async {
+    final task = widget.task;
+    final indicators = <MapEntry<String, String>>[];
+
+    if (task.category == 'Completed') {
+      indicators.add(const MapEntry('Completed', 'This task has been finished and submitted.'));
+      if (task.reworkStartedAt != null) {
+        indicators.add(const MapEntry('Modified', 'This completed task was edited after submission.'));
+      }
+    } else if (task.category == 'Scheduled') {
+      indicators.add(const MapEntry('Scheduled', "You've set a visit date for this task. It will stay here until completed."));
+    } else if (task.category == 'Ongoing') {
+      indicators.add(const MapEntry('Ongoing', 'This task is currently being worked on, without a fixed visit date.'));
+    } else {
+      indicators.add(const MapEntry('Available Anytime', 'This task has no set visit date yet. You can do it anytime before the deadline.'));
+    }
+
+    final statusColor = task.category != 'Completed' && task.scheduleUrgency == 'Overdue'
+      ? InsightTheme.red
+      : _getStatusColor();
+    final borderName = statusColor == InsightTheme.red
+        ? 'Red'
+        : statusColor == InsightTheme.orange
+            ? 'Orange'
+            : statusColor == InsightTheme.green
+                ? 'Green'
+                : 'Blue';
+    const borderExplanations = {
+      'Blue': 'Normal - no urgent action needed yet.',
+      'Orange': 'Your visit date is coming up in 2-3 days.',
+      'Red': 'Your visit date is today, tomorrow, or has already passed.',
+      'Green': 'This task has been finished and submitted.',
+    };
+    indicators.add(MapEntry('Border: $borderName', borderExplanations[borderName]!));
+
+    if (task.category != 'Completed') {
+      if (task.scheduleUrgency == 'Due today') {
+        indicators.add(const MapEntry('Due Today', 'Your visit date is today.'));
+      }
+      if (task.forReschedule != null) {
+        indicators.add(const MapEntry('For Reschedule', 'You missed your visit date. Reschedule now before this becomes overdue.'));
+      }
+      if (task.scheduleUrgency == 'Overdue') {
+        indicators.add(const MapEntry('Overdue', 'The deadline given by admin has passed. This needs immediate attention.'));
+      }
+    }
+    if (task.category == 'Scheduled' && task.currentStep >= 1 && task.currentStep <= 5) {
+      indicators.add(const MapEntry('In Progress', "You've already started working on this task."));
+    }
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Task details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final indicator in indicators) ...[
+              Text(indicator.key, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
+              const SizedBox(height: 2),
+              Text(indicator.value, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+              const SizedBox(height: 10),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
+        ],
+      ),
+    );
   }
 
   /// Formats the real original submission timestamp (`field_jobs.submitted_at`,
@@ -1777,59 +1813,52 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
 
   @override
   Widget build(BuildContext context) {
-    // Border-signal priority color model (revised per field feedback): the
-    // card keeps its white surface in EVERY lifecycle state, but the BORDER
-    // now carries the priority — red when the deadline is urgent, orange
-    // when the task is on the schedule plan. The old accent-only model read
-    // as too quiet outdoors, and the standalone "Scheduled" pill was
-    // redundant inside the Scheduled section, so both were replaced by the
-    // border signal. Urgency is still driven by the admin deadline_date
-    // with the unchanged ≤1-day/overdue threshold.
     final String taskCategory = widget.task.category;
-    // Orange border: the task is on the schedule plan (booked visit date)
-    // and isn't finished — Scheduled-PENDING and an In-Progress task living
-    // in the Scheduled section alike, so the whole section reads uniformly.
-    final bool showScheduleBorder =
-        widget.task.isScheduledPlan && taskCategory != 'Completed';
-    // Urgent gate: any active (non-Completed) task whose admin deadline is
-    // today/tomorrow/past. Drives ONLY the red avatar + red urgency pill —
-    // never a card fill or border.
-    final bool isUrgent = taskCategory != 'Completed' && widget.task.isUrgentDeadline;
-    // Red avatar for urgent (Scheduled and Ongoing alike); blue/orange/green
-    // otherwise via the unchanged _getStatusColor lifecycle mapping.
-    final statusColor = isUrgent ? InsightTheme.red : _getStatusColor();
-    // Visual-only addition (approved Task 2 scope): a slim step-progress
-    // bar under the badge row, matching the reference mockup. Reuses the
-    // exact step math already used by the "In Progress" badge below —
-    // no new data source, no logic change.
+    final bool isOverdue = taskCategory != 'Completed' && widget.task.scheduleUrgency == 'Overdue';
+    final bool isUrgent = taskCategory != 'Completed' && (widget.task.scheduleUrgency == 'Due today' || widget.task.isUrgentDeadline);
+    final statusColor = _getStatusColor();
+    final bool showInProgress = taskCategory == 'Scheduled' && widget.task.currentStep >= 1 && widget.task.currentStep <= 5;
     final int stepValue = (widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
         .clamp(0, InspectionProgress.totalSteps);
-    // Reschedule availability: a task can be (re)scheduled whenever it's
-    // still "on the schedule plan" and hasn't been submitted yet — that
-    // covers plain Pending/Scheduled AND an Ongoing-but-scheduled task
-    // (the ones that show up under the Pending tab's "Scheduled" section
-    // while already In Progress). Completed tasks are excluded since
-    // there's nothing left to plan around.
     final bool canSchedule = widget.task.category != 'Completed' &&
         (widget.task.category == 'Pending' ||
             widget.task.category == 'Scheduled' ||
             widget.task.isScheduledPlan);
 
+    Color borderColor;
+    if (isOverdue) {
+      borderColor = InsightTheme.red;
+    } else if (taskCategory == 'Completed') {
+      borderColor = InsightTheme.green;
+    } else if (taskCategory == 'Scheduled') {
+      if (widget.task.isUrgentDeadline) {
+        borderColor = InsightTheme.red;
+      } else if (widget.task.scheduledDate.isNotEmpty) {
+        try {
+          final due = DateTime.parse(widget.task.scheduledDate);
+          final today = DateTime.now();
+          final dueDay = DateTime(due.year, due.month, due.day);
+          final todayDay = DateTime(today.year, today.month, today.day);
+          final diff = dueDay.difference(todayDay).inDays;
+          borderColor = diff >= 2 && diff <= 3 ? InsightTheme.orange : InsightTheme.blue1;
+        } catch (_) {
+          borderColor = InsightTheme.blue1;
+        }
+      } else {
+        borderColor = InsightTheme.blue1;
+      }
+    } else {
+      borderColor = InsightTheme.blue1;
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        // Border-signal model: surface stays white for sunlight readability;
-        // the border carries priority — red = urgent deadline (overrides),
-        // orange = on the schedule plan, neutral otherwise.
-        color: InsightTheme.surface,
+        color: isOverdue ? InsightTheme.redTint : InsightTheme.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isUrgent
-              ? InsightTheme.red
-              : showScheduleBorder
-                  ? InsightTheme.orange
-                  : InsightTheme.line,
-          width: (isUrgent || showScheduleBorder) ? 1.4 : 1,
+          color: borderColor,
+          width: taskCategory == 'Completed' || taskCategory == 'Ongoing' ? 1 : 1.4,
         ),
         boxShadow: const [BoxShadow(color: Color(0x06000000), blurRadius: 8, offset: Offset(0, 2))],
       ),
@@ -1899,6 +1928,21 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   style: InsightTheme.poppins(14.5, w: FontWeight.w700, c: InsightTheme.ink),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              InkWell(
+                                onTap: _showContextualInfo,
+                                borderRadius: BorderRadius.circular(999),
+                                child: Container(
+                                  width: 20,
+                                  height: 20,
+                                  alignment: Alignment.center,
+                                  decoration: const BoxDecoration(
+                                    color: InsightTheme.blue1,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Text('!', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)),
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -2019,7 +2063,26 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // Visit row already say it) and added clutter
                               // on urgent cards. Scheduled state is carried
                               // by the orange border + avatar instead.
-                              if (widget.task.category == 'Ongoing')
+                              if (widget.task.category == 'Scheduled' && widget.task.isScheduledPlan && widget.task.forReschedule != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.orangeTint,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.pending_actions_rounded, size: 11, color: InsightTheme.orangeInk),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'For Reschedule',
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              if (showInProgress)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
@@ -2073,32 +2136,41 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // still both render.
                               if (widget.task.category != 'Completed' &&
                                   widget.task.scheduleUrgency != null &&
-                                  !(isUrgent && _deadlineUrgencyLabel == widget.task.scheduleUrgency))
+                                  widget.task.scheduleUrgency != 'Overdue' &&
+                                  widget.task.forReschedule == null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: widget.task.scheduleUrgency == 'Overdue'
-                                        ? InsightTheme.redTint
-                                        : InsightTheme.orangeTint,
+                                    color: InsightTheme.orangeTint,
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(
-                                        widget.task.scheduleUrgency == 'Overdue' ? Icons.warning_rounded : Icons.access_time_rounded,
-                                        size: 11,
-                                        color: widget.task.scheduleUrgency == 'Overdue' ? InsightTheme.redInk : InsightTheme.orangeInk,
-                                      ),
+                                      const Icon(Icons.access_time_rounded, size: 11, color: InsightTheme.orangeInk),
                                       const SizedBox(width: 4),
                                       Text(
                                         widget.task.scheduleUrgency!,
-                                        style: InsightTheme.inter(
-                                          10, w: FontWeight.w700,
-                                          c: widget.task.scheduleUrgency == 'Overdue'
-                                              ? InsightTheme.redInk
-                                              : InsightTheme.orangeInk,
-                                        ),
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              if (widget.task.category != 'Completed' && widget.task.scheduleUrgency == 'Overdue')
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.redTint,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.warning_rounded, size: 11, color: InsightTheme.redInk),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Overdue',
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.redInk),
                                       ),
                                     ],
                                   ),
@@ -2110,7 +2182,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // urgent task (Scheduled-pending included),
                               // per the locked lifecycle matrix. Secondary
                               // cue: red avatar square.
-                              if (isUrgent)
+                              if (isUrgent && _deadlineUrgencyLabel != 'Overdue')
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
