@@ -227,14 +227,14 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
 
     final mins = await SecurePrefsService.getBioAutoLockMins();
     // Design decision (AUTH_SECURITY_MASTER_DOC.md §5d): the stored value
-    // is -1=immediately, 0=never, or 1/5/10 minutes of grace. An unset
-    // value should default to the most restrictive behavior, but "never"
-    // is explicitly a non-locking state and not the same as immediate.
+    // is -1=immediately, 0=no grace period configured/"never" (its
+    // original storage comment), or 1/5/10 minutes of grace. With the
+    // master switch (bio_require_on_open) already on, an ambiguous/unset
+    // grace value defaults to the *strictest* behavior (lock immediately)
+    // rather than the most permissive one — so both -1 and 0 lock right
+    // away here; only 1/5/10 get an actual grace window.
     final elapsed = DateTime.now().difference(pausedAt);
-    final shouldLock = SecurePrefsService.shouldLockAfterElapsed(
-      minutes: mins,
-      elapsed: elapsed,
-    );
+    final shouldLock = mins <= 0 || elapsed >= Duration(minutes: mins);
     if (!shouldLock || !mounted) return;
 
     _lockShowing = true;

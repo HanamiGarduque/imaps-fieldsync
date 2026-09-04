@@ -377,13 +377,13 @@ class WeeklyTrendCard extends StatelessWidget {
                       // Peak day stands out at full color; the rest sit a
                       // shade lighter so the eye lands on the highest bar
                       // first, matching the "Highest Day" footer stat.
-                      color: i == highestIdx ? barColor : barColor.withValues(alpha: 0.45),
+                      color: i == highestIdx ? barColor : barColor.withOpacity(0.45),
                       width: 22,
                       borderRadius: BorderRadius.circular(6),
                       backDrawRodData: BackgroundBarChartRodData(
                         show: true,
                         toY: chartMax,
-                        color: barColor.withValues(alpha: 0.06),
+                        color: barColor.withOpacity(0.06),
                       ),
                     ),
                   ]),
@@ -392,7 +392,7 @@ class WeeklyTrendCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        Divider(height: 1, color: barColor.withValues(alpha: 0.12)),
+        Divider(height: 1, color: barColor.withOpacity(0.12)),
         const SizedBox(height: 12),
         _StatRow(
           items: [
@@ -402,7 +402,7 @@ class WeeklyTrendCard extends StatelessWidget {
           ],
           textColor: textColor,
           mutedTextColor: mutedTextColor,
-          dividerColor: barColor.withValues(alpha: 0.12),
+          dividerColor: barColor.withOpacity(0.12),
         ),
       ],
     );
@@ -620,7 +620,7 @@ class ZoningTypeBreakdownCard extends StatelessWidget {
             child: ListView.separated(
               physics: const NeverScrollableScrollPhysics(),
               itemCount: visible.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 12),
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, i) {
                 final e = visible[i];
                 return Row(

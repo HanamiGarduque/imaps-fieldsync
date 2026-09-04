@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
@@ -143,6 +144,15 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   List<Map<String, dynamic>> get _visibleSyncLogs =>
       _syncUnreadOnly ? _syncLogs.where((entry) => entry['is_read'] != true).toList() : _syncLogs;
+
+  Future<void> _markAllRead() async {
+    if (_unreadCount == 0) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      _activity = _activity.map((a) => {...a, 'is_read': true}).toList();
+    });
+    await SupabaseService.markAllActivityRead();
+  }
 
   Future<void> _markOneRead(Map<String, dynamic> item) async {
     if (item['is_read'] == true) return;
@@ -387,7 +397,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.20)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.20)),
               ),
             ),
           ),
@@ -397,7 +407,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 width: 220, height: 220,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.10)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.10)),
               ),
             ),
           ),
@@ -565,7 +575,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                             padding: const EdgeInsets.only(right: 24),
                                             margin: const EdgeInsets.only(bottom: 1),
                                             decoration: BoxDecoration(
-                                              color: InsightTheme.redInk.withValues(alpha: 0.1),
+                                              color: InsightTheme.redInk.withOpacity(0.1),
                                               borderRadius: BorderRadius.circular(16),
                                             ),
                                             child: const Icon(
@@ -832,7 +842,7 @@ class _TabPill extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           border: isActive ? null : Border.all(color: InsightTheme.line),
           boxShadow: isActive ? [
-            BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.28), blurRadius: 18, offset: const Offset(0, 8))
+            BoxShadow(color: InsightTheme.blue1.withOpacity(0.28), blurRadius: 18, offset: const Offset(0, 8))
           ] : [
             const BoxShadow(color: InsightTheme.line, blurRadius: 2, offset: Offset(0, 1))
           ],
@@ -857,9 +867,9 @@ class _GlassBackButton extends StatelessWidget {
       child: Container(
         width: 38, height: 38,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.5),
+          color: Colors.white.withOpacity(0.5),
           borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
+          border: Border.all(color: Colors.white.withOpacity(0.65)),
           boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 14, offset: Offset(0, 4))],
         ),
         child: ClipRRect(

@@ -1093,8 +1093,8 @@ class _VerificationCard extends StatelessWidget {
                 ),
                 _verticalDivider,
                 _Metric(
-                  label: 'HEADING',
-                  value: heading != null ? '${heading!.round()}° ($headingCardinal)' : '--',
+                  label: 'DISTANCE',
+                  value: distanceText,
                   mono: true,
                   valueColor: verified ? InsightTheme.blueInk : InsightTheme.ink2,
                 ),
