@@ -313,24 +313,24 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // ASSUMPTION flagged for Master: Scheduled tasks are folded into
   // Pending/Urgent here since the reference only has 4 rows, not 5.
   Map<String, int> get _completionCounts {
-    int completed = 0, ongoing = 0, urgent = 0, pending = 0;
+    int scheduled = 0, pending = 0, ongoing = 0, completed = 0;
     for (final t in _allTasks) {
       switch (t.category) {
-        case 'Completed':
-          completed++;
+        case 'Scheduled':
+          scheduled++;
+          break;
+        case 'Pending':
+          pending++;
           break;
         case 'Ongoing':
           ongoing++;
           break;
-        default: // Pending or Scheduled
-          if (t.isUrgentDeadline) {
-            urgent++;
-          } else {
-            pending++;
-          }
+        case 'Completed':
+          completed++;
+          break;
       }
     }
-    return {'Urgent': urgent, 'Pending': pending, 'Ongoing': ongoing, 'Completed': completed};
+    return {'Scheduled': scheduled, 'Pending': pending, 'Ongoing': ongoing, 'Completed': completed};
   }
 
   // Which day-of-month numbers (in `month`) have at least one active task
@@ -917,20 +917,44 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                             : Builder(builder: (context) {
                                 final counts = _completionCounts;
                                 final total = counts.values.fold<int>(0, (a, b) => a + b);
-                                const labels = ['Urgent', 'Pending', 'Ongoing', 'Completed'];
-                                const colors = [InsightTheme.red, InsightTheme.orange, InsightTheme.blue1, InsightTheme.green];
-                                const icons = [Icons.priority_high_rounded, Icons.schedule_rounded, Icons.autorenew_rounded, Icons.check_circle_rounded];
+                                const labels = ['Scheduled', 'Pending', 'Ongoing', 'Completed'];
+                                const colors = [InsightTheme.orange, InsightTheme.blue1, InsightTheme.blue1, InsightTheme.green];
+                                const icons = [Icons.event_rounded, Icons.pending_actions_rounded, Icons.autorenew_rounded, Icons.check_circle_rounded];
                                 final fractions = List.generate(labels.length, (i) {
                                   final count = counts[labels[i]] ?? 0;
                                   return total == 0 ? 0.0 : count / total;
                                 });
-                                return _CompletionRingChart(
-                                  total: total,
-                                  labels: labels,
-                                  colors: colors,
-                                  icons: icons,
-                                  counts: List.generate(labels.length, (i) => counts[labels[i]] ?? 0),
-                                  fractions: fractions,
+                                final overdueCount = _allTasks.where((task) {
+                                  if (task.category == 'Completed') return false;
+                                  return task.scheduleUrgency == 'Overdue';
+                                }).length;
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _CompletionRingChart(
+                                      total: total,
+                                      labels: labels,
+                                      colors: colors,
+                                      icons: icons,
+                                      counts: List.generate(labels.length, (i) => counts[labels[i]] ?? 0),
+                                      fractions: fractions,
+                                    ),
+                                    if (overdueCount > 0)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 14),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: InsightTheme.redTint,
+                                            borderRadius: BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            '⚠️ $overdueCount overdue',
+                                            style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.redInk),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 );
                               }),
                   ),
