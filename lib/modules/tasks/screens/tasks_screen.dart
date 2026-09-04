@@ -1510,7 +1510,13 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       'Red': 'Your visit date is today, tomorrow, or has already passed.',
       'Green': 'This task has been finished and submitted.',
     };
-    indicators.add(MapEntry('Border: $borderName', borderExplanations[borderName]!));
+    final indicatorName = task.category != 'Completed' && task.scheduleUrgency == 'Overdue'
+      ? 'Container: Red'
+      : 'Border: $borderName';
+    final indicatorExplanation = task.category != 'Completed' && task.scheduleUrgency == 'Overdue'
+      ? 'This task is overdue and needs immediate attention.'
+      : borderExplanations[borderName]!;
+    indicators.add(MapEntry(indicatorName, indicatorExplanation));
 
     if (task.category != 'Completed') {
       if (task.scheduleUrgency == 'Due today') {
@@ -1816,7 +1822,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     final String taskCategory = widget.task.category;
     final bool isOverdue = taskCategory != 'Completed' && widget.task.scheduleUrgency == 'Overdue';
     final bool isUrgent = taskCategory != 'Completed' && (widget.task.scheduleUrgency == 'Due today' || widget.task.isUrgentDeadline);
-    final statusColor = _getStatusColor();
+    final statusColor = isOverdue ? InsightTheme.red : _getStatusColor();
     final bool showInProgress = taskCategory == 'Scheduled' && widget.task.currentStep >= 1 && widget.task.currentStep <= 5;
     final int stepValue = (widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
         .clamp(0, InspectionProgress.totalSteps);
