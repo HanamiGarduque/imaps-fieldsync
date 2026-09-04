@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
@@ -36,6 +37,7 @@ class MainShellScreen extends StatefulWidget {
 
 class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingObserver {
   late int _currentIndex;
+  late UserProfile _currentProfile;
 
   // ── App-resume lock (see AUTH_SECURITY_MASTER_DOC.md §5d) ───────────────
   // _pausedAt is set the moment the app leaves the foreground and cleared
@@ -44,6 +46,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   // splash-screen/session-check flow separately (see splash_screen.dart).
   DateTime? _pausedAt;
   bool _lockShowing = false;
+  Timer? _inactivityTimer;
 
   // ── Quick Actions sheet ───────────────────────────────────────────────
   bool _quickActionsOpen = false;
@@ -69,14 +72,71 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    _currentProfile = widget.profile;
     _tasksVisitedThisSession = _currentIndex == 1;
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_refreshInactivityLock());
   }
 
   @override
   void dispose() {
+    _cancelInactivityTimer();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  Future<void> _refreshInactivityLock() async {
+    final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
+    final enrolled = await BiometricService.isEnrolled();
+    final confirmed = await BiometricService.isConfirmed();
+    if (!requireOnOpen || !enrolled || !confirmed || _lockShowing) {
+      _cancelInactivityTimer();
+      return;
+    }
+
+    final minutes = await SecurePrefsService.getBioAutoLockMins();
+    final timeout = SecurePrefsService.autoLockTimeoutForMinutes(minutes);
+    if (timeout == null || timeout == Duration.zero) {
+      _cancelInactivityTimer();
+      return;
+    }
+
+    _cancelInactivityTimer();
+    _inactivityTimer = Timer(timeout, _handleIdleLock);
+  }
+
+  void _cancelInactivityTimer() {
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
+  }
+
+  void _handleUserActivity() {
+    if (!mounted || _lockShowing) return;
+    unawaited(_refreshInactivityLock());
+  }
+
+  Future<void> _handleIdleLock() async {
+    if (!mounted || _lockShowing) return;
+
+    final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
+    final enrolled = await BiometricService.isEnrolled();
+    final confirmed = await BiometricService.isConfirmed();
+    if (!requireOnOpen || !enrolled || !confirmed) {
+      _cancelInactivityTimer();
+      return;
+    }
+
+    _lockShowing = true;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const AppResumeLockScreen(),
+        fullscreenDialog: true,
+      ),
+    );
+    _lockShowing = false;
+    if (mounted) {
+      unawaited(_refreshInactivityLock());
+    }
   }
 
   void _toggleQuickActions() {
@@ -90,6 +150,15 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   void _openTab(int index) {
     if (index == 1) _tasksVisitedThisSession = true;
     setState(() => _currentIndex = index);
+  }
+
+  Future<void> _openProfileEdit() async {
+    final result = await Navigator.of(context).push<UserProfile?>(
+      MaterialPageRoute(builder: (_) => ProfileEditScreen(profile: _currentProfile)),
+    );
+    if (result != null && mounted) {
+      setState(() => _currentProfile = result);
+    }
   }
 
   List<QuickAction> _buildQuickActions() {
@@ -139,9 +208,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
         icon: Icons.edit_outlined,
         title: 'Edit profile',
         subtitle: 'Update your personal details',
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ProfileEditScreen(profile: widget.profile)),
-        ),
+        onTap: () => _openProfileEdit(),
       ),
     ];
   }
@@ -162,8 +229,10 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     // is no longer visible," which is the only thing that should count.
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _pausedAt ??= DateTime.now();
+      _cancelInactivityTimer();
     } else if (state == AppLifecycleState.resumed) {
       _maybeShowResumeLock();
+      unawaited(_refreshInactivityLock());
     }
   }
 
@@ -214,90 +283,84 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
       case 0:
         return HomeDashboardScreen(
           key: ValueKey('home_tab_$index'),
-          profile: widget.profile,
+          profile: _currentProfile,
           onNavigateToTab: _openTab,
+          onProfileUpdated: () => setState(() {}),
         );
       case 1:
         return TasksScreen(
           key: ValueKey('tasks_tab_$index'),
-          profile: widget.profile,
+          profile: _currentProfile,
         );
       case 2:
         return UpdatesScreen(
           key: ValueKey('updates_tab_$index'),
-          profile: widget.profile,
+          profile: _currentProfile,
         );
       case 3:
         return ProfileScreen(
           key: ValueKey('profile_tab_$index'),
-          profile: widget.profile,
+          profile: _currentProfile,
           initialAnalyticsOpen: _profileAnalyticsRequested,
           onAnalyticsHandled: () => setState(() => _profileAnalyticsRequested = false),
         );
       default:
         return HomeDashboardScreen(
           key: ValueKey('home_tab_$index'),
-          profile: widget.profile,
+          profile: _currentProfile,
+          onNavigateToTab: _openTab,
+          onProfileUpdated: () => setState(() {}),
         );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      extendBody: true,
-      body: Stack(
-        children: [
-          // ── Ambient mesh blur background ──────────────────────────────
-          // Same blurred-blob pattern already established in
-          // site_map_screen.dart / gps_verification_screen.dart (blue,
-          // two soft circles) — reused here behind the whole shell for
-          // consistency rather than inventing a new background treatment.
-          Positioned(
-            top: -80, right: -80,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-              child: Container(
-                width: 280, height: 280,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.16)),
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _handleUserActivity(),
+      onPointerMove: (_) => _handleUserActivity(),
+      onPointerUp: (_) => _handleUserActivity(),
+      child: Scaffold(
+        extendBody: true,
+        body: Stack(
+          children: [
+            Positioned(
+              top: -80, right: -80,
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
+                child: Container(
+                  width: 280, height: 280,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.16)),
+                ),
               ),
             ),
-          ),
-          Positioned(
-            bottom: -100, left: -100,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-              child: Container(
-                width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue2.withValues(alpha: 0.10)),
+            Positioned(
+              bottom: -100, left: -100,
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
+                child: Container(
+                  width: 260, height: 260,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue2.withValues(alpha: 0.10)),
+                ),
               ),
             ),
-          ),
-
-          // ── Main content — blurs + scales down slightly while Quick
-          // Actions is open (the reference's "Main Content Focus Effect"),
-          // on top of the ambient background so the blur has something to
-          // visibly act on.
-          AnimatedScale(
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
-            scale: _quickActionsOpen ? 0.95 : 1.0,
-            child: TweenAnimationBuilder<double>(
+            AnimatedScale(
               duration: const Duration(milliseconds: 320),
               curve: Curves.easeOutCubic,
-              tween: Tween(begin: 0, end: _quickActionsOpen ? 6.0 : 0.0),
-              builder: (context, blurSigma, child) {
-                return ImageFiltered(
-                  imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-                  child: child,
-                );
-              },
-              child: Column(
+              scale: _quickActionsOpen ? 0.95 : 1.0,
+              child: TweenAnimationBuilder<double>(
+                duration: const Duration(milliseconds: 320),
+                curve: Curves.easeOutCubic,
+                tween: Tween(begin: 0, end: _quickActionsOpen ? 6.0 : 0.0),
+                builder: (context, blurSigma, child) {
+                  return ImageFiltered(
+                    imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+                    child: child,
+                  );
+                },
+                child: Column(
                   children: [
-                    // Phase 5: compact sync progress banner — shown on Home/Tasks/
-                    // Profile tabs. Hidden on the Updates tab (index 2) since the
-                    // Sync Center already renders its own detailed progress line;
-                    // showing both at once would be a redundant duplicate.
                     if (_currentIndex != 2) const SyncProgressBanner(),
                     Expanded(
                       child: AnimatedSwitcher(
@@ -320,92 +383,79 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                       ),
                     ),
                   ],
-              ),
-            ),
-          ),
-
-          // ── Backdrop — actual gaussian blur (not just a dim scrim) over
-          // whatever's behind the Quick Actions sheet, per the reference.
-          // Ignored entirely when closed so it never intercepts normal
-          // taps on the page underneath.
-          IgnorePointer(
-            ignoring: !_quickActionsOpen,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 250),
-              opacity: _quickActionsOpen ? 1 : 0,
-              child: GestureDetector(
-                onTap: _closeQuickActions,
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
-                  child: Container(color: Colors.black.withValues(alpha: 0.22)),
                 ),
               ),
             ),
-          ),
-
-          // Quick Actions sheet — floats just above the nav row, matching
-          // the approved reference position/shape (explicit theme-lock
-          // override for this one element — see quick_actions_sheet.dart).
-          // Mounted/unmounted with the open state so its internal
-          // staggered row animation replays every time it's opened.
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 190, // raised — the trigger now sits above the rail,
-                         // not beside it, so the sheet needs more
-                         // clearance to avoid overlapping the trigger.
-            child: IgnorePointer(
+            IgnorePointer(
               ignoring: !_quickActionsOpen,
-              child: AnimatedSlide(
-                duration: const Duration(milliseconds: 280),
-                curve: Curves.easeOutCubic,
-                offset: _quickActionsOpen ? Offset.zero : const Offset(0, 0.08),
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 220),
-                  opacity: _quickActionsOpen ? 1 : 0,
-                  child: _quickActionsOpen
-                      ? QuickActionsSheet(
-                          key: const ValueKey('quick_actions_open'),
-                          actions: _buildQuickActions(),
-                          onClose: _closeQuickActions,
-                        )
-                      : const SizedBox.shrink(),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 250),
+                opacity: _quickActionsOpen ? 1 : 0,
+                child: GestureDetector(
+                  onTap: _closeQuickActions,
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
+                    child: Container(color: Colors.black.withValues(alpha: 0.22)),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-
-      bottomNavigationBar: ValueListenableBuilder<SyncProgress?>(
-        valueListenable: SyncOutboxService.progress,
-        builder: (context, syncProgress, _) {
-          final items = [
-            _items[0],
-            InsightNavItem(
-              icon: _items[1].icon,
-              label: _items[1].label,
-              showBadge: !_tasksVisitedThisSession,
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 190,
+              child: IgnorePointer(
+                ignoring: !_quickActionsOpen,
+                child: AnimatedSlide(
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeOutCubic,
+                  offset: _quickActionsOpen ? Offset.zero : const Offset(0, 0.08),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 220),
+                    opacity: _quickActionsOpen ? 1 : 0,
+                    child: _quickActionsOpen
+                        ? QuickActionsSheet(
+                            key: const ValueKey('quick_actions_open'),
+                            actions: _buildQuickActions(),
+                            onClose: _closeQuickActions,
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+              ),
             ),
-            InsightNavItem(
-              icon: _items[2].icon,
-              label: _items[2].label,
-              showBadge: syncProgress != null,
-            ),
-            _items[3],
-          ];
-          return InsightBottomNav(
-            currentIndex: _currentIndex,
-            items: items,
-            isQuickActionsOpen: _quickActionsOpen,
-            onQuickActionsTap: _toggleQuickActions,
-            onTap: (i) {
-              _closeQuickActions();
-              if (i == _currentIndex) return;
-              _openTab(i);
-            },
-          );
-        },
+          ],
+        ),
+        bottomNavigationBar: ValueListenableBuilder<SyncProgress?>(
+          valueListenable: SyncOutboxService.progress,
+          builder: (context, syncProgress, _) {
+            final items = [
+              _items[0],
+              InsightNavItem(
+                icon: _items[1].icon,
+                label: _items[1].label,
+                showBadge: !_tasksVisitedThisSession,
+              ),
+              InsightNavItem(
+                icon: _items[2].icon,
+                label: _items[2].label,
+                showBadge: syncProgress != null,
+              ),
+              _items[3],
+            ];
+            return InsightBottomNav(
+              currentIndex: _currentIndex,
+              items: items,
+              isQuickActionsOpen: _quickActionsOpen,
+              onQuickActionsTap: _toggleQuickActions,
+              onTap: (i) {
+                _closeQuickActions();
+                if (i == _currentIndex) return;
+                _openTab(i);
+              },
+            );
+          },
+        ),
       ),
     );
   }

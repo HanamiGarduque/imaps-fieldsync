@@ -160,13 +160,20 @@ class SecurePrefsService {
     return int.tryParse(raw ?? '0') ?? 0;
   }
 
+  static Duration? autoLockTimeoutForMinutes(int minutes) {
+    if (minutes == 0) return null;
+    if (minutes < 0) return Duration.zero;
+    return Duration(minutes: minutes);
+  }
+
   static bool shouldLockAfterElapsed({
     required int minutes,
     required Duration elapsed,
   }) {
-    if (minutes == 0) return false;
-    if (minutes < 0) return true;
-    return elapsed >= Duration(minutes: minutes);
+    final timeout = autoLockTimeoutForMinutes(minutes);
+    if (timeout == null) return false;
+    if (timeout == Duration.zero) return true;
+    return elapsed >= timeout;
   }
 
   static Future<void> setBioAutoLockMins(int minutes) =>

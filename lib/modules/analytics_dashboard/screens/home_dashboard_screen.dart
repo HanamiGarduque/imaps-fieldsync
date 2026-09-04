@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
@@ -29,7 +28,10 @@ class HomeDashboardScreen extends StatefulWidget {
   // normal Navigator.push (see below) if null, so this screen still works
   // fine if ever used outside the shell.
   final ValueChanged<int>? onNavigateToTab;
-  const HomeDashboardScreen({super.key, required this.profile, this.onNavigateToTab});
+  // Optional callback — called when profile is updated externally (e.g.
+  // from Edit Profile screen) so dashboard can refresh header/activity.
+  final VoidCallback? onProfileUpdated;
+  const HomeDashboardScreen({super.key, required this.profile, this.onNavigateToTab, this.onProfileUpdated});
 
   @override
   State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
@@ -112,6 +114,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     } else {
       _dayStripController.jumpTo(target);
     }
+  }
+
+  @override
+  void didUpdateWidget(HomeDashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If profile was updated externally (e.g., from Edit Profile),
+    // refresh the header name and reload recent activity.
+    final profileChanged = oldWidget.profile.fullName != widget.profile.fullName ||
+        oldWidget.profile.avatarUrl != widget.profile.avatarUrl;
+    profileChanged ? _loadRecentActivity() : null;
   }
 
   @override
@@ -444,12 +456,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   static const int _kTasksTabIndex = 1;
 
   void _goToTasksTab() {
-    if (widget.onNavigateToTab != null) {
-      widget.onNavigateToTab!(_kTasksTabIndex);
-    } else {
-      // Fallback when Home isn't hosted inside MainShellScreen.
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile)));
-    }
+    widget.onNavigateToTab == null
+        ? Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(profile: widget.profile)))
+        : widget.onNavigateToTab!(_kTasksTabIndex);
   }
 
   String _formatShortId(String fullId) {
@@ -488,7 +497,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final greeting = _greeting(_now);
     final taskDays = _taskDaysInMonth(_calendarMonth);
     final tasksByDay = _tasksByDayInMonth(_calendarMonth);
-    final selectedDayTasks = tasksByDay[_selectedDay] ?? const <TaskItem>[];
     final daysInMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1, 0).day;
     const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
@@ -555,7 +563,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                             margin: const EdgeInsets.only(right: 12),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: _isOnline ? InsightTheme.green.withOpacity(0.12) : InsightTheme.red.withOpacity(0.12),
+                              color: _isOnline ? InsightTheme.green.withValues(alpha: 0.12) : InsightTheme.red.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Row(
@@ -643,7 +651,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                           opacity: animation,
                           child: SizeTransition(
                             sizeFactor: animation,
-                            axisAlignment: -1,
+                            alignment: Alignment.topCenter,
                             child: SlideTransition(
                               position: Tween<Offset>(begin: const Offset(0, -0.06), end: Offset.zero).animate(animation),
                               child: child,
@@ -711,7 +719,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                           mainAxisAlignment: MainAxisAlignment.center,
                                           children: [
                                             Text('$day', style: InsightTheme.urbanist(14, w: FontWeight.w800, c: isSelected ? Colors.white : InsightTheme.ink)),
-                                            Text(weekdayAbbr[weekday - 1], style: InsightTheme.openSans(12, w: FontWeight.w600, c: isSelected ? Colors.white.withOpacity(0.9) : InsightTheme.ink3)),
+                                            Text(weekdayAbbr[weekday - 1], style: InsightTheme.openSans(12, w: FontWeight.w600, c: isSelected ? Colors.white.withValues(alpha: 0.9) : InsightTheme.ink3)),
                                             const SizedBox(height: 4),
                                             if (hasTask)
                                               Row(
@@ -914,7 +922,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       height: 6,
                       width: _currentCardIndex == index ? 24 : 8,
                       decoration: BoxDecoration(
-                        color: _currentCardIndex == index ? InsightTheme.blue1 : InsightTheme.ink3.withOpacity(0.3),
+                        color: _currentCardIndex == index ? InsightTheme.blue1 : InsightTheme.ink3.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(10),
                       ),
                     );
@@ -1099,7 +1107,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 children: [
                                   Positioned(
                                     left: 19, top: 12, bottom: 16,
-                                    child: Container(width: 2, color: InsightTheme.ink3.withOpacity(0.15)),
+                                    child: Container(width: 2, color: InsightTheme.ink3.withValues(alpha: 0.15)),
                                   ),
                                   Column(
                                     children: List.generate(_filteredActivity.length, (i) {
@@ -1252,7 +1260,7 @@ class _SectionLabel extends StatelessWidget {
               width: 26, height: 26,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: accentColor.withOpacity(0.12),
+                color: accentColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(icon, size: 14, color: accentColor),
@@ -1435,7 +1443,7 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
                         value: value <= 0 ? 0.001 : value,
                         strokeWidth: _strokeWidth,
                         strokeCap: StrokeCap.round,
-                        backgroundColor: widget.colors[i].withOpacity(0.12),
+                        backgroundColor: widget.colors[i].withValues(alpha: 0.12),
                         valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
                       ),
                     ),
@@ -1483,9 +1491,9 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
                   Container(
                     width: 30, height: 30,
                     decoration: BoxDecoration(
-                      color: widget.colors[i].withOpacity(0.12),
+                      color: widget.colors[i].withValues(alpha: 0.12),
                       shape: BoxShape.circle,
-                      border: Border.all(color: widget.colors[i].withOpacity(0.3), width: 1.5),
+                      border: Border.all(color: widget.colors[i].withValues(alpha: 0.3), width: 1.5),
                     ),
                     child: Icon(widget.icons[i], size: 15, color: widget.colors[i]),
                   ),
@@ -1791,7 +1799,7 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                 // read too large next to the rest of the dashboard.
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
                 decoration: BoxDecoration(
-                  color: widget.color.withOpacity(0.12),
+                  color: widget.color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: AnimatedSize(
@@ -1829,7 +1837,7 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                       // Title + accent underline, per the reference shape.
                       Text(widget.title, style: InsightTheme.urbanist(13, w: FontWeight.w700, c: InsightTheme.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 5),
-                      Container(width: 32, height: 2, decoration: BoxDecoration(color: widget.color.withOpacity(0.5), borderRadius: BorderRadius.circular(2))),
+                      Container(width: 32, height: 2, decoration: BoxDecoration(color: widget.color.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(2))),
                       if (widget.subtitle.isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(widget.subtitle, style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2)),

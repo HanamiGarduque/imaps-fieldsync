@@ -30,6 +30,13 @@ void main() {
       );
     });
 
+    test('timeout mapping should match immediate, minute-based, and never settings', () {
+      expect(SecurePrefsService.autoLockTimeoutForMinutes(-1), Duration.zero);
+      expect(SecurePrefsService.autoLockTimeoutForMinutes(1), const Duration(minutes: 1));
+      expect(SecurePrefsService.autoLockTimeoutForMinutes(5), const Duration(minutes: 5));
+      expect(SecurePrefsService.autoLockTimeoutForMinutes(0), isNull);
+    });
+
     test('never should not lock at all', () {
       expect(
         SecurePrefsService.shouldLockAfterElapsed(
