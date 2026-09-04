@@ -18,6 +18,7 @@ import '../widgets/exit_confirm_dialog.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
+import '../inspection_constants.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
 
@@ -30,7 +31,6 @@ class GpsVerificationScreen extends StatefulWidget {
 }
 
 class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
-  static const double _rangeThresholdMeters = 30.0;
   bool _loading = true;
   bool _submitting = false;
   String? _error;
@@ -48,7 +48,9 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   double? _heading;
   bool _compassUnavailable = false;
 
-  bool get _verified => _distance != null && _distance! <= _rangeThresholdMeters;
+  bool get _verified =>
+      _distance != null &&
+      _distance! <= siteVerificationDistanceThresholdMeters;
 
   static const _cardinals = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
   String get _headingCardinal {

@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../services/location_service.dart';
+import '../inspection_constants.dart';
 import '../../../core/services/route_service.dart';
 import '../../../core/services/supabase_service.dart';
 import 'gps_verification_screen.dart';
@@ -86,6 +87,13 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   // card so the map fills the whole screen (field visibility). The recenter
   // control and the OSM attribution stay visible; the toggle flips icon.
   bool _fullscreen = false;
+
+  /// Phase C: Arrival detection — true when the inspector is sufficiently
+  /// close to the target site. Uses the same threshold as GPS Verification
+  /// (Step 2) so the experience is consistent across the workflow.
+  bool get _arrived =>
+      _distanceMeters != null &&
+      _distanceMeters! <= siteVerificationDistanceThresholdMeters;
 
   @override
   void initState() {
@@ -580,64 +588,60 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.circle,
-                                  size: 10,
-                                  color: InsightTheme.red,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Target Site',
-                                  style: InsightTheme.inter(
-                                    12,
-                                    w: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
+                            const Icon(
+                              Icons.circle,
+                              size: 10,
+                              color: InsightTheme.red,
                             ),
-                            GestureDetector(
-                              onTap:
-                                  _deviceLatLng == null &&
-                                      !_retryingDeviceLocation
-                                  ? _retryDeviceLocation
-                                  : null,
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.circle,
-                                    size: 10,
-                                    color: InsightTheme.blue1,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  if (_retryingDeviceLocation)
-                                    const SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  else
-                                    Text(
-                                      _deviceLatLng == null
-                                          ? 'Location unavailable — tap to retry'
-                                          : _distanceMeters != null
-                                          ? 'You (${_distanceMeters!.round()}m)'
-                                          : 'You',
-                                      style: InsightTheme.inter(
-                                        12,
-                                        w: FontWeight.w600,
-                                        c: InsightTheme.ink2,
-                                      ),
-                                    ),
-                                ],
+                            const SizedBox(width: 6),
+                            Text(
+                              'Target Site',
+                              style: InsightTheme.inter(
+                                12,
+                                w: FontWeight.w600,
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap:
+                              _deviceLatLng == null && !_retryingDeviceLocation
+                              ? _retryDeviceLocation
+                              : null,
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.circle,
+                                size: 10,
+                                color: InsightTheme.blue1,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  _deviceLatLng == null
+                                      ? 'Location unavailable — tap to retry'
+                                      : _distanceMeters != null
+                                      ? 'You (${_distanceMeters!.round()}m)'
+                                      : 'You',
+                                  style: InsightTheme.inter(
+                                    12,
+                                    w: FontWeight.w600,
+                                    c: InsightTheme.ink2,
+                                  ),
+                                ),
+                              ),
+                              if (_retryingDeviceLocation)
+                                const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                         // Route Guidance (Phase 1): road-route distance and
                         // ETA from OSRM, shown alongside (not replacing) the
@@ -665,6 +669,52 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                                   ),
                                 ),
                               ],
+                            ),
+                          ),
+                        // Phase C: Arrival detection indicator.
+                        // Shows when the inspector is sufficiently close to the target site.
+                        if (_arrived)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: InsightTheme.greenTint,
+                                borderRadius: BorderRadius.circular(
+                                  InsightTheme.radiusSm,
+                                ),
+                                border: Border.all(
+                                  color: InsightTheme.green.withValues(
+                                    alpha: 0.25,
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: InsightTheme.green,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Arrived at Site — You are close enough to begin verification.',
+                                      style: InsightTheme.inter(
+                                        12,
+                                        w: FontWeight.w600,
+                                        c: InsightTheme.green,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         const SizedBox(height: 14),
