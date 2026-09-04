@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/models/user_profile.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
+import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -69,6 +70,10 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           _bioEnrolled = true;
           _requireOnOpen = true;
         });
+        await SupabaseService.logActivity(
+          eventType: 'security_updated',
+          title: 'Biometric login enabled',
+        );
         _showSnack('$_biometricLabel login enabled successfully');
       } else {
         _showSnack('Authentication failed. Biometric login not enabled.');
@@ -80,6 +85,10 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         _bioEnrolled = false;
         _requireOnOpen = false;
       });
+      await SupabaseService.logActivity(
+        eventType: 'security_updated',
+        title: 'Biometric login disabled',
+      );
       _showSnack('$_biometricLabel login disabled');
     }
   }
@@ -205,6 +214,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                       onChanged: (v) async {
                         await SecurePrefsService.setBioRequireOnOpen(v);
                         setState(() => _requireOnOpen = v);
+                        await SupabaseService.logActivity(
+                          eventType: 'security_updated',
+                          title: 'App opening protection updated',
+                          subtitle: v ? 'Biometric required on app opening' : 'Biometric not required on app opening',
+                        );
                       },
                       activeTrackColor: _Colors.blue1,
                       title: Text(
@@ -382,6 +396,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         if (val) {
           await SecurePrefsService.setBioAutoLockMins(mins);
           setState(() => _autoLockMins = mins);
+          await SupabaseService.logActivity(
+            eventType: 'security_updated',
+            title: 'Auto-lock period updated',
+            subtitle: label,
+          );
         }
       },
     );

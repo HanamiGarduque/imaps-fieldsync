@@ -298,6 +298,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     await _loadCacheStats();
     if (!mounted) return;
     setState(() => _clearingCache = false);
+    unawaited(SupabaseService.logActivity(
+      eventType: 'cache_cleared',
+      title: 'Photo cache cleared',
+      subtitle: 'Freed $cleared photo file(s)',
+    ));
     _showToast('Freed $cleared photo file(s).', color: InsightTheme.greenInk);
   }
 
@@ -321,6 +326,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
               : '$stillPending item(s) still waiting (check connection).',
       color: stillPending == 0 ? InsightTheme.greenInk : InsightTheme.amberInk,
     );
+    unawaited(SupabaseService.logActivity(
+      eventType: 'sync_manual',
+      title: 'Manual sync completed',
+      subtitle: stillPending == 0 ? 'All pending data synchronized' : '$stillPending item(s) still pending',
+    ));
   }
 
   /// Phase 8 (Selective Sync). Syncs only the pending actions belonging to
@@ -370,6 +380,12 @@ class _UpdatesScreenState extends State<UpdatesScreen>
       color = InsightTheme.amberInk;
     }
     _showToast(message, color: color);
+    unawaited(SupabaseService.logActivity(
+      eventType: 'sync_inspection',
+      title: 'Inspection sync completed',
+      subtitle: '$label: $message',
+      fieldJobId: jobId,
+    ));
   }
 
   /// Phase 8 (Selective Sync) + visual grouping fix (2026-07-23).

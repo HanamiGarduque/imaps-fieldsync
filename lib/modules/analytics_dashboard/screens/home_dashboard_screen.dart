@@ -237,7 +237,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       case 'rework_started':
         return {'icon': Icons.refresh_rounded, 'color': InsightTheme.orange};
       case 'photos_synced':
+      case 'sync_manual':
+      case 'sync_inspection':
+      case 'cache_cleared':
         return {'icon': Icons.cloud_done_rounded, 'color': InsightTheme.blue1};
+      case 'profile_updated':
+        return {'icon': Icons.person_rounded, 'color': InsightTheme.blue1};
+      case 'security_updated':
+        return {'icon': Icons.security_rounded, 'color': InsightTheme.amber};
+      case 'diagnostic_report_submitted':
+        return {'icon': Icons.flag_rounded, 'color': InsightTheme.orange};
       case 'gps_confirmed':
         return {'icon': Icons.gps_fixed_rounded, 'color': InsightTheme.blueInk};
       default:
@@ -258,8 +267,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       case 'gps_confirmed':
         return 'tasks';
       case 'photos_synced':
+      case 'sync_manual':
+      case 'sync_inspection':
+      case 'cache_cleared':
         return 'sync';
       case 'push_received':
+      case 'profile_updated':
+      case 'security_updated':
+      case 'diagnostic_report_submitted':
         return 'profile';
       default:
         // Unclassified/system events read as account-level notices.

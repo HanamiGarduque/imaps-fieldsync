@@ -45,12 +45,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   DateTime? _pausedAt;
   bool _lockShowing = false;
 
-  // ── Nav scroll-hide effect ─────────────────────────────────────────────
-  // Hide the full nav stack on downward scroll and reveal it again once
-  // the list settles; this keeps the quick actions button in sync with the
-  // nav bar instead of leaving it floating over the content.
-  bool _navHidden = false;
-
   // ── Quick Actions sheet ───────────────────────────────────────────────
   bool _quickActionsOpen = false;
   bool _profileAnalyticsRequested = false;
@@ -83,38 +77,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
-  }
-
-  bool _onScrollNotification(ScrollNotification notification) {
-    // Quick actions open → don't fight the sheet with nav movement.
-    if (_quickActionsOpen) return false;
-
-    if (notification.metrics.axis != Axis.vertical) return false;
-
-    if (notification is ScrollUpdateNotification) {
-      final delta = notification.scrollDelta ?? 0;
-      final pixels = notification.metrics.pixels;
-
-      // Keep the nav visible at the top edge, and otherwise hide it while
-      // the user is actively scrolling downward.
-      if (pixels <= 10) {
-        if (_navHidden) setState(() => _navHidden = false);
-        return false;
-      }
-
-      if (delta > 0 && !_navHidden) {
-        setState(() => _navHidden = true);
-      } else if (delta < 0 && _navHidden) {
-        setState(() => _navHidden = false);
-      }
-    } else if (notification is ScrollEndNotification) {
-      // Show the nav again once the user stops scrolling, even if the
-      // content is no longer at the top.
-      if (_navHidden && notification.metrics.pixels > 10) {
-        setState(() => _navHidden = false);
-      }
-    }
-    return false;
   }
 
   void _toggleQuickActions() {
@@ -330,9 +292,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                   child: child,
                 );
               },
-              child: NotificationListener<ScrollNotification>(
-                onNotification: _onScrollNotification,
-                child: Column(
+              child: Column(
                   children: [
                     // Phase 5: compact sync progress banner — shown on Home/Tasks/
                     // Profile tabs. Hidden on the Updates tab (index 2) since the
@@ -360,7 +320,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                       ),
                     ),
                   ],
-                ),
               ),
             ),
           ),
@@ -438,7 +397,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
           return InsightBottomNav(
             currentIndex: _currentIndex,
             items: items,
-            navHidden: _navHidden,
             isQuickActionsOpen: _quickActionsOpen,
             onQuickActionsTap: _toggleQuickActions,
             onTap: (i) {

@@ -110,6 +110,11 @@ class DiagnosticsService {
           })
           .select()
           .single();
+      await SupabaseService.logActivity(
+        eventType: 'diagnostic_report_submitted',
+        title: 'Diagnostic report submitted',
+        subtitle: title.trim(),
+      );
       return DiagnosticReport.fromMap(row);
     } catch (e) {
       debugPrint('[DIAGNOSTICS] submitReport error: $e');
