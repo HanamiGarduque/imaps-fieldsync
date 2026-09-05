@@ -1480,13 +1480,41 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Future<void> _showContextualInfo() async {
     final task = widget.task;
     final indicators = <MapEntry<String, String>>[];
+    final isCompleted = task.category == 'Completed';
+    final isScheduled = task.category == 'Scheduled' && task.isSelfScheduled;
+    final visitRowVisible = isScheduled && task.scheduledDate.isNotEmpty;
+    final deadlineRowVisible = !isCompleted && task.deadlineDate?.isNotEmpty == true;
 
-    if (task.category == 'Completed') {
+    DateTime? parseDay(String? value) {
+      if (value == null || value.isEmpty) return null;
+      try {
+        final date = DateTime.parse(value);
+        return DateTime(date.year, date.month, date.day);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final now = DateTime.now();
+    final todayDay = DateTime(now.year, now.month, now.day);
+    final visitDay = parseDay(task.scheduledDate);
+    final visitDiff = visitDay?.difference(todayDay).inDays;
+    final isOverdue = !isCompleted && task.scheduleUrgency == 'Overdue';
+    final scheduledVisitRed = isScheduled && task.isUrgentDeadline && !isOverdue;
+    final scheduledVisitOrange = isScheduled &&
+        !task.isUrgentDeadline &&
+        visitDiff != null &&
+        visitDiff >= 2 &&
+        visitDiff <= 3;
+    final isUrgent = !isCompleted &&
+        (task.scheduleUrgency == 'Due today' || task.isUrgentDeadline);
+
+    if (isCompleted) {
       indicators.add(const MapEntry('Completed', 'This inspection has been finished and submitted. No further action is normally required.'));
       if (task.reworkStartedAt != null) {
         indicators.add(const MapEntry('Modified', 'This completed inspection was changed after it was submitted. The Modified label lets you know that the original submitted information was edited.'));
       }
-    } else if (task.category == 'Scheduled') {
+    } else if (isScheduled) {
       indicators.add(const MapEntry('Scheduled', 'You have chosen a visit date for this task. The task stays Scheduled until the inspection is completed and submitted. You can reschedule the visit when needed, as long as the new date is still allowed by the deadline.'));
     } else if (task.category == 'Ongoing') {
       indicators.add(const MapEntry('Ongoing', 'This task is already being worked on, but no fixed visit date was set. You can continue the inspection without scheduling a visit.'));
@@ -1494,37 +1522,48 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       indicators.add(const MapEntry('Available Anytime', 'This task does not have a fixed visit date yet. You can inspect it anytime before the admin-set deadline. If you want a specific visit date, you can schedule one.'));
     }
 
-    final statusColor = task.category != 'Completed' && task.scheduleUrgency == 'Overdue'
-      ? InsightTheme.red
-      : _getStatusColor();
-    final borderName = statusColor == InsightTheme.red
-        ? 'Red'
-        : statusColor == InsightTheme.orange
-            ? 'Orange'
-            : statusColor == InsightTheme.green
-                ? 'Green'
-                : 'Blue';
-    const borderExplanations = {
-      'Blue': 'The visit date is not close yet, so no urgent action is needed.',
-      'Orange': 'Your visit date is coming up in 2–3 days. Make sure you are prepared to complete the inspection on time.',
-      'Red': 'Your visit date is today, tomorrow, or has already passed. Check the task and take action before the admin-set deadline.',
-    };
-    if (task.category == 'Scheduled' && task.scheduleUrgency != 'Overdue') {
-      indicators.add(MapEntry('Border: $borderName', borderExplanations[borderName]!));
-    }
-
-    if (task.category != 'Completed') {
-      if (task.scheduleUrgency == 'Due today') {
-        indicators.add(const MapEntry('Due Today', 'The scheduled visit date is today. This inspection should be handled today.'));
+    if (!isCompleted) {
+      if (visitRowVisible) {
+        indicators.add(const MapEntry('Visit', 'This task has a deliberate visit date selected for the inspection.'));
       }
-      if (task.forReschedule != null) {
+      if (deadlineRowVisible) {
+        indicators.add(const MapEntry('Deadline', 'This is the admin-set deadline for completing the inspection.'));
+      }
+      if (isOverdue) {
+        indicators.add(const MapEntry('Full red container', 'The admin-set deadline has passed, so the active task is fully highlighted red to show that it needs immediate attention.'));
+      } else if (scheduledVisitRed) {
+        indicators.add(const MapEntry('Red border', 'The scheduled visit date is today, tomorrow, or has already passed. Check the task and take action before the admin-set deadline.'));
+      } else if (scheduledVisitOrange) {
+        indicators.add(const MapEntry('Orange border', 'Your visit date is coming up in 2–3 days. Make sure you are prepared to complete the inspection on time.'));
+      } else {
+        indicators.add(const MapEntry('Blue border', 'The visit date is not close yet, or this task has no deliberate visit date, so no urgent action is needed.'));
+      }
+      if (task.scheduleUrgency == 'Due today') {
+        final dueTodayFromVisit = visitRowVisible && visitDay?.isAtSameMomentAs(todayDay) == true;
+        indicators.add(MapEntry(
+          'Due Today',
+          dueTodayFromVisit
+              ? 'The scheduled visit date is today. This inspection should be handled today.'
+              : 'The admin-set deadline is today. This inspection should be completed today.',
+        ));
+      }
+      if (isScheduled && task.forReschedule != null) {
         indicators.add(const MapEntry('For Reschedule', 'The scheduled visit date has already passed, but the admin-set deadline has not. Choose a new valid visit date as soon as possible.'));
       }
-      if (task.scheduleUrgency == 'Overdue') {
+      if (isOverdue) {
         indicators.add(const MapEntry('Overdue', 'The admin-set deadline has already passed. This task needs immediate attention.'));
       }
+      final deadlineLabel = _deadlineUrgencyLabel;
+      if (isUrgent && deadlineLabel != 'Overdue') {
+        indicators.add(MapEntry(
+          deadlineLabel,
+          deadlineLabel == 'Deadline today'
+              ? 'The admin-set deadline is today. Complete the inspection today if possible.'
+              : 'The admin-set deadline is tomorrow. Prepare to complete the inspection on time.',
+        ));
+      }
     }
-    if (task.category == 'Scheduled' && task.currentStep >= 1 && task.currentStep <= 5) {
+    if (isScheduled && task.currentStep >= 1 && task.currentStep <= 5) {
       indicators.add(const MapEntry('In Progress', 'You have already started this scheduled inspection. Continue working through the remaining steps until it is completed.'));
     }
 
@@ -1992,8 +2031,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           // category == 'Scheduled' alone hid the Visit
                           // date on In-Progress cards that still appear in
                           // the Scheduled section.
-                          if (widget.task.isScheduledPlan &&
-                              widget.task.category != 'Completed' &&
+                            if (widget.task.category == 'Scheduled' &&
+                              widget.task.isSelfScheduled &&
                               widget.task.scheduledDate.isNotEmpty) ...[
                             const SizedBox(height: 5),
                             Row(
