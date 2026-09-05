@@ -67,21 +67,27 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined, color: InsightTheme.blueInk),
-              title: Text('Take a photo', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink)),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera);
-              },
+            Material(
+              color: Colors.transparent,
+              child: ListTile(
+                leading: const Icon(Icons.photo_camera_outlined, color: InsightTheme.blueInk),
+                title: Text('Take a photo', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: InsightTheme.blueInk),
-              title: Text('Choose from gallery', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink)),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.gallery);
-              },
+            Material(
+              color: Colors.transparent,
+              child: ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: InsightTheme.blueInk),
+                title: Text('Choose from gallery', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
             ),
           ],
         ),

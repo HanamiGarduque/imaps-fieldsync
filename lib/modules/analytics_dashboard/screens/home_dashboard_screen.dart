@@ -502,7 +502,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final greeting = _greeting(_now);
     final taskDays = _taskDaysInMonth(_calendarMonth);
     final tasksByDay = _tasksByDayInMonth(_calendarMonth);
-    final selectedDayTasks = tasksByDay[_selectedDay] ?? const <TaskItem>[];
     final daysInMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1, 0).day;
     const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
