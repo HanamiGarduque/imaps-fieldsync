@@ -163,8 +163,8 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
                       ),
                       onPressed: _checking ? null : _signOutInstead,
                       child: Text(
-                        'Sign Out Instead',
-                        style: InsightTheme.inter(14, w: FontWeight.w500, c: InsightTheme.ink3),
+                        'Log Out',
+                        style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.red),
                       ),
                     ),
                   ],

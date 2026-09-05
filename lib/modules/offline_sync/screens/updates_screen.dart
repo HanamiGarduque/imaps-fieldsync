@@ -96,7 +96,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
           color: InsightTheme.blue1,
           shape: BoxShape.circle,
         ),
-        child: const Text('!', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+        child: const Icon(Icons.info_outline_rounded, size: 15, color: Colors.white),
       ),
     );
   }
@@ -886,7 +886,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
               ),
               _sectionHelpButton(
                 title: 'Sync Performance',
-                message: 'This section summarizes how much inspection data has been synchronized and what is still waiting to be uploaded.\n\nSynced Items means data successfully synchronized with the server. Pending Queue means data waiting to be synchronized. Pending Size is the total size of pending data. Queue Record Distribution shows how pending and synchronized records are distributed by data type, such as inspection data, photos, checklists, and GPS coordinates.',
+                message: 'This shows whether your inspection updates are being sent successfully. Information completed while offline may wait here until an internet connection is available. Once you are back online, the app can send the waiting information to the system.',
               ),
             ],
           ),
@@ -1042,7 +1042,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                         const SizedBox(width: 8),
                                         _sectionHelpButton(
                                           title: 'Sync Center',
-                                          message: 'This page shows the current synchronization status of your inspection data, pending uploads, local storage, and recent sync activity.\n\nOnline means the app can communicate with the server. Last sync shows when the latest successful synchronization happened. Use All Synced to manually synchronize pending data.',
+                                          message: 'The Sync Center helps you manage your inspection information when working with or without an internet connection. When you are offline, the app keeps the information you need on your phone so you can continue working. When your internet connection returns, the app sends the information that is waiting to the system and updates the sync status.\n\nOffline to Online: If you complete or update an inspection while offline, the information stays safely on your phone while it is waiting to be sent. Once you are back online, the app can send the waiting information to the system. The Sync Center lets you check whether those updates have already been sent or are still waiting.',
                                         ),
                                       ],
                                     ),
@@ -1246,7 +1246,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   ),
                                   _sectionHelpButton(
                                     title: 'Synchronization Audit History',
-                                    message: 'View previous synchronization activities performed by the app, including the type of data synchronized, the related record, and whether the operation succeeded or failed.',
+                                    message: 'This keeps a record of attempts to send your inspection information to the system. It helps you check when information was sent and whether the update was successful.',
                                   ),
                                   const SizedBox(width: 8),
                                   const Icon(Icons.chevron_right_rounded, size: 18, color: InsightTheme.ink3),
@@ -1287,7 +1287,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     ),
                                     _sectionHelpButton(
                                       title: 'Offline Storage Cache',
-                                      message: 'This shows data currently stored on the device for offline use. Cached jobs allow inspection work to remain available without an active connection.\n\nCached Jobs are inspections currently stored locally. Unsynced Files are locally stored files that have not yet been uploaded. Reclaimable is storage space that can potentially be freed by clearing eligible cached files. SQLite Active indicates that the local database used for offline storage is available. Photo Cache Clear removes locally cached photos to free device storage. It does not remove photos that have already been successfully synchronized to the server.',
+                                      message: 'This shows the inspection information currently saved on your phone for offline work. This allows you to continue accessing and working on available tasks even without an internet connection.',
                                     ),
                                     const SizedBox(width: 10),
                                     Text(
@@ -1432,7 +1432,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   const Spacer(),
                                   _sectionHelpButton(
                                     title: 'Completed Audit Log',
-                                    message: 'This section shows recent synchronization activities that have completed successfully. Each entry identifies the synchronization action, the related inspection or record, and when the operation was completed.',
+                                    message: 'This shows inspection updates that have already been successfully sent to the system. It helps you confirm that your completed work has been received.',
                                   ),
                                 ],
                               ),

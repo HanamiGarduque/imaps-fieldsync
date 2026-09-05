@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/models/user_profile.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../auth_startup/services/secure_prefs_service.dart';
 
 import '../../../core/theme/insight_theme.dart';
 
@@ -111,9 +113,17 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _currentAvatarUrl = uploadedUrl;
         _isUploadingAvatar = false;
       });
+      unawaited(SupabaseService.logActivity(
+        eventType: 'profile_updated',
+        title: 'Profile photo updated',
+      ));
     } else {
       setState(() => _isUploadingAvatar = false);
       if (mounted) {
+        unawaited(SupabaseService.logActivity(
+          eventType: 'profile_updated',
+          title: 'Profile information updated',
+        ));
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to upload photo. Please try again.')),
         );
@@ -126,20 +136,27 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   /// any network call and the user sees why nothing was saved.
   String? _validate() {
     final name = _nameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
 
     if (name.isEmpty) return 'Full name cannot be empty.';
     if (name.length < 2) return 'Full name looks too short.';
+    if (name.length > 64) return 'Full name must be 64 characters or fewer.';
     if (!RegExp(r"^[a-zA-Z\u00C0-\u017F.'\- ]+$").hasMatch(name)) {
       return 'Full name should only contain letters, spaces, and . - characters.';
     }
 
-    // Phone is optional, but if the inspector typed something, it should
-    // look like a real PH mobile/landline number (digits, +, -, spaces only,
-    // 7-13 digits) rather than silently saving garbage to the profile row.
+    if (email.isEmpty || !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]{2,}$').hasMatch(email)) {
+      return 'Enter a valid email address (e.g. inspector@example.com).';
+    }
+
+    // Phone is optional. Local Philippine numbers use 11 digits beginning
+    // with 09; international format uses +63 followed by 10 digits.
     if (phone.isNotEmpty) {
-      final digitsOnly = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      if (!RegExp(r'^[0-9+\-\s]+$').hasMatch(phone) || digitsOnly.length < 7 || digitsOnly.length > 13) {
+      final normalizedPhone = phone.replaceAll(RegExp(r'[\s-]'), '');
+      final isLocalPh = RegExp(r'^09\d{9}$').hasMatch(normalizedPhone);
+      final isInternationalPh = RegExp(r'^\+639\d{9}$').hasMatch(normalizedPhone);
+      if (!isLocalPh && !isInternationalPh) {
         return 'Enter a valid phone number (e.g. 09171234567).';
       }
     }
@@ -178,6 +195,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         phoneNumber: updatedPhone,
         avatarUrl: _currentAvatarUrl,
       );
+      await SecurePrefsService.setCachedProfile(updatedProfile);
+      unawaited(SupabaseService.logActivity(
+        eventType: 'profile_updated',
+        title: 'Profile information updated',
+        subtitle: 'Name and phone number updated',
+      ));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -322,9 +345,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           ),
                         ),
                       ),
-                      _ProfileField(label: 'FULL NAME', controller: _nameCtrl),
-                      _ProfileField(label: 'EMAIL', controller: _emailCtrl, isEnabled: false),
-                      _ProfileField(label: 'PHONE NUMBER', controller: _phoneCtrl),
+                      _ProfileField(label: 'FULL NAME', controller: _nameCtrl, maxLength: 64),
+                      _ProfileField(label: 'EMAIL', controller: _emailCtrl, isEnabled: false, maxLength: 254),
+                      _ProfileField(label: 'PHONE NUMBER', controller: _phoneCtrl, maxLength: 16),
                     ],
                   ),
                 ),
@@ -382,8 +405,9 @@ class _ProfileField extends StatelessWidget {
   final String label;
   final TextEditingController controller;
   final bool isEnabled;
+  final int? maxLength;
 
-  const _ProfileField({required this.label, required this.controller, this.isEnabled = true});
+  const _ProfileField({required this.label, required this.controller, this.isEnabled = true, this.maxLength});
 
   @override
   Widget build(BuildContext context) {
@@ -397,6 +421,8 @@ class _ProfileField extends StatelessWidget {
           TextField(
             controller: controller,
             enabled: isEnabled,
+            maxLength: maxLength,
+            buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
             style: InsightTheme.inter(13.5, w: FontWeight.w500, c: isEnabled ? InsightTheme.ink : InsightTheme.ink3),
             decoration: InputDecoration(
               filled: true,

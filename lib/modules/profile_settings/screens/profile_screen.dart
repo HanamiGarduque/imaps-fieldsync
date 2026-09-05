@@ -26,12 +26,14 @@ class ProfileScreen extends StatefulWidget {
   final UserProfile profile;
   final bool initialAnalyticsOpen;
   final VoidCallback? onAnalyticsHandled;
+  final ValueChanged<UserProfile>? onProfileUpdated;
 
   const ProfileScreen({
     super.key,
     required this.profile,
     this.initialAnalyticsOpen = false,
     this.onAnalyticsHandled,
+    this.onProfileUpdated,
   });
 
   @override
@@ -99,7 +101,9 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
   Future<void> _refreshProfileFromServer() async {
     final fresh = await SupabaseService.fetchMyProfile();
     if (fresh != null && mounted) {
-      setState(() => _currentProfile = UserProfile.fromMap(fresh));
+      final refreshedProfile = UserProfile.fromMap(fresh);
+      setState(() => _currentProfile = refreshedProfile);
+      widget.onProfileUpdated?.call(refreshedProfile);
     }
   }
 
@@ -141,6 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
       setState(() {
         _currentProfile = result;
       });
+      widget.onProfileUpdated?.call(result);
     }
   }
 
@@ -492,7 +497,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                               _actionGroupCard([
                                 _ActionTile(
                                   icon: Icons.logout_rounded,
-                                  title: 'Sign out',
+                                  title: 'Log Out',
                                   isDestructive: true,
                                   onTap: () => _confirmSignOut(context),
                                 ),
