@@ -29,6 +29,45 @@ class SecurePrefsService {
   static const _kBioAutoLockMins   = 'sp_bio_auto_lock_mins'; // '0','1','5','10','-1'=immediately
   static const _kSoftLoggedOut     = 'sp_soft_logged_out';
   static const _kLocalDataOwnerId  = 'sp_local_data_owner_id';
+  static const _kLocalPasscodeSalt = 'sp_local_passcode_salt';
+  static const _kLocalPasscodeHash = 'sp_local_passcode_hash';
+  static const _kLocalPasscodeFailCount = 'sp_local_passcode_fail_count';
+  static const _kLocalPasscodeCooldownUntil = 'sp_local_passcode_cooldown_until';
+
+  static Future<String?> getLocalPasscodeSalt() =>
+      _storage.read(key: _kLocalPasscodeSalt);
+
+  static Future<void> setLocalPasscodeSalt(String salt) =>
+      _storage.write(key: _kLocalPasscodeSalt, value: salt);
+
+  static Future<String?> getLocalPasscodeHash() =>
+      _storage.read(key: _kLocalPasscodeHash);
+
+  static Future<void> setLocalPasscodeHash(String hash) =>
+      _storage.write(key: _kLocalPasscodeHash, value: hash);
+
+  static Future<int> getLocalPasscodeFailCount() async =>
+      int.tryParse(await _storage.read(key: _kLocalPasscodeFailCount) ?? '0') ?? 0;
+
+  static Future<void> incrementLocalPasscodeFailCount() async {
+    final count = await getLocalPasscodeFailCount();
+    await _storage.write(key: _kLocalPasscodeFailCount, value: (count + 1).toString());
+  }
+
+  static Future<void> clearLocalPasscodeFailCount() =>
+      _storage.delete(key: _kLocalPasscodeFailCount);
+
+  static Future<DateTime?> getLocalPasscodeCooldownUntil() async {
+    final raw = await _storage.read(key: _kLocalPasscodeCooldownUntil);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  static Future<void> setLocalPasscodeCooldownUntil(DateTime until) =>
+      _storage.write(key: _kLocalPasscodeCooldownUntil, value: until.toIso8601String());
+
+  static Future<void> clearLocalPasscodeCooldownUntil() =>
+      _storage.delete(key: _kLocalPasscodeCooldownUntil);
+
 
   // ── Saved Email & Encrypted Biometric Secret ────────────────────────────
 
@@ -213,6 +252,10 @@ class SecurePrefsService {
   static Future<void> clearAuthPrefs() async {
     await _storage.delete(key: _kSavedEmail);
     await _storage.delete(key: _kCachedProfile);
+    await _storage.delete(key: _kLocalPasscodeSalt);
+    await _storage.delete(key: _kLocalPasscodeHash);
+    await _storage.delete(key: _kLocalPasscodeFailCount);
+    await _storage.delete(key: _kLocalPasscodeCooldownUntil);
   }
 
   /// Call when biometric is disabled or the device changes.

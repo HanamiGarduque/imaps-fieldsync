@@ -20,6 +20,7 @@ import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
 import '../inspection_constants.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/theme/insight_theme.dart';
 
 class GpsVerificationScreen extends StatefulWidget {
@@ -1294,7 +1295,7 @@ class _LoadingState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      const CircularProgressIndicator(color: InsightTheme.blue1),
+      const ImapsLoadingIndicator(size: 50),
       const SizedBox(height: 16),
       Text('Acquiring satellite lock...', style: InsightTheme.inter(13, c: InsightTheme.ink2)),
     ]);

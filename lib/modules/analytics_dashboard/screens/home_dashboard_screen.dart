@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../../core/models/user_profile.dart';
+import '../../../core/services/auth_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
 import '../../tasks/screens/tasks_screen.dart';
@@ -85,11 +86,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     super.initState();
     _pageController = PageController(viewportFraction: 0.88);
     
+    _checkInitialConnectivity();
+
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
       if (mounted) {
-        setState(() {
-          _isOnline = !results.contains(ConnectivityResult.none);
-        });
+        final online = results.any((r) => r != ConnectivityResult.none);
+        if (_isOnline != online) {
+          setState(() {
+            _isOnline = online;
+          });
+        }
       }
     });
 
@@ -99,6 +105,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
     _loadUpcomingTasks();
     _loadRecentActivity();
+  }
+
+  Future<void> _checkInitialConnectivity() async {
+    final online = await AuthService.hasConnectivity();
+    if (mounted && _isOnline != online) {
+      setState(() => _isOnline = online);
+    }
   }
 
   // Centers the selected day chip in the horizontal strip. Called after
@@ -560,23 +573,29 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               }
                             },
                             child: Container(
-                              width: 44, height: 44,
+                              width: 44,
+                              height: 44,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: InsightTheme.blue1,
                                 border: Border.all(color: InsightTheme.surface, width: 2),
                                 boxShadow: kCardShadow,
-                                image: widget.profile.avatarUrl != null && widget.profile.avatarUrl!.isNotEmpty
-                                    ? DecorationImage(
-                                        image: NetworkImage(widget.profile.avatarUrl!),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : null,
                               ),
-                              alignment: Alignment.center,
-                              child: widget.profile.avatarUrl == null || widget.profile.avatarUrl!.isEmpty
-                                  ? Text(initials, style: InsightTheme.urbanist(13, w: FontWeight.w700, c: Colors.white))
-                                  : null,
+                              child: ClipOval(
+                                child: widget.profile.avatarUrl != null && widget.profile.avatarUrl!.isNotEmpty
+                                    ? Image.network(
+                                        widget.profile.avatarUrl!,
+                                        width: 44,
+                                        height: 44,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) => Center(
+                                          child: Text(initials, style: InsightTheme.urbanist(13, w: FontWeight.w700, c: Colors.white)),
+                                        ),
+                                      )
+                                    : Center(
+                                        child: Text(initials, style: InsightTheme.urbanist(13, w: FontWeight.w700, c: Colors.white)),
+                                      ),
+                              ),
                             ),
                           ),
                           const Spacer(),

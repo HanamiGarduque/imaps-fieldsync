@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:crypto/crypto.dart';
 
 import '../../../core/services/auth_service.dart';
 import '../../profile_settings/services/notification_service.dart';
@@ -248,15 +251,141 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
+  String? _emailError;
+  String? _passcodeError;
 
   bool _biometricEnrolled = false;
   bool _bioConfirmed = false;
   String _biometricLabel = 'Biometric';
 
+  // ── Offline login state ────────────────────────────────────────────────────
+  bool _isOnline = true;
+
+  // ── Local passcode verifier constants ──────────────────────────────────────
+  static const int _passcodeIterations = 10000;
+  static const int _saltLength = 16;
+
+  /// Generates a fresh random salt and derives a verifier from the given
+  /// passcode. Returns (base64Salt, base64Hash). The raw passcode is never
+  /// stored.
+  static (String salt, String hash) _deriveVerifier(String passcode) {
+    final salt = List<int>.generate(_saltLength, (_) => Random.secure().nextInt(256));
+    final key = utf8.encode(passcode) + salt;
+    var digest = Hmac(sha256, key).convert([0x00]).bytes;
+    for (var i = 1; i < _passcodeIterations; i++) {
+      digest = Hmac(sha256, key).convert(digest).bytes;
+    }
+    return (base64.encode(salt), base64.encode(digest));
+  }
+
+  /// Derives a verifier from the entered passcode + stored salt and compares
+  /// it against the stored hash using constant-time comparison.
+  static Future<bool> _verifyPasscode({
+    required String passcode,
+    required String storedSaltBase64,
+    required String storedHashBase64,
+  }) async {
+    final salt = base64.decode(storedSaltBase64);
+    final key = utf8.encode(passcode) + salt;
+    var digest = Hmac(sha256, key).convert([0x00]).bytes;
+    for (var i = 1; i < _passcodeIterations; i++) {
+      digest = Hmac(sha256, key).convert(digest).bytes;
+    }
+    final derivedHash = base64.encode(digest);
+    // Constant-time comparison
+    if (derivedHash.length != storedHashBase64.length) return false;
+    var result = 0;
+    for (var i = 0; i < derivedHash.length; i++) {
+      result |= derivedHash.codeUnitAt(i) ^ storedHashBase64.codeUnitAt(i);
+    }
+    return result == 0;
+  }
+
+  /// Cooldown thresholds: maps cumulative fail count → cooldown duration.
+  static Duration _cooldownForAttempt(int failCount) {
+    if (failCount >= 8) return const Duration(minutes: 5);
+    if (failCount >= 5) return const Duration(minutes: 2);
+    if (failCount >= 3) return const Duration(seconds: 30);
+    return Duration.zero;
+  }
+
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
+  Timer? _cooldownTimer;
+  int _cooldownSecondsRemaining = 0;
+
   @override
   void initState() {
     super.initState();
     _loadSavedEmailAndBio();
+    _startConnectivityListener();
+  }
+
+  void _startConnectivityListener() {
+    _connSub = Connectivity().onConnectivityChanged.listen((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+      if (mounted && online != _isOnline) {
+        setState(() => _isOnline = online);
+      }
+    });
+  }
+
+  void _startCooldownTimer(DateTime cooldownUntil) {
+    _cooldownTimer?.cancel();
+    final remaining = cooldownUntil.difference(DateTime.now()).inSeconds;
+    if (remaining <= 0) {
+      SecurePrefsService.clearLocalPasscodeCooldownUntil();
+      if (mounted) {
+        setState(() {
+          _cooldownSecondsRemaining = 0;
+          _errorMessage = null;
+        });
+      }
+      return;
+    }
+
+    setState(() {
+      _isLoading = false;
+      _cooldownSecondsRemaining = remaining;
+      _updateCooldownErrorMessage();
+    });
+
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final rem = cooldownUntil.difference(DateTime.now()).inSeconds;
+      if (rem <= 0) {
+        timer.cancel();
+        _cooldownTimer = null;
+        SecurePrefsService.clearLocalPasscodeCooldownUntil();
+        if (mounted) {
+          setState(() {
+            _cooldownSecondsRemaining = 0;
+            _errorMessage = null;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _cooldownSecondsRemaining = rem;
+            _updateCooldownErrorMessage();
+          });
+        }
+      }
+    });
+  }
+
+  void _updateCooldownErrorMessage() {
+    final m = _cooldownSecondsRemaining ~/ 60;
+    final s = _cooldownSecondsRemaining % 60;
+    _errorMessage = 'Too many failed attempts. '
+        'Try again in ${m > 0 ? '$m min ' : ''}${s}s.';
+  }
+
+  @override
+  void dispose() {
+    _cooldownTimer?.cancel();
+    _connSub?.cancel();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSavedEmailAndBio() async {
@@ -264,6 +393,8 @@ class _LoginScreenState extends State<LoginScreen> {
     final bioEnrolled = await BiometricService.isEnrolled();
     final bioConfirmed = await BiometricService.isConfirmed();
     final bioLabel = await BiometricService.primaryBiometricLabel();
+    final online = await AuthService.hasConnectivity();
+    final cooldownUntil = await SecurePrefsService.getLocalPasscodeCooldownUntil();
 
     if (mounted) {
       setState(() {
@@ -273,7 +404,12 @@ class _LoginScreenState extends State<LoginScreen> {
         _biometricEnrolled = bioEnrolled;
         _bioConfirmed = bioConfirmed;
         _biometricLabel = bioLabel;
+        _isOnline = online;
       });
+
+      if (cooldownUntil != null && cooldownUntil.isAfter(DateTime.now())) {
+        _startCooldownTimer(cooldownUntil);
+      }
     }
   }
 
@@ -388,10 +524,52 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// Validates email and passcode client-side for UX and input hygiene.
+  /// Returns true if valid, false otherwise (updating inline error messages).
+  bool _validateInputs() {
+    final rawEmail = _emailController.text;
+    final email = rawEmail.trim();
+    final passcode = _passwordController.text;
+
+    String? emailErr;
+    String? passcodeErr;
+
+    // Email validation
+    if (email.isEmpty) {
+      emailErr = 'Enter your email address.';
+    } else if (rawEmail.length > 254 || email.length > 254) {
+      emailErr = 'Email address is too long (maximum 254 characters).';
+    } else if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]{2,}$').hasMatch(email)) {
+      emailErr = 'Enter a valid email address.';
+    }
+
+    // Passcode validation (policy: required, reasonable max length)
+    if (passcode.isEmpty) {
+      passcodeErr = 'Enter your passcode.';
+    } else if (passcode.length > 256) {
+      passcodeErr = 'Passcode is too long (maximum 256 characters).';
+    }
+
+    setState(() {
+      _emailError = emailErr;
+      _passcodeError = passcodeErr;
+    });
+
+    return emailErr == null && passcodeErr == null;
+  }
+
   Future<void> _handleLogin() async {
+    // Clear top banner error
+    setState(() {
+      _errorMessage = null;
+    });
+
+    if (!_validateInputs()) {
+      return;
+    }
+
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
     });
 
     // Navigator.pushReplacement() doesn't block until the transition
@@ -408,6 +586,15 @@ class _LoginScreenState extends State<LoginScreen> {
     var navigatedAway = false;
 
     try {
+      // ── Offline Email + Passcode Login ────────────────────────────────
+      // When there's no connectivity, the passcode is verified against the
+      // locally-stored salted HMAC-SHA256 verifier instead of reaching
+      // Supabase. This is the only path that skips signInWithPassword().
+      if (!await AuthService.hasConnectivity()) {
+        navigatedAway = await _handleOfflineLogin();
+        return;
+      }
+
       await AuthService.signIn(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -454,6 +641,15 @@ class _LoginScreenState extends State<LoginScreen> {
             .catchError((e) => debugPrint('[LOGIN] login_success log error: $e'));
 
         await SecurePrefsService.setSavedEmail(_emailController.text.trim());
+
+        // Offline Email + Passcode Login — enrollment/refresh of the local
+        // salted HMAC-SHA256 verifier. Runs on EVERY successful online
+        // password login, so the stored verifier always reflects the current
+        // real passcode. The raw passcode is never persisted — only a fresh
+        // 16-byte salt and the derived hash.
+        final (salt, hash) = _deriveVerifier(_passwordController.text);
+        await SecurePrefsService.setLocalPasscodeSalt(salt);
+        await SecurePrefsService.setLocalPasscodeHash(hash);
 
         // New request: a freshly-enrolled biometric isn't trusted for
         // sign-in yet — this real credentials login is exactly the "one
@@ -513,8 +709,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
         setState(() {
           _errorMessage = (!hasConnection || looksLikeNetworkError)
-              ? 'No internet connection. Password sign-in needs connectivity — '
-                'try biometric or pattern unlock if you\'ve set one up, or '
+              ? 'No internet connection. Password sign-in needs connectivity. '
+                'Try biometric or pattern unlock if you\'ve set one up, or '
                 'reconnect and try again.'
               : 'Invalid ID or passcode. Please try again.';
         });
@@ -523,6 +719,142 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted && !navigatedAway) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  /// ── Offline Email + Passcode Login ────────────────────────────────────
+  /// Verifies the entered passcode against the locally-stored salted
+  /// HMAC-SHA256 verifier when there is no connectivity. Modeled on the
+  /// existing `_handleBiometricLogin()` session-restoration structure.
+  ///
+  /// Safety rules:
+  /// - NEVER calls `signInWithPassword()` / `AuthService.signIn()`.
+  /// - NEVER deletes the verifier, salt, or cached data.
+  /// - NEVER force-signs-out the user.
+  /// - NEVER creates a hard lockout.
+  ///
+  /// Returns true when the login succeeded and the screen was replaced by
+  /// MainShellScreen (caller should treat it like a successful online login).
+  Future<bool> _handleOfflineLogin() async {
+    // ── 1. Cooldown gate ─────────────────────────────────────────────
+    final cooldownUntil =
+        await SecurePrefsService.getLocalPasscodeCooldownUntil();
+    if (cooldownUntil != null) {
+      final remaining = cooldownUntil.difference(DateTime.now());
+      if (remaining > Duration.zero) {
+        _startCooldownTimer(cooldownUntil);
+        return false;
+      }
+      // Cooldown expired — clear it so the attempt proceeds.
+      await SecurePrefsService.clearLocalPasscodeCooldownUntil();
+    }
+
+    // ── 2. Precondition: live underlying session ──────────────────────
+    if (!AuthService.hasLiveUnderlyingSession) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'No internet connection. '
+              'Offline sign-in requires a previous login on this device.';
+        });
+      }
+      return false;
+    }
+
+    // ── 3. Precondition: local verifier must exist ────────────────────
+    final storedSalt = await SecurePrefsService.getLocalPasscodeSalt();
+    final storedHash = await SecurePrefsService.getLocalPasscodeHash();
+    if (storedSalt == null || storedHash == null) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'No internet connection. '
+              'Offline sign-in requires a previous login on this device.';
+        });
+      }
+      return false;
+    }
+
+    // ── 4. Verify entered passcode against stored verifier ────────────
+    final passcodeMatches = await _verifyPasscode(
+      passcode: _passwordController.text,
+      storedSaltBase64: storedSalt,
+      storedHashBase64: storedHash,
+    );
+
+    if (!passcodeMatches) {
+      // ── 4a. Failed attempt: persist count + cooldown ────────────────
+      await SecurePrefsService.incrementLocalPasscodeFailCount();
+      final failCount = await SecurePrefsService.getLocalPasscodeFailCount();
+      final cooldown = _cooldownForAttempt(failCount);
+      if (cooldown > Duration.zero) {
+        final until = DateTime.now().add(cooldown);
+        await SecurePrefsService.setLocalPasscodeCooldownUntil(until);
+        _startCooldownTimer(until);
+      } else {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'Incorrect passcode. Please try again.';
+          });
+        }
+      }
+      return false;
+    }
+
+    // ── 5. Success: reset cooldown state ──────────────────────────────
+    _cooldownTimer?.cancel();
+    _cooldownTimer = null;
+    _cooldownSecondsRemaining = 0;
+    await SecurePrefsService.clearLocalPasscodeFailCount();
+    await SecurePrefsService.clearLocalPasscodeCooldownUntil();
+
+    // ── 6. Clear soft-logout (same as biometric path) ────────────────
+    await AuthService.clearSoftLogout();
+
+    // ── 7. Handle expired local session (same as biometric) ──────────
+    if (AuthService.isLocalSessionExpired) {
+      final refreshed = await AuthService.tryRefreshSession();
+      if (!refreshed) {
+        if (await AuthService.hasConnectivity()) {
+          await AuthService.signOut(revokeEverywhere: true);
+          await BiometricService.clearEnrollment();
+          await SecurePrefsService.clearAll();
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _errorMessage = 'Session unrecoverable. Please sign in with password.';
+            });
+          }
+          return false;
+        }
+        debugPrint('[OFFLINE LOGIN] Refresh failed offline — '
+            'proceeding with cached session/profile.');
+      }
+    }
+
+    // ── 8. Load cached/offline-aware profile ──────────────────────────
+    final profile = await AuthService.getCurrentProfileOfflineAware();
+    if (!mounted) return false;
+
+    if (profile != null) {
+      // Fire-and-forget device registration (non-fatal, may fail offline).
+      NotificationService.registerCurrentDevice().catchError(
+        (e) => debugPrint('[OFFLINE LOGIN] registerCurrentDevice failed (non-fatal): $e'),
+      );
+      if (!mounted) return false;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => MainShellScreen(profile: profile, offlineSession: true),
+        ),
+      );
+      return true;
+    } else {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Login succeeded, but profile was not found.';
+      });
+      return false;
     }
   }
 
@@ -621,14 +953,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         border: Border.all(color: AppColors.blue1.withValues(alpha: 0.15)),
                       ),
                       child: Text(
-                        'ZONING & LAND USE VERIFICATION',
+                        'VERIFICATION',
                         style: AppText.inter(12, ls: 0.5, w: FontWeight.w700, c: AppColors.blue2),
                       ),
                     ),
                   ],
                 ),
                 
-                const SizedBox(height: 32),
+                const SizedBox(height: 20),
                 
                 Row(
                   children: [
@@ -641,11 +973,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text('LOG IN TO CONTINUE', style: AppText.inter(12.5, w: FontWeight.w700, ls: 0.8, c: AppColors.ink2)),
+                    Text('LOG IN', style: AppText.inter(12.5, w: FontWeight.w700, ls: 0.8, c: AppColors.ink2)),
                   ],
                 ),
                 const SizedBox(height: 12),
-                
+
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
@@ -660,13 +992,80 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildFieldLabel('EMAIL'),
+                      // ── EMAIL Label + Connectivity Badge (Upper Right) ──────
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          _buildFieldLabel('EMAIL'),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: _isOnline ? InsightTheme.greenTint : InsightTheme.redTint,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _isOnline
+                                    ? InsightTheme.green.withValues(alpha: 0.25)
+                                    : InsightTheme.red.withValues(alpha: 0.25),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: _isOnline ? InsightTheme.green : InsightTheme.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _isOnline ? 'Online' : 'Offline',
+                                  style: AppText.inter(
+                                    11.5,
+                                    w: FontWeight.w600,
+                                    c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (!_isOnline) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: InsightTheme.redTint,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: InsightTheme.red.withValues(alpha: 0.18)),
+                          ),
+                          child: Text(
+                            'Offline. You can still sign in if you\'ve logged in before on this device.',
+                            style: AppText.inter(11.5, w: FontWeight.w500, c: InsightTheme.redInk, lh: 1.35),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 6),
                       _buildTextField(
                         controller: _emailController,
                         hintText: 'inspector@test.com',
                         icon: Icons.badge_outlined,
                         obscureText: false,
+                        keyboardType: TextInputType.emailAddress,
+                        textCapitalization: TextCapitalization.none,
+                        autocorrect: false,
+                        maxLength: 254,
+                        errorText: _emailError,
+                        onChanged: (_) {
+                          if (_emailError != null) {
+                            setState(() => _emailError = null);
+                          }
+                        },
                       ),
                       
                       const SizedBox(height: 16),
@@ -679,6 +1078,16 @@ class _LoginScreenState extends State<LoginScreen> {
                         icon: Icons.lock_outline,
                         obscureText: _obscurePassword,
                         isPassword: true,
+                        keyboardType: TextInputType.visiblePassword,
+                        textCapitalization: TextCapitalization.none,
+                        autocorrect: false,
+                        maxLength: 256,
+                        errorText: _passcodeError,
+                        onChanged: (_) {
+                          if (_passcodeError != null) {
+                            setState(() => _passcodeError = null);
+                          }
+                        },
                       ),
 
                       // Offer biometric whenever it's enrolled + confirmed
@@ -787,10 +1196,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       shadowColor: Colors.transparent,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
-                    onPressed: _isLoading ? null : _handleLogin,
+                    onPressed: (_isLoading || _cooldownSecondsRemaining > 0) ? null : _handleLogin,
                     child: _isLoading 
                         ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
-                        : Text('Sign in', style: AppText.inter(15, w: FontWeight.w700, c: Colors.white)),
+                        : Text(
+                            _cooldownSecondsRemaining > 0
+                                ? 'Try again in ${_cooldownSecondsRemaining}s'
+                                : 'Sign in',
+                            style: AppText.inter(15, w: FontWeight.w700, c: Colors.white),
+                          ),
                   ),
                 ),
               ],
@@ -811,11 +1225,22 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData icon,
     required bool obscureText,
     bool isPassword = false,
+    TextInputType? keyboardType,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    bool autocorrect = true,
+    int? maxLength,
+    String? errorText,
+    ValueChanged<String>? onChanged,
   }) {
     return TextFormField(
       controller: controller,
       obscureText: obscureText,
       obscuringCharacter: '•',
+      keyboardType: keyboardType,
+      textCapitalization: textCapitalization,
+      autocorrect: autocorrect,
+      maxLength: maxLength,
+      onChanged: onChanged,
       style: AppText.inter(14, w: FontWeight.w600, c: AppColors.ink),
       cursorColor: AppColors.blue1,
       decoration: InputDecoration(
@@ -825,6 +1250,10 @@ class _LoginScreenState extends State<LoginScreen> {
         fillColor: AppColors.bg.withValues(alpha: 0.6),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         prefixIcon: Icon(icon, color: AppColors.ink3, size: 20),
+        counterText: '',
+        errorText: errorText,
+        errorStyle: AppText.inter(12, w: FontWeight.w500, c: InsightTheme.redInk),
+        errorMaxLines: 2,
         suffixIcon: isPassword
             ? IconButton(
                 icon: Icon(
@@ -846,6 +1275,14 @@ class _LoginScreenState extends State<LoginScreen> {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.blue1, width: 1.2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: InsightTheme.red, width: 1.2),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: InsightTheme.red, width: 1.4),
         ),
       ),
     );

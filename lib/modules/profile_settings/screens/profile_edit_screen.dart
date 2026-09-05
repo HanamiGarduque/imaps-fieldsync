@@ -303,23 +303,33 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                               alignment: Alignment.bottomRight,
                               children: [
                                 Container(
-                                  width: 76, height: 76,
-                                  decoration: BoxDecoration(
+                                  width: 76,
+                                  height: 76,
+                                  decoration: const BoxDecoration(
                                     shape: BoxShape.circle,
-                                    gradient: const LinearGradient(
+                                    gradient: LinearGradient(
                                       colors: [InsightTheme.blue1, InsightTheme.blue2],
-                                      begin: Alignment.topLeft, end: Alignment.bottomRight,
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
                                     ),
-                                    image: _currentAvatarUrl != null
-                                        ? DecorationImage(image: NetworkImage(_currentAvatarUrl!), fit: BoxFit.cover)
-                                        : (_pickedAvatarFile != null
-                                            ? DecorationImage(image: FileImage(_pickedAvatarFile!), fit: BoxFit.cover)
-                                            : null),
                                   ),
-                                  alignment: Alignment.center,
-                                  child: (_currentAvatarUrl == null && _pickedAvatarFile == null)
-                                      ? Text(initials, style: InsightTheme.poppins(22, w: FontWeight.w700, c: Colors.white))
-                                      : null,
+                                  child: ClipOval(
+                                    child: _pickedAvatarFile != null
+                                        ? Image.file(_pickedAvatarFile!, fit: BoxFit.cover, width: 76, height: 76)
+                                        : (_currentAvatarUrl != null && _currentAvatarUrl!.isNotEmpty
+                                            ? Image.network(
+                                                _currentAvatarUrl!,
+                                                fit: BoxFit.cover,
+                                                width: 76,
+                                                height: 76,
+                                                errorBuilder: (context, error, stackTrace) => Center(
+                                                  child: Text(initials, style: InsightTheme.poppins(22, w: FontWeight.w700, c: Colors.white)),
+                                                ),
+                                              )
+                                            : Center(
+                                                child: Text(initials, style: InsightTheme.poppins(22, w: FontWeight.w700, c: Colors.white)),
+                                              )),
+                                  ),
                                 ),
                                 if (_isUploadingAvatar)
                                   const Positioned.fill(

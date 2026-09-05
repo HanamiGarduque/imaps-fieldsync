@@ -15,6 +15,7 @@ import 'terms_privacy_screen.dart';
 import 'diagnostics_screen.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
 
 
 import '../../../core/theme/insight_theme.dart';
@@ -422,7 +423,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                         else if (_isLoadingStats)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 40),
-                            child: Center(child: CircularProgressIndicator(strokeWidth: 2.4)),
+                            child: Center(child: ImapsLoadingIndicator(size: 50)),
                           )
                         else
                           KeyedSubtree(
@@ -980,6 +981,7 @@ class _Avatar extends StatelessWidget {
     // Border radius: rounded-2xl at full size (≈ size * 0.286 ≈ 16px for 56px),
     // scales with size so it stays proportional in the compact bar.
     final radius = (size * 0.286).clamp(10.0, 18.0);
+    final borderWidth = size > 44 ? 2.5 : 2.0;
     return Container(
       width: size,
       height: size,
@@ -997,15 +999,30 @@ class _Avatar extends StatelessWidget {
             offset: const Offset(0, 5),
           ),
         ],
-        border: Border.all(color: Colors.white, width: size > 44 ? 2.5 : 2),
-        image: avatarUrl != null
-            ? DecorationImage(image: NetworkImage(avatarUrl!), fit: BoxFit.cover)
-            : null,
+        border: Border.all(color: Colors.white, width: borderWidth),
       ),
-      alignment: Alignment.center,
-      child: avatarUrl == null
-          ? Text(initials, style: InsightTheme.urbanist(fontSize, w: FontWeight.w800, c: Colors.white))
-          : null,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius > borderWidth ? radius - borderWidth : radius),
+        child: (avatarUrl != null && avatarUrl!.isNotEmpty)
+            ? Image.network(
+                avatarUrl!,
+                fit: BoxFit.cover,
+                width: size,
+                height: size,
+                errorBuilder: (context, error, stackTrace) => Center(
+                  child: Text(
+                    initials,
+                    style: InsightTheme.urbanist(fontSize, w: FontWeight.w800, c: Colors.white),
+                  ),
+                ),
+              )
+            : Center(
+                child: Text(
+                  initials,
+                  style: InsightTheme.urbanist(fontSize, w: FontWeight.w800, c: Colors.white),
+                ),
+              ),
+      ),
     );
   }
 }

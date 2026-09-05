@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/user_profile.dart';
+import '../services/auth_service.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import '../services/sync_outbox_service.dart';
@@ -25,10 +27,13 @@ class MainShellScreen extends StatefulWidget {
   final UserProfile profile;
   final int initialIndex;
 
+  final bool offlineSession;
+
   const MainShellScreen({
     super.key,
     required this.profile,
     this.initialIndex = 0,
+    this.offlineSession = false,
   });
 
   @override
@@ -38,6 +43,10 @@ class MainShellScreen extends StatefulWidget {
 class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingObserver {
   late int _currentIndex;
   late UserProfile _currentProfile;
+
+  // ── Network connectivity state ──────────────────────────────────────────
+  late bool _isOnline;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
   // ── App-resume lock (see AUTH_SECURITY_MASTER_DOC.md §5d) ───────────────
   // _pausedAt is set the moment the app leaves the foreground and cleared
@@ -75,12 +84,32 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     _currentIndex = widget.initialIndex;
     _currentProfile = widget.profile;
     _tasksVisitedThisSession = _currentIndex == 1;
+    _isOnline = !widget.offlineSession;
+    _checkInitialConnectivity();
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
+      if (mounted) {
+        final online = results.any((r) => r != ConnectivityResult.none);
+        if (_isOnline != online) {
+          setState(() {
+            _isOnline = online;
+          });
+        }
+      }
+    });
     WidgetsBinding.instance.addObserver(this);
     _resetIdleLockTimer();
   }
 
+  Future<void> _checkInitialConnectivity() async {
+    final online = await AuthService.hasConnectivity();
+    if (mounted && _isOnline != online) {
+      setState(() => _isOnline = online);
+    }
+  }
+
   @override
   void dispose() {
+    _connectivitySubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _idleLockTimer?.cancel();
     super.dispose();
@@ -360,6 +389,41 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                     // Sync Center already renders its own detailed progress line;
                     // showing both at once would be a redundant duplicate.
                     if (_currentIndex != 2) const SyncProgressBanner(),
+                    // Real-time "Offline mode" banner shown whenever the device
+                    // has no network connectivity. Automatically hidden when
+                    // connectivity returns to reclaim vertical space.
+                    if (!_isOnline)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.redTint,
+                          border: Border(
+                            bottom: BorderSide(color: InsightTheme.red.withValues(alpha: 0.25)),
+                          ),
+                        ),
+                        child: SafeArea(
+                          bottom: false,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const BoxDecoration(
+                                  color: InsightTheme.red,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Offline mode',
+                                style: InsightTheme.inter(11.5, w: FontWeight.w700, c: InsightTheme.redInk),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     Expanded(
                       child: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 450),

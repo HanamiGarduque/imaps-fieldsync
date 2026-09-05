@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/diagnostics_service.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/theme/insight_theme.dart';
 
 // Mapped to standard canonical InsightTheme design tokens
@@ -86,7 +87,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator(color: _kBlue));
+              return const Center(child: ImapsLoadingIndicator(size: 50));
             }
             if (snapshot.hasError) {
               return ListView(
