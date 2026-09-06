@@ -200,13 +200,12 @@ class TaskItem {
     return 'Pending';
   }
 
-  /// A task remains "Scheduled" whenever it carries a visit date, even if it
-  /// has already started. This preserves the approved model: started scheduled
-  /// tasks stay under Pending → Scheduled and do not move to Ongoing.
-  bool get isScheduledPlan => scheduledDate.isNotEmpty || isSelfScheduled;
-
   String? get forReschedule {
-    if (scheduledDate.isEmpty) return null;
+    // Gate on isSelfScheduled directly — scheduledDate is non-nullable and
+    // always populated in the DB even for tasks the inspector never chose
+    // a visit date for, so checking scheduledDate alone (as before) let
+    // this fire for every category, not just Scheduled.
+    if (!isSelfScheduled || scheduledDate.isEmpty) return null;
     try {
       final visitDate = DateTime.parse(scheduledDate);
       final today = DateTime.now();
@@ -223,20 +222,36 @@ class TaskItem {
     return null;
   }
 
-  /// Due Today / Overdue is split across the same getter used by the card tags.
-  /// - Due today is based on the scheduled visit date when present, otherwise the
-  ///   admin deadline for Available Anytime / Ongoing tasks.
-  /// - Overdue is based on the admin deadline passing.
+  /// Due Today / Overdue, correctly split by category (Fix 3):
+  /// - Overdue is ALWAYS Deadline-driven, checked first (more severe,
+  ///   admin-set cutoff, applies to every category alike).
+  /// - For Scheduled tasks (isSelfScheduled true), Due Today is
+  ///   Visit-date-driven — this is the deliberate date the inspector chose.
+  /// - For Pending (Available Anytime) / Ongoing tasks, Due Today is
+  ///   Deadline-driven — scheduledDate is just a non-nullable DB default
+  ///   for these, never a real commitment, so it must NOT be consulted here
+  ///   (this was the root cause of "Due Today" appearing on brand-new
+  ///   Available Anytime tasks whose default scheduled_date happened to
+  ///   equal today's date).
   String? get scheduleUrgency {
     final today = DateTime.now();
     final todayDay = DateTime(today.year, today.month, today.day);
 
-    if (scheduledDate.isNotEmpty) {
+    if (deadlineDate != null && deadlineDate!.isNotEmpty) {
+      try {
+        final due = DateTime.parse(deadlineDate!);
+        final dueDay = DateTime(due.year, due.month, due.day);
+        if (dueDay.isBefore(todayDay)) return 'Overdue';
+      } catch (_) {}
+    }
+
+    if (isSelfScheduled && scheduledDate.isNotEmpty) {
       try {
         final due = DateTime.parse(scheduledDate);
         final dueDay = DateTime(due.year, due.month, due.day);
         if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
       } catch (_) {}
+      return null; // Scheduled, visit not today, not overdue — nothing yet
     }
 
     if (deadlineDate != null && deadlineDate!.isNotEmpty) {
@@ -244,10 +259,8 @@ class TaskItem {
         final due = DateTime.parse(deadlineDate!);
         final dueDay = DateTime(due.year, due.month, due.day);
         if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
-        if (dueDay.isBefore(todayDay)) return 'Overdue';
       } catch (_) {}
     }
-
     return null;
   }
 
@@ -260,30 +273,14 @@ class TaskItem {
     return Icons.home_rounded;
   }
 
-  /// True when the deadline is today or tomorrow but NOT yet past — the
-  /// "approaching" band. Part of the disjoint urgency-filter model:
-  /// Urgent (approaching) and Overdue (past) no longer overlap, and each
-  /// matches its card badge ('Deadline today'/'Deadline tomorrow' vs
-  /// 'Overdue').
-  bool get isDueSoonDeadline {
-    if (deadlineDate == null || deadlineDate!.isEmpty) return false;
-    try {
-      final due = DateTime.parse(deadlineDate!);
-      final today = DateTime.now();
-      final dueDay = DateTime(due.year, due.month, due.day);
-      final todayDay = DateTime(today.year, today.month, today.day);
-      final diff = dueDay.difference(todayDay).inDays;
-      return diff == 0 || diff == 1;
-    } catch (_) {
-      return false;
-    }
-  }
-
   /// Visit-date urgency for Scheduled tasks. Red is kept for the visit day and
   /// any passed visit date until the task reaches deadline overdue. Orange is
   /// used for 2-3 days away; blue is the normal/default state.
   bool get isUrgentDeadline {
-    if (!isScheduledPlan || scheduledDate.isEmpty) return false;
+    // Gate on isSelfScheduled directly, not the old isScheduledPlan (which
+    // incorrectly treated every task as "on the schedule plan" since
+    // scheduledDate is never actually empty in the DB).
+    if (!isSelfScheduled || scheduledDate.isEmpty) return false;
     try {
       final due = DateTime.parse(scheduledDate);
       final today = DateTime.now();
@@ -883,7 +880,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             matches = !isCompleted && (task.scheduleUrgency == 'Due today' || task.isUrgentDeadline);
             break;
           case 'Scheduled':
-            matches = task.isScheduledPlan && task.category != 'Ongoing';
+            // isSelfScheduled directly — not the old isScheduledPlan, which
+            // matched every task since scheduledDate is never empty.
+            matches = task.isSelfScheduled;
             break;
           case 'Overdue':
             matches = !isCompleted && task.scheduleUrgency == 'Overdue';
@@ -1506,8 +1505,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         visitDiff != null &&
         visitDiff >= 2 &&
         visitDiff <= 3;
-    final isUrgent = !isCompleted &&
-        (task.scheduleUrgency == 'Due today' || task.isUrgentDeadline);
 
     if (isCompleted) {
       indicators.add(const MapEntry('Completed', 'This inspection has been finished and submitted. No further action is normally required.'));
@@ -1553,15 +1550,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       if (isOverdue) {
         indicators.add(const MapEntry('Overdue', 'The admin-set deadline has already passed. This task needs immediate attention.'));
       }
-      final deadlineLabel = _deadlineUrgencyLabel;
-      if (isUrgent && deadlineLabel != 'Overdue') {
-        indicators.add(MapEntry(
-          deadlineLabel,
-          deadlineLabel == 'Deadline today'
-              ? 'The admin-set deadline is today. Complete the inspection today if possible.'
-              : 'The admin-set deadline is tomorrow. Prepare to complete the inspection on time.',
-        ));
-      }
     }
     if (isScheduled && task.currentStep >= 1 && task.currentStep <= 5) {
       indicators.add(const MapEntry('In Progress', 'You have already started this scheduled inspection. Continue working through the remaining steps until it is completed.'));
@@ -1605,22 +1593,13 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     }
   }
 
-  /// Deadline-driven urgency label for Ongoing cards (admin deadline_date;
-  /// same ≤1-day threshold as isUrgentDeadline, but with a human label).
-  String get _deadlineUrgencyLabel {
-    final dd = widget.task.deadlineDate;
-    if (dd == null || dd.isEmpty) return 'Deadline near';
-    try {
-      final due = DateTime.parse(dd);
-      final now = DateTime.now();
-      final diff = DateTime(due.year, due.month, due.day).difference(DateTime(now.year, now.month, now.day)).inDays;
-      if (diff < 0) return 'Overdue';
-      if (diff == 0) return 'Deadline today';
-      return 'Deadline tomorrow';
-    } catch (_) {
-      return 'Deadline near';
-    }
-  }
+  // Removed: _deadlineUrgencyLabel getter. It duplicated (and mis-computed)
+  // what the fixed `scheduleUrgency` getter already correctly returns
+  // ('Due today' / 'Overdue' / null) — its own logic returned 'Deadline
+  // tomorrow' for ANY future date (not just 1-day-out) and 'Deadline near'
+  // whenever deadlineDate was missing, which is what caused those labels to
+  // appear on brand-new tasks with a deadline a week away. Call sites now
+  // use `scheduleUrgency` directly (see below).
 
   // BUG FIX #1 (v2) — canLaunchUrl() itself was returning a null component
   // on real devices even with a real number/email, because it depends on
@@ -1860,10 +1839,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     final bool showInProgress = taskCategory == 'Scheduled' && widget.task.currentStep >= 1 && widget.task.currentStep <= 5;
     final int stepValue = (widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
         .clamp(0, InspectionProgress.totalSteps);
-    final bool canSchedule = widget.task.category != 'Completed' &&
-        (widget.task.category == 'Pending' ||
-            widget.task.category == 'Scheduled' ||
-            widget.task.isScheduledPlan);
+    final bool canSchedule = widget.task.category != 'Completed';
 
     Color borderColor;
     if (isOverdue) {
@@ -2103,7 +2079,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // Visit row already say it) and added clutter
                               // on urgent cards. Scheduled state is carried
                               // by the orange border + avatar instead.
-                              if (widget.task.category == 'Scheduled' && widget.task.isScheduledPlan && widget.task.forReschedule != null)
+                              if (widget.task.category == 'Scheduled' && widget.task.forReschedule != null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
@@ -2215,32 +2191,13 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                     ],
                                   ),
                                 ),
-                              // Deadline urgency pill (APPROVED accent
-                              // model): the PRIMARY urgent signal —
-                              // text-bearing, never color-alone. Extended
-                              // from Ongoing-only to ANY non-Completed
-                              // urgent task (Scheduled-pending included),
-                              // per the locked lifecycle matrix. Secondary
-                              // cue: red avatar square.
-                              if (isUrgent && _deadlineUrgencyLabel != 'Overdue')
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.redTint,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.warning_rounded, size: 11, color: InsightTheme.redInk),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        _deadlineUrgencyLabel,
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.redInk),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              // Removed the old separate "Deadline urgency
+                              // pill" here — it duplicated the Overdue/Due
+                              // Today pills above using the buggy
+                              // _deadlineUrgencyLabel getter (now deleted).
+                              // The two pills above (from the corrected
+                              // scheduleUrgency getter) already cover every
+                              // category correctly.
                             ],
                           ),
                           const SizedBox(height: 10),
