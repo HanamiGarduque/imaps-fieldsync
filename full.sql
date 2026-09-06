@@ -620,11 +620,11 @@ CREATE INDEX "push_device_subscriptions_reference_number_idx" ON "public"."push_
 
 
 
-CREATE OR REPLACE TRIGGER "notify-on-status-change" AFTER INSERT ON "public"."application_status_tracks" FOR EACH ROW EXECUTE FUNCTION "supabase_functions"."http_request"('https://laapipjyprmmaylunxib.supabase.co/functions/v1/send-push-notification', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxhYXBpcGp5cHJtbWF5bHVueGliIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzc0OTIxMSwiZXhwIjoyMDkzMzI1MjExfQ.gji-rWjO0waPNKf8kjJJZY6508rK9LNYFelPcvVE_q0"}', '{}', '5000');
+CREATE OR REPLACE TRIGGER "notify-on-status-change" AFTER INSERT ON "public"."application_status_tracks" FOR EACH ROW EXECUTE FUNCTION "public"."send_push_notification_webhook"();
 
 
 
-CREATE OR REPLACE TRIGGER "on_assignment_change" AFTER INSERT ON "public"."field_jobs" FOR EACH ROW EXECUTE FUNCTION "supabase_functions"."http_request"('https://laapipjyprmmaylunxib.supabase.co/functions/v1/send-push-notification', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxhYXBpcGp5cHJtbWF5bHVueGliIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Nzc0OTIxMSwiZXhwIjoyMDkzMzI1MjExfQ.gji-rWjO0waPNKf8kjJJZY6508rK9LNYFelPcvVE_q0"}', '{}', '5000');
+CREATE OR REPLACE TRIGGER "on_assignment_change" AFTER INSERT ON "public"."field_jobs" FOR EACH ROW EXECUTE FUNCTION "public"."send_push_notification_webhook"();
 
 
 
