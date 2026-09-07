@@ -248,6 +248,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _acceptedTerms = false;
+  bool _needsLegalAcceptance = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   
@@ -403,9 +404,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (mounted) {
       setState(() {
-        if (alreadyAccepted) {
-          _acceptedTerms = true;
-        }
+        _needsLegalAcceptance = !alreadyAccepted;
+        _acceptedTerms = alreadyAccepted;
         if (savedEmail != null && savedEmail.isNotEmpty) {
           _emailController.text = savedEmail;
         }
@@ -580,7 +580,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final needsLegalAcceptance = acceptedLegalVersion < SecurePrefsService.currentLegalVersion;
     if (needsLegalAcceptance && !_acceptedTerms) {
       setState(() {
-        _errorMessage = 'Please acknowledge that you have read and agree to the Terms and Conditions and Privacy Policy.';
+        _errorMessage = 'Please acknowledge that you have read and agree to the Terms of Use and Privacy Policy.';
       });
       return;
     }
@@ -1192,87 +1192,44 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 const SizedBox(height: 16),
 
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: Checkbox(
-                        value: _acceptedTerms,
-                        activeColor: AppColors.blue1,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                        onChanged: (val) {
-                          setState(() {
-                            _acceptedTerms = val ?? false;
-                          });
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _acceptedTerms = !_acceptedTerms;
-                          });
-                        },
-                        child: Text.rich(
-                          TextSpan(
-                            style: AppText.inter(11.5, c: AppColors.ink2, lh: 1.35),
-                            children: [
-                              const TextSpan(
-                                text: 'By signing in, you acknowledge that you have read and agree to the iMAPS:FieldSync ',
-                              ),
-                              WidgetSpan(
-                                alignment: PlaceholderAlignment.baseline,
-                                baseline: TextBaseline.alphabetic,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => const TermsPrivacyScreen(initialShowTerms: true),
-                                      ),
-                                    );
-                                  },
-                                  child: Text(
-                                    'Terms and Conditions',
-                                    style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
-                                  ),
-                                ),
-                              ),
-                              const TextSpan(text: ' and '),
-                              WidgetSpan(
-                                alignment: PlaceholderAlignment.baseline,
-                                baseline: TextBaseline.alphabetic,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => const TermsPrivacyScreen(initialShowTerms: false),
-                                      ),
-                                    );
-                                  },
-                                  child: Text(
-                                    'Privacy Policy',
-                                    style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
-                                  ),
-                                ),
-                              ),
-                              const TextSpan(
-                                text: '. This application is intended for authorized personnel of the Municipal Planning and Development Office (MPDO).',
-                              ),
-                            ],
-                          ),
+                if (_needsLegalAcceptance)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: Checkbox(
+                          value: _acceptedTerms,
+                          activeColor: AppColors.blue1,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          onChanged: (val) {
+                            setState(() {
+                              _acceptedTerms = val ?? false;
+                            });
+                          },
                         ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            setState(() {
+                              _acceptedTerms = !_acceptedTerms;
+                            });
+                          },
+                          child: _buildLegalNoticeRichText(isCentered: false),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  Center(
+                    child: _buildLegalNoticeRichText(isCentered: true),
+                  ),
 
                 const SizedBox(height: 20),
 
@@ -1316,6 +1273,60 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     ));
+  }
+
+  Widget _buildLegalNoticeRichText({bool isCentered = false}) {
+    return Text.rich(
+      TextSpan(
+        style: AppText.inter(11.5, c: AppColors.ink3, lh: 1.35),
+        children: [
+          const TextSpan(
+            text: 'By signing in, you agree to the ',
+          ),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const TermsPrivacyScreen(initialShowTerms: true),
+                  ),
+                );
+              },
+              child: Text(
+                'Terms of Use',
+                style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
+              ),
+            ),
+          ),
+          const TextSpan(text: ' and '),
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const TermsPrivacyScreen(initialShowTerms: false),
+                  ),
+                );
+              },
+              child: Text(
+                'Privacy Policy',
+                style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
+              ),
+            ),
+          ),
+          const TextSpan(
+            text: '.\nAuthorized MPDO personnel only.',
+          ),
+        ],
+      ),
+      textAlign: isCentered ? TextAlign.center : TextAlign.start,
+    );
   }
 
   Widget _buildFieldLabel(String text) {
