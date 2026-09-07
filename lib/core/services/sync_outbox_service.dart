@@ -131,6 +131,10 @@ class SyncOutboxService {
   static final ValueNotifier<SyncProgress?> progress =
       ValueNotifier<SyncProgress?>(null);
 
+  /// Broadcasts when a drain pass completes (whether successful or with failures/conflicts),
+  /// allowing the Sync Center or other screens to refresh immediately without waiting for the poll timer.
+  static final ValueNotifier<int> drainCompleted = ValueNotifier<int>(0);
+
 
   static bool get isDraining => _draining;
 
@@ -536,6 +540,7 @@ class SyncOutboxService {
     } finally {
       progress.value = null;
       _draining = false;
+      drainCompleted.value++;
     }
   }
 

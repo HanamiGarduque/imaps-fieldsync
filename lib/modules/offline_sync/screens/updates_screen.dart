@@ -117,11 +117,18 @@ class _UpdatesScreenState extends State<UpdatesScreen>
 
 
 
+  void _onDrainCompleted() {
+    if (!mounted) return;
+    _refresh();
+    unawaited(_loadCacheStats());
+  }
+
   @override
   void initState() {
     super.initState();
     _refresh(replay: true);
     _loadCacheStats();
+    SyncOutboxService.drainCompleted.addListener(_onDrainCompleted);
     // Light polling while this screen is open — catches progress from a
     // drain that SyncOutboxService kicked off elsewhere (e.g. connectivity
     // just came back while the inspector was on a different screen).
@@ -142,6 +149,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
 
   @override
   void dispose() {
+    SyncOutboxService.drainCompleted.removeListener(_onDrainCompleted);
     _pollTimer?.cancel();
     _connSub?.cancel();
     _toastTimer?.cancel();
