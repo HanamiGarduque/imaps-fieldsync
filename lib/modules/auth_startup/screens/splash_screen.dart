@@ -18,6 +18,8 @@ import '../../../core/widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
 import '../../../core/navigation/main_shell_screen.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/services/app_info_service.dart';
+import '../../profile_settings/screens/terms_privacy_screen.dart';
 
 
 /// ==================================================================
@@ -71,6 +73,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkSession() async {
+    await AppInfoService.initialize();
     await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
 
@@ -222,7 +225,7 @@ class _SplashScreenState extends State<SplashScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
-                  'MUNICIPAL PLANNING & ZONING OFFICE · V1.0.0',
+                  'MUNICIPAL PLANNING & ZONING OFFICE · ' + AppInfoService.fullVersionString.toUpperCase(),
                   style: AppText.mono(10, c: Colors.white.withValues(alpha: 0.6)),
                 ),
               ),
@@ -245,6 +248,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  bool _acceptedTerms = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   

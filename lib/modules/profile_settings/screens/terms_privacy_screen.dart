@@ -126,28 +126,43 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
       children: [
         _HeaderSection(
           title: 'Terms and Conditions',
-          date: 'July 20, 2026',
+          date: 'September 7, 2026',
         ),
         const SizedBox(height: 18),
         _PolicySection(
           icon: Icons.gavel_rounded,
-          title: '1. Acceptance of Terms',
-          body: 'By accessing and using the iMAPS:FieldSync application, you agree to comply with these Terms and Conditions. This application is designated exclusively for authorized Zoning Officers and Administrative personnel.',
+          title: '1. Authorized Use & Municipal Purpose',
+          body: 'Access to and use of this mobile platform are strictly restricted to authorized Zoning Officers and Administrative personnel of the Municipal Planning and Development Office (MPDO) of Rosario, Batangas. The application is an official municipal utility. Any use of this platform for personal or non-official purposes, or by unauthorized third parties, is strictly prohibited.',
         ),
         _PolicySection(
           icon: Icons.business_center_rounded,
-          title: '2. Official Use Only',
-          body: 'iMAPS:FieldSync is an enterprise tool built to manage active zoning workloads, track field findings, and streamline the inspection checklist process. Unauthorized distribution or personal use of this software is strictly prohibited.',
+          title: '2. Zoning Inspection Activities & Data Capture',
+          body: 'iMAPS:FieldSync is an enterprise tool built to manage active zoning workloads, track field findings, and streamline inspection checklists. You are responsible for recording accurate GPS site verifications, capturing authentic site photographs, and submitting truthful checklist findings and recommendations for applicant parcels.',
         ),
         _PolicySection(
-          icon: Icons.verified_user_rounded,
-          title: '3. Data Integrity',
-          body: 'As an inspector, you are responsible for ensuring that all data captured—including photographic evidence, GPS verification points, and zoning checklist evaluations—is accurate and truthful to the best of your knowledge.',
+          icon: Icons.sync_rounded,
+          title: '3. Offline-First Operation & Synchronization',
+          body: 'Evaluators acknowledge that the application caches records, media, and inspection actions locally on the secure device database during periods of limited or absent connectivity. It is the duty of the authorized officer to initiate and verify database synchronization once a stable connection to the Supabase network is established.',
         ),
         _PolicySection(
           icon: Icons.lock_person_rounded,
-          title: '4. Account Security',
-          body: 'You are responsible for maintaining the confidentiality of your account credentials. Do not share your Quick Unlock pattern with unverified individuals. Report any operational blockers or security breaches immediately to the MPDO.',
+          title: '4. Authentication & Account Security',
+          body: 'You are responsible for maintaining the confidentiality of your account credentials and Quick Unlock passcodes. Do not share your access credentials or allow unverified individuals to operate the application on your behalf. Report security breaches immediately to the MPDO.',
+        ),
+        _PolicySection(
+          icon: Icons.verified_user_rounded,
+          title: '5. Confidentiality & Proper Use of Applicant/Site Data',
+          body: 'All applicant records, site metrics, boundary information, and inspection notes are confidential municipal records. Evaluators must ensure data accuracy and prevent unauthorized distribution of client data.',
+        ),
+        _PolicySection(
+          icon: Icons.block_rounded,
+          title: '6. Access Revocation / Termination',
+          body: 'MPDO administration reserves the right to revoke account access at any time upon separation from the zoning task force, security compromise, or violation of these terms.',
+        ),
+        _PolicySection(
+          icon: Icons.shield_rounded,
+          title: '7. Governing Law',
+          body: 'These Terms are governed by and construed in accordance with the laws of the Republic of the Philippines, including applicable provisions of the Data Privacy Act of 2012.',
           isLast: true,
         ),
       ],
@@ -163,32 +178,51 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
       children: [
         _HeaderSection(
           title: 'Privacy Policy',
-          date: 'July 20, 2026',
+          date: 'September 7, 2026',
         ),
         const SizedBox(height: 18),
         _PolicySection(
           icon: Icons.data_usage_rounded,
-          title: '1. Information We Collect',
-          body: 'To facilitate field operations, iMAPS:FieldSync collects specific operational and personal data:\n\n'
-                '• Profile Data: Full name, email address, and phone.\n'
-                '• Location Data: Real-time GPS coordinates during verification.\n'
-                '• Media: Site photos captured directly within the app.\n'
-                '• Device Data: Offline cache status and sync logs.',
+          title: '1. Information We Collect & Process',
+          body: 'To facilitate official zoning operations, iMAPS:FieldSync processes specific categories of operational data:\n\n'
+                '• Inspector / account information\n'
+                '• Applicant / application information\n'
+                '• Site / parcel information\n'
+                '• GPS / location information (GPS coordinates are captured during specific verification and inspection events)\n'
+                '• Inspection photographs and geographic metadata (Field photographs captured through the application may contain geographic metadata used to support physical site verification and inspection records)\n'
+                '• Inspection notes\n'
+                '• Checklist answers\n'
+                '• Findings\n'
+                '• Discrepancy title / details\n'
+                '• Recommendations\n'
+                '• Task / scheduling information\n'
+                '• Offline cached / encrypted local data\n'
+                '• Pending actions / outbox\n'
+                '• Supabase / cloud records\n'
+                '• Supabase Storage objects\n'
+                '• OneSignal / device notification information\n'
+                '• Authentication / session information\n'
+                '• Quick Unlock / offline passcode information',
         ),
         _PolicySection(
           icon: Icons.analytics_rounded,
-          title: '2. Use of Information',
-          body: 'The collected data is utilized strictly for evaluating zoning applications, verifying inspection sites, and syncing accurate field findings to the main database via Supabase.',
+          title: '2. Use of Information & Offline Processing',
+          body: 'Collected information is used strictly to evaluate zoning applications, verify inspection sites, record findings, and synchronize secure records to the municipal Supabase backend. Local offline processing ensures uninterrupted fieldwork before syncing.',
         ),
         _PolicySection(
-          icon: Icons.lock_outline_rounded,
-          title: '3. Quick Unlock',
-          body: 'If you opt-in to use the Quick Unlock feature, your pattern is stored as a salted hash, securely and locally on your device. The raw pattern is never stored or transmitted, and none of this data is sent to our servers.',
+          icon: Icons.share_rounded,
+          title: '3. Authorized Access & Sharing',
+          body: 'Information is accessed solely by authorized MPDO personnel and municipal database administrators. Data is not shared with external commercial entities.',
         ),
         _PolicySection(
-          icon: Icons.shield_rounded,
-          title: '4. Data Sharing & Retention',
-          body: 'Information gathered through iMAPS:FieldSync is shared exclusively with the local MPDO database and authorized administrative users. All data processing conforms strictly to the Data Privacy Act of 2012 of the Philippines.',
+          icon: Icons.security_rounded,
+          title: '4. Storage, Security Safeguards & Retention',
+          body: 'Data is protected using encrypted local SQLite databases, secure storage mechanisms, and TLS-encrypted transmission channels. Records are retained for as long as required for municipal zoning administration.',
+        ),
+        _PolicySection(
+          icon: Icons.privacy_tip_rounded,
+          title: '5. Data Subject Rights & Privacy Inquiries',
+          body: 'In accordance with the Data Privacy Act of 2012, data subjects may inquire about stored records or request corrections. For inquiries, access requests, or issues regarding data privacy, contact the Rosario Municipal Planning and Development Office (MPDO) through the administrative desk or the official municipal communication channels.',
           isLast: true,
         ),
       ],

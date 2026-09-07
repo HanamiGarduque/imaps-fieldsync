@@ -20,6 +20,17 @@ class SecurePrefsService {
   static const _kBioSecret         = 'sp_bio_secret';
   static const _kCachedProfile     = 'sp_cached_profile';
   static const _kDbEncryptionKey   = 'sp_db_encryption_key';
+  static const _kAcceptedLegalVersion = 'sp_accepted_legal_version';
+
+  static const int currentLegalVersion = 1;
+
+  static Future<int?> getAcceptedLegalVersion() async {
+    final raw = await _storage.read(key: _kAcceptedLegalVersion);
+    return raw == null ? null : int.tryParse(raw);
+  }
+
+  static Future<void> setAcceptedLegalVersion(int version) =>
+      _storage.write(key: _kAcceptedLegalVersion, value: version.toString());
 
   // ── Biometric enrollment ────────────────────────────────────────────────
   static const _kBioEnrolled       = 'sp_bio_enrolled';

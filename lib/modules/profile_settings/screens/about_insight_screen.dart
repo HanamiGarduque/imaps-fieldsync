@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/services/app_info_service.dart';
 
 class AboutInsightScreen extends StatelessWidget {
   const AboutInsightScreen({super.key});
@@ -92,7 +93,7 @@ class AboutInsightScreen extends StatelessWidget {
                         const SizedBox(height: 20),
                         Text('iMAPS:FieldSync', style: InsightTheme.poppins(22, w: FontWeight.w700)),
                         const SizedBox(height: 4),
-                        Text('Version 1.0.0', style: InsightTheme.jetBrains(12, c: InsightTheme.ink2, ls: 0.5)),
+                        Text(AppInfoService.fullVersionString, style: InsightTheme.jetBrains(12, c: InsightTheme.ink2, ls: 0.5)),
 
                         const SizedBox(height: 32),
 
@@ -113,8 +114,13 @@ class AboutInsightScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                'iMAPS:FieldSync is an intelligent geospatial analytics and zoning application designed specifically for the Municipal Planning and Development Office of Rosario, Batangas.\n\nThis application facilitates active monitoring and analytics reporting of land use and zoning compliance directly from the field unit.',
+                                'iMAPS:FieldSync is the official municipal field application used by authorized MPDO and Zoning personnel of Rosario, Batangas for field inspection, site verification, GPS location verification, photographs, zoning checklists, findings, recommendations, offline work, and later synchronization.',
                                 style: InsightTheme.inter(13.5, h: 1.6),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Municipal Planning and Development Office (MPDO)\nRosario, Batangas',
+                                style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.ink2, h: 1.5),
                               ),
                             ],
                           ),

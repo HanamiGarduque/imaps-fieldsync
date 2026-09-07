@@ -16,6 +16,7 @@ import 'diagnostics_screen.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/services/app_info_service.dart';
 
 
 import '../../../core/theme/insight_theme.dart';
@@ -485,7 +486,7 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                 _ActionTile(
                                   icon: Icons.info_outline_rounded,
                                   title: 'About iMAPS',
-                                  subtitle: 'Version 1.0.0',
+                                  subtitle: AppInfoService.fullVersionString,
                                   onTap: () {
                                     Navigator.push(
                                       context,
