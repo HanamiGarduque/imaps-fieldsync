@@ -73,7 +73,6 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkSession() async {
-    await AppInfoService.initialize();
     await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
 
@@ -399,9 +398,14 @@ class _LoginScreenState extends State<LoginScreen> {
     final bioLabel = await BiometricService.primaryBiometricLabel();
     final online = await AuthService.hasConnectivity();
     final cooldownUntil = await SecurePrefsService.getLocalPasscodeCooldownUntil();
+    final acceptedLegalVersion = await SecurePrefsService.getAcceptedLegalVersion() ?? 0;
+    final alreadyAccepted = acceptedLegalVersion >= SecurePrefsService.currentLegalVersion;
 
     if (mounted) {
       setState(() {
+        if (alreadyAccepted) {
+          _acceptedTerms = true;
+        }
         if (savedEmail != null && savedEmail.isNotEmpty) {
           _emailController.text = savedEmail;
         }
@@ -572,6 +576,15 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    final acceptedLegalVersion = await SecurePrefsService.getAcceptedLegalVersion() ?? 0;
+    final needsLegalAcceptance = acceptedLegalVersion < SecurePrefsService.currentLegalVersion;
+    if (needsLegalAcceptance && !_acceptedTerms) {
+      setState(() {
+        _errorMessage = 'Please acknowledge that you have read and agree to the Terms and Conditions and Privacy Policy.';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -645,6 +658,7 @@ class _LoginScreenState extends State<LoginScreen> {
             .catchError((e) => debugPrint('[LOGIN] login_success log error: $e'));
 
         await SecurePrefsService.setSavedEmail(_emailController.text.trim());
+        await SecurePrefsService.setAcceptedLegalVersion(SecurePrefsService.currentLegalVersion);
 
         // Offline Email + Passcode Login — enrollment/refresh of the local
         // salted HMAC-SHA256 verifier. Runs on EVERY successful online
@@ -846,6 +860,7 @@ class _LoginScreenState extends State<LoginScreen> {
       NotificationService.registerCurrentDevice().catchError(
         (e) => debugPrint('[OFFLINE LOGIN] registerCurrentDevice failed (non-fatal): $e'),
       );
+      await SecurePrefsService.setAcceptedLegalVersion(SecurePrefsService.currentLegalVersion);
       if (!mounted) return false;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -1175,8 +1190,92 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
 
-                const SizedBox(height: 28),
-                
+                const SizedBox(height: 16),
+
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: Checkbox(
+                        value: _acceptedTerms,
+                        activeColor: AppColors.blue1,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        onChanged: (val) {
+                          setState(() {
+                            _acceptedTerms = val ?? false;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _acceptedTerms = !_acceptedTerms;
+                          });
+                        },
+                        child: Text.rich(
+                          TextSpan(
+                            style: AppText.inter(11.5, c: AppColors.ink2, lh: 1.35),
+                            children: [
+                              const TextSpan(
+                                text: 'By signing in, you acknowledge that you have read and agree to the iMAPS:FieldSync ',
+                              ),
+                              WidgetSpan(
+                                alignment: PlaceholderAlignment.baseline,
+                                baseline: TextBaseline.alphabetic,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => const TermsPrivacyScreen(initialShowTerms: true),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(
+                                    'Terms and Conditions',
+                                    style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
+                                  ),
+                                ),
+                              ),
+                              const TextSpan(text: ' and '),
+                              WidgetSpan(
+                                alignment: PlaceholderAlignment.baseline,
+                                baseline: TextBaseline.alphabetic,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => const TermsPrivacyScreen(initialShowTerms: false),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(
+                                    'Privacy Policy',
+                                    style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
+                                  ),
+                                ),
+                              ),
+                              const TextSpan(
+                                text: '. This application is intended for authorized personnel of the Municipal Planning and Development Office (MPDO).',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
                 Container(
                   height: 52,
                   decoration: BoxDecoration(

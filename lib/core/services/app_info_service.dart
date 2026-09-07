@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 class AppInfoService {
@@ -20,8 +21,10 @@ class AppInfoService {
       _version = packageInfo.version;
       _buildNumber = packageInfo.buildNumber;
     } catch (e) {
+      debugPrint('[AppInfoService] Failed to initialize package info: $e');
       _version = '';
       _buildNumber = '';
     }
   }
 }
+

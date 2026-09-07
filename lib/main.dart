@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
+import 'core/services/app_info_service.dart';
 import 'core/services/supabase_service.dart';
 import 'core/services/auth_service.dart';
 import './modules/profile_settings/services/notification_service.dart';
@@ -24,6 +25,7 @@ Future<void> main() async {
   }
 
   await dotenv.load(fileName: ".env");
+  await AppInfoService.initialize();
   await SupabaseService.initialize();
   await AuthService.loadSoftLogoutState();
   await NotificationService.initialize();
