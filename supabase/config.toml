@@ -1,0 +1,9 @@
+# Supabase Edge Function configuration
+# Gateway-level JWT verification is disabled for send-push-notification
+# because this function is invoked by pg_net (database webhook trigger),
+# which sends an opaque Secret API key (sb_secret_...) in the `apikey` header
+# rather than a signed JWT in the Authorization header.
+# Authentication is enforced at the application level inside the function handler.
+
+[functions.send-push-notification]
+verify_jwt = false

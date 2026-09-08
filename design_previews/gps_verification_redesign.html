@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPS Verification — Flutter redesign preview (InsightTheme-accurate)</title>
+<!--
+  PREVIEW ONLY — mirrors exactly what will be built in
+  lib/modules/inspection/screens/gps_verification_screen.dart.
+  Colors are the app's real InsightTheme tokens:
+    bg #F4F6FB / ink #0F111A / ink2 #595E73 / ink3 #969CB3
+    blue1 #3563FF / blue2 #0F32CA / blueTint #E4EBFF / blueInk #1336B8
+    amber #E0A526 / amberTint #FEF3DE / amberInk #A66C00
+  Fonts: Inter (UI) + JetBrains Mono (readings) — already used by InsightTheme helpers.
+  Business rule kept: verification zone is 30 m (existing _rangeThresholdMeters),
+  NOT the mockup's 50 m.
+-->
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script>
+tailwind.config = { theme: { extend: {
+  fontFamily: { sans: ['Inter','sans-serif'], mono: ['JetBrains Mono','monospace'] },
+  colors: {
+    bg:'#F4F6FB', ink:'#0F111A', ink2:'#595E73', ink3:'#969CB3',
+    blue1:'#3563FF', blue2:'#0F32CA', bluetint:'#E4EBFF', blueink:'#1336B8',
+    amber1:'#E0A526', ambertint:'#FEF3DE', amberink:'#A66C00'
+  }
+}}}
+</script>
+<style>
+  body { font-family:'Inter',sans-serif; background:#dfe4ee; user-select:none; -webkit-tap-highlight-color:transparent; }
+  .disc { transition: transform .15s ease-out; }
+  .needle { transition: transform .15s ease-out; }
+  @keyframes bounce-soft { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+  .bounce-soft { animation: bounce-soft 1.6s ease-in-out infinite; }
+</style>
+</head>
+<body class="min-h-screen p-6 flex flex-col items-center gap-6">
+
+  <div class="flex items-center gap-3 bg-white rounded-2xl px-4 py-3 shadow-sm border border-slate-200">
+    <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Preview state:</span>
+    <button id="btn-far"  onclick="setState('far')"  class="px-4 py-2 rounded-xl text-xs font-extrabold border transition">Malayo sa Site</button>
+    <button id="btn-near" onclick="setState('near')" class="px-4 py-2 rounded-xl text-xs font-extrabold border transition">Malapit (In Zone)</button>
+    <span class="text-[10px] text-slate-400 font-medium ml-2">Colors = InsightTheme &middot; zone = 30 m (app rule)</span>
+  </div>
+
+  <div id="frame" class="w-full max-w-[380px] h-[810px] rounded-[44px] border-[7px] border-slate-300 shadow-2xl overflow-hidden relative flex flex-col" style="background:#F4F6FB">
+
+    <!-- Header block (replaces InspectionStepHeader) -->
+    <div class="px-4 pt-4 pb-2 z-10">
+      <div class="flex items-center justify-between mb-2">
+        <button class="w-10 h-10 rounded-2xl bg-white shadow-sm border flex items-center justify-center text-ink active:scale-95 transition" style="border-color:#e2e6ef">
+          <i class="fa-solid fa-chevron-left text-sm"></i>
+        </button>
+        <div class="flex-1 mx-2.5 bg-white rounded-2xl py-1.5 px-3 shadow-sm border flex flex-col items-center justify-center" style="border-color:#e2e6ef">
+          <h2 class="font-extrabold text-[13px] text-ink tracking-tight leading-tight">GPS Verification</h2>
+          <p class="text-[10px] text-ink3 font-medium flex items-center justify-center gap-1 mt-0.5">
+            <i id="h-pin" class="fa-solid fa-location-dot text-[10px]" style="color:#E0A526"></i>
+            <span class="font-semibold text-ink2">Balibago Substation</span>
+          </p>
+        </div>
+        <button class="w-10 h-10 rounded-2xl bg-white shadow-sm border flex items-center justify-center text-ink active:scale-95 transition" style="border-color:#e2e6ef">
+          <i class="fa-solid fa-expand text-xs"></i>
+        </button>
+      </div>
+      <div class="bg-white rounded-2xl p-2.5 px-3.5 shadow-sm border flex items-center gap-3" style="border-color:#e2e6ef">
+        <div class="flex-1">
+          <div class="flex justify-between items-center mb-1">
+            <span id="p-label" class="uppercase tracking-wider text-[10px] font-extrabold" style="color:#A66C00">Step 2 of 6</span>
+            <span class="text-[10px] font-mono text-ink3">Verify Coordinates</span>
+          </div>
+          <div class="w-full bg-[#EDF0F7] rounded-full h-1.5 overflow-hidden">
+            <div id="p-bar" class="h-full rounded-full transition-all duration-300" style="width:33.3%;background:#E0A526"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Compass section -->
+    <div class="flex-1 flex flex-col items-center justify-center px-4 relative min-h-0">
+      <div class="relative w-60 h-60 flex items-center justify-center">
+        <div class="absolute -top-2 z-30 flex flex-col items-center">
+          <div style="width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:13px solid #E0A526;filter:drop-shadow(0 2px 2px rgba(15,17,26,.25))"></div>
+        </div>
+        <div id="disc" class="disc w-full h-full rounded-full bg-white relative flex items-center justify-center overflow-hidden"
+             style="box-shadow:0 18px 40px rgba(15,50,202,.16),0 4px 12px rgba(15,17,26,.08);border:4px solid #EDF0F7;transform:rotate(-135deg)">
+          <svg viewBox="0 0 300 300" class="w-full h-full absolute inset-0 p-1">
+            <defs>
+              <radialGradient id="dialGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#ffffff"/><stop offset="85%" stop-color="#F8FAFC"/><stop id="gradEdge" offset="100%" stop-color="#FEF3DE"/>
+              </radialGradient>
+            </defs>
+            <circle id="ring-outer" cx="150" cy="150" r="142" fill="url(#dialGrad)" stroke="#E0A526" stroke-width="1.5"/>
+            <circle id="ring-dash" cx="150" cy="150" r="112" fill="none" stroke="#FEF3DE" stroke-width="1" stroke-dasharray="2,3"/>
+            <g id="ticks"></g>
+            <text x="150" y="40" fill="#E23B4E" font-size="17" font-weight="900" text-anchor="middle" dominant-baseline="middle">N</text>
+            <text x="264" y="150" fill="#595E73" font-size="15" font-weight="800" text-anchor="middle" dominant-baseline="middle">E</text>
+            <text x="150" y="262" fill="#595E73" font-size="15" font-weight="800" text-anchor="middle" dominant-baseline="middle">S</text>
+            <text x="36" y="150" fill="#595E73" font-size="15" font-weight="800" text-anchor="middle" dominant-baseline="middle">W</text>
+          </svg>
+          <div id="needle" class="needle absolute inset-0 flex items-start justify-center pointer-events-none" style="transform:rotate(45deg)">
+            <div class="flex flex-col items-center bounce-soft" style="margin-top:14px">
+              <div class="w-6 h-6 rounded-full flex items-center justify-center shadow-md" style="background:#3563FF;border:2px solid #fff">
+                <i class="fa-solid fa-location-arrow text-white" style="font-size:10px"></i>
+              </div>
+              <span class="font-mono font-extrabold mt-0.5 px-1 rounded border" style="font-size:8px;color:#1336B8;background:#E4EBFF;border-color:#c7d4ff">SITE</span>
+            </div>
+          </div>
+          <div id="hub" class="w-28 h-28 rounded-full flex flex-col items-center justify-center z-10 text-white p-2 transition-all duration-300"
+               style="background:linear-gradient(135deg,#3d4654,#232936);border:4px solid #fff;box-shadow:0 8px 20px rgba(15,17,26,.28)">
+            <span id="hub-cardinal" class="font-black uppercase" style="font-size:10px;letter-spacing:.14em;color:#c9cfdd">SE</span>
+            <div class="flex items-baseline gap-0.5">
+              <span id="hub-deg" class="font-mono font-black tracking-tight" style="font-size:24px">135</span>
+              <span id="hub-degmark" class="font-bold" style="font-size:15px;color:#c9cfdd">&deg;</span>
+            </div>
+            <div class="flex items-center font-mono rounded-full mt-0.5" style="font-size:8px;gap:4px;padding:2px 8px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.18);color:#d7dbe6">
+              <span>Target: <strong>210&deg;</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p id="tip" class="font-medium mt-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-sm border transition-all duration-300"
+         style="font-size:11px;color:#A66C00;background:#FEF3DE;border-color:#f2e3b8">
+        <i id="tip-icon" class="fa-solid fa-circle-info text-xs" style="color:#E0A526"></i>
+        <span id="tip-text">Rotate towards target site (210&deg;)</span>
+      </p>
+    </div>
+
+    <!-- Unified bottom card -->
+    <div class="p-4 pt-1 z-20">
+      <div class="bg-white rounded-3xl p-4 shadow-xl flex flex-col gap-3" style="border:1px solid rgba(21,22,40,.08)">
+
+        <div class="flex items-center justify-between pb-2.5" style="border-bottom:1px solid rgba(21,22,40,.06)">
+          <div class="flex items-center gap-2.5">
+            <div id="r1-icon" class="w-8 h-8 rounded-2xl flex items-center justify-center text-xs font-bold transition-all duration-300" style="background:#FEF3DE;border:1px solid #f2e3b8;color:#A66C00">
+              <i class="fa-solid fa-location-crosshairs"></i>
+            </div>
+            <div>
+              <div class="uppercase font-bold text-ink3" style="font-size:9px;letter-spacing:.1em">Target Site</div>
+              <div class="font-bold text-ink" style="font-size:12px">Balibago Substation</div>
+            </div>
+          </div>
+          <div class="text-right">
+            <div id="r1-dist" class="font-mono font-black text-ink tracking-tight" style="font-size:15px">21.2 km</div>
+            <div id="r1-zone" class="font-bold flex items-center justify-end gap-1" style="font-size:10px;color:#A66C00">
+              <span id="r1-dot" class="rounded-full" style="width:6px;height:6px;background:#E0A526"></span>
+              <span id="r1-zonetext">Outside Zone</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 rounded-2xl" style="background:#F4F6FB;padding:10px;border:1px solid rgba(21,22,40,.06)">
+          <div class="text-center">
+            <div class="font-bold text-ink3 uppercase" style="font-size:8.5px;letter-spacing:.06em">GPS Accuracy</div>
+            <div id="m-acc" class="font-mono font-extrabold text-ink mt-0.5" style="font-size:11.5px">&plusmn;3 m</div>
+          </div>
+          <div class="text-center" style="border-left:1px solid rgba(21,22,40,.08);border-right:1px solid rgba(21,22,40,.08)">
+            <div class="font-bold text-ink3 uppercase" style="font-size:8.5px;letter-spacing:.06em">Status</div>
+            <div id="m-status" class="font-bold mt-0.5" style="font-size:11.5px;color:#A66C00">Too Far</div>
+          </div>
+          <div class="text-center">
+            <div class="font-bold text-ink3 uppercase" style="font-size:8.5px;letter-spacing:.06em">Heading</div>
+            <div id="m-head" class="font-mono font-extrabold mt-0.5" style="font-size:11.5px;color:#595E73">135&deg; (SE)</div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between rounded-xl cursor-pointer active:scale-[.99] transition"
+             style="background:rgba(244,246,251,.8);padding:8px 12px;border:1px solid rgba(21,22,40,.06)">
+          <div class="flex items-center gap-2">
+            <i class="fa-solid fa-globe text-ink3" style="font-size:11px"></i>
+            <span id="r3-coords" class="font-mono font-semibold" style="font-size:10.5px;color:#595E73">14&deg;02'36" N, 121&deg;11'23" E</span>
+          </div>
+          <div id="r3-copy" class="font-bold bg-white rounded px-2 py-0.5 text-ink3" style="font-size:9px;border:1px solid rgba(21,22,40,.1)">
+            <i class="fa-regular fa-copy"></i>
+          </div>
+        </div>
+
+        <button id="cta" class="w-full rounded-2xl font-extrabold uppercase flex items-center justify-center gap-2 transition-all duration-300"
+                style="padding:14px;font-size:11px;letter-spacing:.08em;background:#E5E8F0;color:#969CB3;border:1px solid #d8dce8">
+          <i id="cta-icon" class="fa-solid fa-location-pin-lock"></i>
+          <span id="cta-text">Get closer to the site (&lt; 30 m)</span>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+function renderTicks(){
+  let s='';
+  for(let d=0;d<360;d+=10){
+    const major=d%30===0;
+    const len=major?10:5, col=major?'#595E73':'#cbd5e1', w=major?2:1;
+    s+=`<line x1="150" y1="${12+(major?0:3)}" x2="150" y2="${12+len}" stroke="${col}" stroke-width="${w}" transform="rotate(${d} 150 150)"/>`;
+    if(major&&d%90!==0){
+      const r=(d-90)*Math.PI/180;
+      s+=`<text x="${150+120*Math.cos(r)}" y="${150+120*Math.sin(r)}" fill="#969CB3" font-size="9" font-family="JetBrains Mono" font-weight="600" text-anchor="middle" dominant-baseline="middle">${d}&deg;</text>`;
+    }
+  }
+  document.getElementById('ticks').innerHTML=s;
+}
+const S={
+  far:{pinColor:'#E0A526',labelColor:'#A66C00',barColor:'#E0A526',
+    ring:'#E0A526',dash:'#FEF3DE',grad:'#FEF3DE',
+    discRot:-135,needleRot:45,
+    hubBg:'linear-gradient(135deg,#3d4654,#232936)',hubSub:'#c9cfdd',cardinal:'SE',deg:'135',
+    tipColor:'#A66C00',tipBg:'#FEF3DE',tipBorder:'#f2e3b8',tipIcon:'fa-circle-info',tipIconColor:'#E0A526',
+    tipText:'Rotate towards target site (210\u00B0)',
+    dist:'21.2 km',zoneColor:'#A66C00',zoneText:'Outside Zone',dotColor:'#E0A526',
+    iconBg:'#FEF3DE',iconBorder:'#f2e3b8',iconColor:'#A66C00',
+    statusColor:'#A66C00',statusText:'Too Far',headColor:'#595E73',headText:'135\u00B0 (SE)',
+    ctaBg:'#E5E8F0',ctaColor:'#969CB3',ctaBorder:'#d8dce8',ctaIcon:'fa-location-pin-lock',
+    ctaText:'Get closer to the site (&lt; 30 m)',ctaEnabled:false},
+  near:{pinColor:'#3563FF',labelColor:'#1336B8',barColor:'#3563FF',
+    ring:'#93b0ff',dash:'#E4EBFF',grad:'#E4EBFF',
+    discRot:-210,needleRot:0,
+    hubBg:'linear-gradient(135deg,#3563FF,#0F32CA)',hubSub:'#c9d6ff',cardinal:'SSW',deg:'210',
+    tipColor:'#1336B8',tipBg:'#E4EBFF',tipBorder:'#c7d4ff',tipIcon:'fa-circle-check',tipIconColor:'#3563FF',
+    tipText:'Aligned with site target! Ready to verify.',
+    dist:'25 m',zoneColor:'#1336B8',zoneText:'In Zone (&lt; 30 m)',dotColor:'#3563FF',
+    iconBg:'#E4EBFF',iconBorder:'#c7d4ff',iconColor:'#1336B8',
+    statusColor:'#1336B8',statusText:'In Range',headColor:'#1336B8',headText:'210\u00B0 (SSW)',
+    ctaBg:'linear-gradient(90deg,#3563FF,#0F32CA)',ctaColor:'#ffffff',ctaBorder:'transparent',ctaIcon:'fa-shield-halved',
+    ctaText:'Verify GPS Location Now',ctaEnabled:true}
+};
+function setState(k){
+  const d=S[k], $=id=>document.getElementById(id);
+  $('disc').style.transform=`rotate(${d.discRot}deg)`;
+  $('needle').style.transform=`rotate(${d.needleRot}deg)`;
+  $('h-pin').style.color=d.pinColor; $('p-label').style.color=d.labelColor; $('p-bar').style.background=d.barColor;
+  $('ring-outer').setAttribute('stroke',d.ring); $('ring-dash').setAttribute('stroke',d.dash);
+  $('gradEdge').setAttribute('stop-color',d.grad);
+  const hub=$('hub'); hub.style.background=d.hubBg;
+  $('hub-cardinal').style.color=d.hubSub; $('hub-cardinal').textContent=d.cardinal;
+  $('hub-deg').textContent=d.deg; $('hub-degmark').style.color=d.hubSub;
+  const tip=$('tip'); tip.style.color=d.tipColor; tip.style.background=d.tipBg; tip.style.borderColor=d.tipBorder;
+  $('tip-icon').className=`fa-solid ${d.tipIcon} text-xs`; $('tip-icon').style.color=d.tipIconColor;
+  $('tip-text').innerHTML=d.tipText;
+  $('r1-dist').textContent=d.dist;
+  $('r1-zone').style.color=d.zoneColor; $('r1-zonetext').innerHTML=d.zoneText; $('r1-dot').style.background=d.dotColor;
+  const ic=$('r1-icon'); ic.style.background=d.iconBg; ic.style.borderColor=d.iconBorder; ic.style.color=d.iconColor;
+  $('m-status').style.color=d.statusColor; $('m-status').textContent=d.statusText;
+  $('m-head').style.color=d.headColor; $('m-head').textContent=d.headText;
+  const cta=$('cta'); cta.style.background=d.ctaBg; cta.style.color=d.ctaColor; cta.style.borderColor=d.ctaBorder;
+  cta.style.boxShadow=d.ctaEnabled?'0 10px 24px rgba(53,99,255,.35)':'none';
+  $('cta-icon').className=`fa-solid ${d.ctaIcon}`;
+  $('cta-text').innerHTML=d.ctaText;
+  $('btn-far').style.cssText=k==='far'?'background:#FEF3DE;color:#A66C00;border:1px solid #f2e3b8':'background:#fff;color:#595E73;border:1px solid #e2e6ef';
+  $('btn-near').style.cssText=k==='near'?'background:#E4EBFF;color:#1336B8;border:1px solid #c7d4ff':'background:#fff;color:#595E73;border:1px solid #e2e6ef';
+}
+renderTicks(); setState('far');
+</script>
+</body>
+</html>

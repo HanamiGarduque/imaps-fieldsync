@@ -18,10 +18,10 @@ import '../../../../core/theme/insight_theme.dart';
 class _FolderAccent {
   static Color forStatus(String status) {
     switch (status) {
-      case 'Ongoing':   return const Color(0xFF60A5FA); // electric blue
-      case 'Scheduled': return const Color(0xFFA78BFA); // violet
-      case 'Completed': return const Color(0xFF34D399); // emerald
-      default:          return const Color(0xFFFBBF24); // amber — Pending
+      case 'Ongoing':   return const Color.fromARGB(255, 240, 242, 243); // electric blue
+      case 'Scheduled': return const Color.fromARGB(255, 239, 239, 241); // violet
+      case 'Completed': return const Color.fromARGB(255, 241, 245, 243); // emerald
+      default:          return const Color.fromARGB(255, 246, 245, 244); // amber — Pending
     }
   }
 
@@ -34,7 +34,7 @@ class _FolderAccent {
       case 'Completed':
         return [const Color(0xFF065F46), const Color(0xFF10B981)];
       default: // Pending
-        return [const Color(0xFF92400E), const Color(0xFFF59E0B)];
+        return [const Color.fromARGB(255, 22, 51, 212), const Color.fromARGB(255, 50, 81, 221)];
     }
   }
 }
