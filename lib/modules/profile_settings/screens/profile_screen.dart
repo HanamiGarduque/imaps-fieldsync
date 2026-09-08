@@ -13,6 +13,7 @@ import 'about_insight_screen.dart';
 import '../../auth_startup/screens/security_settings_screen.dart';
 import 'terms_privacy_screen.dart';
 import 'diagnostics_screen.dart';
+import 'help_faq_screen.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
@@ -202,8 +203,8 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   await _performSignOut(dialogContext);
                                 },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: InsightTheme.coral,
-                            disabledBackgroundColor: InsightTheme.coral.withValues(alpha: 0.7),
+                            backgroundColor: const Color.fromARGB(255, 234, 12, 12),
+                            disabledBackgroundColor: const Color.fromARGB(255, 234, 12, 12).withValues(alpha: 0.7),
                             foregroundColor: Colors.white,
                             elevation: 0,
                             minimumSize: const Size(90, 44),
@@ -455,6 +456,17 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                       MaterialPageRoute(
                                         builder: (_) => SecuritySettingsScreen(profile: _currentProfile),
                                       ),
+                                    );
+                                  },
+                                ),
+                                _ActionTile(
+                                  icon: Icons.help_outline_rounded,
+                                  title: 'Help & FAQ',
+                                  subtitle: 'Guide, color codes & field rules',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const HelpFaqScreen()),
                                     );
                                   },
                                 ),
