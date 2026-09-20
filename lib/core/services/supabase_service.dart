@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'db_helper.dart';
 
 class SupabaseService {
   static Future<void> initialize() async {
@@ -14,6 +15,189 @@ class SupabaseService {
   }
 
   static SupabaseClient get client => Supabase.instance.client;
+
+  /// R4 read: absence/reassignment is not a successful delivery. Transport
+  /// failures propagate, unlike the UI's best-effort detail reader.
+  static Future<Map<String, dynamic>?> readOutboxRecoveryJob(String jobId) async {
+    final user = client.auth.currentUser;
+    if (user == null) throw StateError('Recovery requires authenticated session');
+    return await client.from('field_jobs').select()
+        .eq('id', jobId).eq('assigned_inspector_id', user.id).maybeSingle();
+  }
+
+  /// Compare-and-set: WHERE tests the old tuple before BEFORE UPDATE stamps
+  /// NEW.updated_at. RETURNING yields the actual post-trigger revision. Never
+  /// send an updated_at assignment or interpret zero returned rows as success.
+  static Future<Map<String, dynamic>?> conditionalOutboxUpdate(
+    String jobId, String version, String status, Map<String, dynamic> values,
+  ) async {
+    final user = client.auth.currentUser;
+    if (user == null) throw StateError('Recovery requires authenticated session');
+    return await client.from('field_jobs').update(values)
+        .eq('id', jobId).eq('assigned_inspector_id', user.id)
+        .eq('updated_at', version).eq('status', status)
+        .select().maybeSingle();
+  }
+
+  @visibleForTesting
+  static String stablePhotoKey(String localPath) => _stablePhotoKey(localPath);
+
+  @visibleForTesting
+  static String photoStoragePath(String jobId, String localPath) =>
+      'inspections/$jobId/photo_${_stablePhotoKey(localPath)}.jpg';
+
+  @visibleForTesting
+  static String photoRowId(String storagePath) =>
+      const Uuid().v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', storagePath);
+
+  static String? extractStorageObjectPath(String value) {
+    if (value.isEmpty) return null;
+    final parts = value.split('/');
+    if (parts.length >= 3 &&
+        parts.first == 'inspections' &&
+        parts[1].isNotEmpty &&
+        parts.every((p) =>
+            p.isNotEmpty &&
+            p != '.' &&
+            p != '..' &&
+            !p.contains('\\') &&
+            !p.contains('%') &&
+            !p.contains('?') &&
+            !p.contains('#'))) {
+      return value;
+    }
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        !{'https', 'http'}.contains(uri.scheme) ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.fragment.isNotEmpty) {
+      return null;
+    }
+    final segs = uri.pathSegments;
+    if (segs.length < 7 ||
+        segs[0] != 'storage' ||
+        segs[1] != 'v1' ||
+        segs[2] != 'object' ||
+        !{'public', 'sign', 'authenticated'}.contains(segs[3]) ||
+        segs[4] != 'inspection-photos') {
+      return null;
+    }
+    final extracted = segs.skip(5).join('/');
+    final extractedParts = extracted.split('/');
+    if (extractedParts.length >= 3 &&
+        extractedParts.first == 'inspections' &&
+        extractedParts[1].isNotEmpty &&
+        extractedParts.every((p) =>
+            p.isNotEmpty &&
+            p != '.' &&
+            p != '..' &&
+            !p.contains('\\') &&
+            !p.contains('%') &&
+            !p.contains('?') &&
+            !p.contains('#'))) {
+      return extracted;
+    }
+    return null;
+  }
+
+  static bool _isSamePhotoUrl(String? a, String? b, String expectedObjectPath) {
+    if (a == null || b == null) return a == b;
+    if (a == b) return true;
+    final pathA = extractStorageObjectPath(a);
+    final pathB = extractStorageObjectPath(b);
+    if (pathA != null && pathB != null && pathA == pathB) return true;
+    if (pathA != null && pathA == expectedObjectPath) return true;
+    if (pathB != null && pathB == expectedObjectPath) return true;
+    return false;
+  }
+
+  /// Recovery checks every queued photo, not just metadata ID existence.
+  /// Missing evidence is returned as a conflict by the caller; no existing
+  /// object or metadata is overwritten on the basis of an ID alone.
+  static Future<List<String>> verifyOutboxRecoveryPhotos(
+      String jobId, List<Map<String, dynamic>> photos,
+      {bool allowMissingResume = false}) async {
+    final paths = <String>[];
+    for (final photo in photos) {
+      final localPath = photo['photoPath'];
+      if (localPath is! String || photo['isRemoteUrl'] == true) {
+        throw StateError('Recovery requires original deterministic photo identity');
+      }
+      final path = photoStoragePath(jobId, localPath);
+      final id = photoRowId(path);
+      final url = client.storage.from('inspection-photos').getPublicUrl(path);
+      final row = await client.from('field_job_photos').select()
+          .eq('id', id).eq('field_job_id', jobId).maybeSingle();
+      if (row == null && !allowMissingResume) {
+        throw StateError('Missing photo metadata without valid durable base');
+      }
+      final expected = <String, dynamic>{
+        'photo_url': url, 'latitude': photo['latitude'],
+        'longitude': photo['longitude'], 'captured_at': photo['capturedAt'],
+        'notes': photo['notes'],
+      };
+      if (row != null) {
+        for (final entry in expected.entries) {
+          var equal = row[entry.key] == entry.value;
+          if (entry.key == 'photo_url' && row[entry.key] is String) {
+            equal = _isSamePhotoUrl(row[entry.key] as String, entry.value as String, path);
+          } else if (entry.key == 'captured_at' && row[entry.key] is String && entry.value is String) {
+            final a = DateTime.tryParse(row[entry.key] as String);
+            final b = DateTime.tryParse(entry.value as String);
+            equal = a != null && b != null && a.isAtSameMomentAs(b);
+          }
+          if (!equal) throw StateError('Differing photo metadata: ${entry.key}');
+        }
+      }
+
+      final file = File(localPath);
+      final fileExists = await file.exists();
+
+      Uint8List? bytes;
+      try {
+        final downloaded = await client.storage.from('inspection-photos').download(path);
+        if (downloaded.isNotEmpty) {
+          bytes = downloaded;
+        }
+      } catch (_) {
+        bytes = null;
+      }
+
+      if (bytes != null) {
+        if (fileExists) {
+          final local = await file.readAsBytes();
+          if (!listEquals(local, bytes)) throw StateError('Differing photo bytes');
+        } else if (row == null) {
+          throw StateError('Object-only recovery needs local bytes for identity proof');
+        }
+      } else {
+        if (!fileExists) {
+          throw StateError('Missing photo object evidence');
+        }
+        if (!allowMissingResume) {
+          throw StateError('Missing photo object without valid durable base');
+        }
+        await client.storage.from('inspection-photos').upload(
+          path,
+          file,
+          fileOptions: const FileOptions(
+            cacheControl: '3600',
+            upsert: true,
+          ),
+        );
+      }
+
+      if (row == null) {
+        // INSERT, not upsert: a concurrent metadata row must not be overwritten.
+        await client.from('field_job_photos').insert({
+          'id': id, 'field_job_id': jobId, ...expected,
+        });
+      }
+      paths.add(row != null && row['photo_url'] is String ? row['photo_url'] as String : url);
+    }
+    return paths;
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // DEVICE REGISTRATION
@@ -240,6 +424,9 @@ class SupabaseService {
       started_at,
       submitted_at,
       supabase_parcel_id,
+      assignment_instructions,
+      assigned_by_imaps_user_id,
+      assigned_by_name,
       supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
         reference_number,
         applicant_name,
@@ -260,7 +447,11 @@ class SupabaseService {
         .eq('assigned_inspector_id', userId)
         .order('scheduled_date', ascending: true);
 
-    return List<Map<String, dynamic>>.from(response);
+    // Effective local presentation only: the remote row is not rewritten.
+    // Both Tasks and Home Dashboard consume this same protected result.
+    return DBHelper.projectPendingCompletions(
+      List<Map<String, dynamic>>.from(response),
+    );
   }
 
   static Future<String?> fetchJobUpdatedAt(String jobId) async {
@@ -302,7 +493,6 @@ class SupabaseService {
   static Future<void> scheduleJob({
     required String jobId,
     required DateTime date,
-    String? note,
   }) async {
     final dateStr =
         '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -311,7 +501,6 @@ class SupabaseService {
         .update({
           'scheduled_date': dateStr,
           'is_self_scheduled': true,
-          if (note != null && note.trim().isNotEmpty) 'remarks': note.trim(),
         })
         .eq('id', jobId);
   }
@@ -641,6 +830,7 @@ class SupabaseService {
     List<String>? photoPaths,
     int photoCount = 0,
     String? locationLabel,
+    String? submittedAt,
   }) async {
     try {
       await client
@@ -659,7 +849,7 @@ class SupabaseService {
             'checklist_total_count': checklistTotalCount,
             'photo_paths': ?photoPaths,
             'photo_count': photoCount,
-            'submitted_at': DateTime.now().toUtc().toIso8601String(),
+            'submitted_at': submittedAt ?? DateTime.now().toUtc().toIso8601String(),
             // Rework redesign: Review & Submit is the one finalize point,
             // for both a normal submit (already null — harmless) and a
             // rework resubmit (clears the "Modified" signal). status was

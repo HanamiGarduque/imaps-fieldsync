@@ -247,8 +247,6 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  bool _acceptedTerms = false;
-  bool _needsLegalAcceptance = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   
@@ -399,13 +397,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final bioLabel = await BiometricService.primaryBiometricLabel();
     final online = await AuthService.hasConnectivity();
     final cooldownUntil = await SecurePrefsService.getLocalPasscodeCooldownUntil();
-    final acceptedLegalVersion = await SecurePrefsService.getAcceptedLegalVersion() ?? 0;
-    final alreadyAccepted = acceptedLegalVersion >= SecurePrefsService.currentLegalVersion;
 
     if (mounted) {
       setState(() {
-        _needsLegalAcceptance = !alreadyAccepted;
-        _acceptedTerms = alreadyAccepted;
         if (savedEmail != null && savedEmail.isNotEmpty) {
           _emailController.text = savedEmail;
         }
@@ -573,15 +567,6 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (!_validateInputs()) {
-      return;
-    }
-
-    final acceptedLegalVersion = await SecurePrefsService.getAcceptedLegalVersion() ?? 0;
-    final needsLegalAcceptance = acceptedLegalVersion < SecurePrefsService.currentLegalVersion;
-    if (needsLegalAcceptance && !_acceptedTerms) {
-      setState(() {
-        _errorMessage = 'Please acknowledge that you have read and agree to the Terms of Use and Privacy Policy.';
-      });
       return;
     }
 
@@ -1192,45 +1177,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 const SizedBox(height: 16),
 
-                if (_needsLegalAcceptance)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: Checkbox(
-                          value: _acceptedTerms,
-                          activeColor: AppColors.blue1,
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          visualDensity: VisualDensity.compact,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                          onChanged: (val) {
-                            setState(() {
-                              _acceptedTerms = val ?? false;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            setState(() {
-                              _acceptedTerms = !_acceptedTerms;
-                            });
-                          },
-                          child: _buildLegalNoticeRichText(isCentered: false),
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  Center(
-                    child: _buildLegalNoticeRichText(isCentered: true),
-                  ),
-
+                // F3: the acceptance checkbox was removed — signing in is the
+                // acknowledgment. The Terms/Privacy notice and links stay.
+                Center(
+                  child: _buildLegalNoticeRichText(isCentered: true),
+                ),
                 const SizedBox(height: 20),
 
                 Container(

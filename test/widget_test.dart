@@ -9,8 +9,17 @@ void main() {
     await tester.pumpWidget(const MyApp());
     await tester.pump();
 
-    expect(find.text('iMAPS\nFieldSync'), findsOneWidget);
-    expect(find.text('Sign In'), findsOneWidget);
+    // Splash renders the brand as two separate Text widgets (not one
+    // 'iMAPS\nFieldSync' string as the old expectation assumed).
+    expect(find.text('iMAPS'), findsOneWidget);
+    expect(find.text('FieldSync'), findsOneWidget);
+
+    // Session check waits 3s, then routes to LoginScreen via a 700ms fade
+    // (splash_screen.dart _checkSession/_goToLogin).
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 700));
+
+    expect(find.text('Sign in'), findsOneWidget);
   });
 
   testWidgets('Activity heatmap renders in a constrained card without overflow', (WidgetTester tester) async {

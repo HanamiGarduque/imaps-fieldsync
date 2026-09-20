@@ -26,6 +26,12 @@ class UserProfile {
     );
   }
 
+  /// Full display name for greetings/headers. Outer whitespace is trimmed;
+  /// internal spaces and every token are preserved (F2: the dashboard used
+  /// to truncate to the first whitespace token, e.g. "My Tofu" → "My").
+  static String displayFullName(String value) =>
+      value.trim().isEmpty ? 'there' : value.trim();
+
   /// Round-trips with fromMap() — used to cache the profile locally
   /// (SecurePrefsService) so a previously-authenticated inspector can keep
   /// working if a later profile refresh fails only because there's no

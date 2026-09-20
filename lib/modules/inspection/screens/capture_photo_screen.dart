@@ -19,6 +19,7 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../widgets/photo_viewer.dart';
+import '../services/photo_source_resolver.dart';
 import '../widgets/inspection_step_header.dart';
 
 class CapturePhotoScreen extends StatefulWidget {
@@ -216,9 +217,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                     itemCount: _capturedPhotos.length + (_capturedPhotos.length < maxPhotos ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index < _capturedPhotos.length) {
+                        final paths = inspectionDisplayPaths(
+                          _capturedPhotos.map((p) => p['photoPath'] as String).toList(),
+                          widget.task.id, widget.task.photoDetails, widget.task.photoPaths);
                         return _PhotoCell(
-                          photoPath: _capturedPhotos[index]['photoPath'] as String,
-                          allPhotoPaths: _capturedPhotos.map((p) => p['photoPath'] as String).toList(),
+                          photoPath: paths[index],
+                          allPhotoPaths: paths,
                           index: index,
                           onRemove: () => _confirmRemovePhoto(index),
                         );
@@ -598,25 +602,21 @@ class _PhotoCell extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    // FIX: this cell used to always assume `photoPath` was a local device
-    // path (FileImage only). A photo rehydrated for rework
-    // (InspectionProvider.hydrateForRework) has a remote Supabase Storage
-    // URL here instead, which FileImage can't load — the thumbnail was
-    // silently blank/broken for every photo carried over into a rework
-    // session. NetworkImage for a remote URL, FileImage otherwise.
-    final ImageProvider image = isRemotePhotoPath(photoPath)
-        ? NetworkImage(photoPath)
-        : FileImage(File(photoPath)) as ImageProvider;
+    // Use the same private-storage read contract as the fullscreen viewer.
     return GestureDetector(
       onTap: () => openFullscreenPhotoViewer(context, allPhotoPaths, index),
       child: Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16), border: Border.all(color: InsightTheme.line),
-        image: DecorationImage(image: image, fit: BoxFit.cover),
+
         boxShadow: const [BoxShadow(color: Color(0x0A141628), blurRadius: 4, offset: Offset(0, 2))],
       ),
       child: Stack(
         children: [
+          Positioned.fill(child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: AdaptivePhotoImage(path: photoPath),
+          )),
           Positioned(
             left: 0, right: 0, bottom: 0,
             child: Padding(

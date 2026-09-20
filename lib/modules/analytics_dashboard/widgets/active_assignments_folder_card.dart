@@ -1,6 +1,24 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../../../core/theme/insight_theme.dart';
+import '../../tasks/screens/tasks_screen.dart';
+
+/// Human-readable card status derived from the shared lifecycle contract.
+///
+/// Scheduled is display metadata only for Pending tasks. A supplied scheduling
+/// subsection can never override Ongoing, Completed, or Unknown lifecycle state.
+String activeAssignmentStatusLabel(
+  TaskLifecycleCategory lifecycleCategory,
+  PendingTaskSection? pendingSection,
+) {
+  return switch (lifecycleCategory) {
+    TaskLifecycleCategory.pending =>
+      pendingSection == PendingTaskSection.scheduled ? 'Scheduled' : 'Pending',
+    TaskLifecycleCategory.ongoing => 'Ongoing',
+    TaskLifecycleCategory.completed => 'Completed',
+    TaskLifecycleCategory.unknown => 'Unknown',
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // iMAPS FieldSync • Active Assignments — Premium Glossy Folder Card
@@ -49,7 +67,8 @@ class ActiveAssignmentsFolderCard extends StatefulWidget {
   final String location;
   final String applicantName;
   final String applicationType;
-  final String status;
+  final TaskLifecycleCategory lifecycleCategory;
+  final PendingTaskSection? pendingSection;
   final VoidCallback onTap;
 
   const ActiveAssignmentsFolderCard({
@@ -60,7 +79,8 @@ class ActiveAssignmentsFolderCard extends StatefulWidget {
     required this.location,
     required this.applicantName,
     required this.applicationType,
-    required this.status,
+    required this.lifecycleCategory,
+    this.pendingSection,
     required this.onTap,
   });
 
@@ -102,8 +122,12 @@ class _ActiveAssignmentsFolderCardState
 
   @override
   Widget build(BuildContext context) {
-    final accent   = _FolderAccent.forStatus(widget.status);
-    final gradient = _FolderAccent.gradientForStatus(widget.status);
+    final status = activeAssignmentStatusLabel(
+      widget.lifecycleCategory,
+      widget.pendingSection,
+    );
+    final accent = _FolderAccent.forStatus(status);
+    final gradient = _FolderAccent.gradientForStatus(status);
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -180,14 +204,14 @@ class _ActiveAssignmentsFolderCardState
                     referenceNo: widget.referenceNo,
                     inspectionId: widget.inspectionId,
                     date: widget.date,
-                    status: widget.status,
+                    status: status,
                   ),
                 ),
 
                 // ── Layer 6: Status badge ───────────────────────────────────
                 Positioned(
                   top: 14, right: 14,
-                  child: _StatusBadge(status: widget.status, accent: accent),
+                  child: _StatusBadge(status: status, accent: accent),
                 ),
               ],
             ),

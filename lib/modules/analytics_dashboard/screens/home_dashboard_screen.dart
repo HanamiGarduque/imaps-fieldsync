@@ -18,6 +18,27 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../widgets/active_assignments_folder_card.dart';
 import '../../../core/theme/insight_theme.dart';
 
+/// Whether a task belongs in the dashboard's Active Assignments carousel.
+/// Scheduling is presentation metadata and cannot make a non-Pending task active.
+bool isHomeDashboardActiveAssignment(TaskItem task) =>
+    task.lifecycleCategory == TaskLifecycleCategory.pending;
+
+/// The existing dashboard display bucket for a task.
+///
+/// "Scheduled" remains a visual Pending subsection; it is never returned for
+/// Ongoing, Completed, or Unknown lifecycle values.
+String? homeDashboardTaskPresentationCategory(TaskItem task) {
+  return switch (task.lifecycleCategory) {
+    TaskLifecycleCategory.pending =>
+      task.pendingSection == PendingTaskSection.scheduled
+          ? 'Scheduled'
+          : 'Pending',
+    TaskLifecycleCategory.ongoing => 'Ongoing',
+    TaskLifecycleCategory.completed => 'Completed',
+    TaskLifecycleCategory.unknown => null,
+  };
+}
+
 /// ==================================================================
 /// SCREEN — HOME DASHBOARD 
 /// ==================================================================
@@ -52,6 +73,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // complete picture, so this is loaded alongside it in the same fetch
   // rather than issuing a second network/service call.
   List<TaskItem> _allTasks = [];
+  // Keep real fetched metadata for selected normal entry; display is read-only.
+  Map<String, Map<String, dynamic>> _entryJobs = {};
   bool _isLoadingTasks = true;
 
   List<Map<String, dynamic>> _recentActivity = [];
@@ -168,8 +191,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
       if (hasConnection) {
         final jobs = await SupabaseService.fetchMyJobs();
+        _entryJobs = {for (final job in jobs) job['id'] as String: job};
         tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
       } else {
+        _entryJobs = {};
         final localJobs = await DBHelper.getCachedJobs();
         tasks = localJobs.map((j) => TaskItem.fromJob({
               'id': j['id'],
@@ -191,7 +216,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       debugPrint('Error loading tasks: $e');
     }
 
-    final upcoming = tasks.where((t) => t.category == 'Scheduled' || t.category == 'Pending').toList()
+    final upcoming = tasks.where(isHomeDashboardActiveAssignment).toList()
       ..sort((a, b) {
         final aDate = _calendarDateForTask(a) ?? '9999-12-31';
         final bDate = _calendarDateForTask(b) ?? '9999-12-31';
@@ -337,11 +362,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     return parts[0].substring(0, name.length >= 2 ? 2 : 1).toUpperCase();
   }
 
-  String _firstName(String name) {
-    if (name.trim().isEmpty) return "there";
-    return name.trim().split(' ').first;
-  }
-
   String _greeting(DateTime now) {
     if (now.hour < 12) return 'Good morning';
     if (now.hour < 18) return 'Good afternoon';
@@ -351,39 +371,46 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // ----------------------------------------------------------------
   // TASK COMPLETION FLOW — Scheduled / Pending / Ongoing / Completed
   // ----------------------------------------------------------------
-  // Real category values only (TaskItem.category) — the four buckets are
-  // mutually exclusive and sum to the full task count.
+  // The visual Scheduled bucket is the scheduled subsection of Pending.
+  // Unknown tasks stay outside these normal dashboard buckets.
   Map<String, int> get _completionCounts {
-    int scheduled = 0, pending = 0, ongoing = 0, completed = 0;
-    for (final t in _allTasks) {
-      switch (t.category) {
-        case 'Scheduled':
-          scheduled++;
-          break;
-        case 'Pending':
-          pending++;
-          break;
-        case 'Ongoing':
-          ongoing++;
-          break;
-        case 'Completed':
-          completed++;
-          break;
+    final counts = {
+      'Scheduled': 0,
+      'Pending': 0,
+      'Ongoing': 0,
+      'Completed': 0,
+    };
+    for (final task in _allTasks) {
+      final presentationCategory =
+          homeDashboardTaskPresentationCategory(task);
+      if (presentationCategory != null) {
+        counts[presentationCategory] = counts[presentationCategory]! + 1;
       }
     }
-    return {'Scheduled': scheduled, 'Pending': pending, 'Ongoing': ongoing, 'Completed': completed};
+    return counts;
   }
 
-  // Which day-of-month numbers (in `month`) have at least one active task
-  // All active tasks back the dots under each day in both calendar views.
-  // Scheduled tasks use their Visit date; Available Anytime and Ongoing tasks
-  // use their admin Deadline date.
+  // Which day-of-month numbers (in `month`) have at least one active task.
+  // Pending/Scheduled tasks use their Visit date; Pending/Available Anytime
+  // and Ongoing tasks use their admin Deadline date. Unknown and Completed
+  // tasks are not represented as active calendar work.
   String? _calendarDateForTask(TaskItem task) {
-    if (task.category == 'Completed') return null;
-    if (task.category == 'Scheduled') {
-      return task.scheduledDate.isEmpty ? null : task.scheduledDate;
+    switch (task.lifecycleCategory) {
+      case TaskLifecycleCategory.pending:
+        if (task.pendingSection == PendingTaskSection.scheduled) {
+          return task.scheduledDate.isEmpty ? null : task.scheduledDate;
+        }
+        return task.deadlineDate?.isNotEmpty == true
+            ? task.deadlineDate
+            : null;
+      case TaskLifecycleCategory.ongoing:
+        return task.deadlineDate?.isNotEmpty == true
+            ? task.deadlineDate
+            : null;
+      case TaskLifecycleCategory.completed:
+      case TaskLifecycleCategory.unknown:
+        return null;
     }
-    return task.deadlineDate?.isNotEmpty == true ? task.deadlineDate : null;
   }
 
   Set<int> _taskDaysInMonth(DateTime month) {
@@ -435,7 +462,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       final taskDay = DateTime(visit.year, visit.month, visit.day);
       final todayDay = DateTime(today.year, today.month, today.day);
       final daysUntilTask = taskDay.difference(todayDay).inDays;
-      if (task.category == 'Scheduled') {
+      if (task.pendingSection == PendingTaskSection.scheduled) {
         if (daysUntilTask <= 1) return 0;
         if (daysUntilTask <= 3) return 1;
       } else {
@@ -511,7 +538,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   @override
   Widget build(BuildContext context) {
     final initials = _getInitials(widget.profile.fullName);
-    final firstName = _firstName(widget.profile.fullName);
+    final firstName = UserProfile.displayFullName(widget.profile.fullName);
     final greeting = _greeting(_now);
     final taskDays = _taskDaysInMonth(_calendarMonth);
     final tasksByDay = _tasksByDayInMonth(_calendarMonth);
@@ -939,9 +966,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       applicationType: _upcomingTasks[index].applicationType?.isNotEmpty == true
                                           ? _upcomingTasks[index].applicationType!
                                           : _upcomingTasks[index].landUseClass,
-                                      status: _upcomingTasks[index].category,
+                                      lifecycleCategory:
+                                          _upcomingTasks[index].lifecycleCategory,
+                                      pendingSection:
+                                          _upcomingTasks[index].pendingSection,
                                       onTap: () => Navigator.of(context).push(
-                                          MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: _upcomingTasks[index]))),
+                                          MaterialPageRoute(builder: (_) => ParcelDetailScreen(
+                                            task: _upcomingTasks[index],
+                                            fetchedJob: _entryJobs[_upcomingTasks[index].id],
+                                          ))),
                                     ),
                                   ),
                                 ),

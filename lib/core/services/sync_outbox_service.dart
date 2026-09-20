@@ -87,6 +87,26 @@ class SyncOutboxService {
   SyncOutboxService._();
 
   static bool _draining = false;
+  static bool _startupRecoveryDone = false;
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>?> Function(String)? recoveryReadForTesting;
+  @visibleForTesting
+  static Future<Map<String, dynamic>?> Function(
+      String, String, String, Map<String, dynamic>)? recoveryWriteForTesting;
+
+  @visibleForTesting
+  static void resetRecoverySessionForTesting() {
+    if (_draining) throw StateError('Cannot reset a live drain');
+    _startupRecoveryDone = false;
+    _knownGoodUpdatedAt.clear();
+    recoveryReadForTesting = null;
+    recoveryWriteForTesting = null;
+    _debounce?.cancel();
+    _debounce = null;
+    _connSub?.cancel();
+    _connSub = null;
+  }
   static StreamSubscription<List<ConnectivityResult>>? _connSub;
   static Timer? _debounce;
   static const _lastSyncPrefsKey = 'field_sync_last_success';
@@ -422,6 +442,10 @@ class SyncOutboxService {
     if (_draining) return;
     _draining = true;
     try {
+      if (!_startupRecoveryDone) {
+        await DBHelper.recoverAbandonedClaims();
+        _startupRecoveryDone = true;
+      }
       final allActions = await DBHelper.getActionableActions();
       final actions = onlyJobId == null
           ? allActions
@@ -594,6 +618,10 @@ class SyncOutboxService {
     final payload = Map<String, dynamic>.from(
       jsonDecode(action['payload'] as String) as Map,
     );
+    if (payload['r4RecoveryRequired'] == true) {
+      await _reconcileInterruptedAction(action, payload);
+      return;
+    }
     await _throwIfServerVersionConflict(
       type: type,
       jobId: jobId,
@@ -701,6 +729,7 @@ class SyncOutboxService {
           photoPaths: photoPaths,
           photoCount: photoPaths.length,
           locationLabel: payload['locationLabel'] as String?,
+          submittedAt: action['created_at'] as String?,
         );
         break;
       case 'checklist_update':
@@ -783,6 +812,158 @@ class SyncOutboxService {
       }
     }
   }
+
+  static bool _sameEvidence(dynamic a, dynamic b) {
+    if (a is Map && b is Map) {
+      return a.length == b.length && a.keys.every((k) =>
+          b.containsKey(k) && _sameEvidence(a[k], b[k]));
+    }
+    if (a is List && b is List) {
+      return a.length == b.length &&
+          List.generate(a.length, (i) => i).every((i) => _sameEvidence(a[i], b[i]));
+    }
+    return a == b;
+  }
+
+  static Future<void> _reconcileInterruptedAction(
+      Map<String, dynamic> action, Map<String, dynamic> payload) async {
+    final jobId = action['job_id'] as String;
+    final type = action['type'] as String;
+    final remote = await (recoveryReadForTesting ??
+        SupabaseService.readOutboxRecoveryJob)(jobId);
+    if (remote == null) throw _OutboxConflictException('Missing or reassigned job');
+    final status = remote['status'] as String?;
+    if (!{'assigned', 'approved', 'in_progress', 'completed'}.contains(status)) {
+      throw _OutboxConflictException('Unsupported remote lifecycle');
+    }
+    final desired = <String, dynamic>{};
+    void fields(Map<String, String> mapping, {bool omitNull = false}) {
+      for (final entry in mapping.entries) {
+        if (!payload.containsKey(entry.value)) {
+          throw _OutboxConflictException('Missing queued ${entry.value}');
+        }
+        if (!omitNull || payload[entry.value] != null) {
+          desired[entry.key] = payload[entry.value];
+        }
+      }
+    }
+    bool matches() => desired.entries.every((e) =>
+        remote.containsKey(e.key) && _sameEvidence(remote[e.key], e.value));
+    final now = DateTime.now().toUtc().toIso8601String();
+    switch (type) {
+      case 'mark_ongoing':
+        if (status == 'completed' ||
+            (status == 'in_progress' && remote['started_at'] != null)) {
+          await _recoveryDiagnostic(action, 'Satisfied/superseded; no remote replay');
+          return;
+        }
+        if (status != 'in_progress') desired['status'] = 'in_progress';
+        if (remote['started_at'] == null) desired['started_at'] = now;
+        break;
+      case 'gps_confirm':
+        fields({'confirmed_latitude': 'latitude', 'confirmed_longitude': 'longitude',
+          'gps_accuracy_m': 'accuracyMeters'});
+        if (matches() && remote['gps_confirmed_at'] != null &&
+            remote['started_at'] != null &&
+            {'in_progress', 'completed'}.contains(status)) {
+          await _recoveryDiagnostic(action, 'GPS satisfied; audit delivery unknown');
+          return;
+        }
+        if (status == 'completed' || remote['gps_confirmed_at'] != null ||
+            remote['confirmed_latitude'] != null || remote['confirmed_longitude'] != null) {
+          throw _OutboxConflictException('GPS differs or partially executed');
+        }
+        desired.addAll({'status': 'in_progress', 'gps_confirmed_at': now,
+          if (remote['started_at'] == null) 'started_at': now});
+        break;
+      case 'checklist_update':
+        fields({'checklist_data': 'checklistData',
+          'checklist_completed_count': 'checklistCompletedCount',
+          'checklist_total_count': 'checklistTotalCount'});
+        break;
+      case 'current_step_update':
+        fields({'current_step': 'currentStep'});
+        if (payload['stepTimestamps'] is Map) {
+          desired['step_timestamps'] = (payload['stepTimestamps'] as Map)
+              .map((k, v) => MapEntry(k.toString(), v.toString()));
+        }
+        if (!matches() && remote['current_step'] is num &&
+            desired['current_step'] is num &&
+            remote['current_step'] > desired['current_step']) {
+          throw _OutboxConflictException('Cannot move progress backward');
+        }
+        break;
+      case 'findings_update':
+        fields({'observations': 'observations', 'discrepancies': 'discrepancies',
+          'recommendations': 'recommendations', 'inspector_notes': 'inspectorNotes'});
+        break;
+      case 'photos_update':
+      case 'submit_inspection':
+        final photos = payload[type == 'photos_update' ? 'photos' : 'photosData'];
+        if (photos is! List) {
+          throw _OutboxConflictException('Missing complete queued photo evidence');
+        }
+        final List<String> paths;
+        try {
+          final base = payload[_conflictSnapshotKey];
+          final version = remote['updated_at'];
+          paths = await SupabaseService.verifyOutboxRecoveryPhotos(jobId,
+              photos.map((p) => Map<String, dynamic>.from(p as Map)).toList(),
+              allowMissingResume: status != 'completed' && base is String &&
+                  base.isNotEmpty && version is String && _sameInstant(base, version));
+        } on StateError catch (e) {
+          throw _OutboxConflictException(e.message.toString());
+        }
+        desired.addAll({'photo_paths': paths, 'photo_count': paths.length});
+        if (type == 'submit_inspection') {
+          fields({'findings': 'findings', 'is_compliant': 'isCompliant',
+            'inspection_result': 'inspectionResult',
+            'checklist_data': 'checklistData',
+            'checklist_completed_count': 'checklistCompletedCount',
+            'checklist_total_count': 'checklistTotalCount'});
+          fields({'observations': 'observations', 'discrepancies': 'discrepancies',
+            'recommendations': 'recommendations', 'inspector_notes': 'inspectorNotes'},
+            omitNull: true);
+          if (matches() && status == 'completed' && remote['submitted_at'] != null &&
+              remote['rework_started_at'] == null) {
+            await _recoveryDiagnostic(action, 'Submission satisfied; audit delivery unknown');
+            return;
+          }
+          if (remote['rework_started_at'] != null || remote['submitted_at'] != null) {
+            throw _OutboxConflictException('Submission/rework revision ambiguous');
+          }
+          final intendedSubmittedAt = payload['submittedAt'] ?? action['created_at'];
+          if (intendedSubmittedAt == null ||
+              intendedSubmittedAt is! String ||
+              intendedSubmittedAt.trim().isEmpty) {
+            throw _OutboxConflictException('Original intended submitted_at unavailable');
+          }
+          desired.addAll({'status': 'completed', 'submitted_at': intendedSubmittedAt.trim()});
+        }
+        break;
+      default:
+        throw _OutboxConflictException('Unsupported interrupted action type: $type');
+    }
+    if (matches()) {
+      await _recoveryDiagnostic(action, 'Business evidence satisfied; no remote replay');
+      return;
+    }
+    final base = payload[_conflictSnapshotKey];
+    final version = remote['updated_at'];
+    if (status == 'completed' || base is! String || version is! String ||
+        base.isEmpty || !_sameInstant(base, version)) {
+      throw _OutboxConflictException('No defensible unchanged durable base for recovery');
+    }
+    final result = await (recoveryWriteForTesting ?? SupabaseService.conditionalOutboxUpdate)(
+        jobId, version, status!, desired);
+    if (result == null) throw _OutboxConflictException('Conditional recovery affected zero rows');
+    await _recoveryDiagnostic(action, 'Guarded business write accepted; no reconstructed activity');
+  }
+
+  static Future<void> _recoveryDiagnostic(Map<String, dynamic> action, String message) =>
+      DBHelper.logSyncEvent(eventType: 'interrupted_recovery', result: 'info',
+        message: message, jobId: action['job_id'] as String,
+        pendingActionId: action['id'] as String);
 
   static Future<Map<String, dynamic>> _withConflictSnapshot({
     required String jobId,

@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
+import '../services/photo_source_resolver.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../../tasks/screens/tasks_screen.dart'; // To access TaskItem class
 
@@ -321,14 +322,25 @@ class InspectionProvider extends ChangeNotifier {
     _capturedPhotos
       ..clear()
       ..addAll(
-        task.photoPaths.map(
-          (path) => {
-            'photoPath': path,
-            'notes': '',
-            'latitude': null,
-            'longitude': null,
-            'capturedAt': task.submittedAt,
-            'isRemoteUrl': true,
+        PhotoSourceResolver.evidence(task.photoDetails, task.photoPaths).map(
+          (photo) {
+            final path = photo['photoPath'] as String;
+            // Existing upload API uses this flag to preserve remote evidence;
+            // never mark an arbitrary local/invalid value as remote.
+            bool remote = PhotoSourceResolver.isObjectPath(path);
+            if (PhotoSourceResolver.classify(path) == PhotoSourceKind.remoteHttp) {
+              try {
+                remote = inspectionPhotoResolver().objectPath(path) != null;
+              } catch (_) {
+                remote = false;
+              }
+            }
+            return {
+              ...photo,
+              'notes': photo['notes'] ?? '',
+              'capturedAt': photo['captured_at'] ?? task.submittedAt,
+              'isRemoteUrl': remote,
+            };
           },
         ),
       );
@@ -771,7 +783,6 @@ class InspectionProvider extends ChangeNotifier {
                   (insp['is_compliant'] == 1
                       ? 'Compliant'
                       : 'With Discrepancy'),
-              'remarks': insp['boundary_status'],
               'updated_at': insp['updated_at'],
             })
             .eq('id', insp['id']);

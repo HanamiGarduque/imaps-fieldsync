@@ -10,6 +10,11 @@ import '../../modules/auth_startup/services/secure_prefs_service.dart';
 class DBHelper {
   static Database? _database;
 
+  /// Inject an isolated SQLite connection in persistence tests. Never opens or
+  /// closes an application database; the test owns the connection lifecycle.
+  @visibleForTesting
+  static void useDatabaseForTesting(Database? db) => _database = db;
+
   static Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDB();
@@ -117,7 +122,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 9,
+      version: 11,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -190,8 +195,23 @@ class DBHelper {
             'ALTER TABLE local_inspections ADD COLUMN step_timestamps TEXT',
           );
         }
+        if (oldVersion < 10) {
+          await createInspectionRetentionTable(db);
+        }
+        if (oldVersion < 11) {
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN assigned_by_imaps_user_id TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN assigned_by_name TEXT',
+          );
+        }
       },
       onCreate: (db, version) async {
+        await createInspectionRetentionTable(db);
         // Table for caching assigned jobs
         await db.execute('''
           CREATE TABLE local_jobs(
@@ -206,6 +226,9 @@ class DBHelper {
             barangay TEXT,
             reference_number TEXT,
             application_type TEXT,
+            assignment_instructions TEXT,
+            assigned_by_imaps_user_id TEXT,
+            assigned_by_name TEXT,
             cached_updated_at TEXT,
             rework_started_at TEXT,
             parcel_lat REAL,
@@ -312,41 +335,207 @@ class DBHelper {
     )
   ''';
 
+  /// Shared by the version-10 upgrade and fresh database creation.
+  static Future<void> createInspectionRetentionTable(DatabaseExecutor db) =>
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS inspection_job_retention(
+          job_id TEXT PRIMARY KEY NOT NULL,
+          retained_at TEXT NOT NULL
+        )
+      ''');
+
+  /// Normal step entry only. No lifecycle transition and no network request.
+  /// The fetched payload is optional for Tasks/offline entry, where the exact
+  /// cached row already exists. Cache + retention commit together.
+  static Future<void> retainInspectionJob(
+    String jobId, {
+    Map<String, dynamic>? fetchedJob,
+  }) async {
+    if (jobId.isEmpty || (fetchedJob != null && fetchedJob['id'] != jobId)) {
+      throw StateError('Inspection entry requires the exact field job.');
+    }
+    final db = await database;
+    await db.transaction((txn) async {
+      if (fetchedJob != null) {
+        final effective = _projectPendingCompletions(
+          [fetchedJob], await _pendingCompletionJobIds(txn),
+        ).single;
+        await txn.insert('local_jobs', _cachedJobRow(effective),
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      final rows = await txn.query('local_jobs', where: 'id = ?', whereArgs: [jobId]);
+      if (rows.length != 1) {
+        throw StateError('Inspection entry requires the exact cached field job.');
+      }
+      // Retention is not a way into completed rework or unsupported lifecycle.
+      if (!const ['assigned', 'Pending', 'pending', 'in_progress', 'in-progress', 'ongoing']
+          .contains(rows.single['status'])) {
+        throw StateError('Only unfinished normal inspections can be retained.');
+      }
+      await txn.insert('inspection_job_retention', {
+        'job_id': jobId,
+        'retained_at': DateTime.now().toUtc().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    });
+  }
+
+  /// Called only after confirmed online acceptance, outside the business
+  /// submission catch. Failure leaves retention intact for recovery via cache.
+  /// Returning false reports cleanup failure without resubmitting remote work.
+  static Future<bool> finalizeAcceptedOnlineInspection(String jobId) async {
+    try {
+      final db = await database;
+      await db.transaction((txn) async {
+        await txn.update('local_jobs', {'status': 'completed'},
+            where: 'id = ?', whereArgs: [jobId]);
+        await txn.delete('inspection_job_retention',
+            where: 'job_id = ?', whereArgs: [jobId]);
+      });
+      return true;
+    } catch (e) {
+      debugPrint('Online inspection accepted; local cleanup failed for $jobId: $e');
+      return false;
+    }
+  }
+
   // --- LOCAL JOBS CACHING ---
+
+  static Future<Set<String>> _pendingCompletionJobIds(
+    DatabaseExecutor db,
+  ) async {
+    final rows = await db.rawQuery('''
+      SELECT j.id FROM local_jobs j
+      WHERE j.status IN ('completed', 'Completed', 'submitted')
+      AND EXISTS (
+        SELECT 1 FROM pending_actions a
+        WHERE a.job_id = j.id AND a.type = 'submit_inspection'
+        AND a.status IN ('pending', 'failed', 'syncing', 'conflict')
+      )
+    ''');
+    return rows.map((row) => row['id'] as String).toSet();
+  }
+
+  static List<Map<String, dynamic>> _projectPendingCompletions(
+    List<Map<String, dynamic>> jobs,
+    Set<String> protectedIds,
+  ) {
+    return jobs.map((job) {
+      if (!protectedIds.contains(job['id'])) return Map<String, dynamic>.of(job);
+      switch (job['status']) {
+        case 'assigned':
+        case 'Pending':
+        case 'pending':
+        case 'in_progress':
+        case 'in-progress':
+        case 'ongoing':
+          return {...job, 'status': 'completed'};
+        case 'completed':
+        case 'Completed':
+        case 'submitted':
+          return Map<String, dynamic>.of(job);
+        default:
+          // Field work is complete; remote disagreement is a separate local
+          // diagnostic, not a reason to fail every consumer's refresh. These
+          // keys are in-memory only (_cachedJobRow uses an explicit allowlist).
+          // Log classification only, never arbitrary remote text or payloads.
+          debugPrint(
+            '[DB] Field job ${job['id']}: unsupported remote lifecycle; '
+            'local pending completion protection active.',
+          );
+          return {
+            ...job,
+            'status': 'completed',
+            '_localPendingCompletionConflict': true,
+            '_remoteStatusSnapshot': job['status'],
+          };
+      }
+    }).toList();
+  }
+
+  /// Shared single-job cache mapping. Used by full-list cacheJobs() and
+  /// normal inspection entry so both persist identical metadata.
+  static Map<String, dynamic> _cachedJobRow(Map<String, dynamic> job) {
+    final app = job['supabase_zoning_applications'] ?? {};
+    final parcel = job['supabase_parcels'] ?? {};
+    final rawAssignedByName = job['assigned_by_name'];
+    final normalizedAssignedByName = rawAssignedByName is String
+        ? rawAssignedByName.trim()
+        : rawAssignedByName?.toString().trim();
+    return {
+      'id': job['id'],
+      'local_inspection_id': job['local_inspection_id'],
+      'status': job['status'],
+      'scheduled_date': job['scheduled_date'],
+      'deadline_date': job['deadline_date'],
+      'is_self_scheduled': (job['is_self_scheduled'] == true) ? 1 : 0,
+      'supabase_parcel_id': job['supabase_parcel_id'],
+      'applicant_name': app['applicant_name'] ?? 'Unknown Applicant',
+      'barangay': app['barangay'] ?? 'No barangay listed',
+      'reference_number': app['reference_number'] ?? '',
+      'application_type': app['application_type'],
+      'assignment_instructions': job['assignment_instructions'],
+      'assigned_by_imaps_user_id': job['assigned_by_imaps_user_id']?.toString(),
+      'assigned_by_name': (normalizedAssignedByName != null && normalizedAssignedByName.isNotEmpty)
+          ? normalizedAssignedByName
+          : null,
+      'cached_updated_at': job['updated_at'],
+      'rework_started_at': job['rework_started_at'],
+      'parcel_lat': parcel['latitude'],
+      'parcel_lng': parcel['longitude'],
+      'lot_area_sqm': parcel['lot_area_sqm'],
+      'declared_land_use':
+          parcel['declared_land_use'] ?? 'Single-detached residential',
+      'parcel_address': parcel['address'] ?? '',
+    };
+  }
+
+  /// Local UI projection, never a remote write. One rule for every consumer
+  /// and cache replacement; acknowledgement removes the exception.
+  static Future<List<Map<String, dynamic>>> projectPendingCompletions(
+    List<Map<String, dynamic>> jobs,
+  ) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      return _projectPendingCompletions(
+        jobs,
+        await _pendingCompletionJobIds(txn),
+      );
+    });
+  }
 
   static Future<void> cacheJobs(List<Map<String, dynamic>> jobs) async {
     final db = await database;
-    final batch = db.batch();
+    await db.transaction((txn) async {
+      final protectedIds = await _pendingCompletionJobIds(txn);
+      final effectiveJobs = _projectPendingCompletions(jobs, protectedIds);
+      // Only actual canonical remote completion releases unfinished retention.
+      // Projection above remains exclusively pending-completion behavior.
+      for (final job in jobs.where((job) => job['status'] == 'completed')) {
+        await txn.delete('inspection_job_retention',
+            where: 'job_id = ?', whereArgs: [job['id']]);
+      }
+      final retained = await txn.query('inspection_job_retention');
+      protectedIds.addAll(retained.map((row) => row['job_id'] as String));
+      final batch = txn.batch();
 
-    // Clear old local jobs first before caching the latest fetched list
-    batch.delete('local_jobs');
+      // Separate unfinished-work and pending-completion reasons protect rows.
+      // Unretained rows still follow ordinary full-refresh replacement.
+      if (protectedIds.isEmpty) {
+        batch.delete('local_jobs');
+      } else {
+        batch.delete(
+          'local_jobs',
+          where: 'id NOT IN (${List.filled(protectedIds.length, '?').join(',')})',
+          whereArgs: protectedIds.toList(),
+        );
+      }
 
-    for (final job in jobs) {
-      final app = job['supabase_zoning_applications'] ?? {};
-      final parcel = job['supabase_parcels'] ?? {};
-      batch.insert('local_jobs', {
-        'id': job['id'],
-        'local_inspection_id': job['local_inspection_id'],
-        'status': job['status'],
-        'scheduled_date': job['scheduled_date'],
-        'deadline_date': job['deadline_date'],
-        'is_self_scheduled': (job['is_self_scheduled'] == true) ? 1 : 0,
-        'supabase_parcel_id': job['supabase_parcel_id'],
-        'applicant_name': app['applicant_name'] ?? 'Unknown Applicant',
-        'barangay': app['barangay'] ?? 'No barangay listed',
-        'reference_number': app['reference_number'] ?? '',
-        'application_type': app['application_type'],
-        'cached_updated_at': job['updated_at'],
-        'rework_started_at': job['rework_started_at'],
-        'parcel_lat': parcel['latitude'],
-        'parcel_lng': parcel['longitude'],
-        'lot_area_sqm': parcel['lot_area_sqm'],
-        'declared_land_use':
-            parcel['declared_land_use'] ?? 'Single-detached residential',
-        'parcel_address': parcel['address'] ?? '',
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
-    }
-    await batch.commit(noResult: true);
+      for (final job in effectiveJobs) {
+        batch.insert('local_jobs', _cachedJobRow(job),
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   static Future<List<Map<String, dynamic>>> getCachedJobs() async {
@@ -365,7 +554,7 @@ class DBHelper {
     );
     if (rows.isEmpty) return null;
     final value = rows.first['cached_updated_at'];
-    return value == null ? null : value.toString();
+    return value?.toString();
   }
 
   // --- LOCAL INSPECTIONS ---
@@ -494,17 +683,93 @@ class DBHelper {
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
-    await db.insert('pending_actions', {
-      'id': id,
-      'type': type,
-      'job_id': jobId,
-      'payload': jsonEncode(payload),
-      'status': 'pending',
-      'retry_count': 0,
-      'last_error': null,
-      'created_at': now,
-      'updated_at': now,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.transaction((txn) async {
+      await txn.insert('pending_actions', {
+        'id': id,
+        'type': type,
+        'job_id': jobId,
+        'payload': jsonEncode(payload),
+        'status': 'pending',
+        'retry_count': 0,
+        'last_error': null,
+        'created_at': now,
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      if (type == 'gps_confirm' || type == 'mark_ongoing') {
+        // A durable start action, not retention or a network failure, accepts
+        // local field work. Queue replacement and lifecycle commit together.
+        final rows = await txn.query('local_jobs',
+            columns: ['status'], where: 'id = ?', whereArgs: [jobId]);
+        if (rows.length != 1) {
+          throw StateError('Offline start requires the exact cached field job.');
+        }
+        switch (rows.single['status']) {
+          case 'assigned':
+          case 'Pending':
+          case 'pending':
+          case 'in_progress':
+          case 'in-progress':
+          case 'ongoing':
+            final updated = await txn.update('local_jobs',
+                {'status': 'in_progress'}, where: 'id = ?', whereArgs: [jobId]);
+            if (updated != 1) {
+              throw StateError('Offline start requires the exact cached field job.');
+            }
+            break;
+          default:
+            // Preserve existing enqueue semantics for completed/unsupported
+            // rows, but never downgrade completion or invent their lifecycle.
+            break;
+        }
+        // Unfinished inspection retention is deliberately not retired here.
+      }
+      if (type == 'submit_inspection') {
+        // Field work is complete, delivery is not. Neither write may survive
+        // alone; a missing cache row is also a failed acceptance, not success.
+        final updated = await txn.update(
+          'local_jobs',
+          {'status': 'completed'},
+          where: 'id = ?',
+          whereArgs: [jobId],
+        );
+        if (updated != 1) {
+          throw StateError('Final Submit requires the exact cached field job.');
+        }
+        // Retention handoff: unfinished-work retention ends in the same
+        // transaction that durably accepts the offline completion.
+        await txn.delete('inspection_job_retention',
+            where: 'job_id = ?', whereArgs: [jobId]);
+      }
+    });
+  }
+
+  /// R4: called once under the outbox's process guard before new claims.
+  /// The durable marker routes retries back through reconciliation, NEVER
+  /// ordinary replay. Preserve action identity, payload fields and retry count.
+  static Future<void> recoverAbandonedClaims() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      final rows = await txn.query('pending_actions', where: "status = 'syncing'");
+      for (final row in rows) {
+        final raw = row['payload'] as String;
+        try {
+          final payload = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+          payload['r4RecoveryRequired'] = true;
+          await txn.update('pending_actions', {
+            'payload': jsonEncode(payload),
+            'status': 'failed',
+            'last_error': 'Interrupted claim: remote reconciliation required.',
+          }, where: "id = ? AND status = 'syncing' AND payload = ?",
+              whereArgs: [row['id'], raw]);
+        } catch (_) {
+          await txn.update('pending_actions', {
+            'status': 'conflict',
+            'last_error': 'Interrupted claim has invalid payload; review required.',
+          }, where: "id = ? AND status = 'syncing' AND payload = ?",
+              whereArgs: [row['id'], raw]);
+        }
+      }
+    });
   }
 
   /// Rows ready to (re)try — pending or previously-failed, oldest first so
@@ -547,6 +812,7 @@ class DBHelper {
   static Future<void> wipeAllLocalData() async {
     final db = await database;
     await db.transaction((txn) async {
+      await txn.delete('inspection_job_retention');
       await txn.delete('local_jobs');
       await txn.delete('local_inspections');
       await txn.delete('local_photos');
@@ -574,7 +840,7 @@ class DBHelper {
     await db.update(
       'pending_actions',
       {'status': 'synced', 'updated_at': DateTime.now().toIso8601String()},
-      where: 'id = ?',
+      where: "id = ? AND status = 'syncing'",
       whereArgs: [id],
     );
     await db.rawDelete('''
@@ -604,7 +870,7 @@ class DBHelper {
     final db = await database;
     await db.rawUpdate(
       "UPDATE pending_actions SET status = 'failed', retry_count = retry_count + 1, "
-      "last_error = ?, updated_at = ? WHERE id = ?",
+      "last_error = ?, updated_at = ? WHERE id = ? AND status = 'syncing'",
       [error, DateTime.now().toIso8601String(), id],
     );
   }
@@ -618,7 +884,7 @@ class DBHelper {
         'last_error': error,
         'updated_at': DateTime.now().toIso8601String(),
       },
-      where: 'id = ?',
+      where: "id = ? AND status = 'syncing'",
       whereArgs: [id],
     );
   }
@@ -749,7 +1015,7 @@ class DBHelper {
             'id': a['id'] ?? const Uuid().v4(),
             'pending_action_id': a['id'],
             'job_id': a['job_id'],
-            'event_type': 'sync_${status}',
+            'event_type': 'sync_$status',
             'result': result,
             'message': message,
             // Sanitization rule (Sync DB audit): never copy the raw outbox
@@ -759,7 +1025,7 @@ class DBHelper {
             'technical_details': jsonEncode({
               'actionType': type,
               'retryCount': a['retry_count'] ?? 0,
-              if (lastError != null) 'lastError': lastError,
+              'lastError': ?lastError,
             }),
             'created_at': updatedAt,
           }, conflictAlgorithm: ConflictAlgorithm.ignore);

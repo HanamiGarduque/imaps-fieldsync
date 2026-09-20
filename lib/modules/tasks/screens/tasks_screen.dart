@@ -34,13 +34,33 @@ const List<String> rosarioBarangays = [
 /// ==================================================================
 /// MODEL
 /// ==================================================================
+enum TaskLifecycleCategory { pending, ongoing, completed, unknown }
+
+enum PendingTaskSection { availableAnytime, scheduled }
+
+/// Transitional read compatibility for field_jobs.status.
+///
+/// Matching is deliberately exact and case-sensitive. Do not trim, lowercase,
+/// coerce, or use substring matching here: anything outside this approved map
+/// must remain visible to diagnostics rather than entering a normal task list.
+TaskLifecycleCategory mapTaskStatusToLifecycle(String? status) {
+  return switch (status) {
+    'assigned' || 'Pending' || 'pending' => TaskLifecycleCategory.pending,
+    'in_progress' || 'in-progress' || 'ongoing' =>
+      TaskLifecycleCategory.ongoing,
+    'completed' || 'Completed' || 'submitted' =>
+      TaskLifecycleCategory.completed,
+    _ => TaskLifecycleCategory.unknown,
+  };
+}
+
 class TaskItem {
   final String id;
   final String? parcelId;
   final String name;
   final String location;
   final String parcels; 
-  final String status;
+  final String? status;
   final String inspectionNo;
   final String scheduledDate;
   final String? deadlineDate;
@@ -50,6 +70,12 @@ class TaskItem {
   final String? applicationType;
 
   final String? findings;
+  final String? assignmentInstructions;
+  // Loop 3 — Assigning Planning Officer (read-only; iMAPS-owned).
+  // Never written by FieldSync. Null when columns are absent from Supabase
+  // (schema not yet applied) — display remains neutral/unavailable.
+  final String? assignedByImapsUserId;
+  final String? assignedByName;
   final String? observations;
   final String? discrepancies;
   final String? recommendations;
@@ -100,7 +126,9 @@ class TaskItem {
     required this.parcels, required this.status, required this.inspectionNo, 
     this.scheduledDate = '', this.deadlineDate, this.landUseClass = 'Not yet on file', this.lotAreaSqm,
     this.propertyIndexNumber, this.applicationType, this.findings, this.observations,
-    this.discrepancies, this.recommendations, this.inspectorNotes, this.inspectionResult,
+    this.discrepancies, this.recommendations, this.inspectorNotes, this.assignmentInstructions,
+    this.assignedByImapsUserId, this.assignedByName,
+    this.inspectionResult,
     this.isCompliant, this.photoPaths = const [], this.photoDetails = const [], this.photoCount = 0,
     this.checklistCompletedCount = 0, this.checklistTotalCount = 0, this.submittedAt,
     this.checklistData = const [], this.confirmedLatitude, this.confirmedLongitude,
@@ -130,7 +158,7 @@ class TaskItem {
           ? (application?['email'] as String).trim()
           : null,
       parcels: scheduledDate.isNotEmpty ? scheduledDate : application?['reference_number'] as String? ?? 'No schedule',
-      status: job['status'] as String? ?? 'Pending',
+      status: job['status'] as String?,
       inspectionNo: application?['reference_number'] as String? ?? job['local_inspection_id']?.toString() ?? 'N/A',
       scheduledDate: scheduledDate,
       deadlineDate: job['deadline_date'] as String?,
@@ -142,6 +170,10 @@ class TaskItem {
       discrepancies: job['discrepancies'] as String?,
       recommendations: job['recommendations'] as String?,
       inspectorNotes: job['inspector_notes'] as String?,
+      assignmentInstructions: job['assignment_instructions'] as String?,
+      // Loop 3 — read-only; null gracefully when Supabase columns are not yet live.
+      assignedByImapsUserId: job['assigned_by_imaps_user_id']?.toString(),
+      assignedByName: job['assigned_by_name'] as String?,
       inspectionResult: job['inspection_result'] as String?,
       isCompliant: job['is_compliant'] as bool?,
       photoPaths: (job['photo_paths'] as List?)?.map((e) => e.toString()).toList() ?? const [],
@@ -178,7 +210,7 @@ class TaskItem {
   /// survive app restarts and stay correct when switching between tasks
   /// (each task derives its own number from its own real data).
   int get derivedHighestStep {
-    if (status.toLowerCase().contains('complete')) return 6;
+    if (lifecycleCategory == TaskLifecycleCategory.completed) return 6;
     final hasFindings = (observations?.isNotEmpty ?? false) ||
         (discrepancies?.isNotEmpty ?? false) ||
         (recommendations?.isNotEmpty ?? false) ||
@@ -187,17 +219,24 @@ class TaskItem {
     if (checklistCompletedCount > 0) return 4;
     if (photoCount > 0 || photoPaths.isNotEmpty) return 3;
     if (confirmedLatitude != null && confirmedLongitude != null) return 2;
-    final s = status.toLowerCase();
-    if (s.contains('progress') || s.contains('ongoing')) return 1;
+    if (lifecycleCategory == TaskLifecycleCategory.ongoing) return 1;
     return 0;
   }
 
-  String get category {
-    final s = status.toLowerCase();
-    if (s.contains('complete') || s.contains('done')) return 'Completed';
-    if (isSelfScheduled) return 'Scheduled';
-    if (s.contains('progress') || s.contains('ongoing')) return 'Ongoing';
-    return 'Pending';
+  TaskLifecycleCategory get lifecycleCategory => mapTaskStatusToLifecycle(status);
+
+  String get category => switch (lifecycleCategory) {
+    TaskLifecycleCategory.pending => 'Pending',
+    TaskLifecycleCategory.ongoing => 'Ongoing',
+    TaskLifecycleCategory.completed => 'Completed',
+    TaskLifecycleCategory.unknown => 'Unknown',
+  };
+
+  PendingTaskSection? get pendingSection {
+    if (lifecycleCategory != TaskLifecycleCategory.pending) return null;
+    return isSelfScheduled
+        ? PendingTaskSection.scheduled
+        : PendingTaskSection.availableAnytime;
   }
 
   String? get forReschedule {
@@ -305,13 +344,9 @@ class TasksScreen extends StatefulWidget {
   /// callers stay readable and in sync with `_visibleTabOrder`.
   final int initialTabIndex;
 
-  // Phase 3 (My Tasks status architecture): "Scheduled" is no longer its
-  // own segment tab — it's now a section header inside Pending (see
-  // `_categorizeAndFilter` / `_visibleTabOrder`). TaskItem.category still
-  // returns 'Scheduled' as its own value (unchanged) so callers outside
-  // this screen — e.g. ActiveAssignmentsFolderCard's status coloring on
-  // the Home dashboard — keep working exactly as before; only this
-  // screen's tab layout changed.
+  // Phase 3 (My Tasks status architecture): "Scheduled" is not a lifecycle
+  // category or segment tab. It is a subsection inside Pending, selected only
+  // after the explicit lifecycle mapper classifies a task as Pending.
   static const int tabPending = 0;
   static const int tabOngoing = 1;
   static const int tabCompleted = 2;
@@ -347,17 +382,14 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   // switch in _categorizeAndFilter for each option's exact condition).
   String _urgencyFilter = 'All';
 
-  // Internal categorization/sorting still uses all 4 real categories —
-  // TaskItem.category is unchanged. Only the visible segment tabs (below)
-  // collapse Scheduled into Pending.
-  static const _tabOrder = ['Pending', 'Ongoing', 'Scheduled', 'Completed'];
-  // What's actually shown as segment tabs, post-Phase-3.
-  static const _visibleTabOrder = ['Pending', 'Ongoing', 'Completed'];
+  static const _tabOrder = ['Pending', 'Ongoing', 'Completed'];
+  static const _visibleTabOrder = _tabOrder;
 
   final GlobalKey _scheduledSectionKey = GlobalKey();
   bool _pendingScrollToScheduled = false;
 
   List<TaskItem> _allTasks = [];
+  final Set<String> _diagnosedUnknownTaskIds = <String>{};
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -457,6 +489,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 'scheduled_date': j['scheduled_date'],
                 'deadline_date': j['deadline_date'],
                 'is_self_scheduled': j['is_self_scheduled'] == 1,
+                'assignment_instructions': j['assignment_instructions'],
+                'assigned_by_imaps_user_id': j['assigned_by_imaps_user_id'],
+                'assigned_by_name': j['assigned_by_name'],
                 'rework_started_at': j['rework_started_at'],
                 'supabase_zoning_applications': {
                   'applicant_name': j['applicant_name'],
@@ -855,12 +890,27 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     );
   }
 
+  void _diagnoseUnknownStatus(TaskItem task) {
+    final diagnosticKey = '${task.id}:${task.status ?? '<null>'}';
+    if (_diagnosedUnknownTaskIds.add(diagnosticKey)) {
+      debugPrint(
+        '[MyTasks] Excluded task ${task.id} from lifecycle lists: '
+        'unrecognized status ${task.status == null ? '<null>' : '"${task.status}"'}.',
+      );
+    }
+  }
+
   Map<String, List<TaskItem>> _categorizeAndFilter() {
     final map = <String, List<TaskItem>>{
       for (final t in _tabOrder) t: <TaskItem>[],
     };
 
     for (final task in _allTasks) {
+      if (task.lifecycleCategory == TaskLifecycleCategory.unknown) {
+        _diagnoseUnknownStatus(task);
+        continue;
+      }
+
       if (_searchQuery.isNotEmpty) {
         final query = _searchQuery.toLowerCase();
         if (!task.name.toLowerCase().contains(query) &&
@@ -880,9 +930,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             matches = !isCompleted && (task.scheduleUrgency == 'Due today' || task.isUrgentDeadline);
             break;
           case 'Scheduled':
-            // isSelfScheduled directly — not the old isScheduledPlan, which
-            // matched every task since scheduledDate is never empty.
-            matches = task.isSelfScheduled;
+            matches =
+                task.pendingSection == PendingTaskSection.scheduled;
             break;
           case 'Overdue':
             matches = !isCompleted && task.scheduleUrgency == 'Overdue';
@@ -917,10 +966,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             final sa = a.startedAt ?? a.createdAt;
             final sb = b.startedAt ?? b.createdAt;
             return sa.compareTo(sb);
-          case 'Scheduled':
-            final da = a.deadlineDate?.isNotEmpty == true ? a.deadlineDate! : '9999-12-31';
-            final db = b.deadlineDate?.isNotEmpty == true ? b.deadlineDate! : '9999-12-31';
-            return da.compareTo(db);
           case 'Completed':
             final sa = a.submittedAt ?? '';
             final sb = b.submittedAt ?? '';
@@ -937,8 +982,16 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   Widget build(BuildContext context) {
     final categorized = _categorizeAndFilter();
     final ongoing = categorized['Ongoing'] ?? [];
-    final pending = categorized['Pending'] ?? [];
-    final scheduled = categorized['Scheduled'] ?? [];
+    final pendingTasks = categorized['Pending'] ?? [];
+    final scheduled = pendingTasks
+        .where((task) => task.pendingSection == PendingTaskSection.scheduled)
+        .toList();
+    final pending = pendingTasks
+        .where(
+          (task) =>
+              task.pendingSection == PendingTaskSection.availableAnytime,
+        )
+        .toList();
     final completed = categorized['Completed'] ?? [];
 
     final selectedCategory = _visibleTabOrder[_currentTabIndex];
@@ -1459,7 +1512,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Color _getStatusColor() {
     final cat = widget.task.category;
     if (cat == 'Completed') return InsightTheme.green;
-    if (cat == 'Scheduled') {
+    if (widget.task.pendingSection == PendingTaskSection.scheduled) {
       final scheduledDate = widget.task.scheduledDate;
       if (scheduledDate.isEmpty) return InsightTheme.blue1;
       try {
@@ -1480,7 +1533,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     final task = widget.task;
     final indicators = <MapEntry<String, String>>[];
     final isCompleted = task.category == 'Completed';
-    final isScheduled = task.category == 'Scheduled' && task.isSelfScheduled;
+    final isScheduled =
+        task.pendingSection == PendingTaskSection.scheduled;
     final visitRowVisible = isScheduled && task.scheduledDate.isNotEmpty;
     final deadlineRowVisible = !isCompleted && task.deadlineDate?.isNotEmpty == true;
 
@@ -1660,9 +1714,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     await _launchOrFallback(emailUri, email, 'email');
   }
 
-  // Long-press a Pending card -> pick a date (never past the admin's
-  // deadline_date) + optional note -> updates scheduled_date, which moves
-  // this task into the Scheduled tab automatically (see TaskItem.category).
+  // Long-press a Pending card -> pick a date (never past the assignment
+  // deadline) -> moves the task into the Scheduled subsection while its
+  // lifecycle remains Pending.
   Future<void> _scheduleTask(BuildContext context) async {
     HapticFeedback.mediumImpact();
 
@@ -1685,8 +1739,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         if (!existing.isBefore(tomorrow)) pickedDate = existing;
       } catch (_) {}
     }
-    final notesController = TextEditingController();
-
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1759,32 +1811,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                     if (deadline != null) ...[
                       const SizedBox(height: 6),
                       Text(
-                        'Must be on or before ${deadline.year}-${deadline.month.toString().padLeft(2, '0')}-${deadline.day.toString().padLeft(2, '0')} (deadline set by admin)',
+                        'Must be on or before ${deadline.year}-${deadline.month.toString().padLeft(2, '0')}-${deadline.day.toString().padLeft(2, '0')} (assignment deadline)',
                         style: InsightTheme.inter(11, c: InsightTheme.ink3),
                       ),
                     ],
-
-                    const SizedBox(height: 16),
-                    Text('Notes (optional)', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2)),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: InsightTheme.bg,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: InsightTheme.line),
-                      ),
-                      child: TextField(
-                        controller: notesController,
-                        maxLines: 3,
-                        style: InsightTheme.inter(13, c: InsightTheme.ink2),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          border: InputBorder.none,
-                          hintText: 'e.g. "Applicant requested morning slot"',
-                        ),
-                      ),
-                    ),
 
                     const SizedBox(height: 20),
                     SizedBox(
@@ -1797,7 +1827,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   await SupabaseService.scheduleJob(
                                     jobId: widget.task.id,
                                     date: pickedDate!,
-                                    note: notesController.text,
                                   );
                                   if (sheetContext.mounted) Navigator.pop(sheetContext);
                                   widget.onScheduled?.call();
@@ -1834,9 +1863,11 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Widget build(BuildContext context) {
     final String taskCategory = widget.task.category;
     final bool isOverdue = taskCategory != 'Completed' && widget.task.scheduleUrgency == 'Overdue';
-    final bool isUrgent = taskCategory != 'Completed' && (widget.task.scheduleUrgency == 'Due today' || widget.task.isUrgentDeadline);
     final statusColor = isOverdue ? InsightTheme.red : _getStatusColor();
-    final bool showInProgress = taskCategory == 'Scheduled' && widget.task.currentStep >= 1 && widget.task.currentStep <= 5;
+    final bool showInProgress =
+        widget.task.pendingSection == PendingTaskSection.scheduled &&
+        widget.task.currentStep >= 1 &&
+        widget.task.currentStep <= 5;
     final int stepValue = (widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
         .clamp(0, InspectionProgress.totalSteps);
     final bool canSchedule = widget.task.category != 'Completed';
@@ -1846,7 +1877,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       borderColor = InsightTheme.red;
     } else if (taskCategory == 'Completed') {
       borderColor = InsightTheme.green;
-    } else if (taskCategory == 'Scheduled') {
+    } else if (widget.task.pendingSection == PendingTaskSection.scheduled) {
       if (widget.task.isUrgentDeadline) {
         borderColor = InsightTheme.red;
       } else if (widget.task.scheduledDate.isNotEmpty) {
@@ -1998,17 +2029,12 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               ),
                             ],
                           ),
-                          // F3 fix + Scheduled-section alignment fix: the
-                          // Pending tab's "Scheduled" section uses the
-                          // cross-cutting ScheduledActive bucket (any
-                          // non-Completed task on the schedule plan,
-                          // INCLUDING ones already In Progress). The Visit
-                          // row must use that SAME test — gating on
-                          // category == 'Scheduled' alone hid the Visit
-                          // date on In-Progress cards that still appear in
-                          // the Scheduled section.
-                            if (widget.task.category == 'Scheduled' &&
-                              widget.task.isSelfScheduled &&
+                          // The Visit row belongs only to the Scheduled
+                          // subsection of Pending. Ongoing and Completed tasks
+                          // may retain schedule metadata, but scheduling never
+                          // overrides their lifecycle category.
+                          if (widget.task.pendingSection ==
+                                  PendingTaskSection.scheduled &&
                               widget.task.scheduledDate.isNotEmpty) ...[
                             const SizedBox(height: 5),
                             Row(
@@ -2079,7 +2105,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // Visit row already say it) and added clutter
                               // on urgent cards. Scheduled state is carried
                               // by the orange border + avatar instead.
-                              if (widget.task.category == 'Scheduled' && widget.task.forReschedule != null)
+                              if (widget.task.pendingSection == PendingTaskSection.scheduled &&
+                                  widget.task.forReschedule != null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(

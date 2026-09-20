@@ -193,6 +193,76 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           padding: const EdgeInsets.only(left: 4, bottom: 12),
           child: Text('INSPECTION DATA', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.2)),
         ),
+        if (task.assignmentInstructions?.trim().isNotEmpty == true) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(color: const Color(0xFF000000).withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.assignment_ind_outlined, size: 20, color: InsightTheme.ink2),
+                      const SizedBox(width: 8),
+                      Text('Assignment Instructions', style: InsightTheme.poppins(14, w: FontWeight.w600, c: InsightTheme.ink)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.surface2,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(task.assignmentInstructions!, style: InsightTheme.inter(13, w: FontWeight.w400, c: InsightTheme.ink2)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+        // Loop 3 — Assigning Planning Officer (read-only).
+        // Never shows "Admin" — null/missing renders nothing.
+        if (task.assignedByName?.trim().isNotEmpty == true) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(color: const Color(0xFF000000).withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_outline_rounded, size: 20, color: InsightTheme.ink2),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Assigned by', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink3)),
+                        const SizedBox(height: 2),
+                        Text(task.assignedByName!, style: InsightTheme.poppins(14, w: FontWeight.w600, c: InsightTheme.ink)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         _CollapsibleStepCard(
           step: 1,
           title: 'Site Verification',
@@ -426,12 +496,13 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                   onTap: () => openFullscreenPhotoViewer(context, urls, i),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: Image.network(
-                      url,
+                    child: SizedBox(
                       width: 80,
                       height: 80,
+                      child: AdaptivePhotoImage(
+                      path: url,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Container(
+                      errorBuilder: (context) => Container(
                         width: 80,
                         height: 80,
                         decoration: BoxDecoration(
@@ -440,6 +511,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                           border: Border.all(color: InsightTheme.line),
                         ),
                         child: const Icon(Icons.broken_image_outlined, size: 22, color: InsightTheme.ink3),
+                      ),
                       ),
                     ),
                   ),

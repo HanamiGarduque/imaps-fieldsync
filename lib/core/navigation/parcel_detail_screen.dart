@@ -14,13 +14,18 @@ import '../../modules/inspection/screens/inspection_progress.dart';
 import '../../modules/inspection/providers/inspection_provider.dart';
 import '../../core/widgets/sensitive_screen.dart';
 import '../../modules/inspection/widgets/photo_viewer.dart';
+import '../../modules/inspection/services/photo_source_resolver.dart';
 
 import '../theme/insight_theme.dart';
+import '../services/db_helper.dart';
 
 class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
 
-  const ParcelDetailScreen({super.key, required this.task});
+  // Dashboard supplies the real fetch; Tasks/offline entry uses its cached row.
+  final Map<String, dynamic>? fetchedJob;
+
+  const ParcelDetailScreen({super.key, required this.task, this.fetchedJob});
 
   @override
   State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
@@ -29,6 +34,15 @@ class ParcelDetailScreen extends StatefulWidget {
 class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   TaskItem get task => widget.task;
   InspectionProgress get progress => InspectionProgress.instance;
+  bool _enteringStep = false;
+  Future<void>? _draftLoad;
+
+  Future<void> _loadDraft() async {
+    final provider = context.read<InspectionProvider>();
+    if (provider.activeTask?.id != task.id) {
+      await provider.startInspection(task);
+    }
+  }
 
   @override
   void initState() {
@@ -40,8 +54,12 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     );
     progress.addListener(_onProgressChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (context.read<InspectionProvider>().activeTask?.id != widget.task.id) {
-        await context.read<InspectionProvider>().startInspection(widget.task);
+      if (!mounted) return;
+      try {
+        await (_draftLoad ??= _loadDraft());
+      } catch (e) {
+        _draftLoad = null;
+        debugPrint('Could not restore inspection draft: $e');
       }
     });
   }
@@ -78,6 +96,8 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                 .where((p) => p.isNotEmpty)
                 .toList()
             : task.photoPaths);
+    final displayPaths = inspectionDisplayPaths(
+        paths, task.id, task.photoDetails, task.photoPaths);
     return _sectionShell(
         step: 3,
         title: 'Photos',
@@ -90,7 +110,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                   itemCount: paths.length,
                   separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => _openFullscreenPhoto(paths, i),
+                    onTap: () => _openFullscreenPhoto(displayPaths, i),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       // AdaptivePhotoImage renders BOTH freshly-captured
@@ -98,7 +118,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                       child: SizedBox(
                         width: 90,
                         height: 90,
-                        child: AdaptivePhotoImage(path: paths[i]),
+                        child: AdaptivePhotoImage(path: displayPaths[i]),
                       ),
                     ),
                   ),
@@ -111,7 +131,8 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     openFullscreenPhotoViewer(context, photoPaths, startIndex);
   }
 
-  void _goToStep(BuildContext context, int step, WidgetBuilder builder) {
+  Future<void> _goToStep(BuildContext context, int step, WidgetBuilder builder) async {
+    if (_enteringStep) return;
     if (progress.isLocked(step)) {
       HapticFeedback.selectionClick();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -119,14 +140,27 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       );
       return;
     }
-    HapticFeedback.selectionClick();
-    // F2 fix (Task Overview photo refresh): rebuild when control returns
-    // from a step so sections backed by live provider state (e.g. Photos)
-    // reflect saves made inside the step — mirrors the Completed Summary's
-    // reload-on-return behavior without changing any persistence path.
-    Navigator.push(context, MaterialPageRoute(builder: builder)).then((_) {
+    _enteringStep = true;
+    try {
+      final provider = context.read<InspectionProvider>();
+      if (!provider.isReworkMode) {
+        // Task Overview is passive. The first actual normal step tap is the
+        // durable boundary, repeated on resume before any step can proceed.
+        await DBHelper.retainInspectionJob(task.id, fetchedJob: widget.fetchedJob);
+        await (_draftLoad ??= _loadDraft());
+      }
+      if (!context.mounted) return;
+      HapticFeedback.selectionClick();
+      await Navigator.push(context, MaterialPageRoute(builder: builder));
       if (mounted) setState(() {});
-    });
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not prepare inspection for offline work: $e'),
+      ));
+    } finally {
+      _enteringStep = false;
+    }
   }
 
   void _handleExitRework() {
@@ -304,6 +338,77 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                           ),
                         ),
                       ),
+
+                      if (task.assignmentInstructions?.trim().isNotEmpty == true) ...[
+                        const SizedBox(height: 16),
+                        _GlassCard(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
+                                      child: const Icon(Icons.assignment_ind_outlined, color: InsightTheme.ink2, size: 16),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text('Assignment Instructions', style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.ink)),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.surface2.withValues(alpha: 0.5),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: InsightTheme.line.withValues(alpha: 0.5)),
+                                  ),
+                                  child: Text(
+                                    task.assignmentInstructions!,
+                                    style: InsightTheme.inter(13, w: FontWeight.w400, c: InsightTheme.ink),
+                                    maxLines: null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+
+                      // Loop 3 — Assigning Planning Officer (read-only).
+                      // Displayed only when assigned_by_name is non-null and non-empty.
+                      // Never shows "Admin" as a fallback — null/missing renders nothing.
+                      if (task.assignedByName?.trim().isNotEmpty == true) ...[
+                        const SizedBox(height: 16),
+                        _GlassCard(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
+                                  child: const Icon(Icons.person_outline_rounded, color: InsightTheme.ink2, size: 16),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Assigned by', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink3)),
+                                      const SizedBox(height: 2),
+                                      Text(task.assignedByName!, style: InsightTheme.poppins(13, w: FontWeight.w600, c: InsightTheme.ink)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
 
                       const SizedBox(height: 16),
 

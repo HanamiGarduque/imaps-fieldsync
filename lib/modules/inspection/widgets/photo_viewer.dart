@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../services/photo_source_resolver.dart';
 
 /// Renders a photo whether `path` is a local device file path or a remote
 /// (Supabase Storage) URL — used anywhere a photo might be either,
@@ -8,35 +9,78 @@ import 'package:flutter/material.dart';
 bool isRemotePhotoPath(String path) =>
     path.startsWith('http://') || path.startsWith('https://');
 
-class AdaptivePhotoImage extends StatelessWidget {
+class AdaptivePhotoImage extends StatefulWidget {
   final String path;
   final BoxFit fit;
+  final String? fallbackPath;
+  final PhotoSourceResolver? resolver;
   final Widget Function(BuildContext context)? errorBuilder;
 
   const AdaptivePhotoImage({
     super.key,
     required this.path,
     this.fit = BoxFit.cover,
+    this.fallbackPath,
+    this.resolver,
     this.errorBuilder,
   });
 
   @override
-  Widget build(BuildContext context) {
-    if (isRemotePhotoPath(path)) {
-      return Image.network(
-        path,
-        fit: fit,
-        errorBuilder: (_, _, _) =>
-            errorBuilder?.call(context) ?? const _BrokenImageFallback(),
-      );
+  State<AdaptivePhotoImage> createState() => _AdaptivePhotoImageState();
+}
+
+class _AdaptivePhotoImageState extends State<AdaptivePhotoImage> {
+  late Future<ResolvedPhoto?> _photo;
+
+  Future<ResolvedPhoto?> _resolve() async {
+    try {
+      // Local capture remains usable before/offline from Supabase setup.
+      if (PhotoSourceResolver.classify(widget.path) == PhotoSourceKind.localFile &&
+          File(widget.path).existsSync()) {
+        return ResolvedPhoto.local(widget.path);
+      }
+      return await (widget.resolver ?? inspectionPhotoResolver())
+          .resolve(widget.path, fallback: widget.fallbackPath);
+    } catch (_) {
+      return null;
     }
-    return Image.file(
-      File(path),
-      fit: fit,
-      errorBuilder: (_, _, _) =>
-          errorBuilder?.call(context) ?? const _BrokenImageFallback(),
-    );
   }
+
+  @override
+  void initState() {
+    super.initState();
+    _photo = _resolve();
+  }
+
+  @override
+  void didUpdateWidget(covariant AdaptivePhotoImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path ||
+        oldWidget.fallbackPath != widget.fallbackPath ||
+        oldWidget.resolver != widget.resolver) {
+      _photo = _resolve();
+    }
+  }
+
+  Widget _error() => widget.errorBuilder?.call(context) ?? const _BrokenImageFallback();
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<ResolvedPhoto?>(
+    future: _photo,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Center(child: SizedBox(width: 20, height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2)));
+      }
+      final photo = snapshot.data;
+      if (photo == null) return _error();
+      return photo.localPath != null
+          ? Image.file(File(photo.localPath!), fit: widget.fit,
+              errorBuilder: (_, _, _) => _error())
+          : Image.memory(photo.bytes!, fit: widget.fit,
+              errorBuilder: (_, _, _) => _error());
+    },
+  );
 }
 
 class _BrokenImageFallback extends StatelessWidget {

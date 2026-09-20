@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/sync_outbox_service.dart';
+import '../../../core/services/db_helper.dart';
 import 'inspection_progress.dart';
 import '../../../core/navigation/main_shell_screen.dart';
 import '../../tasks/screens/tasks_screen.dart' show TaskItem;
@@ -15,6 +16,8 @@ import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/theme/insight_theme.dart';
 import '../widgets/inspection_step_header.dart';
+import '../widgets/photo_viewer.dart';
+import '../services/photo_source_resolver.dart';
 
 class ReviewSubmitScreen extends StatefulWidget {
   final TaskItem task;
@@ -97,6 +100,17 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       }
     }
 
+    // Remote acceptance has already succeeded. Local cleanup must never enter
+    // the catch above and enqueue/retry that successful business submission.
+    if (!queuedOffline && !provider.isReworkMode) {
+      final cleaned = await DBHelper.finalizeAcceptedOnlineInspection(widget.task.id);
+      if (!cleaned && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Inspection submitted. Local cache cleanup will retry on refresh.'),
+        ));
+      }
+    }
+
     InspectionProgress.instance.markStepComplete(6);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(MaterialPageRoute(
@@ -162,6 +176,27 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                           ],
                         ),
                       ),
+                      if (provider.capturedPhotos.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 90,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: provider.capturedPhotos.length,
+                            separatorBuilder: (_, _) => const SizedBox(width: 8),
+                            itemBuilder: (_, i) {
+                              final paths = inspectionDisplayPaths(
+                                provider.capturedPhotos.map((p) => p['photoPath'] as String? ?? '').toList(),
+                                widget.task.id, widget.task.photoDetails, widget.task.photoPaths);
+                              return GestureDetector(
+                                onTap: () => openFullscreenPhotoViewer(context, paths, i),
+                                child: SizedBox(width: 90,
+                                  child: AdaptivePhotoImage(path: paths[i])),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 28),
                       _SectionLabel(title: 'FINAL ASSESSMENT'),
                       const SizedBox(height: 12),
