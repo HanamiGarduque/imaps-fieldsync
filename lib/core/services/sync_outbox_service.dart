@@ -622,6 +622,23 @@ class SyncOutboxService {
       await _reconcileInterruptedAction(action, payload);
       return;
     }
+    if (type == 'mark_ongoing' || type == 'current_step_update') {
+      final remote = await (recoveryReadForTesting ??
+          SupabaseService.readOutboxRecoveryJob)(jobId);
+      if (remote == null) {
+        throw _OutboxConflictException('Missing or reassigned job');
+      }
+      if (remote['status'] == 'completed') {
+        // A start/status replay is superseded by completion. A late progress
+        // replay is satisfied only at Step 6; neither may write the row.
+        if (type == 'current_step_update' && remote['current_step'] != 6) {
+          throw _OutboxConflictException(
+            'Completed job has invalid current_step; refusing stale replay',
+          );
+        }
+        return;
+      }
+    }
     await _throwIfServerVersionConflict(
       type: type,
       jobId: jobId,
@@ -749,14 +766,12 @@ class SyncOutboxService {
         // F1 fix: carry the per-step saved times through the offline queue
         // so field_jobs.step_timestamps is updated by the same drain pass.
         final stepTs = payload['stepTimestamps'];
-        await SupabaseService.updateJobInspectionProgress(
+        await SupabaseService.advanceJobInspectionProgress(
           jobId: jobId,
-          updateData: {
-            'current_step': payload['currentStep'],
-            if (stepTs is Map)
-              'step_timestamps':
-                  stepTs.map((k, v) => MapEntry(k.toString(), v.toString())),
-          },
+          currentStep: payload['currentStep'] as int,
+          stepTimestamps: stepTs is Map
+              ? stepTs.map((k, v) => MapEntry(k.toString(), v.toString()))
+              : null,
         );
         break;
       case 'photos_update':
@@ -882,6 +897,18 @@ class SyncOutboxService {
           'checklist_total_count': 'checklistTotalCount'});
         break;
       case 'current_step_update':
+        if (status == 'completed') {
+          if (remote['current_step'] != 6) {
+            throw _OutboxConflictException(
+              'Completed job has invalid current_step; refusing stale replay',
+            );
+          }
+          await _recoveryDiagnostic(
+            action,
+            'Completed Step 6 supersedes stale progress; no remote replay',
+          );
+          return;
+        }
         fields({'current_step': 'currentStep'});
         if (payload['stepTimestamps'] is Map) {
           desired['step_timestamps'] = (payload['stepTimestamps'] as Map)

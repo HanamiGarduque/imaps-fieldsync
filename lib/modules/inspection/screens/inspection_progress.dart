@@ -154,13 +154,11 @@ class InspectionProgress extends ChangeNotifier {
           ? connectivityResult.any((r) => r != ConnectivityResult.none)
           : connectivityResult != ConnectivityResult.none;
       if (online) {
-        await SupabaseService.updateJobInspectionProgress(
+        await SupabaseService.advanceJobInspectionProgress(
           jobId: taskId,
-          updateData: {
-            'current_step': step,
-            'step_timestamps':
-                _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
-          },
+          currentStep: step,
+          stepTimestamps:
+              _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
         );
       } else {
         await SyncOutboxService.enqueueCurrentStepUpdate(

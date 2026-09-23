@@ -339,7 +339,7 @@ void main() {
   }
 
   test(
-    'acknowledgement ends exception and restores remote authority',
+    'acknowledgement ends pending-submit projection but cached completion remains terminal',
     () async {
       await submitFixture('fixture-A');
       final action = (await DBHelper.getActionableActions()).single;
@@ -354,7 +354,7 @@ void main() {
         'in_progress',
       );
       await DBHelper.cacheJobs(remoteJobs);
-      expect((await DBHelper.getCachedJobs()).first['status'], 'in_progress');
+      expect((await DBHelper.getCachedJobs()).first['status'], 'completed');
       remoteJobs.first['status'] = 'completed';
       await DBHelper.cacheJobs(await SupabaseService.fetchMyJobs());
       expect((await DBHelper.getCachedJobs()).first['status'], 'completed');

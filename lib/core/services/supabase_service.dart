@@ -496,13 +496,16 @@ class SupabaseService {
   }) async {
     final dateStr =
         '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    // Scheduling is a pending-task operation. The lifecycle predicate makes a
+    // stale card/action a safe no-op after another client completes the job.
     await client
         .from('field_jobs')
         .update({
           'scheduled_date': dateStr,
           'is_self_scheduled': true,
         })
-        .eq('id', jobId);
+        .eq('id', jobId)
+        .eq('status', 'assigned');
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -532,20 +535,12 @@ class SupabaseService {
   // ─────────────────────────────────────────────────────────────────────────
   static Future<bool> markJobOngoing(String jobId) async {
     try {
+      final startedAt = DateTime.now().toUtc().toIso8601String();
       await client
           .from('field_jobs')
-          .update({'status': 'in_progress'})
+          .update({'status': 'in_progress', 'started_at': startedAt})
           .eq('id', jobId)
-          .not('status', 'ilike', 'completed');
-      await client
-          .from('field_jobs')
-          .update({'started_at': DateTime.now().toUtc().toIso8601String()})
-          .eq('id', jobId)
-          .filter(
-            'started_at',
-            'is',
-            null,
-          ); // huwag lang i-touch kung completed na
+          .eq('status', 'assigned');
       return true;
     } catch (e) {
       debugPrint('Error marking job ongoing: $e');
@@ -564,21 +559,23 @@ class SupabaseService {
     String? locationLabel,
   }) async {
     try {
+      final confirmedAt = DateTime.now().toUtc().toIso8601String();
+      // GPS is evidence. It may be corrected during completed-task rework,
+      // but must never carry a lifecycle assignment that reopens the job.
       await client
           .from('field_jobs')
           .update({
-            'status': 'in_progress',
             'confirmed_latitude': latitude,
             'confirmed_longitude': longitude,
             'gps_accuracy_m': accuracyMeters,
-            'gps_confirmed_at': DateTime.now().toUtc().toIso8601String(),
+            'gps_confirmed_at': confirmedAt,
           })
           .eq('id', jobId);
       await client
           .from('field_jobs')
-          .update({'started_at': DateTime.now().toUtc().toIso8601String()})
+          .update({'status': 'in_progress', 'started_at': confirmedAt})
           .eq('id', jobId)
-          .filter('started_at', 'is', null); // only sets it the first time
+          .eq('status', 'assigned');
       await logActivity(
         eventType: 'gps_confirmed',
         title: 'GPS verified on-site',
@@ -833,10 +830,22 @@ class SupabaseService {
     String? submittedAt,
   }) async {
     try {
+      // Preserve the first successful submission time. A final-submit retry or
+      // completed-task evidence correction must not replace that lifecycle
+      // boundary with a newer timestamp.
+      final existing = await client
+          .from('field_jobs')
+          .select('status,submitted_at')
+          .eq('id', jobId)
+          .maybeSingle();
+      final existingSubmittedAt = existing?['submitted_at']?.toString();
+      final effectiveSubmittedAt =
+          existingSubmittedAt ?? submittedAt ?? DateTime.now().toUtc().toIso8601String();
       await client
           .from('field_jobs')
           .update({
             'status': 'completed',
+            'current_step': 6,
             'findings': findings,
             'is_compliant': isCompliant,
             'inspection_result': inspectionResult,
@@ -849,7 +858,7 @@ class SupabaseService {
             'checklist_total_count': checklistTotalCount,
             'photo_paths': ?photoPaths,
             'photo_count': photoCount,
-            'submitted_at': submittedAt ?? DateTime.now().toUtc().toIso8601String(),
+            'submitted_at': effectiveSubmittedAt,
             // Rework redesign: Review & Submit is the one finalize point,
             // for both a normal submit (already null — harmless) and a
             // rework resubmit (clears the "Modified" signal). status was
@@ -934,10 +943,9 @@ class SupabaseService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // REOPEN A COMPLETED JOB FOR REWORK  (Completed detail screen → "Rework")
-  //   Moves the job back to in_progress (so it shows under Ongoing again)
-  //   without touching the previously submitted answers — those stay in
-  //   place until the inspector actually edits and resubmits that step.
+  // OPEN A COMPLETED JOB FOR REWORK  (Completed detail screen → "Rework")
+  //   This is an evidence-editing session only. Lifecycle, Step 6 and the
+  //   original submission timestamp remain terminal and unchanged.
   // ─────────────────────────────────────────────────────────────────────────
   static Future<void> reopenForRework({
     required String jobId,
@@ -977,16 +985,49 @@ class SupabaseService {
   // ─────────────────────────────────────────────────────────────────────────
   // GENERIC PARTIAL UPDATE  (checklist progress, photo upload count, etc.)
   // ─────────────────────────────────────────────────────────────────────────
+  static const Set<String> _forbiddenProgressFields = {
+    'status',
+    'current_step',
+    'submitted_at',
+  };
+
   static Future<void> updateJobInspectionProgress({
     required String jobId,
     required Map<String, dynamic> updateData,
   }) async {
+    final forbidden = updateData.keys.toSet().intersection(_forbiddenProgressFields);
+    if (forbidden.isNotEmpty) {
+      throw ArgumentError(
+        'Lifecycle/progress fields require a monotonic domain method: $forbidden',
+      );
+    }
     try {
       await client.from('field_jobs').update(updateData).eq('id', jobId);
     } catch (e) {
       debugPrint('Error updating field job: $e');
       rethrow;
     }
+  }
+
+  /// Advances ordinary inspection progress without ever lowering it or
+  /// changing the terminal Step 6 of a completed job.
+  static Future<void> advanceJobInspectionProgress({
+    required String jobId,
+    required int currentStep,
+    Map<String, String>? stepTimestamps,
+  }) async {
+    if (currentStep < 0 || currentStep > 6) {
+      throw RangeError.range(currentStep, 0, 6, 'currentStep');
+    }
+    await client
+        .from('field_jobs')
+        .update({
+          'current_step': currentStep,
+          'step_timestamps': ?stepTimestamps,
+        })
+        .eq('id', jobId)
+        .neq('status', 'completed')
+        .lt('current_step', currentStep);
   }
 
   // ─────────────────────────────────────────────────────────────────────────

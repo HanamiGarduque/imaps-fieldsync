@@ -306,7 +306,9 @@ void main() {
     await seed('mark_ongoing', {});
     // Initial drain executes startup recovery and syncs the row
     SyncOutboxService.start();
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    for (var attempt = 0; attempt < 50 && await state() != 'synced'; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
     expect(await state(), 'synced');
     expect(reads, 1);
     expect(writes, 1);

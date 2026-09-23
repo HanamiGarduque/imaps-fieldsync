@@ -776,6 +776,10 @@ class InspectionProvider extends ChangeNotifier {
             .from('field_jobs')
             .update({
               'status': 'completed',
+              'current_step': 6,
+              // Legacy local-inspection replay has no separate submitted_at;
+              // its durable local update time is the original completion time.
+              'submitted_at': insp['updated_at'],
               'findings': '${insp['notes']}\n\nChecklist: $checklistSummary',
               'is_compliant': insp['is_compliant'] == 1,
               'inspection_result':

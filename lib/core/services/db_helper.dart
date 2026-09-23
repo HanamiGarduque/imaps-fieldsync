@@ -531,7 +531,24 @@ class DBHelper {
       }
 
       for (final job in effectiveJobs) {
-        batch.insert('local_jobs', _cachedJobRow(job),
+        final incoming = Map<String, dynamic>.of(job);
+        final existingRows = await txn.query(
+          'local_jobs',
+          columns: ['status'],
+          where: 'id = ?',
+          whereArgs: [job['id']],
+          limit: 1,
+        );
+        if (existingRows.isNotEmpty &&
+            existingRows.single['status'] == 'completed' &&
+            const {'assigned', 'Pending', 'pending', 'in_progress', 'in-progress', 'ongoing'}
+                .contains(incoming['status'])) {
+          // A recognized stale lifecycle refresh cannot reclassify a
+          // canonically completed cached round as ongoing or pending. Preserve
+          // legacy completed equivalents and unsupported diagnostic states.
+          incoming['status'] = 'completed';
+        }
+        batch.insert('local_jobs', _cachedJobRow(incoming),
             conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await batch.commit(noResult: true);
