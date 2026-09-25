@@ -259,7 +259,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.20)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.20)),
               ),
             ),
           ),
@@ -269,7 +269,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 width: 220, height: 220,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withOpacity(0.10)),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.10)),
               ),
             ),
           ),
@@ -390,7 +390,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           ),
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: [
-                            BoxShadow(color: InsightTheme.blue1.withOpacity(0.32), blurRadius: 22, offset: const Offset(0, 10)),
+                            BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.32), blurRadius: 22, offset: const Offset(0, 10)),
                           ],
                         ),
                         child: Container(
@@ -479,9 +479,9 @@ class _GlassBackButton extends StatelessWidget {
       child: Container(
         width: 38, height: 38,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.5),
+          color: Colors.white.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: Colors.white.withOpacity(0.65)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
           boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 14, offset: Offset(0, 4))],
         ),
         child: ClipRRect(

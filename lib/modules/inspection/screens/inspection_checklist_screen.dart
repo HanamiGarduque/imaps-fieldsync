@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'field_findings_screen.dart';
 import '../../tasks/screens/tasks_screen.dart';
@@ -219,7 +218,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                             onPressed: _isSaving ? null : () async {
                               setState(() => _isSaving = true);
                               final ok = await context.read<InspectionProvider>().saveStepChecklist();
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               setState(() => _isSaving = false);
                               // Issue 2 fix (Completed Category enhancement):
                               // single Save button during rework, returns to

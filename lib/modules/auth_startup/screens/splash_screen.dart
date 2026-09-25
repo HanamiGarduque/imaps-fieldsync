@@ -224,7 +224,7 @@ class _SplashScreenState extends State<SplashScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
-                  'MUNICIPAL PLANNING & ZONING OFFICE · ' + AppInfoService.fullVersionString.toUpperCase(),
+                  'MUNICIPAL PLANNING & ZONING OFFICE · ${AppInfoService.fullVersionString.toUpperCase()}',
                   style: AppText.mono(10, c: Colors.white.withValues(alpha: 0.6)),
                 ),
               ),

@@ -118,7 +118,9 @@ void main() {
         expect(await DBHelper.getCachedJobs(), isEmpty);
         expect(await db.query('inspection_job_retention'), isEmpty);
       });
-      if (resume) expect(provider.notes, 'Unfinished restored notes');
+      if (resume) {
+        expect(provider.notes, 'Unfinished restored notes');
+      }
       final step = find.text('Review & Submit');
       await tester.ensureVisible(step);
       await tester.tap(step);
@@ -291,11 +293,11 @@ void main() {
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'await createInspectionRetentionTable\(db\)').allMatches(source), hasLength(2));
     } finally {
-      if (upgradedDb != null && upgradedDb!.isOpen) {
-        await upgradedDb!.close();
+      if (upgradedDb != null && upgradedDb.isOpen) {
+        await upgradedDb.close();
       }
-      if (legacyDb != null && legacyDb!.isOpen) {
-        await legacyDb!.close();
+      if (legacyDb != null && legacyDb.isOpen) {
+        await legacyDb.close();
       }
       DBHelper.useDatabaseForTesting(null);
     }
