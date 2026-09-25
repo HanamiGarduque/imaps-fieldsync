@@ -124,15 +124,26 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     );
   }
 
-  void _removePhoto(int index) {
+  Future<void> _removePhoto(int index) async {
     if (index < 0 || index >= _capturedPhotos.length) return;
-    setState(() => _capturedPhotos.removeAt(index));
+    final removed = await context.read<InspectionProvider>().removePhoto(index);
+    if (!mounted) return;
+    if (!removed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This photo is already submitted or could not be removed locally.',
+          ),
+        ),
+      );
+      return;
+    }
     // Screen-local `_capturedPhotos` and InspectionProvider's own list have
     // been kept in lockstep — appended together in _savePhotoAndReturnToGrid
     // and seeded together in initState — so the same index is safe to
-    // remove from both. The provider call also handles cleaning up the
-    // local_photos DB row and any already-synced Supabase copy.
-    context.read<InspectionProvider>().removePhoto(index);
+    // remove from both. The provider confirms the file and row cleanup
+    // before this grid changes.
+    setState(() => _capturedPhotos.removeAt(index));
   }
 
   void _savePhotoAndReturnToGrid() {

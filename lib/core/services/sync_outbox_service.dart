@@ -30,7 +30,10 @@ class SyncProgress {
     this.photoTotal,
   });
 
-  SyncProgress copyWithPhoto({required int photoIndex, required int photoTotal}) {
+  SyncProgress copyWithPhoto({
+    required int photoIndex,
+    required int photoTotal,
+  }) {
     return SyncProgress(
       actionIndex: actionIndex,
       actionTotal: actionTotal,
@@ -93,7 +96,12 @@ class SyncOutboxService {
   static Future<Map<String, dynamic>?> Function(String)? recoveryReadForTesting;
   @visibleForTesting
   static Future<Map<String, dynamic>?> Function(
-      String, String, String, Map<String, dynamic>)? recoveryWriteForTesting;
+    String,
+    String,
+    String,
+    Map<String, dynamic>,
+  )?
+  recoveryWriteForTesting;
 
   @visibleForTesting
   static void resetRecoverySessionForTesting() {
@@ -107,6 +115,7 @@ class SyncOutboxService {
     _connSub?.cancel();
     _connSub = null;
   }
+
   static StreamSubscription<List<ConnectivityResult>>? _connSub;
   static Timer? _debounce;
   static const _lastSyncPrefsKey = 'field_sync_last_success';
@@ -154,7 +163,6 @@ class SyncOutboxService {
   /// Broadcasts when a drain pass completes (whether successful or with failures/conflicts),
   /// allowing the Sync Center or other screens to refresh immediately without waiting for the poll timer.
   static final ValueNotifier<int> drainCompleted = ValueNotifier<int>(0);
-
 
   static bool get isDraining => _draining;
 
@@ -287,7 +295,8 @@ class SyncOutboxService {
   /// embedded directly in the payload rather than re-read from
   /// `local_photos` at drain time, since the live capture flow doesn't
   /// persist there today (see addPhoto/saveStepPhotos) — this keeps the
-  /// retry self-contained regardless of that.
+  /// retry self-contained. Local photo IDs, when present, are acknowledged
+  /// only after the canonical writer/recovery contract completes.
   ///
   /// Issue 4 fix (device-test finding — Task Overview showed "no photos
   /// on file" for a step the inspector had already finished): Photos
@@ -361,10 +370,7 @@ class SyncOutboxService {
   }) async {
     final payload = await _withConflictSnapshot(
       jobId: jobId,
-      payload: {
-        'currentStep': step,
-        'stepTimestamps': ?stepTimestamps,
-      },
+      payload: {'currentStep': step, 'stepTimestamps': ?stepTimestamps},
     );
     return DBHelper.enqueueAction(
       id: 'current_step_update_$jobId',
@@ -438,7 +444,10 @@ class SyncOutboxService {
   /// paths — everything else in the queue is left completely untouched
   /// (not read, not marked syncing/failed, still `pending` in its
   /// original position) so a later full drain picks it up normally.
-  static Future<void> drain({String trigger = 'automatic', String? onlyJobId}) async {
+  static Future<void> drain({
+    String trigger = 'automatic',
+    String? onlyJobId,
+  }) async {
     if (_draining) return;
     _draining = true;
     try {
@@ -459,7 +468,11 @@ class SyncOutboxService {
         message: total == 1
             ? 'Synchronization started — 1 item to send.'
             : 'Synchronization started — $total items to send.',
-        technicalDetails: {'trigger': trigger, 'itemCount': total, 'onlyJobId': ?onlyJobId},
+        technicalDetails: {
+          'trigger': trigger,
+          'itemCount': total,
+          'onlyJobId': ?onlyJobId,
+        },
       );
 
       var successCount = 0;
@@ -597,6 +610,14 @@ class SyncOutboxService {
   /// default in the Sync tab (Phase 6). Technical specifics (exception
   /// type, raw message) still get stored, but only inside
   /// `technical_details` — never surfaced here.
+  static Future<void> _acknowledgeQueuedLocalPhotos(
+    List<Map<String, dynamic>> photos,
+  ) async {
+    await DBHelper.markPhotosSynced(
+      photos.map((photo) => (photo['localPhotoId'] ?? photo['id']) as String?),
+    );
+  }
+
   static String _friendlyErrorMessage(Object error) {
     final text = error.toString();
     if (text.contains('SocketException') ||
@@ -623,8 +644,9 @@ class SyncOutboxService {
       return;
     }
     if (type == 'mark_ongoing' || type == 'current_step_update') {
-      final remote = await (recoveryReadForTesting ??
-          SupabaseService.readOutboxRecoveryJob)(jobId);
+      final remote =
+          await (recoveryReadForTesting ??
+              SupabaseService.readOutboxRecoveryJob)(jobId);
       if (remote == null) {
         throw _OutboxConflictException('Missing or reassigned job');
       }
@@ -669,9 +691,9 @@ class SyncOutboxService {
       case 'submit_inspection':
         // Photos couldn't be uploaded while this was queued (that needs a
         // connection too) — do it now, at drain time, using the local
-        // paths/metadata captured back on Step 3. If a photo file no longer exists
-        // (e.g. cleared cache), uploadInspectionPhotos already skips it
-        // rather than failing the whole action.
+        // paths/metadata captured back on Step 3. A missing local file is
+        // acknowledged only when remote object + metadata are independently
+        // verified; otherwise the action remains failed/retryable.
         //
         // Phase 1 audit item #5 — DECISION (documented, not changed):
         // photos are uploaded FIRST, then submitInspection() finalizes the
@@ -748,6 +770,7 @@ class SyncOutboxService {
           locationLabel: payload['locationLabel'] as String?,
           submittedAt: action['created_at'] as String?,
         );
+        await _acknowledgeQueuedLocalPhotos(photosData);
         break;
       case 'checklist_update':
         final checklistData = (payload['checklistData'] as List)
@@ -789,6 +812,7 @@ class SyncOutboxService {
             'photo_count': uploadedUrls.length,
           },
         );
+        await _acknowledgeQueuedLocalPhotos(photosData);
         break;
       case 'findings_update':
         await SupabaseService.updateJobInspectionProgress(
@@ -823,32 +847,48 @@ class SyncOutboxService {
         // (already rare) false-conflict case this fix targets — it does
         // NOT cause a real conflict to go undetected, since a genuine
         // external change would still be caught by the fallback path.
-        debugPrint('SyncOutboxService: could not refresh known-good updated_at for $jobId — $e');
+        debugPrint(
+          'SyncOutboxService: could not refresh known-good updated_at for $jobId — $e',
+        );
       }
     }
   }
 
   static bool _sameEvidence(dynamic a, dynamic b) {
     if (a is Map && b is Map) {
-      return a.length == b.length && a.keys.every((k) =>
-          b.containsKey(k) && _sameEvidence(a[k], b[k]));
+      return a.length == b.length &&
+          a.keys.every((k) => b.containsKey(k) && _sameEvidence(a[k], b[k]));
     }
     if (a is List && b is List) {
       return a.length == b.length &&
-          List.generate(a.length, (i) => i).every((i) => _sameEvidence(a[i], b[i]));
+          List.generate(
+            a.length,
+            (i) => i,
+          ).every((i) => _sameEvidence(a[i], b[i]));
     }
     return a == b;
   }
 
   static Future<void> _reconcileInterruptedAction(
-      Map<String, dynamic> action, Map<String, dynamic> payload) async {
+    Map<String, dynamic> action,
+    Map<String, dynamic> payload,
+  ) async {
     final jobId = action['job_id'] as String;
     final type = action['type'] as String;
-    final remote = await (recoveryReadForTesting ??
-        SupabaseService.readOutboxRecoveryJob)(jobId);
-    if (remote == null) throw _OutboxConflictException('Missing or reassigned job');
+    final remote =
+        await (recoveryReadForTesting ?? SupabaseService.readOutboxRecoveryJob)(
+          jobId,
+        );
+    if (remote == null) {
+      throw _OutboxConflictException('Missing or reassigned job');
+    }
     final status = remote['status'] as String?;
-    if (!{'assigned', 'approved', 'in_progress', 'completed'}.contains(status)) {
+    if (!{
+      'assigned',
+      'approved',
+      'in_progress',
+      'completed',
+    }.contains(status)) {
       throw _OutboxConflictException('Unsupported remote lifecycle');
     }
     final desired = <String, dynamic>{};
@@ -862,39 +902,58 @@ class SyncOutboxService {
         }
       }
     }
-    bool matches() => desired.entries.every((e) =>
-        remote.containsKey(e.key) && _sameEvidence(remote[e.key], e.value));
+
+    bool matches() => desired.entries.every(
+      (e) => remote.containsKey(e.key) && _sameEvidence(remote[e.key], e.value),
+    );
     final now = DateTime.now().toUtc().toIso8601String();
     switch (type) {
       case 'mark_ongoing':
         if (status == 'completed' ||
             (status == 'in_progress' && remote['started_at'] != null)) {
-          await _recoveryDiagnostic(action, 'Satisfied/superseded; no remote replay');
+          await _recoveryDiagnostic(
+            action,
+            'Satisfied/superseded; no remote replay',
+          );
           return;
         }
         if (status != 'in_progress') desired['status'] = 'in_progress';
         if (remote['started_at'] == null) desired['started_at'] = now;
         break;
       case 'gps_confirm':
-        fields({'confirmed_latitude': 'latitude', 'confirmed_longitude': 'longitude',
-          'gps_accuracy_m': 'accuracyMeters'});
-        if (matches() && remote['gps_confirmed_at'] != null &&
+        fields({
+          'confirmed_latitude': 'latitude',
+          'confirmed_longitude': 'longitude',
+          'gps_accuracy_m': 'accuracyMeters',
+        });
+        if (matches() &&
+            remote['gps_confirmed_at'] != null &&
             remote['started_at'] != null &&
             {'in_progress', 'completed'}.contains(status)) {
-          await _recoveryDiagnostic(action, 'GPS satisfied; audit delivery unknown');
+          await _recoveryDiagnostic(
+            action,
+            'GPS satisfied; audit delivery unknown',
+          );
           return;
         }
-        if (status == 'completed' || remote['gps_confirmed_at'] != null ||
-            remote['confirmed_latitude'] != null || remote['confirmed_longitude'] != null) {
+        if (status == 'completed' ||
+            remote['gps_confirmed_at'] != null ||
+            remote['confirmed_latitude'] != null ||
+            remote['confirmed_longitude'] != null) {
           throw _OutboxConflictException('GPS differs or partially executed');
         }
-        desired.addAll({'status': 'in_progress', 'gps_confirmed_at': now,
-          if (remote['started_at'] == null) 'started_at': now});
+        desired.addAll({
+          'status': 'in_progress',
+          'gps_confirmed_at': now,
+          if (remote['started_at'] == null) 'started_at': now,
+        });
         break;
       case 'checklist_update':
-        fields({'checklist_data': 'checklistData',
+        fields({
+          'checklist_data': 'checklistData',
           'checklist_completed_count': 'checklistCompletedCount',
-          'checklist_total_count': 'checklistTotalCount'});
+          'checklist_total_count': 'checklistTotalCount',
+        });
         break;
       case 'current_step_update':
         if (status == 'completed') {
@@ -911,86 +970,151 @@ class SyncOutboxService {
         }
         fields({'current_step': 'currentStep'});
         if (payload['stepTimestamps'] is Map) {
-          desired['step_timestamps'] = (payload['stepTimestamps'] as Map)
-              .map((k, v) => MapEntry(k.toString(), v.toString()));
+          desired['step_timestamps'] = (payload['stepTimestamps'] as Map).map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          );
         }
-        if (!matches() && remote['current_step'] is num &&
+        if (!matches() &&
+            remote['current_step'] is num &&
             desired['current_step'] is num &&
             remote['current_step'] > desired['current_step']) {
           throw _OutboxConflictException('Cannot move progress backward');
         }
         break;
       case 'findings_update':
-        fields({'observations': 'observations', 'discrepancies': 'discrepancies',
-          'recommendations': 'recommendations', 'inspector_notes': 'inspectorNotes'});
+        fields({
+          'observations': 'observations',
+          'discrepancies': 'discrepancies',
+          'recommendations': 'recommendations',
+          'inspector_notes': 'inspectorNotes',
+        });
         break;
       case 'photos_update':
       case 'submit_inspection':
-        final photos = payload[type == 'photos_update' ? 'photos' : 'photosData'];
+        final photos =
+            payload[type == 'photos_update' ? 'photos' : 'photosData'];
         if (photos is! List) {
-          throw _OutboxConflictException('Missing complete queued photo evidence');
+          throw _OutboxConflictException(
+            'Missing complete queued photo evidence',
+          );
         }
         final List<String> paths;
         try {
           final base = payload[_conflictSnapshotKey];
           final version = remote['updated_at'];
-          paths = await SupabaseService.verifyOutboxRecoveryPhotos(jobId,
-              photos.map((p) => Map<String, dynamic>.from(p as Map)).toList(),
-              allowMissingResume: status != 'completed' && base is String &&
-                  base.isNotEmpty && version is String && _sameInstant(base, version));
+          paths = await SupabaseService.verifyOutboxRecoveryPhotos(
+            jobId,
+            photos.map((p) => Map<String, dynamic>.from(p as Map)).toList(),
+            allowMissingResume:
+                status != 'completed' &&
+                base is String &&
+                base.isNotEmpty &&
+                version is String &&
+                _sameInstant(base, version),
+          );
+          await _acknowledgeQueuedLocalPhotos(
+            photos.map((p) => Map<String, dynamic>.from(p as Map)).toList(),
+          );
         } on StateError catch (e) {
           throw _OutboxConflictException(e.message.toString());
         }
         desired.addAll({'photo_paths': paths, 'photo_count': paths.length});
         if (type == 'submit_inspection') {
-          fields({'findings': 'findings', 'is_compliant': 'isCompliant',
+          fields({
+            'findings': 'findings',
+            'is_compliant': 'isCompliant',
             'inspection_result': 'inspectionResult',
             'checklist_data': 'checklistData',
             'checklist_completed_count': 'checklistCompletedCount',
-            'checklist_total_count': 'checklistTotalCount'});
-          fields({'observations': 'observations', 'discrepancies': 'discrepancies',
-            'recommendations': 'recommendations', 'inspector_notes': 'inspectorNotes'},
-            omitNull: true);
-          if (matches() && status == 'completed' && remote['submitted_at'] != null &&
+            'checklist_total_count': 'checklistTotalCount',
+          });
+          fields({
+            'observations': 'observations',
+            'discrepancies': 'discrepancies',
+            'recommendations': 'recommendations',
+            'inspector_notes': 'inspectorNotes',
+          }, omitNull: true);
+          if (matches() &&
+              status == 'completed' &&
+              remote['submitted_at'] != null &&
               remote['rework_started_at'] == null) {
-            await _recoveryDiagnostic(action, 'Submission satisfied; audit delivery unknown');
+            await _recoveryDiagnostic(
+              action,
+              'Submission satisfied; audit delivery unknown',
+            );
             return;
           }
-          if (remote['rework_started_at'] != null || remote['submitted_at'] != null) {
-            throw _OutboxConflictException('Submission/rework revision ambiguous');
+          if (remote['rework_started_at'] != null ||
+              remote['submitted_at'] != null) {
+            throw _OutboxConflictException(
+              'Submission/rework revision ambiguous',
+            );
           }
-          final intendedSubmittedAt = payload['submittedAt'] ?? action['created_at'];
+          final intendedSubmittedAt =
+              payload['submittedAt'] ?? action['created_at'];
           if (intendedSubmittedAt == null ||
               intendedSubmittedAt is! String ||
               intendedSubmittedAt.trim().isEmpty) {
-            throw _OutboxConflictException('Original intended submitted_at unavailable');
+            throw _OutboxConflictException(
+              'Original intended submitted_at unavailable',
+            );
           }
-          desired.addAll({'status': 'completed', 'submitted_at': intendedSubmittedAt.trim()});
+          desired.addAll({
+            'status': 'completed',
+            'submitted_at': intendedSubmittedAt.trim(),
+          });
         }
         break;
       default:
-        throw _OutboxConflictException('Unsupported interrupted action type: $type');
+        throw _OutboxConflictException(
+          'Unsupported interrupted action type: $type',
+        );
     }
     if (matches()) {
-      await _recoveryDiagnostic(action, 'Business evidence satisfied; no remote replay');
+      await _recoveryDiagnostic(
+        action,
+        'Business evidence satisfied; no remote replay',
+      );
       return;
     }
     final base = payload[_conflictSnapshotKey];
     final version = remote['updated_at'];
-    if (status == 'completed' || base is! String || version is! String ||
-        base.isEmpty || !_sameInstant(base, version)) {
-      throw _OutboxConflictException('No defensible unchanged durable base for recovery');
+    if (status == 'completed' ||
+        base is! String ||
+        version is! String ||
+        base.isEmpty ||
+        !_sameInstant(base, version)) {
+      throw _OutboxConflictException(
+        'No defensible unchanged durable base for recovery',
+      );
     }
-    final result = await (recoveryWriteForTesting ?? SupabaseService.conditionalOutboxUpdate)(
-        jobId, version, status!, desired);
-    if (result == null) throw _OutboxConflictException('Conditional recovery affected zero rows');
-    await _recoveryDiagnostic(action, 'Guarded business write accepted; no reconstructed activity');
+    final result =
+        await (recoveryWriteForTesting ??
+            SupabaseService.conditionalOutboxUpdate)(
+          jobId,
+          version,
+          status!,
+          desired,
+        );
+    if (result == null) {
+      throw _OutboxConflictException('Conditional recovery affected zero rows');
+    }
+    await _recoveryDiagnostic(
+      action,
+      'Guarded business write accepted; no reconstructed activity',
+    );
   }
 
-  static Future<void> _recoveryDiagnostic(Map<String, dynamic> action, String message) =>
-      DBHelper.logSyncEvent(eventType: 'interrupted_recovery', result: 'info',
-        message: message, jobId: action['job_id'] as String,
-        pendingActionId: action['id'] as String);
+  static Future<void> _recoveryDiagnostic(
+    Map<String, dynamic> action,
+    String message,
+  ) => DBHelper.logSyncEvent(
+    eventType: 'interrupted_recovery',
+    result: 'info',
+    message: message,
+    jobId: action['job_id'] as String,
+    pendingActionId: action['id'] as String,
+  );
 
   static Future<Map<String, dynamic>> _withConflictSnapshot({
     required String jobId,
@@ -1014,7 +1138,8 @@ class SyncOutboxService {
     // this specific action's payload at enqueue time — see
     // _knownGoodUpdatedAt for why the enqueue-time snapshot alone causes
     // a false conflict on the 2nd+ queued action for the same job.
-    final cachedUpdatedAt = _knownGoodUpdatedAt[jobId] ?? payload[_conflictSnapshotKey] as String?;
+    final cachedUpdatedAt =
+        _knownGoodUpdatedAt[jobId] ?? payload[_conflictSnapshotKey] as String?;
     if (cachedUpdatedAt == null || cachedUpdatedAt.isEmpty) return;
 
     final serverUpdatedAt = await SupabaseService.fetchJobUpdatedAt(jobId);

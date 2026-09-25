@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/services/supabase_service.dart';
@@ -28,6 +26,10 @@ class InspectionProvider extends ChangeNotifier {
 
   // Photo Evidence State
   final List<Map<String, dynamic>> _capturedPhotos = [];
+  // Photos that have entered save/upload/queue work in this durable session.
+  // A local row alone cannot prove a photo was never uploaded: the live
+  // capture path can upload before a local_photos row is acknowledged.
+  final Set<String> _photosWithRemoteWork = {};
 
   // Findings State
   String _actualLandUse = 'Single-detached residential';
@@ -77,6 +79,7 @@ class InspectionProvider extends ChangeNotifier {
     (key, value) => key == 'Accessibility & road frontage' ? true : false,
   );
   _capturedPhotos.clear();
+    _photosWithRemoteWork.clear();
   _actualLandUse = 'Single-detached residential';
   _notes = '';
   _discrepancies = '';
@@ -144,6 +147,29 @@ class InspectionProvider extends ChangeNotifier {
 
   // --- PHOTO METHODS ---
 
+  void _markPhotoHasRemoteWork(Map<String, dynamic> photo) {
+    final id = photo['id'] as String?;
+    final path = photo['photoPath'] as String?;
+    if (id != null && id.isNotEmpty) _photosWithRemoteWork.add(id);
+    if (path != null && path.isNotEmpty) _photosWithRemoteWork.add(path);
+  }
+
+  bool _photoHasRemoteWork(Map<String, dynamic> photo) {
+    final id = photo['id'] as String?;
+    final path = photo['photoPath'] as String?;
+    return (id != null && _photosWithRemoteWork.contains(id)) ||
+        (path != null && _photosWithRemoteWork.contains(path));
+  }
+
+  /// Marks the current photo set as having entered the remote submission
+  /// path. This is intentionally session-local: a later delete must not claim
+  /// the photo is still local-only after an upload/queue attempt.
+  void markPhotosSubmitted() {
+    for (final photo in _capturedPhotos) {
+      _markPhotoHasRemoteWork(photo);
+    }
+  }
+
   void addPhoto({
     required String photoPath,
     required String photoNotes,
@@ -178,51 +204,46 @@ class InspectionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Removes one captured photo — from the in-memory list, from
-  /// local_photos if it was already persisted there, and (best-effort)
-  /// from Supabase if it was already synced there too.
-  ///
-  /// FIX (2026-07-23) — "no remove photo" usability gap: this method
-  /// existed before but was never called from any screen, and only ever
-  /// removed the in-memory entry — a photo already saved via
-  /// `saveStepPhotos()` would still be sitting in `local_photos` and
-  /// potentially already uploaded to Supabase, so it would silently
-  /// reappear/re-count on the next save even after being "removed" from
-  /// the grid. Now properly wired to the Photos step's per-cell delete
-  /// button, and cleans up all three layers.
-  Future<void> removePhoto(int index) async {
-    if (index < 0 || index >= _capturedPhotos.length) return;
-    _markReworkModifiedIfNeeded();
-    final photo = _capturedPhotos[index];
-    _capturedPhotos.removeAt(index);
-    notifyListeners();
+  /// Removes one captured photo only when it is still local, unacknowledged
+  /// evidence. Submitted, completed, or rework evidence is immutable here.
+  /// Returns false without changing memory when removal is not permitted or
+  /// local cleanup fails, so the caller cannot report a false success.
+  Future<bool> removePhoto(int index) async {
+    if (index < 0 || index >= _capturedPhotos.length) return false;
 
+    final photo = _capturedPhotos[index];
     final photoId = photo['id'] as String?;
     final photoPath = photo['photoPath'] as String?;
-    if (photoId != null) {
-      try {
-        await DBHelper.deleteLocalPhoto(photoId);
-      } catch (e) {
-        debugPrint('removePhoto: local delete failed — $e');
-      }
+    if (photoId == null || photoPath == null || photoPath.isEmpty) {
+      return false;
     }
-    if (photoPath != null && _activeTask != null) {
-      // Best-effort — if this photo was never actually uploaded (e.g.
-      // removed before ever going online), these calls just no-op rather
-      // than error. If the device is offline right now, this silently
-      // fails and an already-synced copy may be left behind in Supabase
-      // as a known limitation — there's no delete-outbox action yet to
-      // retry this later. Acceptable for now since the common case is
-      // removing a photo shortly after taking it, before it's synced.
-      try {
-        await SupabaseService.deleteInspectionPhoto(
-          jobId: _activeTask!.id,
-          localPath: photoPath,
-        );
-      } catch (e) {
-        debugPrint('removePhoto: Supabase cleanup failed — $e');
+    if (PhotoSourceResolver.classify(photoPath) != PhotoSourceKind.localFile) {
+      return false;
       }
+
+    if (_isReworkMode ||
+        _activeTask?.lifecycleCategory == TaskLifecycleCategory.completed) {
+      return false;
     }
+
+    final localRow = await DBHelper.getLocalPhoto(photoId);
+    final locallyAcknowledged = localRow?['is_synced'] == 1;
+    final knownRemote = photo['isRemoteUrl'] == true || _photoHasRemoteWork(photo);
+    if (locallyAcknowledged || knownRemote) {
+      return false;
+    }
+
+      try {
+      await DBHelper.deleteLocalPhoto(photoId, photoPath: photoPath);
+      } catch (e) {
+      debugPrint('removePhoto: local file/row delete failed — $e');
+      return false;
+    }
+
+    _markReworkModifiedIfNeeded();
+    _capturedPhotos.removeAt(index);
+    notifyListeners();
+    return true;
   }
 
   // --- FINDINGS METHODS ---
@@ -239,7 +260,8 @@ class InspectionProvider extends ChangeNotifier {
     // anything — so mark-modified only if something genuinely differs,
     // otherwise merely visiting and leaving Findings during rework would
     // trip the same false "Modified" badge Issue 2 was about.
-    final changed = actualLandUse != _actualLandUse ||
+    final changed =
+        actualLandUse != _actualLandUse ||
         notes != _notes ||
         discrepancies != _discrepancies ||
         recommendations != _recommendations ||
@@ -281,6 +303,7 @@ class InspectionProvider extends ChangeNotifier {
     // edit in THIS session, not to entering rework mode itself. Reset
     // here so a fresh rework session starts clean.
     _reworkModifiedMarked = false;
+    _photosWithRemoteWork.clear();
 
     // Match stored checklist entries back onto the two known maps.
     // FIX (Completed/Rework audit, Finding 2): this used to read
@@ -322,13 +345,15 @@ class InspectionProvider extends ChangeNotifier {
     _capturedPhotos
       ..clear()
       ..addAll(
-        PhotoSourceResolver.evidence(task.photoDetails, task.photoPaths).map(
-          (photo) {
+        PhotoSourceResolver.evidence(task.photoDetails, task.photoPaths).map((
+          photo,
+        ) {
             final path = photo['photoPath'] as String;
             // Existing upload API uses this flag to preserve remote evidence;
             // never mark an arbitrary local/invalid value as remote.
             bool remote = PhotoSourceResolver.isObjectPath(path);
-            if (PhotoSourceResolver.classify(path) == PhotoSourceKind.remoteHttp) {
+          if (PhotoSourceResolver.classify(path) ==
+              PhotoSourceKind.remoteHttp) {
               try {
                 remote = inspectionPhotoResolver().objectPath(path) != null;
               } catch (_) {
@@ -341,10 +366,12 @@ class InspectionProvider extends ChangeNotifier {
               'capturedAt': photo['captured_at'] ?? task.submittedAt,
               'isRemoteUrl': remote,
             };
-          },
-        ),
+        }),
       );
 
+    for (final photo in _capturedPhotos) {
+      _markPhotoHasRemoteWork(photo);
+    }
     _notes = task.inspectorNotes ?? '';
     _discrepancies = task.discrepancies ?? '';
     _recommendations = task.recommendations ?? '';
@@ -397,7 +424,8 @@ class InspectionProvider extends ChangeNotifier {
       _capturedPhotos.clear();
       for (final p in localPhotos) {
         _capturedPhotos.add({
-          'id': p['id'], // reuse the existing local_photos row id (see addPhoto() fix)
+          'id':
+              p['id'], // reuse the existing local_photos row id (see addPhoto() fix)
           'photoPath': p['photo_path'],
           'notes': p['notes'],
           'latitude': p['latitude'],
@@ -458,7 +486,6 @@ class InspectionProvider extends ChangeNotifier {
     return false; // Stored offline
   }
 
-
   // --- REWORK: PER-STEP SAVE (writes immediately, no need to reach Submit) ---
 
   Future<bool> saveStepPhotos() async {
@@ -467,6 +494,9 @@ class InspectionProvider extends ChangeNotifier {
     final photosToUpload = _capturedPhotos
         .where((p) => (p['photoPath'] as String?)?.isNotEmpty == true)
         .toList();
+    for (final photo in photosToUpload) {
+      _markPhotoHasRemoteWork(photo);
+    }
     try {
       // Pass the full list of maps as photosData
       final uploadedUrls = await SupabaseService.uploadInspectionPhotos(
@@ -506,9 +536,7 @@ class InspectionProvider extends ChangeNotifier {
   Future<bool> saveStepChecklist() async {
     if (_activeTask == null) return false;
     final checklist = <Map<String, dynamic>>[
-      ..._siteCondition.entries.map(
-        (e) => {'item': e.key, 'checked': e.value},
-      ),
+      ..._siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
       ..._zoningObservations.entries.map(
         (e) => {'item': e.key, 'checked': e.value},
       ),
@@ -534,7 +562,9 @@ class InspectionProvider extends ChangeNotifier {
       // earlier — so no data was actually lost, but the message was
       // misleading. Now matches the same queue-on-failure pattern already
       // used by saveStepPhotos and saveStepFindings above.
-      debugPrint('saveStepChecklist: direct push failed, queuing for retry — $e');
+      debugPrint(
+        'saveStepChecklist: direct push failed, queuing for retry — $e',
+      );
       try {
         await SyncOutboxService.enqueueChecklistUpdate(
           jobId: _activeTask!.id,
@@ -555,8 +585,9 @@ class InspectionProvider extends ChangeNotifier {
     final observations =
         'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.';
     final discrepancies = _discrepancies.isNotEmpty ? _discrepancies : null;
-    final recommendations =
-        _recommendations.isNotEmpty ? _recommendations : null;
+    final recommendations = _recommendations.isNotEmpty
+        ? _recommendations
+        : null;
     try {
       await SupabaseService.updateJobInspectionProgress(
         jobId: _activeTask!.id,
@@ -572,7 +603,9 @@ class InspectionProvider extends ChangeNotifier {
       // Issue 4 fix — same rationale as saveStepPhotos above: no offline
       // fallback existed here before, so a failed push while offline was
       // silently lost instead of queued.
-      debugPrint('saveStepFindings: direct push failed, queuing for retry — $e');
+      debugPrint(
+        'saveStepFindings: direct push failed, queuing for retry — $e',
+      );
       try {
         await SyncOutboxService.enqueueFindingsUpdate(
           jobId: _activeTask!.id,
@@ -678,59 +711,46 @@ class InspectionProvider extends ChangeNotifier {
     try {
       final supabase = SupabaseService.client;
 
-      // 1. Sync Pending Photos first (needed for database metadata joins)
+      // 1. Sync pending local photos through the one canonical remote writer.
+      // Legacy local_photos rows are adapted here; all NEW remote identities
+      // now use job ID + stable local path + UUIDv5 through the service path.
       final pendingPhotos = await DBHelper.getPendingPhotos();
-      // BUG FIX #4B — Image Presentation Bug.
-      // This used to only upsert into field_job_photos and never touch
-      // field_jobs.photo_paths, so that column kept whatever local device
-      // paths were written when the photo was first captured. Any screen
-      // that reads task.photoPaths (which comes straight from
-      // field_jobs.photo_paths) then tried Image.network() on a local
-      // filesystem path and fell straight into the gray/broken-image
-      // fallback — even though the photo really did make it to storage.
-      // Track uploaded public URLs per job here and patch field_jobs too.
-      final Map<String, List<String>> uploadedUrlsByJob = {};
+      final pendingPhotosByJob = <String, List<Map<String, dynamic>>>{};
       for (final photo in pendingPhotos) {
-        final file = File(photo['photo_path']);
-        if (!await file.exists()) {
-          await DBHelper.markPhotoSynced(photo['id']);
+        final jobId = photo['job_id'] as String?;
+        final photoPath = photo['photo_path'] as String?;
+        if (jobId == null ||
+            jobId.isEmpty ||
+            photoPath == null ||
+            photoPath.isEmpty) {
           continue;
         }
-
-        final fileName = 'photo_${photo['id']}.jpg';
-        final storagePath = 'inspections/${photo['job_id']}/$fileName';
-
-        await supabase.storage
-            .from('inspection-photos')
-            .upload(
-              storagePath,
-              file,
-              fileOptions: const FileOptions(
-                cacheControl: '3600',
-                upsert: true,
-              ),
-            );
-
-        final publicUrl = supabase.storage
-            .from('inspection-photos')
-            .getPublicUrl(storagePath);
-
-        await supabase.from('field_job_photos').upsert({
-          'id': photo['id'],
-          'field_job_id': photo['job_id'],
-          'photo_url': publicUrl,
-          'latitude': photo['latitude'],
-          'longitude': photo['longitude'],
-          'captured_at': photo['captured_at'],
+        pendingPhotosByJob.putIfAbsent(jobId, () => []).add({
+          'localPhotoId': photo['id'],
+          ...SupabaseService.photoUploadPayloadFromLegacyLocalRow(photo),
         });
-
-        uploadedUrlsByJob.putIfAbsent(photo['job_id'], () => []).add(publicUrl);
-        await DBHelper.markPhotoSynced(photo['id']);
       }
 
-      // Patch field_jobs.photo_paths / photo_count for every job that had a
-      // photo land in storage this pass — merging with whatever real (http)
-      // URLs were already there so re-syncs don't clobber earlier uploads.
+      final Map<String, List<String>> uploadedUrlsByJob = {};
+      for (final entry in pendingPhotosByJob.entries) {
+        for (final photo in entry.value) {
+          _markPhotoHasRemoteWork(photo);
+        }
+        final uploadedUrls = await SupabaseService.uploadInspectionPhotos(
+          jobId: entry.key,
+          photosData: entry.value,
+        );
+        uploadedUrlsByJob[entry.key] = uploadedUrls;
+        for (final photo in entry.value) {
+          final localPhotoId = photo['localPhotoId'] as String?;
+          if (localPhotoId != null) {
+            await DBHelper.markPhotoSynced(localPhotoId);
+          }
+        }
+      }
+
+      // Patch field_jobs.photo_paths / photo_count using the canonical
+      // writer's returned projection, preserving any prior remote evidence.
       for (final entry in uploadedUrlsByJob.entries) {
         try {
           final existing = await supabase
@@ -740,7 +760,9 @@ class InspectionProvider extends ChangeNotifier {
               .maybeSingle();
           final existingPaths = ((existing?['photo_paths'] as List?) ?? [])
               .cast<String>()
-              .where((p) => p.startsWith('http'))
+              .where(
+                (p) => p.startsWith('http') || p.startsWith('inspections/'),
+              )
               .toList();
           final merged = {...existingPaths, ...entry.value}.toList();
           await supabase

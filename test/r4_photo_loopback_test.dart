@@ -34,6 +34,14 @@ void main() {
     String actionId = 'photos_a',
     List<int>? localFileBytes,
     Map<String, dynamic>? remoteJobOverrides,
+    bool recoveryRequired = true,
+    String actionStatus = 'syncing',
+    int? storageHeadStatus,
+    int storageUploadStatus = 200,
+    int metadataUpsertStatus = 201,
+    bool retryAfterFailure = false,
+    String? localPhotoId,
+    bool expectLocalPhotoSynced = true,
   }) async {
     final overrides = HttpOverrides.current;
     HttpOverrides.global = null;
@@ -66,8 +74,10 @@ void main() {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final publicUrl =
         'http://127.0.0.1:${server.port}/storage/v1/object/public/inspection-photos/$object';
-    final metadata = metadataBuilder?.call(photoId, object, publicUrl);
+    var metadata = metadataBuilder?.call(photoId, object, publicUrl);
     var storageBytes = initialStorageBytes;
+    var fixtureStorageUploadStatus = storageUploadStatus;
+    var fixtureMetadataUpsertStatus = metadataUpsertStatus;
 
     server.listen((request) async {
       final body = await utf8.decoder.bind(request).join();
@@ -82,7 +92,14 @@ void main() {
           };
         }
         request.response.write(
-          jsonEncode(request.method == 'PATCH' ? job : [job]),
+          jsonEncode(
+            request.method == 'PATCH' ||
+                    (request.headers['accept']?.toString() ?? '').contains(
+                      'application/vnd.pgrst.object+json',
+                    )
+                ? job
+                : [job],
+          ),
         );
       } else if (request.uri.path == '/rest/v1/field_job_photos') {
         if (request.method == 'GET') {
@@ -90,16 +107,25 @@ void main() {
             jsonEncode(metadata == null ? [] : [metadata]),
           );
         } else {
-          inserts++;
           final inserted = Map<String, dynamic>.from(jsonDecode(body) as Map);
-          request.response.statusCode = 201;
-          request.response.write(jsonEncode(inserted));
+          if (fixtureMetadataUpsertStatus >= 400) {
+            request.response.statusCode = fixtureMetadataUpsertStatus;
+            request.response.write(jsonEncode({'error': 'fixture failure'}));
+          } else {
+            inserts++;
+            metadata = inserted;
+            request.response.statusCode = 201;
+            request.response.write(jsonEncode(inserted));
+          }
         }
       } else if (request.uri.path == '/rest/v1/activity_log') {
         request.response.statusCode = 201;
         request.response.write('[]');
       } else if (request.uri.path.startsWith('/storage/v1/object/')) {
-        if (request.method == 'GET') {
+        if (request.method == 'HEAD') {
+          request.response.statusCode =
+              storageHeadStatus ?? (storageBytes == null ? 404 : 200);
+        } else if (request.method == 'GET') {
           if (storageBytes == null) {
             request.response.statusCode = 404;
             request.response.write(
@@ -111,8 +137,13 @@ void main() {
           }
         } else {
           uploads++;
-          storageBytes = localFileBytes ?? [1, 2, 3];
-          request.response.write('{"Key": "inspection-photos/$object"}');
+          if (fixtureStorageUploadStatus >= 400) {
+            request.response.statusCode = fixtureStorageUploadStatus;
+            request.response.write(jsonEncode({'error': 'storage failure'}));
+          } else {
+            storageBytes = localFileBytes ?? [1, 2, 3];
+            request.response.write('{"Key": "inspection-photos/$object"}');
+          }
         }
       }
       await request.response.close();
@@ -154,6 +185,7 @@ void main() {
         'latitude': null,
         'longitude': null,
         'capturedAt': base,
+        'localPhotoId': ?localPhotoId,
       };
       var payload = <String, dynamic>{
         'cachedUpdatedAtSnapshot': queuedSnapshotUpdatedAt,
@@ -176,15 +208,30 @@ void main() {
         };
       }
 
+      if (localPhotoId != null) {
+        await db.insert('local_photos', {
+          'id': localPhotoId,
+          'job_id': 'a',
+          'photo_path': file.path,
+          'notes': 'fixture',
+          'latitude': null,
+          'longitude': null,
+          'captured_at': base,
+          'is_synced': 0,
+        });
+      }
       await db.insert('pending_actions', {
         'id': actionId,
         'type': actionType,
         'job_id': 'a',
-        'status': 'syncing',
+        'status': actionStatus,
         'retry_count': 0,
         'created_at': base,
         'updated_at': base,
-        'payload': jsonEncode({...payload, 'r4RecoveryRequired': true}),
+        'payload': jsonEncode({
+          ...payload,
+          if (recoveryRequired) 'r4RecoveryRequired': true,
+        }),
       });
       await SyncOutboxService.drain();
       expect(
@@ -194,6 +241,28 @@ void main() {
       expect(uploads, expectedUploads);
       expect(inserts, expectedInserts);
       expect(patches, expectedPatches);
+      if (localPhotoId != null) {
+        final localPhoto = (await db.query('local_photos')).single;
+        expect(localPhoto['is_synced'], expectLocalPhotoSynced ? 1 : 0);
+      }
+      if (retryAfterFailure) {
+        expect(expectedStatus, 'failed');
+        fixtureMetadataUpsertStatus = 201;
+        await db.update(
+          'pending_actions',
+          {'status': 'pending', 'last_error': null},
+          where: 'id = ?',
+          whereArgs: [actionId],
+        );
+        await SyncOutboxService.drain();
+        expect((await db.query('pending_actions')).single['status'], 'synced');
+        expect(uploads, expectedUploads);
+        expect(inserts, expectedInserts + 1);
+        expect(patches, expectedPatches + 1);
+        if (localPhotoId != null) {
+          expect((await db.query('local_photos')).single['is_synced'], 1);
+        }
+      }
       if (expectedStatus == 'synced') {
         final pp = patches, pu = uploads, pi = inserts;
         await SyncOutboxService.drain();
@@ -584,6 +653,7 @@ void main() {
     final file = File('${temp.path}/evidence.jpg')..writeAsBytesSync([1, 2, 3]);
     final key = base64Url.encode(utf8.encode(file.path)).replaceAll('=', '');
     final object = 'inspections/a/photo_$key.jpg';
+    Uint8List? storageBytes;
 
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
@@ -609,12 +679,20 @@ void main() {
         request.response.statusCode = 201;
         request.response.write('[]');
       } else if (request.uri.path.startsWith('/storage/v1/object/')) {
-        if (request.method == 'GET') {
-          request.response.statusCode = 404;
-          request.response.write(
-            jsonEncode({'statusCode': '404', 'error': 'Not Found'}),
-          );
+        if (request.method == 'HEAD') {
+          request.response.statusCode = storageBytes == null ? 404 : 200;
+        } else if (request.method == 'GET') {
+          if (storageBytes == null) {
+            request.response.statusCode = 404;
+            request.response.write(
+              jsonEncode({'statusCode': '404', 'error': 'Not Found'}),
+            );
+          } else {
+            request.response.headers.contentType = ContentType.binary;
+            request.response.add(storageBytes!);
+          }
         } else {
+          storageBytes = Uint8List.fromList([1, 2, 3]);
           request.response.write('{"Key": "inspection-photos/$object"}');
         }
       }
@@ -745,6 +823,7 @@ void main() {
       final key = base64Url.encode(utf8.encode(file.path)).replaceAll('=', '');
       final objectA = 'inspections/a/photo_$key.jpg';
       var patchesB = 0;
+      Uint8List? storageBytes;
 
       final jobA = {
         'id': 'a',
@@ -783,12 +862,20 @@ void main() {
           request.response.statusCode = 201;
           request.response.write('[]');
         } else if (request.uri.path.startsWith('/storage/v1/object/')) {
-          if (request.method == 'GET') {
-            request.response.statusCode = 404;
-            request.response.write(
-              jsonEncode({'statusCode': '404', 'error': 'Not Found'}),
-            );
+          if (request.method == 'HEAD') {
+            request.response.statusCode = storageBytes == null ? 404 : 200;
+          } else if (request.method == 'GET') {
+            if (storageBytes == null) {
+              request.response.statusCode = 404;
+              request.response.write(
+                jsonEncode({'statusCode': '404', 'error': 'Not Found'}),
+              );
+            } else {
+              request.response.headers.contentType = ContentType.binary;
+              request.response.add(storageBytes!);
+            }
           } else {
+            storageBytes = Uint8List.fromList([1, 2, 3]);
             request.response.write('{"Key": "inspection-photos/$objectA"}');
           }
         }
@@ -912,7 +999,11 @@ void main() {
             req.response.write('{"error":"injected patch failure"}');
           } else {
             patches++;
-            job = {...job, ...jsonDecode(body) as Map<String, dynamic>, 'updated_at': '2026-01-02T00:00:00Z'};
+            job = {
+              ...job,
+              ...jsonDecode(body) as Map<String, dynamic>,
+              'updated_at': '2026-01-02T00:00:00Z',
+            };
             req.response.write(jsonEncode(job));
           }
         } else {
@@ -933,7 +1024,9 @@ void main() {
           }
         }
       } else if (req.uri.path.startsWith('/storage/v1/object/')) {
-        if (req.method == 'GET') {
+        if (req.method == 'HEAD') {
+          req.response.statusCode = storageBytes == null ? 404 : 200;
+        } else if (req.method == 'GET') {
           if (storageBytes == null) {
             req.response.statusCode = 404;
             req.response.write('{"error":"Not Found"}');
@@ -957,25 +1050,54 @@ void main() {
 
     final db = await databaseFactoryFfi.openDatabase('${temp.path}/test.db');
     try {
-      final source = await File('lib/core/services/db_helper.dart').readAsString();
-      for (final m in RegExp(r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)').allMatches(source)) {
+      final source = await File(
+        'lib/core/services/db_helper.dart',
+      ).readAsString();
+      for (final m in RegExp(
+        r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)',
+      ).allMatches(source)) {
         await db.execute(m.group(0)!);
       }
       DBHelper.useDatabaseForTesting(db);
       await Supabase.initialize(
-        url: 'http://127.0.0.1:${server.port}', publishableKey: 'fixture',
-        authOptions: FlutterAuthClientOptions(autoRefreshToken: false, detectSessionInUri: false, localStorage: EmptyLocalStorage()),
+        url: 'http://127.0.0.1:${server.port}',
+        publishableKey: 'fixture',
+        authOptions: FlutterAuthClientOptions(
+          autoRefreshToken: false,
+          detectSessionInUri: false,
+          localStorage: EmptyLocalStorage(),
+        ),
       );
-      await SupabaseService.client.auth.setInitialSession(jsonEncode({
-        'access_token': 'fixt', 'refresh_token': 'fixt', 'token_type': 'bearer', 'expires_in': 3600,
-        'user': {'id': 'inspector', 'aud': 'authenticated'},
-      }));
+      await SupabaseService.client.auth.setInitialSession(
+        jsonEncode({
+          'access_token': 'fixt',
+          'refresh_token': 'fixt',
+          'token_type': 'bearer',
+          'expires_in': 3600,
+          'user': {'id': 'inspector', 'aud': 'authenticated'},
+        }),
+      );
 
-      final photoPayload = {'photoPath': file.path, 'notes': 'fixture', 'latitude': null, 'longitude': null, 'capturedAt': baseTime};
+      final photoPayload = {
+        'photoPath': file.path,
+        'notes': 'fixture',
+        'latitude': null,
+        'longitude': null,
+        'capturedAt': baseTime,
+      };
       await db.insert('pending_actions', {
-        'id': 'photos_a', 'type': 'photos_update', 'job_id': 'a', 'status': 'pending', 'retry_count': 0,
-        'created_at': baseTime, 'updated_at': baseTime,
-        'payload': jsonEncode({'cachedUpdatedAtSnapshot': baseTime, 'r4RecoveryRequired': true, 'photos': [photoPayload]}),
+        'id': 'photos_a',
+        'type': 'photos_update',
+        'job_id': 'a',
+        'status': 'pending',
+        'retry_count': 0,
+        'created_at': baseTime,
+        'updated_at': baseTime,
+        'payload': jsonEncode({
+          'cachedUpdatedAtSnapshot': baseTime,
+          'r4RecoveryRequired': true,
+          'photos': [photoPayload],
+        }),
       });
 
       // Pass 1: Drain with injected failure
@@ -989,7 +1111,9 @@ void main() {
       expect(patches, expectedPass1Patches);
 
       // Pass 2: Clear failures and recover
-      failStorage = false; failMetadata = false; failPatch = false;
+      failStorage = false;
+      failMetadata = false;
+      failPatch = false;
       await SyncOutboxService.drain();
       final p2 = (await db.query('pending_actions')).single;
       expect(p2['status'], 'synced');
@@ -1073,7 +1197,8 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       SyncOutboxService.resetRecoverySessionForTesting();
       final temp = await Directory.systemTemp.createTemp('r4-fi5-');
-      final file = File('${temp.path}/evidence.jpg')..writeAsBytesSync([1, 2, 3]);
+      final file = File('${temp.path}/evidence.jpg')
+        ..writeAsBytesSync([1, 2, 3]);
       final key = base64Url.encode(utf8.encode(file.path)).replaceAll('=', '');
       final object = 'inspections/a/photo_$key.jpg';
 
@@ -1097,7 +1222,11 @@ void main() {
         if (req.uri.path == '/rest/v1/field_jobs') {
           if (req.method == 'PATCH') {
             patches++;
-            job = {...job, ...jsonDecode(body) as Map<String, dynamic>, 'updated_at': '2026-01-02T00:00:00Z'};
+            job = {
+              ...job,
+              ...jsonDecode(body) as Map<String, dynamic>,
+              'updated_at': '2026-01-02T00:00:00Z',
+            };
             req.response.write(jsonEncode(job));
           } else {
             req.response.write(jsonEncode([job]));
@@ -1112,7 +1241,9 @@ void main() {
             req.response.write(jsonEncode(metadata));
           }
         } else if (req.uri.path.startsWith('/storage/v1/object/')) {
-          if (req.method == 'GET') {
+          if (req.method == 'HEAD') {
+            req.response.statusCode = storageBytes == null ? 404 : 200;
+          } else if (req.method == 'GET') {
             if (storageBytes == null) {
               req.response.statusCode = 404;
               req.response.write('{"error":"Not Found"}');
@@ -1131,25 +1262,54 @@ void main() {
 
       final db = await databaseFactoryFfi.openDatabase('${temp.path}/test.db');
       try {
-        final source = await File('lib/core/services/db_helper.dart').readAsString();
-        for (final m in RegExp(r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)').allMatches(source)) {
+        final source = await File(
+          'lib/core/services/db_helper.dart',
+        ).readAsString();
+        for (final m in RegExp(
+          r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)',
+        ).allMatches(source)) {
           await db.execute(m.group(0)!);
         }
         DBHelper.useDatabaseForTesting(db);
         await Supabase.initialize(
-          url: 'http://127.0.0.1:${server.port}', publishableKey: 'fixture',
-          authOptions: FlutterAuthClientOptions(autoRefreshToken: false, detectSessionInUri: false, localStorage: EmptyLocalStorage()),
+          url: 'http://127.0.0.1:${server.port}',
+          publishableKey: 'fixture',
+          authOptions: FlutterAuthClientOptions(
+            autoRefreshToken: false,
+            detectSessionInUri: false,
+            localStorage: EmptyLocalStorage(),
+          ),
         );
-        await SupabaseService.client.auth.setInitialSession(jsonEncode({
-          'access_token': 'fixt', 'refresh_token': 'fixt', 'token_type': 'bearer', 'expires_in': 3600,
-          'user': {'id': 'inspector', 'aud': 'authenticated'},
-        }));
+        await SupabaseService.client.auth.setInitialSession(
+          jsonEncode({
+            'access_token': 'fixt',
+            'refresh_token': 'fixt',
+            'token_type': 'bearer',
+            'expires_in': 3600,
+            'user': {'id': 'inspector', 'aud': 'authenticated'},
+          }),
+        );
 
-        final photoPayload = {'photoPath': file.path, 'notes': 'fixture', 'latitude': null, 'longitude': null, 'capturedAt': baseTime};
+        final photoPayload = {
+          'photoPath': file.path,
+          'notes': 'fixture',
+          'latitude': null,
+          'longitude': null,
+          'capturedAt': baseTime,
+        };
         await db.insert('pending_actions', {
-          'id': 'photos_a', 'type': 'photos_update', 'job_id': 'a', 'status': 'pending', 'retry_count': 0,
-          'created_at': baseTime, 'updated_at': baseTime,
-          'payload': jsonEncode({'cachedUpdatedAtSnapshot': baseTime, 'r4RecoveryRequired': true, 'photos': [photoPayload]}),
+          'id': 'photos_a',
+          'type': 'photos_update',
+          'job_id': 'a',
+          'status': 'pending',
+          'retry_count': 0,
+          'created_at': baseTime,
+          'updated_at': baseTime,
+          'payload': jsonEncode({
+            'cachedUpdatedAtSnapshot': baseTime,
+            'r4RecoveryRequired': true,
+            'photos': [photoPayload],
+          }),
         });
 
         // Pass 1: Drain to synced
@@ -1186,7 +1346,8 @@ void main() {
       SyncOutboxService.resetRecoverySessionForTesting();
       final temp = await Directory.systemTemp.createTemp('r4-fi4-');
       final dbFile = '${temp.path}/test.db';
-      final file = File('${temp.path}/evidence.jpg')..writeAsBytesSync([1, 2, 3]);
+      final file = File('${temp.path}/evidence.jpg')
+        ..writeAsBytesSync([1, 2, 3]);
       final key = base64Url.encode(utf8.encode(file.path)).replaceAll('=', '');
       final object = 'inspections/a/photo_$key.jpg';
 
@@ -1210,7 +1371,11 @@ void main() {
         if (req.uri.path == '/rest/v1/field_jobs') {
           if (req.method == 'PATCH') {
             patches++;
-            job = {...job, ...jsonDecode(body) as Map<String, dynamic>, 'updated_at': '2026-01-02T00:00:00Z'};
+            job = {
+              ...job,
+              ...jsonDecode(body) as Map<String, dynamic>,
+              'updated_at': '2026-01-02T00:00:00Z',
+            };
             req.response.write(jsonEncode(job));
           } else {
             req.response.write(jsonEncode([job]));
@@ -1225,7 +1390,9 @@ void main() {
             req.response.write(jsonEncode(metadata));
           }
         } else if (req.uri.path.startsWith('/storage/v1/object/')) {
-          if (req.method == 'GET') {
+          if (req.method == 'HEAD') {
+            req.response.statusCode = storageBytes == null ? 404 : 200;
+          } else if (req.method == 'GET') {
             if (storageBytes == null) {
               req.response.statusCode = 404;
               req.response.write(jsonEncode({'error': 'Not Found'}));
@@ -1244,24 +1411,52 @@ void main() {
 
       // Session 1: Create DB, tables, and interrupted in-flight syncing action
       var db = await databaseFactoryFfi.openDatabase(dbFile);
-      final source = await File('lib/core/services/db_helper.dart').readAsString();
-      for (final m in RegExp(r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)').allMatches(source)) {
+      final source = await File(
+        'lib/core/services/db_helper.dart',
+      ).readAsString();
+      for (final m in RegExp(
+        r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)',
+      ).allMatches(source)) {
         await db.execute(m.group(0)!);
       }
       DBHelper.useDatabaseForTesting(db);
       await Supabase.initialize(
-        url: 'http://127.0.0.1:${server.port}', publishableKey: 'fixture',
-        authOptions: FlutterAuthClientOptions(autoRefreshToken: false, detectSessionInUri: false, localStorage: EmptyLocalStorage()),
+        url: 'http://127.0.0.1:${server.port}',
+        publishableKey: 'fixture',
+        authOptions: FlutterAuthClientOptions(
+          autoRefreshToken: false,
+          detectSessionInUri: false,
+          localStorage: EmptyLocalStorage(),
+        ),
       );
-      await SupabaseService.client.auth.setInitialSession(jsonEncode({
-        'access_token': 'fixt', 'refresh_token': 'fixt', 'token_type': 'bearer', 'expires_in': 3600,
-        'user': {'id': 'inspector', 'aud': 'authenticated'},
-      }));
-      final photoPayload = {'photoPath': file.path, 'notes': 'fixture', 'latitude': null, 'longitude': null, 'capturedAt': baseTime};
+      await SupabaseService.client.auth.setInitialSession(
+        jsonEncode({
+          'access_token': 'fixt',
+          'refresh_token': 'fixt',
+          'token_type': 'bearer',
+          'expires_in': 3600,
+          'user': {'id': 'inspector', 'aud': 'authenticated'},
+        }),
+      );
+      final photoPayload = {
+        'photoPath': file.path,
+        'notes': 'fixture',
+        'latitude': null,
+        'longitude': null,
+        'capturedAt': baseTime,
+      };
       await db.insert('pending_actions', {
-        'id': 'photos_a', 'type': 'photos_update', 'job_id': 'a', 'status': 'syncing', 'retry_count': 0,
-        'created_at': baseTime, 'updated_at': baseTime,
-        'payload': jsonEncode({'cachedUpdatedAtSnapshot': baseTime, 'photos': [photoPayload]}),
+        'id': 'photos_a',
+        'type': 'photos_update',
+        'job_id': 'a',
+        'status': 'syncing',
+        'retry_count': 0,
+        'created_at': baseTime,
+        'updated_at': baseTime,
+        'payload': jsonEncode({
+          'cachedUpdatedAtSnapshot': baseTime,
+          'photos': [photoPayload],
+        }),
       });
 
       // Restart boundary: Full teardown of in-memory DB handle, Supabase client, and session state
@@ -1274,13 +1469,23 @@ void main() {
       db = await databaseFactoryFfi.openDatabase(dbFile);
       DBHelper.useDatabaseForTesting(db);
       await Supabase.initialize(
-        url: 'http://127.0.0.1:${server.port}', publishableKey: 'fixture',
-        authOptions: FlutterAuthClientOptions(autoRefreshToken: false, detectSessionInUri: false, localStorage: EmptyLocalStorage()),
+        url: 'http://127.0.0.1:${server.port}',
+        publishableKey: 'fixture',
+        authOptions: FlutterAuthClientOptions(
+          autoRefreshToken: false,
+          detectSessionInUri: false,
+          localStorage: EmptyLocalStorage(),
+        ),
       );
-      await SupabaseService.client.auth.setInitialSession(jsonEncode({
-        'access_token': 'fixt', 'refresh_token': 'fixt', 'token_type': 'bearer', 'expires_in': 3600,
-        'user': {'id': 'inspector', 'aud': 'authenticated'},
-      }));
+      await SupabaseService.client.auth.setInitialSession(
+        jsonEncode({
+          'access_token': 'fixt',
+          'refresh_token': 'fixt',
+          'token_type': 'bearer',
+          'expires_in': 3600,
+          'user': {'id': 'inspector', 'aud': 'authenticated'},
+        }),
+      );
 
       // Drain after restart: triggers startup recovery on persisted database
       await SyncOutboxService.drain();
@@ -1288,8 +1493,15 @@ void main() {
       try {
         final row = (await db.query('pending_actions')).single;
         expect(row['status'], 'synced');
-        expect(jsonDecode(row['payload'] as String)['r4RecoveryRequired'], isTrue);
-        expect(uploads, 0, reason: 'Zero duplicate uploads during reopen recovery');
+        expect(
+          jsonDecode(row['payload'] as String)['r4RecoveryRequired'],
+          isTrue,
+        );
+        expect(
+          uploads,
+          0,
+          reason: 'Zero duplicate uploads during reopen recovery',
+        );
         expect(inserts, 1, reason: 'Metadata inserted exactly once');
         expect(patches, 1, reason: 'Guarded job PATCH executed exactly once');
       } finally {
@@ -1304,6 +1516,209 @@ void main() {
     },
   );
 
+  test(
+    '7D-1: storage exists + metadata missing -> metadata repaired and local photo acknowledged',
+    () async {
+      await runScenario(
+        localFileExists: true,
+        initialStorageBytes: [1, 2, 3],
+        metadataBuilder: null,
+        localPhotoId: 'local-7d-1',
+        recoveryRequired: true,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'synced',
+        expectedUploads: 0,
+        expectedInserts: 1,
+        expectedPatches: 1,
+      );
+    },
+  );
+
+  test(
+    '7D-2: storage upload succeeds + metadata fails -> action failed and local remains unsynced, retry acknowledges same identity',
+    () async {
+      await runScenario(
+        localFileExists: true,
+        initialStorageBytes: [1, 2, 3],
+        metadataBuilder: null,
+        localPhotoId: 'local-7d-2',
+        actionStatus: 'pending',
+        recoveryRequired: false,
+        metadataUpsertStatus: 500,
+        retryAfterFailure: true,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'failed',
+        expectedUploads: 0,
+        expectedInserts: 0,
+        expectedPatches: 0,
+        expectLocalPhotoSynced: false,
+      );
+    },
+  );
+
+  test(
+    '7D-3: metadata exists + canonical object missing -> same object repaired and local acknowledged',
+    () async {
+      await runScenario(
+        localFileExists: true,
+        initialStorageBytes: null,
+        metadataBuilder: (p, o, u) => {
+          'id': p,
+          'field_job_id': 'a',
+          'photo_url': u,
+          'latitude': null,
+          'longitude': null,
+          'captured_at': baseTime,
+          'notes': 'fixture',
+        },
+        localPhotoId: 'local-7d-3',
+        recoveryRequired: true,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'synced',
+        expectedUploads: 1,
+        expectedInserts: 0,
+        expectedPatches: 1,
+      );
+    },
+  );
+
+  test(
+    '7D-4: canonical object exists + metadata missing -> metadata repaired and local acknowledged',
+    () async {
+      await runScenario(
+        localFileExists: true,
+        initialStorageBytes: [1, 2, 3],
+        metadataBuilder: null,
+        localPhotoId: 'local-7d-4',
+        recoveryRequired: true,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'synced',
+        expectedUploads: 0,
+        expectedInserts: 1,
+        expectedPatches: 1,
+      );
+    },
+  );
+
+  test(
+    '7D-5: remote complete + local ACK lost -> recovery acknowledges without new upload or metadata row',
+    () async {
+      await runScenario(
+        localFileExists: true,
+        initialStorageBytes: [1, 2, 3],
+        metadataBuilder: (p, o, u) => {
+          'id': p,
+          'field_job_id': 'a',
+          'photo_url': u,
+          'latitude': null,
+          'longitude': null,
+          'captured_at': baseTime,
+          'notes': 'fixture',
+        },
+        localPhotoId: 'local-7d-5',
+        recoveryRequired: true,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'synced',
+        expectedUploads: 0,
+        expectedInserts: 0,
+        expectedPatches: 1,
+      );
+    },
+  );
+
+  test(
+    '7D-6: local file missing + remote complete -> acknowledged from verified remote state',
+    () async {
+      await runScenario(
+        localFileExists: false,
+        initialStorageBytes: [1, 2, 3],
+        metadataBuilder: (p, o, u) => {
+          'id': p,
+          'field_job_id': 'a',
+          'photo_url': u,
+          'latitude': null,
+          'longitude': null,
+          'captured_at': baseTime,
+          'notes': 'fixture',
+        },
+        localPhotoId: 'local-7d-6',
+        recoveryRequired: true,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'synced',
+        expectedUploads: 0,
+        expectedInserts: 0,
+        expectedPatches: 1,
+      );
+    },
+  );
+
+  test(
+    '7D-7: local file missing + remote incomplete -> conflict and no local acknowledgement',
+    () async {
+      await runScenario(
+        localFileExists: false,
+        initialStorageBytes: null,
+        metadataBuilder: null,
+        localPhotoId: 'local-7d-7',
+        recoveryRequired: true,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'conflict',
+        expectedUploads: 0,
+        expectedInserts: 0,
+        expectedPatches: 0,
+        expectLocalPhotoSynced: false,
+      );
+    },
+  );
+
+  test(
+    '7D-8: existence check UNKNOWN -> remains failed/retryable and does not acknowledge',
+    () async {
+      await runScenario(
+        localFileExists: true,
+        initialStorageBytes: [1, 2, 3],
+        metadataBuilder: null,
+        localPhotoId: 'local-7d-8',
+        recoveryRequired: true,
+        storageHeadStatus: 500,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'failed',
+        expectedUploads: 0,
+        expectedInserts: 0,
+        expectedPatches: 0,
+        expectLocalPhotoSynced: false,
+      );
+    },
+  );
+
+  test(
+    '7D-9: submit_inspection uses the same photo completeness and local ACK contract',
+    () async {
+      await runScenario(
+        localFileExists: true,
+        initialStorageBytes: [1, 2, 3],
+        metadataBuilder: null,
+        localPhotoId: 'local-7d-9',
+        actionType: 'submit_inspection',
+        actionStatus: 'pending',
+        recoveryRequired: false,
+        initialRemoteUpdatedAt: baseTime,
+        queuedSnapshotUpdatedAt: baseTime,
+        expectedStatus: 'synced',
+        expectedUploads: 0,
+        expectedInserts: 1,
+        expectedPatches: 1,
+      );
+    },
+  );
 }
 
 class EmptyLocalStorage extends LocalStorage {

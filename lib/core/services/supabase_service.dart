@@ -6,6 +6,15 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'db_helper.dart';
 
+enum PhotoObjectState { exists, missing, unknown }
+
+class PhotoRecoveryUnknownException implements Exception {
+  final String message;
+  const PhotoRecoveryUnknownException(this.message);
+  @override
+  String toString() => message;
+}
+
 class SupabaseService {
   static Future<void> initialize() async {
     await Supabase.initialize(
@@ -18,25 +27,43 @@ class SupabaseService {
 
   /// R4 read: absence/reassignment is not a successful delivery. Transport
   /// failures propagate, unlike the UI's best-effort detail reader.
-  static Future<Map<String, dynamic>?> readOutboxRecoveryJob(String jobId) async {
+  static Future<Map<String, dynamic>?> readOutboxRecoveryJob(
+    String jobId,
+  ) async {
     final user = client.auth.currentUser;
-    if (user == null) throw StateError('Recovery requires authenticated session');
-    return await client.from('field_jobs').select()
-        .eq('id', jobId).eq('assigned_inspector_id', user.id).maybeSingle();
+    if (user == null) {
+      throw StateError('Recovery requires authenticated session');
+    }
+    return await client
+        .from('field_jobs')
+        .select()
+        .eq('id', jobId)
+        .eq('assigned_inspector_id', user.id)
+        .maybeSingle();
   }
 
   /// Compare-and-set: WHERE tests the old tuple before BEFORE UPDATE stamps
   /// NEW.updated_at. RETURNING yields the actual post-trigger revision. Never
   /// send an updated_at assignment or interpret zero returned rows as success.
   static Future<Map<String, dynamic>?> conditionalOutboxUpdate(
-    String jobId, String version, String status, Map<String, dynamic> values,
+    String jobId,
+    String version,
+    String status,
+    Map<String, dynamic> values,
   ) async {
     final user = client.auth.currentUser;
-    if (user == null) throw StateError('Recovery requires authenticated session');
-    return await client.from('field_jobs').update(values)
-        .eq('id', jobId).eq('assigned_inspector_id', user.id)
-        .eq('updated_at', version).eq('status', status)
-        .select().maybeSingle();
+    if (user == null) {
+      throw StateError('Recovery requires authenticated session');
+    }
+    return await client
+        .from('field_jobs')
+        .update(values)
+        .eq('id', jobId)
+        .eq('assigned_inspector_id', user.id)
+        .eq('updated_at', version)
+        .eq('status', status)
+        .select()
+        .maybeSingle();
   }
 
   @visibleForTesting
@@ -56,14 +83,16 @@ class SupabaseService {
     if (parts.length >= 3 &&
         parts.first == 'inspections' &&
         parts[1].isNotEmpty &&
-        parts.every((p) =>
-            p.isNotEmpty &&
-            p != '.' &&
-            p != '..' &&
-            !p.contains('\\') &&
-            !p.contains('%') &&
-            !p.contains('?') &&
-            !p.contains('#'))) {
+        parts.every(
+          (p) =>
+              p.isNotEmpty &&
+              p != '.' &&
+              p != '..' &&
+              !p.contains('\\') &&
+              !p.contains('%') &&
+              !p.contains('?') &&
+              !p.contains('#'),
+        )) {
       return value;
     }
     final uri = Uri.tryParse(value);
@@ -88,17 +117,33 @@ class SupabaseService {
     if (extractedParts.length >= 3 &&
         extractedParts.first == 'inspections' &&
         extractedParts[1].isNotEmpty &&
-        extractedParts.every((p) =>
-            p.isNotEmpty &&
-            p != '.' &&
-            p != '..' &&
-            !p.contains('\\') &&
-            !p.contains('%') &&
-            !p.contains('?') &&
-            !p.contains('#'))) {
+        extractedParts.every(
+          (p) =>
+              p.isNotEmpty &&
+              p != '.' &&
+              p != '..' &&
+              !p.contains('\\') &&
+              !p.contains('%') &&
+              !p.contains('?') &&
+              !p.contains('#'),
+        )) {
       return extracted;
     }
     return null;
+  }
+
+  /// Narrow HEAD check for the exact canonical object. A transport failure is
+  /// UNKNOWN, never evidence that the object is absent.
+  static Future<PhotoObjectState> photoObjectState(String storagePath) async {
+    try {
+      final exists = await client.storage
+          .from('inspection-photos')
+          .exists(storagePath);
+      return exists ? PhotoObjectState.exists : PhotoObjectState.missing;
+    } catch (e) {
+      debugPrint('Photo object existence check unknown for $storagePath: $e');
+      return PhotoObjectState.unknown;
+    }
   }
 
   static bool _isSamePhotoUrl(String? a, String? b, String expectedObjectPath) {
@@ -116,85 +161,123 @@ class SupabaseService {
   /// Missing evidence is returned as a conflict by the caller; no existing
   /// object or metadata is overwritten on the basis of an ID alone.
   static Future<List<String>> verifyOutboxRecoveryPhotos(
-      String jobId, List<Map<String, dynamic>> photos,
-      {bool allowMissingResume = false}) async {
+    String jobId,
+    List<Map<String, dynamic>> photos, {
+    bool allowMissingResume = false,
+  }) async {
     final paths = <String>[];
     for (final photo in photos) {
       final localPath = photo['photoPath'];
       if (localPath is! String || photo['isRemoteUrl'] == true) {
-        throw StateError('Recovery requires original deterministic photo identity');
+        throw StateError(
+          'Recovery requires original deterministic photo identity',
+        );
       }
       final path = photoStoragePath(jobId, localPath);
       final id = photoRowId(path);
-      final url = client.storage.from('inspection-photos').getPublicUrl(path);
-      final row = await client.from('field_job_photos').select()
-          .eq('id', id).eq('field_job_id', jobId).maybeSingle();
-      if (row == null && !allowMissingResume) {
-        throw StateError('Missing photo metadata without valid durable base');
-      }
+      final row = await client
+          .from('field_job_photos')
+          .select()
+          .eq('id', id)
+          .eq('field_job_id', jobId)
+          .maybeSingle();
+      // Metadata is verified below after the object state is known. Do not
+      // reject a missing row here: a definite canonical object can repair the
+      // same deterministic metadata identity.
       final expected = <String, dynamic>{
-        'photo_url': url, 'latitude': photo['latitude'],
-        'longitude': photo['longitude'], 'captured_at': photo['capturedAt'],
+        'photo_url': path,
+        'latitude': photo['latitude'],
+        'longitude': photo['longitude'],
+        'captured_at': photo['capturedAt'],
         'notes': photo['notes'],
       };
       if (row != null) {
         for (final entry in expected.entries) {
           var equal = row[entry.key] == entry.value;
           if (entry.key == 'photo_url' && row[entry.key] is String) {
-            equal = _isSamePhotoUrl(row[entry.key] as String, entry.value as String, path);
-          } else if (entry.key == 'captured_at' && row[entry.key] is String && entry.value is String) {
+            equal = _isSamePhotoUrl(
+              row[entry.key] as String,
+              entry.value as String,
+              path,
+            );
+          } else if (entry.key == 'captured_at' &&
+              row[entry.key] is String &&
+              entry.value is String) {
             final a = DateTime.tryParse(row[entry.key] as String);
             final b = DateTime.tryParse(entry.value as String);
             equal = a != null && b != null && a.isAtSameMomentAs(b);
           }
-          if (!equal) throw StateError('Differing photo metadata: ${entry.key}');
+          if (!equal) {
+            throw StateError('Differing photo metadata: ${entry.key}');
+          }
         }
       }
 
       final file = File(localPath);
       final fileExists = await file.exists();
+      final objectState = await photoObjectState(path);
 
-      Uint8List? bytes;
-      try {
-        final downloaded = await client.storage.from('inspection-photos').download(path);
-        if (downloaded.isNotEmpty) {
-          bytes = downloaded;
-        }
-      } catch (_) {
-        bytes = null;
+      if (objectState == PhotoObjectState.unknown) {
+        throw PhotoRecoveryUnknownException(
+          'Photo object existence is unknown for $path',
+        );
       }
 
-      if (bytes != null) {
-        if (fileExists) {
-          final local = await file.readAsBytes();
-          if (!listEquals(local, bytes)) throw StateError('Differing photo bytes');
-        } else if (row == null) {
-          throw StateError('Object-only recovery needs local bytes for identity proof');
-        }
-      } else {
+      if (objectState == PhotoObjectState.missing) {
         if (!fileExists) {
-          throw StateError('Missing photo object evidence');
+          throw StateError('Missing photo object and local source');
         }
         if (!allowMissingResume) {
           throw StateError('Missing photo object without valid durable base');
         }
-        await client.storage.from('inspection-photos').upload(
-          path,
-          file,
-          fileOptions: const FileOptions(
-            cacheControl: '3600',
-            upsert: true,
-          ),
-        );
+        await client.storage
+            .from('inspection-photos')
+            .upload(
+              path,
+              file,
+              fileOptions: const FileOptions(
+                cacheControl: '3600',
+                upsert: true,
+              ),
+            );
+      } else if (fileExists) {
+        // Existence is only the completeness gate. When both sides are
+        // present, retain the existing byte proof for recovery decisions.
+        Uint8List? bytes;
+        try {
+          final downloaded = await client.storage
+              .from('inspection-photos')
+              .download(path);
+          if (downloaded.isNotEmpty) bytes = downloaded;
+        } catch (e) {
+          throw PhotoRecoveryUnknownException(
+            'Photo object bytes could not be verified for $path',
+          );
+        }
+        if (bytes == null) {
+          throw PhotoRecoveryUnknownException(
+            'Photo object returned no bytes for $path',
+          );
+        }
+        final local = await file.readAsBytes();
+        if (!listEquals(local, bytes)) {
+          throw StateError('Differing photo bytes');
+        }
       }
 
       if (row == null) {
         // INSERT, not upsert: a concurrent metadata row must not be overwritten.
         await client.from('field_job_photos').insert({
-          'id': id, 'field_job_id': jobId, ...expected,
+          'id': id,
+          'field_job_id': jobId,
+          ...expected,
         });
       }
-      paths.add(row != null && row['photo_url'] is String ? row['photo_url'] as String : url);
+      paths.add(
+        row != null && row['photo_url'] is String
+            ? row['photo_url'] as String
+            : path,
+      );
     }
     return paths;
   }
@@ -500,10 +583,7 @@ class SupabaseService {
     // stale card/action a safe no-op after another client completes the job.
     await client
         .from('field_jobs')
-        .update({
-          'scheduled_date': dateStr,
-          'is_self_scheduled': true,
-        })
+        .update({'scheduled_date': dateStr, 'is_self_scheduled': true})
         .eq('id', jobId)
         .eq('status', 'assigned');
   }
@@ -591,7 +671,8 @@ class SupabaseService {
   // ─────────────────────────────────────────────────────────────────────────
   // UPLOAD INSPECTION PHOTOS  (Review & submit screen → runs before submit)
   //   Uploads each locally-captured photo to the inspection-photos bucket
-  //   and returns the public URLs to store in field_jobs.photo_paths.
+  //   and returns the raw durable Storage object paths to store in
+  //   field_jobs.photo_paths for new writes.
   //   Local device paths (e.g. /data/user/0/.../inspection_xxx.jpg) only
   //   exist on the phone that took them — they must never be written to
   //   the DB as-is, since they're meaningless on any other device/session.
@@ -599,9 +680,9 @@ class SupabaseService {
   // ─────────────────────────────────────────────────────────────────────────
   // UPLOAD INSPECTION PHOTOS  (Review & submit screen, online path)
   //   Local device paths lang ang meron dito — i-upload sa Storage at
-  //   ibalik ang public URLs para hindi mawala kapag na-clear ang cache
-  //   ng device. Parehong bucket/path convention gaya ng
-  //   InspectionProvider.syncToServer para compatible ang dalawang path.
+  //   ibalik ang raw durable paths para hindi mawala kapag na-clear ang cache
+  //   ng device. Existing historical URLs are preserved on resume.
+  //   Existing historical URLs are preserved on resume.
   // ─────────────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────────────
   // UPLOAD INSPECTION PHOTOS & STORE METADATA
@@ -619,10 +700,21 @@ class SupabaseService {
   //   upsert:true (overwrite, hindi duplicate object), at field_job_photos
   //   row gamit ang .upsert() sa deterministic id (hindi .insert()) kaya
   //   parehong row lang ang ma-a-apektuhan sa bawat retry — walang bagong
-  //   duplicate row. Kapareho ito ng pattern na ginagamit na sa
-  //   InspectionProvider.syncToServer() (photo_${photo['id']}.jpg +
-  //   upsert), para consistent ang dalawang code path.
+  //   duplicate row. The legacy local_photos adapter is routed through this
+  //   same canonical writer; it no longer creates a competing identity.
   // ─────────────────────────────────────────────────────────────────────────
+  static Map<String, dynamic> photoUploadPayloadFromLegacyLocalRow(
+    Map<String, dynamic> row,
+  ) {
+    return {
+      'photoPath': row['photo_path'],
+      'notes': row['notes'],
+      'latitude': row['latitude'],
+      'longitude': row['longitude'],
+      'capturedAt': row['captured_at'],
+    };
+  }
+
   static String _stablePhotoKey(String localPath) {
     // Deterministic, filesystem/URL-safe key derived from the photo's own
     // local path — same file will always produce the same key, kahit
@@ -679,10 +771,11 @@ class SupabaseService {
     //   already-good photos every time, instead of resuming from #7.
     //
     //   Fix: compute each photo's deterministic rowId up front, batch-check
-    //   which ones already have a field_job_photos row (i.e. already fully
-    //   uploaded), and skip the storage upload + row upsert entirely for
-    //   those — just reuse the known public URL. Only photos not yet in
-    //   that set actually transfer bytes this attempt.
+    //   which ones already have a field_job_photos row, then verify the exact
+    //   canonical object before reusing that identity. A missing object is
+    //   repaired with the same path; an UNKNOWN check remains retryable.
+    //   New writes use the raw durable object path; existing historical values
+    //   are preserved.
     // ─────────────────────────────────────────────────────────────────
     final Map<String, String> pathToStoragePath = {};
     final Map<String, String> pathToRowId = {};
@@ -691,29 +784,36 @@ class SupabaseService {
       if (path == null) continue;
       final photoKey = _stablePhotoKey(path);
       final storagePath = 'inspections/$jobId/photo_$photoKey.jpg';
-      final rowId = const Uuid().v5('6ba7b811-9dad-11d1-80b4-00c04fd430c8', storagePath);
+      final rowId = const Uuid().v5(
+        '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+        storagePath,
+      );
       pathToStoragePath[path] = storagePath;
       pathToRowId[path] = rowId;
     }
 
-    Set<String> alreadyUploadedRowIds = {};
+    final Map<String, String> existingPhotoValues = {};
     if (pathToRowId.isNotEmpty) {
       try {
         final existing = await client
             .from('field_job_photos')
-            .select('id')
+            .select('id,photo_url')
             .eq('field_job_id', jobId)
             .inFilter('id', pathToRowId.values.toList());
-        alreadyUploadedRowIds = (existing as List)
-            .map((row) => (row as Map)['id'] as String)
-            .toSet();
+        for (final row in existing as List) {
+          final map = row as Map;
+          final id = map['id'];
+          final value = map['photo_url'];
+          if (id is String && value is String && value.isNotEmpty) {
+            existingPhotoValues[id] = value;
+          }
+        }
       } catch (e) {
-        // If the check itself fails (e.g. offline mid-retry), fall back to
-        // the old safe-but-not-resumable behavior: treat nothing as
-        // already uploaded, so every photo is attempted this pass. Still
-        // correct (idempotent), just not optimized for this one attempt.
-        debugPrint('Photo resume check failed, uploading all: $e');
-        alreadyUploadedRowIds = {};
+        // An unknown metadata lookup is retryable. Never treat it as an
+        // absent row: doing so could rewrite a historical stored value.
+        throw PhotoRecoveryUnknownException(
+          'Photo metadata lookup is unknown: $e',
+        );
       }
     }
 
@@ -731,8 +831,41 @@ class SupabaseService {
         // local path), then fail File(path).exists() and silently drop
         // the photo from the resubmission with no error surfaced at all.
         if (photo['isRemoteUrl'] == true) {
+          final objectPath = extractStorageObjectPath(path);
+          if (objectPath == null) {
+            throw StateError('Remote photo identity is not a canonical object');
+          }
+          final objectState = await photoObjectState(objectPath);
+          if (objectState == PhotoObjectState.unknown) {
+            throw PhotoRecoveryUnknownException(
+              'Remote photo object existence is unknown for $objectPath',
+            );
+          }
+          if (objectState == PhotoObjectState.missing) {
+            throw StateError('Remote photo object is missing for $objectPath');
+          }
+          final rowId = photoRowId(objectPath);
+          final existing = await client
+              .from('field_job_photos')
+              .select('id,photo_url')
+              .eq('id', rowId)
+              .eq('field_job_id', jobId)
+              .maybeSingle();
+          if (existing == null || existing['photo_url'] is! String) {
+            await client.from('field_job_photos').upsert({
+              'id': rowId,
+              'field_job_id': jobId,
+              'photo_url': objectPath,
+              'latitude': photo['latitude'],
+              'longitude': photo['longitude'],
+              'captured_at': photo['capturedAt'],
+              'notes': photo['notes'],
+            }, onConflict: 'id');
+            uploadedUrls.add(objectPath);
+          } else {
+            uploadedUrls.add(existing['photo_url'] as String);
+          }
           onProgress?.call(i + 1, photoTotal);
-          uploadedUrls.add(path);
           continue;
         }
 
@@ -740,60 +873,58 @@ class SupabaseService {
         final rowId = pathToRowId[path];
         if (storagePath == null || rowId == null) continue;
 
-        if (alreadyUploadedRowIds.contains(rowId)) {
-          // Already fully uploaded in a previous attempt — skip re-sending
-          // the file bytes, just reuse the existing public URL. Still
-          // reported to onProgress so "photo X of Y" reflects the whole
-          // batch, not just the ones actually transferred this pass.
-          onProgress?.call(i + 1, photoTotal);
-          uploadedUrls.add(
-            client.storage.from('inspection-photos').getPublicUrl(storagePath),
+        final objectState = await photoObjectState(storagePath);
+        if (objectState == PhotoObjectState.unknown) {
+          throw PhotoRecoveryUnknownException(
+            'Photo object existence is unknown for $storagePath',
           );
-          continue;
         }
 
         final file = File(path);
-        if (!await file.exists()) continue;
+        final fileExists = await file.exists();
+        final metadataExists = existingPhotoValues.containsKey(rowId);
+        if (objectState == PhotoObjectState.missing && !fileExists) {
+          throw StateError('Missing photo object and local source');
+        }
+        if (objectState == PhotoObjectState.missing) {
+          // Repair the same canonical object; never create a second identity.
+          await client.storage
+              .from('inspection-photos')
+              .upload(
+                storagePath,
+                file,
+                fileOptions: const FileOptions(
+                  cacheControl: '3600',
+                  upsert: true,
+                ),
+              );
+        }
 
         onProgress?.call(i + 1, photoTotal);
+        uploadedUrls.add(existingPhotoValues[rowId] ?? storagePath);
 
-        // 1. Upload to Supabase Storage — upsert:true means a retry
-        //    overwrites the SAME storage object instead of creating a new
-        //    one under a new random name.
-        await client.storage
-            .from('inspection-photos')
-            .upload(
-              storagePath,
-              file,
-              fileOptions: const FileOptions(
-                cacheControl: '3600',
-                upsert: true,
-              ),
-            );
-
-        final publicUrl = client.storage
-            .from('inspection-photos')
-            .getPublicUrl(storagePath);
-        uploadedUrls.add(publicUrl);
-
-        // 2. Upsert (not insert) metadata into field_job_photos, keyed by
-        //    the same deterministic id derived from the photo's storage
-        //    path. A retry updates this one row in place — it never adds
-        //    a second row for a photo that already synced.
-        await client.from('field_job_photos').upsert({
-          'id': rowId,
-          'field_job_id': jobId,
-          'photo_url': publicUrl,
-          'latitude': photo['latitude'],
-          'longitude': photo['longitude'],
-          'captured_at': photo['capturedAt'],
-          // Fix (Summary/Step-3 audit): this was missing entirely, so the
-          // note the inspector typed for this specific photo — already
-          // captured on-device via InspectionProvider.addPhoto and already
-          // persisted locally (local_photos.notes) — was silently dropped
-          // on every upload and never reached Supabase at all.
-          'notes': photo['notes'],
-        }, onConflict: 'id');
+        // Only repair metadata when the deterministic metadata identity is
+        // absent. Existing historical rows keep their stored URL/values.
+        if (!metadataExists) {
+          // 2. Upsert (not insert) metadata into field_job_photos, keyed by
+          //    the same deterministic id derived from the photo's storage
+          //    path. A retry updates this one row in place — it never adds
+          //    a second row for a photo that already synced.
+          await client.from('field_job_photos').upsert({
+            'id': rowId,
+            'field_job_id': jobId,
+            'photo_url': storagePath,
+            'latitude': photo['latitude'],
+            'longitude': photo['longitude'],
+            'captured_at': photo['capturedAt'],
+            // Fix (Summary/Step-3 audit): this was missing entirely, so the
+            // note the inspector typed for this specific photo — already
+            // captured on-device via InspectionProvider.addPhoto and already
+            // persisted locally (local_photos.notes) — was silently dropped
+            // on every upload and never reached Supabase at all.
+            'notes': photo['notes'],
+          }, onConflict: 'id');
+        }
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
         failedPaths.add(path);
@@ -840,7 +971,9 @@ class SupabaseService {
           .maybeSingle();
       final existingSubmittedAt = existing?['submitted_at']?.toString();
       final effectiveSubmittedAt =
-          existingSubmittedAt ?? submittedAt ?? DateTime.now().toUtc().toIso8601String();
+          existingSubmittedAt ??
+          submittedAt ??
+          DateTime.now().toUtc().toIso8601String();
       await client
           .from('field_jobs')
           .update({
@@ -966,7 +1099,9 @@ class SupabaseService {
           .select('status')
           .eq('id', jobId)
           .limit(1);
-      final status = (rows as List).isNotEmpty ? rows.first['status'] as String? : null;
+      final status = (rows as List).isNotEmpty
+          ? rows.first['status'] as String?
+          : null;
       if (status?.toLowerCase() != 'completed') {
         throw Exception('Job is not completed — cannot reopen for rework.');
       }
@@ -995,7 +1130,9 @@ class SupabaseService {
     required String jobId,
     required Map<String, dynamic> updateData,
   }) async {
-    final forbidden = updateData.keys.toSet().intersection(_forbiddenProgressFields);
+    final forbidden = updateData.keys.toSet().intersection(
+      _forbiddenProgressFields,
+    );
     if (forbidden.isNotEmpty) {
       throw ArgumentError(
         'Lifecycle/progress fields require a monotonic domain method: $forbidden',

@@ -64,6 +64,10 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
     
     final observations = 'Actual land use: ${provider.actualLandUse}. Boundary status: ${provider.boundaryStatus}.';
 
+    // Mark before the first remote attempt. Even if the upload or queue write
+    // fails, the delete path must not treat this photo as safely local-only.
+    context.read<InspectionProvider>().markPhotosSubmitted();
+
     // Try the real thing first — unchanged happy path when online.
     bool queuedOffline = false;
     try {

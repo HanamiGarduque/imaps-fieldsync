@@ -60,8 +60,13 @@ class DBHelper {
   /// it into place. The original plaintext file is renamed aside (not
   /// deleted) as a safety net in case anything about the migration looks
   /// wrong after the fact; it is NOT auto-deleted.
-  static Future<void> _migrateLegacyPlaintextDb(String path, String password) async {
-    debugPrint('[DB] Legacy unencrypted database detected — migrating to SQLCipher.');
+  static Future<void> _migrateLegacyPlaintextDb(
+    String path,
+    String password,
+  ) async {
+    debugPrint(
+      '[DB] Legacy unencrypted database detected — migrating to SQLCipher.',
+    );
     final plainDb = await openDatabase(path);
     final tmpPath = '$path.encrypting_tmp';
     final tmpFile = File(tmpPath);
@@ -71,7 +76,9 @@ class DBHelper {
     }
 
     try {
-      await plainDb.execute("ATTACH DATABASE '$tmpPath' AS encrypted KEY '$password'");
+      await plainDb.execute(
+        "ATTACH DATABASE '$tmpPath' AS encrypted KEY '$password'",
+      );
       await plainDb.execute("SELECT sqlcipher_export('encrypted')");
       await plainDb.execute('DETACH DATABASE encrypted');
     } finally {
@@ -357,19 +364,34 @@ class DBHelper {
     final db = await database;
     await db.transaction((txn) async {
       if (fetchedJob != null) {
-        final effective = _projectPendingCompletions(
-          [fetchedJob], await _pendingCompletionJobIds(txn),
-        ).single;
-        await txn.insert('local_jobs', _cachedJobRow(effective),
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        final effective = _projectPendingCompletions([
+          fetchedJob,
+        ], await _pendingCompletionJobIds(txn)).single;
+        await txn.insert(
+          'local_jobs',
+          _cachedJobRow(effective),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
-      final rows = await txn.query('local_jobs', where: 'id = ?', whereArgs: [jobId]);
+      final rows = await txn.query(
+        'local_jobs',
+        where: 'id = ?',
+        whereArgs: [jobId],
+      );
       if (rows.length != 1) {
-        throw StateError('Inspection entry requires the exact cached field job.');
+        throw StateError(
+          'Inspection entry requires the exact cached field job.',
+        );
       }
       // Retention is not a way into completed rework or unsupported lifecycle.
-      if (!const ['assigned', 'Pending', 'pending', 'in_progress', 'in-progress', 'ongoing']
-          .contains(rows.single['status'])) {
+      if (!const [
+        'assigned',
+        'Pending',
+        'pending',
+        'in_progress',
+        'in-progress',
+        'ongoing',
+      ].contains(rows.single['status'])) {
         throw StateError('Only unfinished normal inspections can be retained.');
       }
       await txn.insert('inspection_job_retention', {
@@ -386,14 +408,23 @@ class DBHelper {
     try {
       final db = await database;
       await db.transaction((txn) async {
-        await txn.update('local_jobs', {'status': 'completed'},
-            where: 'id = ?', whereArgs: [jobId]);
-        await txn.delete('inspection_job_retention',
-            where: 'job_id = ?', whereArgs: [jobId]);
+        await txn.update(
+          'local_jobs',
+          {'status': 'completed'},
+          where: 'id = ?',
+          whereArgs: [jobId],
+        );
+        await txn.delete(
+          'inspection_job_retention',
+          where: 'job_id = ?',
+          whereArgs: [jobId],
+        );
       });
       return true;
     } catch (e) {
-      debugPrint('Online inspection accepted; local cleanup failed for $jobId: $e');
+      debugPrint(
+        'Online inspection accepted; local cleanup failed for $jobId: $e',
+      );
       return false;
     }
   }
@@ -420,7 +451,9 @@ class DBHelper {
     Set<String> protectedIds,
   ) {
     return jobs.map((job) {
-      if (!protectedIds.contains(job['id'])) return Map<String, dynamic>.of(job);
+      if (!protectedIds.contains(job['id'])) {
+        return Map<String, dynamic>.of(job);
+      }
       switch (job['status']) {
         case 'assigned':
         case 'Pending':
@@ -475,7 +508,9 @@ class DBHelper {
       'application_type': app['application_type'],
       'assignment_instructions': job['assignment_instructions'],
       'assigned_by_imaps_user_id': job['assigned_by_imaps_user_id']?.toString(),
-      'assigned_by_name': (normalizedAssignedByName != null && normalizedAssignedByName.isNotEmpty)
+      'assigned_by_name':
+          (normalizedAssignedByName != null &&
+              normalizedAssignedByName.isNotEmpty)
           ? normalizedAssignedByName
           : null,
       'cached_updated_at': job['updated_at'],
@@ -511,8 +546,11 @@ class DBHelper {
       // Only actual canonical remote completion releases unfinished retention.
       // Projection above remains exclusively pending-completion behavior.
       for (final job in jobs.where((job) => job['status'] == 'completed')) {
-        await txn.delete('inspection_job_retention',
-            where: 'job_id = ?', whereArgs: [job['id']]);
+        await txn.delete(
+          'inspection_job_retention',
+          where: 'job_id = ?',
+          whereArgs: [job['id']],
+        );
       }
       final retained = await txn.query('inspection_job_retention');
       protectedIds.addAll(retained.map((row) => row['job_id'] as String));
@@ -525,7 +563,8 @@ class DBHelper {
       } else {
         batch.delete(
           'local_jobs',
-          where: 'id NOT IN (${List.filled(protectedIds.length, '?').join(',')})',
+          where:
+              'id NOT IN (${List.filled(protectedIds.length, '?').join(',')})',
           whereArgs: protectedIds.toList(),
         );
       }
@@ -541,15 +580,24 @@ class DBHelper {
         );
         if (existingRows.isNotEmpty &&
             existingRows.single['status'] == 'completed' &&
-            const {'assigned', 'Pending', 'pending', 'in_progress', 'in-progress', 'ongoing'}
-                .contains(incoming['status'])) {
+            const {
+              'assigned',
+              'Pending',
+              'pending',
+              'in_progress',
+              'in-progress',
+              'ongoing',
+            }.contains(incoming['status'])) {
           // A recognized stale lifecycle refresh cannot reclassify a
           // canonically completed cached round as ongoing or pending. Preserve
           // legacy completed equivalents and unsupported diagnostic states.
           incoming['status'] = 'completed';
         }
-        batch.insert('local_jobs', _cachedJobRow(incoming),
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        batch.insert(
+          'local_jobs',
+          _cachedJobRow(incoming),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
       await batch.commit(noResult: true);
     });
@@ -674,14 +722,50 @@ class DBHelper {
     );
   }
 
-  /// Removes one photo's row from local_photos, if it was ever persisted
-  /// there. Added alongside the "remove photo" feature on the Photos step
-  /// — a photo the inspector removes before submitting was previously
-  /// impossible to un-persist, since local_photos had no delete path at
-  /// all (only insert-or-replace and mark-synced). Safe to call even if
-  /// the photo was never saved to SQLite yet (in-memory only) — deletes
-  /// zero rows in that case.
-  static Future<void> deleteLocalPhoto(String photoId) async {
+  /// Acknowledge only photo rows already proven remote-complete by the
+  /// canonical writer/recovery path. No row is created or deleted here.
+  static Future<void> markPhotosSynced(Iterable<String?> photoIds) async {
+    final ids = photoIds
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (ids.isEmpty) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final id in ids) {
+        await txn.update(
+          'local_photos',
+          {'is_synced': 1},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+    });
+  }
+
+  static Future<Map<String, dynamic>?> getLocalPhoto(String photoId) async {
+    final db = await database;
+    final rows = await db.query(
+      'local_photos',
+      where: 'id = ?',
+      whereArgs: [photoId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Removes one photo's local row only after its physical file has been
+  /// removed. The file-first order prevents the UI from acknowledging a
+  /// removal while leaving an orphan behind. A missing file is already
+  /// clean; a file deletion failure propagates and the row is retained.
+  static Future<void> deleteLocalPhoto(
+    String photoId, {
+    String? photoPath,
+  }) async {
+    if (photoPath != null && photoPath.isNotEmpty) {
+      final file = File(photoPath);
+      if (await file.exists()) await file.delete();
+    }
     final db = await database;
     await db.delete('local_photos', where: 'id = ?', whereArgs: [photoId]);
   }
@@ -715,10 +799,16 @@ class DBHelper {
       if (type == 'gps_confirm' || type == 'mark_ongoing') {
         // A durable start action, not retention or a network failure, accepts
         // local field work. Queue replacement and lifecycle commit together.
-        final rows = await txn.query('local_jobs',
-            columns: ['status'], where: 'id = ?', whereArgs: [jobId]);
+        final rows = await txn.query(
+          'local_jobs',
+          columns: ['status'],
+          where: 'id = ?',
+          whereArgs: [jobId],
+        );
         if (rows.length != 1) {
-          throw StateError('Offline start requires the exact cached field job.');
+          throw StateError(
+            'Offline start requires the exact cached field job.',
+          );
         }
         switch (rows.single['status']) {
           case 'assigned':
@@ -727,10 +817,16 @@ class DBHelper {
           case 'in_progress':
           case 'in-progress':
           case 'ongoing':
-            final updated = await txn.update('local_jobs',
-                {'status': 'in_progress'}, where: 'id = ?', whereArgs: [jobId]);
+            final updated = await txn.update(
+              'local_jobs',
+              {'status': 'in_progress'},
+              where: 'id = ?',
+              whereArgs: [jobId],
+            );
             if (updated != 1) {
-              throw StateError('Offline start requires the exact cached field job.');
+              throw StateError(
+                'Offline start requires the exact cached field job.',
+              );
             }
             break;
           default:
@@ -754,8 +850,11 @@ class DBHelper {
         }
         // Retention handoff: unfinished-work retention ends in the same
         // transaction that durably accepts the offline completion.
-        await txn.delete('inspection_job_retention',
-            where: 'job_id = ?', whereArgs: [jobId]);
+        await txn.delete(
+          'inspection_job_retention',
+          where: 'job_id = ?',
+          whereArgs: [jobId],
+        );
       }
     });
   }
@@ -766,24 +865,37 @@ class DBHelper {
   static Future<void> recoverAbandonedClaims() async {
     final db = await database;
     await db.transaction((txn) async {
-      final rows = await txn.query('pending_actions', where: "status = 'syncing'");
+      final rows = await txn.query(
+        'pending_actions',
+        where: "status = 'syncing'",
+      );
       for (final row in rows) {
         final raw = row['payload'] as String;
         try {
           final payload = Map<String, dynamic>.from(jsonDecode(raw) as Map);
           payload['r4RecoveryRequired'] = true;
-          await txn.update('pending_actions', {
+          await txn.update(
+            'pending_actions',
+            {
             'payload': jsonEncode(payload),
             'status': 'failed',
-            'last_error': 'Interrupted claim: remote reconciliation required.',
-          }, where: "id = ? AND status = 'syncing' AND payload = ?",
-              whereArgs: [row['id'], raw]);
+              'last_error':
+                  'Interrupted claim: remote reconciliation required.',
+            },
+            where: "id = ? AND status = 'syncing' AND payload = ?",
+            whereArgs: [row['id'], raw],
+          );
         } catch (_) {
-          await txn.update('pending_actions', {
+          await txn.update(
+            'pending_actions',
+            {
             'status': 'conflict',
-            'last_error': 'Interrupted claim has invalid payload; review required.',
-          }, where: "id = ? AND status = 'syncing' AND payload = ?",
-              whereArgs: [row['id'], raw]);
+              'last_error':
+                  'Interrupted claim has invalid payload; review required.',
+            },
+            where: "id = ? AND status = 'syncing' AND payload = ?",
+            whereArgs: [row['id'], raw],
+          );
         }
       }
     });
@@ -990,9 +1102,11 @@ class DBHelper {
     } catch (_) {}
 
     try {
-      final totalLogs = Sqflite.firstIntValue(
+      final totalLogs =
+          Sqflite.firstIntValue(
         await db.rawQuery('SELECT COUNT(*) FROM sync_log_entries'),
-      ) ?? 0;
+          ) ??
+          0;
 
       if (totalLogs == 0) {
         // Backfill from pending_actions so past sync history is visible
@@ -1005,7 +1119,8 @@ class DBHelper {
           final type = a['type'] as String? ?? 'action';
           final status = a['status'] as String? ?? 'synced';
           final lastError = a['last_error'] as String?;
-          final updatedAt = a['updated_at'] as String? ??
+          final updatedAt =
+              a['updated_at'] as String? ??
               a['created_at'] as String? ??
               DateTime.now().toIso8601String();
 
@@ -1017,7 +1132,9 @@ class DBHelper {
           String actionTitle = 'Data Sync';
           if (type == 'gps_confirm') actionTitle = 'GPS Confirmation';
           if (type == 'checklist_update') actionTitle = 'Checklist Update';
-          if (type == 'submit_inspection') actionTitle = 'Inspection Submission';
+          if (type == 'submit_inspection') {
+            actionTitle = 'Inspection Submission';
+          }
           if (type == 'status_change') actionTitle = 'Status Update';
 
           final message = status == 'synced'
@@ -1106,7 +1223,8 @@ class DBHelper {
   static Future<Map<String, dynamic>> getCacheStats() async {
     final db = await database;
 
-    final jobsCount = Sqflite.firstIntValue(
+    final jobsCount =
+        Sqflite.firstIntValue(
           await db.rawQuery('SELECT COUNT(*) as c FROM local_jobs'),
         ) ??
         0;
@@ -1116,7 +1234,8 @@ class DBHelper {
       columns: ['photo_path'],
       where: 'is_synced = 1',
     );
-    final unsyncedPhotoCount = Sqflite.firstIntValue(
+    final unsyncedPhotoCount =
+        Sqflite.firstIntValue(
           await db.rawQuery(
             'SELECT COUNT(*) as c FROM local_photos WHERE is_synced = 0',
           ),
@@ -1155,10 +1274,7 @@ class DBHelper {
   /// message ("Freed 12 photo(s), 8.4 MB").
   static Future<int> clearSyncedPhotoCache() async {
     final db = await database;
-    final syncedRows = await db.query(
-      'local_photos',
-      where: 'is_synced = 1',
-    );
+    final syncedRows = await db.query('local_photos', where: 'is_synced = 1');
 
     var cleared = 0;
     for (final row in syncedRows) {
@@ -1193,12 +1309,15 @@ class DBHelper {
     final db = await database;
     final total = await getSyncLogCount();
     if (total <= keep) return;
-    await db.rawDelete('''
+    await db.rawDelete(
+      '''
       DELETE FROM sync_log_entries
       WHERE id NOT IN (
         SELECT id FROM sync_log_entries ORDER BY created_at DESC LIMIT ?
       )
-    ''', [keep]);
+    ''',
+      [keep],
+    );
   }
 
   static Future<void> clearSyncLogEntries() async {
