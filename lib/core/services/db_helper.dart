@@ -129,7 +129,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 11,
+      version: 12,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -216,6 +216,15 @@ class DBHelper {
             'ALTER TABLE local_jobs ADD COLUMN assigned_by_name TEXT',
           );
         }
+        if (oldVersion < 12) {
+          // Loop 8 — read-only Planning Review metadata for this exact round.
+          // Optional JSON; absence simply means "no Planning Review", and it is
+          // never allowed to influence status, category, current_step or
+          // progress. Reuses the existing local_jobs cache; no new cache system.
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT',
+          );
+        }
       },
       onCreate: (db, version) async {
         await createInspectionRetentionTable(db);
@@ -236,6 +245,7 @@ class DBHelper {
             assignment_instructions TEXT,
             assigned_by_imaps_user_id TEXT,
             assigned_by_name TEXT,
+            planning_review TEXT,
             cached_updated_at TEXT,
             rework_started_at TEXT,
             parcel_lat REAL,
@@ -521,7 +531,44 @@ class DBHelper {
       'declared_land_use':
           parcel['declared_land_use'] ?? 'Single-detached residential',
       'parcel_address': parcel['address'] ?? '',
+      // Loop 8 — cache the optional read-only Planning Review row for this
+      // exact job so it stays presentable offline. Presentational only.
+      'planning_review': _planningReviewCacheJson(job['field_job_reviews']),
     };
+  }
+
+  /// Serialize the optional `field_job_reviews` embed for the local_jobs cache.
+  /// Returns null when there is no review row, which is the normal state for
+  /// any task that has not been reviewed.
+  static String? _planningReviewCacheJson(dynamic embedded) {
+    if (embedded is! List || embedded.isEmpty) {
+      return null;
+    }
+
+    final first = embedded.first;
+    if (first is! Map) {
+      return null;
+    }
+
+    final row = Map<String, dynamic>.from(first);
+    final decision = row['decision']?.toString().trim();
+    if (decision == null || decision.isEmpty) {
+      return null;
+    }
+
+    try {
+      return jsonEncode({
+        'decision': decision,
+        'reviewed_by_name': row['reviewed_by_name'],
+        'reviewed_at': row['reviewed_at'],
+        'technical_review_id': row['technical_review_id'],
+        'reviewed_site_inspection_id': row['reviewed_site_inspection_id'],
+        'field_job_id': row['field_job_id'],
+      });
+    } catch (e) {
+      debugPrint('Loop 8 planning review cache encode failed: $e');
+      return null;
+    }
   }
 
   /// Local UI projection, never a remote write. One rule for every consumer

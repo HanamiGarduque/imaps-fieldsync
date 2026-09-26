@@ -163,7 +163,7 @@ void main() {
     expect(review.indexOf('finalizeAcceptedOnlineInspection'), greaterThan(review.indexOf('queuedOffline = true')));
   });
 
-  test('fresh schema and version 9->11 upgrade preserve all prior rows and current metadata', () async {
+  test('fresh schema and version 9->12 upgrade preserve all prior rows and current metadata', () async {
     final legacyTemp = await Directory.systemTemp.createTemp('legacy-v9-');
     addTearDown(() async {
       if (legacyTemp.existsSync()) {
@@ -251,7 +251,7 @@ void main() {
       legacyDb = null;
 
       upgradedDb = await databaseFactoryFfi.openDatabase(legacyPath, options: OpenDatabaseOptions(
-        version: 11,
+        version: 12,
         onUpgrade: (database, oldVersion, newVersion) async {
           expect(oldVersion, 9);
           if (oldVersion < 10) {
@@ -268,11 +268,18 @@ void main() {
               'ALTER TABLE local_jobs ADD COLUMN assigned_by_name TEXT',
             );
           }
+          // Loop 8: an existing v11 install must gain the optional read-only
+          // Planning Review cache column without losing any cached task.
+          if (oldVersion < 12) {
+            await database.execute(
+              'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT',
+            );
+          }
         },
       ));
       DBHelper.useDatabaseForTesting(upgradedDb);
 
-      expect(await upgradedDb.getVersion(), 11);
+      expect(await upgradedDb.getVersion(), 12);
       expect(await upgradedDb.query('inspection_job_retention'), isEmpty);
       expect((await upgradedDb.query('local_jobs')).single['id'], jobA);
       expect((await upgradedDb.query('local_inspections')).single['notes'], 'Saved draft');
@@ -285,12 +292,15 @@ void main() {
         'assignment_instructions',
         'assigned_by_imaps_user_id',
         'assigned_by_name',
+        'planning_review',
       ]));
 
-      expect(source, contains('version: 11,'));
+      expect(source, contains('version: 12,'));
       expect(source, contains('if (oldVersion < 10)'));
       expect(source, contains('if (oldVersion < 11)'));
+      expect(source, contains('if (oldVersion < 12)'));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT').allMatches(source), hasLength(1));
+      expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'await createInspectionRetentionTable\(db\)').allMatches(source), hasLength(2));
     } finally {
       if (upgradedDb != null && upgradedDb.isOpen) {

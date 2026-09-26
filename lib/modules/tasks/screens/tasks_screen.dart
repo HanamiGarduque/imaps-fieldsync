@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 
 import '../../../core/models/user_profile.dart';
+import '../../../core/models/planning_review_metadata.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
 
@@ -120,6 +121,11 @@ class TaskItem {
   // trigger on every UPDATE, so it reflects the true last-write time for both
   // a normal submit and any in-progress rework edit — no new column needed.
   final String? updatedAt;
+  // Loop 8 — optional, read-only Planning Review metadata for THIS exact
+  // inspection round. Presentational only: it must never alter status, category,
+  // current_step, progress or completed state, and its absence is meaningful
+  // (no review row = no Planning Review section, nothing inferred).
+  final PlanningReviewMetadata? planningReview;
 
   TaskItem({
     required this.id, this.parcelId, required this.name, required this.location,
@@ -140,6 +146,7 @@ class TaskItem {
     this.startedAt,
     this.reworkStartedAt,
     this.updatedAt,
+    this.planningReview,
   });
 
   factory TaskItem.fromJob(Map<String, dynamic> job) {
@@ -202,6 +209,8 @@ class TaskItem {
       startedAt: job['started_at'] as String?,
       reworkStartedAt: job['rework_started_at'] as String?,
       updatedAt: job['updated_at'] as String?,
+      // Loop 8 — read-only review metadata, resolved by exact field_job_id.
+      planningReview: PlanningReviewMetadata.fromJobRow(job),
     );
   }
 
@@ -493,6 +502,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 'assigned_by_imaps_user_id': j['assigned_by_imaps_user_id'],
                 'assigned_by_name': j['assigned_by_name'],
                 'rework_started_at': j['rework_started_at'],
+                // Loop 8 — cached Planning Review metadata stays visible
+                // offline. Presentation only; never alters any lifecycle field.
+                'planning_review': j['planning_review'],
                 'supabase_zoning_applications': {
                   'applicant_name': j['applicant_name'],
                   'barangay': j['barangay'],

@@ -525,6 +525,15 @@ class SupabaseService {
         property_index_number,
         latitude,
         longitude
+      ),
+      field_job_reviews (
+        id,
+        technical_review_id,
+        reviewed_site_inspection_id,
+        decision,
+        reviewed_by,
+        reviewed_by_name,
+        reviewed_at
       )
     ''')
         .eq('assigned_inspector_id', userId)
@@ -1063,6 +1072,15 @@ class SupabaseService {
               longitude,
               captured_at,
               notes
+            ),
+            field_job_reviews (
+              id,
+              technical_review_id,
+              reviewed_site_inspection_id,
+              decision,
+              reviewed_by,
+              reviewed_by_name,
+              reviewed_at
             )
           ''') // Added field_job_photos to the select query
           .eq('id', jobId)

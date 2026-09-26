@@ -325,8 +325,74 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
             'Submitted at': task.submittedAt ?? '—',
           }),
         ),
+        // Loop 8 — read-only Planning Review metadata for THIS exact round.
+        // Rendered only when an explicit review row exists; a Completed task
+        // with no review simply shows nothing. No buttons, no editing, and no
+        // effect on status, category, current_step, progress or completed state.
+        if (task.planningReview != null) ...[
+          const SizedBox(height: 24),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 12),
+            child: Text('PLANNING REVIEW', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.2)),
+          ),
+          _buildPlanningReviewCard(task),
+        ],
       ],
     );
+  }
+
+  /// Loop 8 — small, strictly read-only Planning Review card. Reuses the
+  /// existing card styling of this screen; genuinely null values are omitted
+  /// rather than shown as placeholders.
+  Widget _buildPlanningReviewCard(TaskItem task) {
+    final review = task.planningReview!;
+    final rows = <String, String>{
+      'Decision': review.displayDecision,
+      if (review.reviewedBy != null && review.reviewedBy!.isNotEmpty)
+        'Reviewed by': review.reviewedBy!,
+      if (review.reviewedAt != null && review.reviewedAt!.isNotEmpty)
+        'Reviewed at': _formatPlanningReviewTimestamp(review.reviewedAt!),
+    };
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: const Color(0xFF000000).withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.rate_review_outlined, size: 20, color: InsightTheme.ink2),
+                const SizedBox(width: 8),
+                Text('Planning Review', style: InsightTheme.poppins(14, w: FontWeight.w600, c: InsightTheme.ink)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildDetailRows(rows),
+            const SizedBox(height: 4),
+            Text(
+              'Read-only record from the City Planning Office.',
+              style: InsightTheme.inter(11, c: InsightTheme.ink3),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Format a transported review timestamp for display; falls back to the raw
+  /// value when it cannot be parsed, so a review is never hidden by formatting.
+  String _formatPlanningReviewTimestamp(String raw) {
+    final formatted = _formatTimestamp(raw);
+    return formatted == '—' ? raw : formatted;
   }
 
   Widget _buildHeaderCard(TaskItem task) {
