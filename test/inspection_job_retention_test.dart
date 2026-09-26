@@ -251,7 +251,7 @@ void main() {
       legacyDb = null;
 
       upgradedDb = await databaseFactoryFfi.openDatabase(legacyPath, options: OpenDatabaseOptions(
-        version: 12,
+        version: 13,
         onUpgrade: (database, oldVersion, newVersion) async {
           expect(oldVersion, 9);
           if (oldVersion < 10) {
@@ -275,11 +275,18 @@ void main() {
               'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT',
             );
           }
+          // Offline/online list parity: the Completed category is sorted by
+          // submitted_at, so the cached column must exist after upgrade too.
+          if (oldVersion < 13) {
+            await database.execute(
+              'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT',
+            );
+          }
         },
       ));
       DBHelper.useDatabaseForTesting(upgradedDb);
 
-      expect(await upgradedDb.getVersion(), 12);
+      expect(await upgradedDb.getVersion(), 13);
       expect(await upgradedDb.query('inspection_job_retention'), isEmpty);
       expect((await upgradedDb.query('local_jobs')).single['id'], jobA);
       expect((await upgradedDb.query('local_inspections')).single['notes'], 'Saved draft');
@@ -293,14 +300,17 @@ void main() {
         'assigned_by_imaps_user_id',
         'assigned_by_name',
         'planning_review',
+        'submitted_at',
       ]));
 
-      expect(source, contains('version: 12,'));
+      expect(source, contains('version: 13,'));
       expect(source, contains('if (oldVersion < 10)'));
       expect(source, contains('if (oldVersion < 11)'));
       expect(source, contains('if (oldVersion < 12)'));
+      expect(source, contains('if (oldVersion < 13)'));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT').allMatches(source), hasLength(1));
+      expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'await createInspectionRetentionTable\(db\)').allMatches(source), hasLength(2));
     } finally {
       if (upgradedDb != null && upgradedDb.isOpen) {

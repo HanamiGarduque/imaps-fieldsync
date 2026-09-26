@@ -129,7 +129,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 12,
+      version: 13,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -225,6 +225,16 @@ class DBHelper {
             'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT',
           );
         }
+        if (oldVersion < 13) {
+          // Offline/online list parity: the Tasks screen already sorts the
+          // Completed category by submitted_at (newest first, oldest last).
+          // Without this cached column the offline path had no sort key at all,
+          // so Completed fell back to raw row order and the sequence differed
+          // from the online list. Presentational only; no lifecycle effect.
+          await db.execute(
+            'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT',
+          );
+        }
       },
       onCreate: (db, version) async {
         await createInspectionRetentionTable(db);
@@ -246,6 +256,7 @@ class DBHelper {
             assigned_by_imaps_user_id TEXT,
             assigned_by_name TEXT,
             planning_review TEXT,
+            submitted_at TEXT,
             cached_updated_at TEXT,
             rework_started_at TEXT,
             parcel_lat REAL,
@@ -531,6 +542,10 @@ class DBHelper {
       'declared_land_use':
           parcel['declared_land_use'] ?? 'Single-detached residential',
       'parcel_address': parcel['address'] ?? '',
+      // Offline/online list parity: the Tasks screen sorts Completed by
+      // submitted_at, so the cached row must carry it or the offline order
+      // silently diverges from the online order.
+      'submitted_at': job['submitted_at'],
       // Loop 8 — cache the optional read-only Planning Review row for this
       // exact job so it stays presentable offline. Presentational only.
       'planning_review': _planningReviewCacheJson(job['field_job_reviews']),

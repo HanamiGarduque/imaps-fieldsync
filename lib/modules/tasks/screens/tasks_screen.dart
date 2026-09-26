@@ -502,6 +502,10 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 'assigned_by_imaps_user_id': j['assigned_by_imaps_user_id'],
                 'assigned_by_name': j['assigned_by_name'],
                 'rework_started_at': j['rework_started_at'],
+                // Offline/online list parity: Completed is sorted by
+                // submitted_at, so the cached value must reach TaskItem or the
+                // offline sequence diverges from the online sequence.
+                'submitted_at': j['submitted_at'],
                 // Loop 8 — cached Planning Review metadata stays visible
                 // offline. Presentation only; never alters any lifecycle field.
                 'planning_review': j['planning_review'],
