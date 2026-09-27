@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../tasks/screens/tasks_screen.dart'; // TaskItem
 import '../../../core/services/supabase_service.dart';
@@ -18,6 +19,14 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../widgets/photo_viewer.dart';
 
+/// Test-only seam for the Completed summary's remote detail fetch.
+///
+/// When set, it replaces `SupabaseService.fetchJobDetail` so the cached
+/// fallback can be exercised deterministically without a network. Production
+/// always runs the real service path; this is never assigned at runtime.
+typedef CompletedDetailFetcher = Future<Map<String, dynamic>?> Function(String jobId);
+CompletedDetailFetcher? completedDetailFetcherOverride;
+
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
   const CompletedInspectionDetailScreen({super.key, required this.task});
@@ -32,6 +41,17 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   bool _isLoading = true;
   String? _error;
 
+  /// True when the full remote detail is unavailable and the already-cached
+  /// task handed in by the caller is being shown instead. This is a read-only
+  /// degradation: nothing is fetched, invented, or persisted, and no status,
+  /// category or step value is ever changed by viewing.
+  bool _isCachedFallback = false;
+
+  /// A refresh that failed while the device still had connectivity. The saved
+  /// data is still shown, but the failure stays visible so a genuine backend
+  /// problem is never silently presented as a normal offline view.
+  bool _refreshFailedWhileOnline = false;
+
   @override
   void initState() {
     super.initState();
@@ -39,24 +59,81 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   }
 
   Future<void> _loadFullDetail() async {
+    Map<String, dynamic>? job;
+    Object? failure;
+
     try {
-      final job = await SupabaseService.fetchJobDetail(widget.task.id);
-      if (job == null) {
-        setState(() {
-          _error = 'Could not load this inspection.';
-          _isLoading = false;
-        });
-        return;
-      }
-      setState(() {
-        _fullTask = TaskItem.fromJob(job);
-        _isLoading = false;
-      });
+      final override = completedDetailFetcherOverride;
+      job = override != null
+          ? await override(widget.task.id)
+          : await SupabaseService.fetchJobDetail(widget.task.id);
     } catch (e) {
+      failure = e;
+    }
+
+    // Remote-first: a successful fetch always wins.
+    if (job != null) {
+      if (!mounted) return;
       setState(() {
-        _error = 'Failed to load: $e';
+        _fullTask = TaskItem.fromJob(job!);
+        _isLoading = false;
+        _error = null;
+        _isCachedFallback = false;
+        _refreshFailedWhileOnline = false;
+      });
+      return;
+    }
+
+    await _applyCachedFallback(failure);
+  }
+
+  /// Fallback contract: a Completed task is already listed from the local
+  /// cache, so opening its summary must still work when the full remote detail
+  /// cannot be fetched. Only data that is genuinely cached is displayed; no
+  /// field is invented, no lifecycle value is altered, and nothing is written.
+  Future<void> _applyCachedFallback(Object? failure) async {
+    final cached = widget.task;
+    final hasCachedTask = cached.id.isNotEmpty && (cached.status?.isNotEmpty ?? false);
+
+    // Case B: neither a remote detail nor a usable cached task. Keep the
+    // existing safe error state.
+    if (!hasCachedTask) {
+      if (!mounted) return;
+      setState(() {
+        _error = failure == null
+            ? 'Could not load this inspection.'
+            : 'Failed to load: $failure';
         _isLoading = false;
       });
+      return;
+    }
+
+    // Connectivity only refines the wording of an already-decided fallback; it
+    // must never gate rendering, so it is bounded and treated as unknown.
+    final online = await _hasConnectivity()
+        .timeout(const Duration(milliseconds: 500), onTimeout: () => false);
+
+    if (!mounted) return;
+    setState(() {
+      _fullTask = cached;
+      _isLoading = false;
+      _error = null;
+      _isCachedFallback = true;
+      _refreshFailedWhileOnline = online;
+    });
+  }
+
+  /// Smallest existing connectivity pattern in the app. An unknown result is
+  /// treated as not-online, so a failure is never labelled a normal offline
+  /// view and a real backend error is never hidden as one.
+  Future<bool> _hasConnectivity() async {
+    try {
+      final dynamic result = await Connectivity().checkConnectivity();
+      return result is ConnectivityResult
+          ? result != ConnectivityResult.none
+          : (result as List).any((s) => s != ConnectivityResult.none);
+    } catch (_) {
+      return false;
     }
   }
 
@@ -187,6 +264,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
       children: [
+        if (_isCachedFallback) _buildSavedDataNotice(),
         _buildHeaderCard(task),
         const SizedBox(height: 24),
         Padding(
@@ -395,6 +473,33 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     return formatted == '—' ? raw : formatted;
   }
 
+  /// Non-blocking notice shown only when this summary is rendered from cached
+  /// data. It never blocks the screen and it never claims detail is complete.
+  Widget _buildSavedDataNotice() {
+    final message = _refreshFailedWhileOnline
+        ? 'Could not refresh from the server. Showing saved task data.'
+        : 'Offline. Showing saved task data. Some details are not available.';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: InsightTheme.line),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.cloud_off_rounded, size: 16, color: InsightTheme.ink3),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeaderCard(TaskItem task) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -530,7 +635,16 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     final hasDetails = task.photoDetails.isNotEmpty;
     final int count = hasDetails ? task.photoDetails.length : task.photoPaths.length;
     if (count == 0) {
-      return Text('No photos attached to this report.', style: InsightTheme.inter(13, c: InsightTheme.ink2));
+      // Loop 7 rule: never render a stale signed URL or an invented grid.
+      // Signed URLs are deliberately never cached, so on the cached fallback
+      // there is simply no photo data to show - say so plainly instead of
+      // implying the inspection had no photos.
+      return Text(
+        _isCachedFallback
+            ? 'Photo evidence is not available offline.'
+            : 'No photos attached to this report.',
+        style: InsightTheme.inter(13, c: InsightTheme.ink2),
+      );
     }
     final urls = hasDetails
         ? task.photoDetails.map((p) => (p['photo_url'] as String?) ?? '').toList()
