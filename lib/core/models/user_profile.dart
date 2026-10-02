@@ -26,24 +26,42 @@ class UserProfile {
     );
   }
 
-  /// Full display name for greetings/headers. Outer whitespace is trimmed;
-  /// internal spaces and every token are preserved (F2: the dashboard used
-  /// to truncate to the first whitespace token, e.g. "My Tofu" → "My").
-  static String displayFullName(String value) =>
-      value.trim().isEmpty ? 'there' : value.trim();
+  /// Returns the complete configured name without abbreviation.
+  ///
+  /// Outer whitespace is ignored for display, while internal whitespace and
+  /// every name token are preserved exactly.
+  static String displayFullName(String value) {
+    final name = value.trim();
+    return name.isEmpty ? 'there' : name;
+  }
+
+  /// Avatar initials are intentionally derived independently from the visible
+  /// name so retaining a compact avatar never abbreviates the header text.
+  static String avatarInitials(String value) {
+    final name = value.trim();
+    if (name.isEmpty) return 'JR';
+
+    final parts = name.split(RegExp(r'\s+'));
+    if (parts.length > 1) {
+      return '${parts.first[0]}${parts[1][0]}'.toUpperCase();
+    }
+    return parts.first
+        .substring(0, parts.first.length >= 2 ? 2 : 1)
+        .toUpperCase();
+  }
 
   /// Round-trips with fromMap() — used to cache the profile locally
   /// (SecurePrefsService) so a previously-authenticated inspector can keep
   /// working if a later profile refresh fails only because there's no
   /// connectivity, not because the account was actually deactivated.
   Map<String, dynamic> toMap() => {
-        'id': id,
-        'full_name': fullName,
-        'role': role,
-        'phone_number': phoneNumber,
-        'avatar_url': avatarUrl,
-        'email': email,
-      };
+    'id': id,
+    'full_name': fullName,
+    'role': role,
+    'phone_number': phoneNumber,
+    'avatar_url': avatarUrl,
+    'email': email,
+  };
 
   bool get isAdmin => role == 'admin';
   bool get isInspector => role == 'inspector';
