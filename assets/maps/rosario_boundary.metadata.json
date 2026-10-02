@@ -1,0 +1,10 @@
+﻿{
+    "authority":  "MPDO Rosario",
+    "source_system":  "iMAPS",
+    "source_table":  "public.rosario_boundary",
+    "crs":  "EPSG:4326",
+    "geometry_policy":  "raw_unsimplified",
+    "exported_at":  "2026-10-02T09:53:07Z",
+    "dataset_version":  null,
+    "dataset_issue_date":  null
+}
