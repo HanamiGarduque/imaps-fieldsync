@@ -18,9 +18,10 @@ import '../widgets/active_assignments_folder_card.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// Whether a task belongs in the dashboard's Active Assignments carousel.
-/// Scheduling is presentation metadata and cannot make a non-Pending task active.
+/// Uses the same canonical lifecycle categories as My Tasks.
 bool isHomeDashboardActiveAssignment(TaskItem task) =>
-    task.lifecycleCategory == TaskLifecycleCategory.pending;
+    task.lifecycleCategory == TaskLifecycleCategory.pending ||
+    task.lifecycleCategory == TaskLifecycleCategory.ongoing;
 
 /// The existing dashboard display bucket for a task.
 ///
@@ -873,7 +874,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   animation: springFor(1),
                   beginOffset: const Offset(0, 20),
                   child: _SectionLabel(
-                    title: "ACTIVE ASSIGNMENTS",
+                    title: "Active Assignments",
                     icon: Icons.assignment_rounded,
                     accentColor: InsightTheme.blue1,
                     trailing: _SectionActionButton(label: 'See All', onTap: _goToTasksTab),
