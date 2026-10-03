@@ -290,26 +290,23 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
               children: [
                 Icon(category.icon, size: 16, color: InsightTheme.blue1),
                 const SizedBox(width: 6),
-                Text(
+                Expanded(child: Text(
                   title.toUpperCase(),
                   style: InsightTheme.jetBrains(11, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.6),
-                ),
+                )),
               ],
             ),
           ),
-          Container(
-            decoration: BoxDecoration(
-              color: InsightTheme.surface,
+          Material(
+            // The ExpansionTile paints its background and ink on the nearest
+            // Material, so the decorated card must be a Material itself —
+            // otherwise the tap ripple stays invisible behind this background.
+            color: InsightTheme.surface,
+            shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: InsightTheme.line),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x05141628),
-                  blurRadius: 10,
-                  offset: Offset(0, 3),
-                ),
-              ],
+              side: const BorderSide(color: InsightTheme.line),
             ),
+            elevation: 0,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
               child: Column(

@@ -303,12 +303,13 @@ void main() {
         'submitted_at',
       ]));
 
-      expect(source, contains('version: 14,'));
+      expect(source, contains('version: 15,'));
       expect(source, contains('if (oldVersion < 10)'));
       expect(source, contains('if (oldVersion < 11)'));
       expect(source, contains('if (oldVersion < 12)'));
       expect(source, contains('if (oldVersion < 13)'));
       expect(source, contains('if (oldVersion < 14)'));
+      expect(source, contains('if (oldVersion < 15)'));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT').allMatches(source), hasLength(1));

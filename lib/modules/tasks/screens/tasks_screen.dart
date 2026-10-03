@@ -77,6 +77,11 @@ class TaskItem {
   // (schema not yet applied) — display remains neutral/unavailable.
   final String? assignedByImapsUserId;
   final String? assignedByName;
+  // Exact remote identity used only to author Application Support reports.
+  // NULL for upgraded v14 cache rows until the task is refreshed online; such
+  // rows become ineligible for Application Support and show an honest state.
+  final String? supabaseApplicationId;
+  final String? bridgeSourceId;
   final String? observations;
   final String? discrepancies;
   final String? recommendations;
@@ -134,6 +139,7 @@ class TaskItem {
     this.propertyIndexNumber, this.applicationType, this.findings, this.observations,
     this.discrepancies, this.recommendations, this.inspectorNotes, this.assignmentInstructions,
     this.assignedByImapsUserId, this.assignedByName,
+    this.supabaseApplicationId, this.bridgeSourceId,
     this.inspectionResult,
     this.isCompliant, this.photoPaths = const [], this.photoDetails = const [], this.photoCount = 0,
     this.checklistCompletedCount = 0, this.checklistTotalCount = 0, this.submittedAt,
@@ -209,6 +215,8 @@ class TaskItem {
       startedAt: job['started_at'] as String?,
       reworkStartedAt: job['rework_started_at'] as String?,
       updatedAt: job['updated_at'] as String?,
+      supabaseApplicationId: job['supabase_application_id'] as String?,
+      bridgeSourceId: job['bridge_source_id'] as String?,
       // Loop 8 — read-only review metadata, resolved by exact field_job_id.
       planningReview: PlanningReviewMetadata.fromJobRow(job),
     );
@@ -502,6 +510,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 'assigned_by_imaps_user_id': j['assigned_by_imaps_user_id'],
                 'assigned_by_name': j['assigned_by_name'],
                 'rework_started_at': j['rework_started_at'],
+                'supabase_application_id': j['supabase_application_id'],
+                'bridge_source_id': j['bridge_source_id'],
                 // Offline/online list parity: Completed is sorted by
                 // submitted_at, so the cached value must reach TaskItem or the
                 // offline sequence diverges from the online sequence.

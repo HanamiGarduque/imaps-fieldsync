@@ -466,5 +466,121 @@ class FaqData {
         ),
       ],
     ),
+    // 10. REPORTS & SUPPORT — two report types, plus history/status.
+    FaqCategory(
+      titleEn: 'Reports & Support',
+      titleTl: 'Reports & Support',
+      icon: Icons.flag_outlined,
+      items: [
+        FaqItem(
+          questionEn: 'What is Reports & Support?',
+          questionTl: 'Ano ang Reports & Support?',
+          answerEn:
+              'Open Profile → Reports & Support to tell the MPDO team what needs attention. '
+              'There are two report types: Technical Issue for FieldSync problems, and Application Support '
+              'for concerns about a task or application assigned to you.\n\n'
+              'My Reports is your history and status list, not another report type.',
+          answerTl:
+              'Buksan ang Profile → Reports & Support para ipaalam sa MPDO team ang kailangang asikasuhin. '
+              'May dalawang uri ng report: Technical Issue para sa problema sa FieldSync, at Application Support '
+              'para sa concern sa task o application na nakatalaga sa iyo.\n\n'
+              'Ang My Reports ay listahan ng history at status, hindi isa pang uri ng report.',
+        ),
+        FaqItem(
+          questionEn: 'When should I file a Technical Issue?',
+          questionTl: 'Kailan ako dapat mag-file ng Technical Issue?',
+          answerEn:
+              'Use Technical Issue when something is wrong with FieldSync itself: a screen does not respond, '
+              'GPS behaves unexpectedly, sync fails, a button does not work, or a map, route or app error appears.\n\n'
+              'No task or application is required. Choose the affected screen and describe what happened. '
+              'The report first goes to the MPDO team (Admin) for review; it does not directly contact a Planning Officer.',
+          answerTl:
+              'Gamitin ang Technical Issue kapag may problema sa FieldSync mismo: hindi tumutugon ang screen, '
+              'kakaiba ang GPS, hindi gumagana ang sync o button, o may error sa mapa, ruta o app.\n\n'
+              'Hindi kailangan ng task o application. Piliin ang apektadong screen at ilarawan ang nangyari. '
+              'Sa MPDO team (Admin) muna mapupunta ang report para suriin; hindi ito direktang kumokontak sa Planning Officer.',
+        ),
+        FaqItem(
+          questionEn: 'When should I use Application Support?',
+          questionTl: 'Kailan ko gagamitin ang Application Support?',
+          answerEn:
+              'Use Application Support for incorrect or missing information, additional site information, '
+              'clarification, a correction request, or another concern about an exact task or application.\n\n'
+              'Select the exact task from your available assignments or completed tasks. You do not choose a Planning Officer. '
+              'iMAPS identifies the current Planning Officer and handles routing and follow-up.',
+          answerTl:
+              'Gamitin ang Application Support para sa mali o kulang na impormasyon, dagdag na impormasyon sa site, '
+              'paglilinaw, kahilingan sa pagwawasto, o ibang concern sa isang tiyak na task o application.\n\n'
+              'Piliin ang mismong task mula sa mga available mong assignment o completed task. Hindi ikaw ang pipili ng Planning Officer. '
+              'Tinutukoy ng iMAPS ang kasalukuyang Planning Officer at inaasikaso ang routing at follow-up.',
+        ),
+        FaqItem(
+          questionEn: 'Why can’t I select my task for Application Support?',
+          questionTl: 'Bakit hindi ko mapili ang task ko sa Application Support?',
+          answerEn:
+              'A task saved by an older version of FieldSync may be missing information needed to link your report correctly. '
+              'Open or refresh My Tasks while online, then refresh the tasks in Application Support. '
+              'While offline, only tasks already saved on this device are available.',
+          answerTl:
+              'Maaaring kulang ang impormasyong na-save ng lumang bersyon ng FieldSync upang maitugma nang tama ang report sa task. '
+              'Buksan o i-refresh ang My Tasks habang online, saka i-refresh ang mga task sa Application Support. '
+              'Kapag offline, ang mga task na naka-save na sa device lamang ang available.',
+        ),
+        FaqItem(
+          questionEn: 'What do the statuses in My Reports mean?',
+          questionTl: 'Ano ang ibig sabihin ng mga status sa My Reports?',
+          answerEn:
+              'My Reports shows both filed reports and reports still waiting on this device.\n\n'
+              '• Pending on this device: saved here, not yet confirmed by the server.\n'
+              '• Filed / Submitted: the server confirmed receipt; a report reference is available.\n'
+              '• Retry needed: saved here after a temporary sending problem; another attempt may work.\n'
+              '• Could not be filed: the report was refused. Contact the MPDO team; FieldSync will not keep resending it automatically.\n'
+              '• Submission status uncertain: the report may have arrived. Check the filed list before trying again.',
+          answerTl:
+              'Makikita sa My Reports ang mga na-file na report at ang mga naghihintay pa sa device.\n\n'
+              '• Pending on this device: naka-save dito, pero hindi pa nakukumpirma ng server.\n'
+              '• Filed / Submitted: nakumpirma ng server ang pagtanggap; may report reference na.\n'
+              '• Retry needed: naka-save matapos ang pansamantalang problema sa pagpapadala; maaaring gumana ang susunod na pagtatangka.\n'
+              '• Could not be filed: tinanggihan ang report. Kontakin ang MPDO team; hindi ito paulit-ulit na awtomatikong ipapadala ng FieldSync.\n'
+              '• Submission status uncertain: maaaring dumating na ang report. Tingnan muna ang filed list bago subukang muli.',
+        ),
+        FaqItem(
+          questionEn: 'Can I file a report while offline?',
+          questionTl: 'Maaari ba akong mag-file ng report habang offline?',
+          answerEn:
+              'Yes. When you tap Submit report, FieldSync saves a valid report on this device before attempting to send it. '
+              'If offline, it stays here. When connectivity returns, eligible pending reports can be sent.\n\n'
+              'Check My Reports for the delivery status. Text you have only typed into a form is not yet a saved report.',
+          answerTl:
+              'Oo. Kapag pinindot mo ang Submit report, sine-save muna ng FieldSync ang valid na report sa device bago subukang ipadala. '
+              'Kapag offline, mananatili ito rito. Kapag bumalik ang koneksyon, maaaring maipadala ang mga pending report na puwede nang subukan.\n\n'
+              'Tingnan sa My Reports ang delivery status. Ang text na na-type mo pa lang sa form ay hindi pa naka-save na report.',
+        ),
+        FaqItem(
+          questionEn: 'What should I do if submission status is uncertain?',
+          questionTl: 'Ano ang gagawin ko kung uncertain ang submission status?',
+          answerEn:
+              'FieldSync cannot tell whether the report reached the server, so it will not silently resend it. '
+              'Check My Reports first. If you decide to try sending again, read the confirmation carefully: '
+              'resending may create a duplicate.',
+          answerTl:
+              'Hindi matukoy ng FieldSync kung nakarating ang report sa server, kaya hindi ito basta ipapadala muli. '
+              'Tingnan muna ang My Reports. Kung susubukan mong ipadala muli, basahing mabuti ang confirmation: '
+              'maaaring makagawa ng duplicate ang muling pagpapadala.',
+        ),
+        FaqItem(
+          questionEn: 'What happens after I file a report?',
+          questionTl: 'Ano ang mangyayari pagkatapos kong mag-file ng report?',
+          answerEn:
+              'For a Technical Issue, the MPDO team (Admin) reviews the FieldSync problem. '
+              'For Application Support, iMAPS handles the concern through the current application workflow and Planning Officer.\n\n'
+              'Open My Reports to check the status and any review details added by the MPDO team.',
+          answerTl:
+              'Para sa Technical Issue, sinusuri ng MPDO team (Admin) ang problema sa FieldSync. '
+              'Para sa Application Support, inaasikaso ng iMAPS ang concern ayon sa kasalukuyang application workflow at Planning Officer.\n\n'
+              'Buksan ang My Reports para makita ang status at anumang detalye ng review mula sa MPDO team.',
+        ),
+      ],
+    ),
   ];
 }

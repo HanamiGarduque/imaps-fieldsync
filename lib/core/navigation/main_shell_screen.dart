@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import '../services/sync_outbox_service.dart';
+import '../services/report_submission_service.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/sync_progress_banner.dart';
 import '../widgets/quick_actions_sheet.dart';
@@ -86,6 +87,10 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     _tasksVisitedThisSession = _currentIndex == 1;
     _isOnline = !widget.offlineSession;
     _checkInitialConnectivity();
+    // Reports & Support queue: recover any interrupted send, then let the
+    // queue try once. Fire-and-forget so app startup never waits on the
+    // network, and completely separate from the inspection SyncOutbox.
+    unawaited(_serviceReportsQueue());
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
       if (mounted) {
         final online = results.any((r) => r != ConnectivityResult.none);
@@ -93,6 +98,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
           setState(() {
             _isOnline = online;
           });
+          if (online) unawaited(_serviceReportsQueue());
         }
       }
     });
@@ -104,6 +110,21 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     final online = await AuthService.hasConnectivity();
     if (mounted && _isOnline != online) {
       setState(() => _isOnline = online);
+    }
+  }
+
+  /// A row persisted as `sending` means the previous process died mid-request,
+  /// so its outcome is unknowable: it becomes `delivery_unknown` and is never
+  /// resent automatically. Only then are genuinely retryable rows attempted,
+  /// serially.
+  Future<void> _serviceReportsQueue() async {
+    try {
+      await ReportQueueService.recoverInterruptedSends();
+      await ReportQueueService.processPending();
+    } catch (e) {
+      // Reporting retry must never take the shell down and must never loop.
+      // The row simply stays in its current transport state.
+      debugPrint('[REPORTS] queue service skipped: $e');
     }
   }
 
