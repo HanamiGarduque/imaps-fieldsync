@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 import '../models/dashboard_stats.dart';
+import '../models/analytics_activity_range.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// ==================================================================
@@ -72,6 +73,21 @@ class CompletionGaugeCard extends StatelessWidget {
   final Color textColor;
   final Color mutedTextColor;
 
+  /// When supplied, this card reports the selected Week/Month period instead
+  /// of the lifetime figure. A null rate means "no scheduled tasks in this
+  /// period", which renders as an explicit N/A rather than 0%.
+  final AnalyticsRangeMetrics? periodMetrics;
+
+  /// 'Week' or 'Month' — only used when [periodMetrics] is supplied.
+  final String? periodLabel;
+
+  /// The real period percentage chip, or null when there is no cohort.
+  String? get periodRateLabel {
+    final rate = periodMetrics?.scheduledCompletionRate;
+    if (rate == null) return null;
+    return '${(rate * 100).toStringAsFixed(0)}%';
+  }
+
   const CompletionGaugeCard({
     super.key,
     required this.rate,
@@ -81,12 +97,23 @@ class CompletionGaugeCard extends StatelessWidget {
     required this.fillColor,
     required this.textColor,
     required this.mutedTextColor,
+    this.periodMetrics,
+    this.periodLabel,
   });
 
   @override
   Widget build(BuildContext context) {
-    final clamped = rate.isNaN ? 0.0 : rate.clamp(0.0, 1.0);
-    final percentLabel = '${(clamped * 100).toStringAsFixed(1)}%';
+    final scoped = periodMetrics;
+    // In period mode the gauge is the scheduled-cohort rate; null means there
+    // is nothing scheduled, which must not be drawn as a confident 0.0%.
+    final effectiveRate = scoped == null
+        ? (rate.isNaN ? 0.0 : rate.clamp(0.0, 1.0))
+        : scoped.scheduledCompletionRate;
+    final hasNoScheduled = scoped != null && effectiveRate == null;
+    final clamped = hasNoScheduled
+        ? 0.0
+        : (effectiveRate!.isNaN ? 0.0 : effectiveRate.clamp(0.0, 1.0));
+    final percentLabel = hasNoScheduled ? 'N/A' : '${(clamped * 100).toStringAsFixed(1)}%';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,7 +187,7 @@ class CompletionGaugeCard extends StatelessWidget {
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              'Applications',
+                              scoped == null ? 'Applications' : 'Scheduled',
                               style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -168,22 +195,26 @@ class CompletionGaugeCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF3563FF),
-                            borderRadius: BorderRadius.circular(6),
+                        // The old hardcoded '3.5%' chip was a literal string,
+                        // never a computed value. Now it shows the real period
+                        // figure, or nothing when there is no scheduled cohort.
+                        if (periodRateLabel != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF3563FF),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              periodRateLabel!,
+                              style: InsightTheme.inter(8, w: FontWeight.w700, c: Colors.white),
+                            ),
                           ),
-                          child: Text(
-                            '3.5% ↗',
-                            style: InsightTheme.inter(8, w: FontWeight.w700, c: Colors.white),
-                          ),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      '$totalApplications',
+                      '${scoped?.scheduledCohortCount ?? totalApplications}',
                       style: InsightTheme.poppins(18, w: FontWeight.w800, c: InsightTheme.ink),
                     ),
                   ],
@@ -208,7 +239,7 @@ class CompletionGaugeCard extends StatelessWidget {
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              'Workload',
+                              scoped == null ? 'Workload' : 'Still open',
                               style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -216,22 +247,25 @@ class CompletionGaugeCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0F111A),
-                            borderRadius: BorderRadius.circular(6),
+                        // Same as above: the old '4.5%' chip was also a literal.
+                        // In period mode this reports the real completed count.
+                        if (scoped != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F111A),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '${scoped.scheduledCompletedCount} done',
+                              style: InsightTheme.inter(8, w: FontWeight.w700, c: Colors.white),
+                            ),
                           ),
-                          child: Text(
-                            '4.5% ↘',
-                            style: InsightTheme.inter(8, w: FontWeight.w700, c: Colors.white),
-                          ),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      '$activeWorkload',
+                      '${scoped?.scheduledOpenCount ?? activeWorkload}',
                       style: InsightTheme.poppins(18, w: FontWeight.w800, c: InsightTheme.ink),
                     ),
                   ],
@@ -308,12 +342,17 @@ class WeeklyTrendCard extends StatelessWidget {
   final Color textColor;
   final Color mutedTextColor;
 
+  /// 'Week' or 'Month' — keeps the heading honest now that the card can show
+  /// either range, instead of always claiming to be weekly.
+  final String? periodLabel;
+
   const WeeklyTrendCard({
     super.key,
     required this.points,
     required this.barColor,
     required this.textColor,
     required this.mutedTextColor,
+    this.periodLabel,
   });
 
   @override
@@ -328,7 +367,10 @@ class WeeklyTrendCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('WEEKLY PERFORMANCE', style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor)),
+        Text(
+          periodLabel == null ? 'WEEKLY PERFORMANCE' : '${periodLabel!.toUpperCase()} PERFORMANCE',
+          style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor),
+        ),
         const SizedBox(height: 4),
         Text('Inspections submitted per day', style: InsightTextStyles.caption(color: mutedTextColor)),
         const SizedBox(height: 14),
@@ -414,62 +456,59 @@ class WeeklyTrendCard extends StatelessWidget {
 /// glance; footer surfaces the streak, which the raw grid can't show.
 /// ==================================================================
 class ActivityHeatmapCard extends StatelessWidget {
-  final Set<int> activeDays;
-  final int month;
-  final int year;
+  /// Exactly which days are shown and which of them were completed. The
+  /// denominator, calendar shape and "today" outline all come from this — never
+  /// from a hardcoded month or a guessed cell size.
+  final AnalyticsActivityRange activityRange;
   final Color activeColor;
   final Color inactiveColor;
   final Color textColor;
   final Color mutedTextColor;
 
+  /// Injectable for deterministic tests; defaults to the real clock.
+  final DateTime Function() now;
+
   const ActivityHeatmapCard({
     super.key,
-    required this.activeDays,
-    required this.month,
-    required this.year,
+    required this.activityRange,
     required this.activeColor,
     required this.inactiveColor,
     required this.textColor,
     required this.mutedTextColor,
-  });
+    DateTime Function()? now,
+  }) : now = now ?? _systemNow;
 
-  int get _currentStreak {
-    final today = DateTime.now();
-    final isCurrentMonth = today.year == year && today.month == month;
-    if (!isCurrentMonth) return 0;
-    int streak = 0;
-    int day = today.day;
-    while (day >= 1 && activeDays.contains(day)) {
-      streak++;
-      day--;
-    }
-    return streak;
-  }
+  static DateTime _systemNow() => DateTime.now();
+
+  static const List<String> _weekdayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+  bool get _isWeek => activityRange.range == AnalyticsRange.week;
+
+  static String _monthName(int month) => const [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December',
+      ][month - 1];
 
   @override
   Widget build(BuildContext context) {
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final firstWeekday = DateTime(year, month, 1).weekday; // 1 = Mon .. 7 = Sun
-    final leadingBlanks = firstWeekday - 1;
-    final totalCells = leadingBlanks + daysInMonth;
-    final calendarWeeks = ((totalCells + 6) / 7).ceil();
-    final cellSize = 24.0;
-    final gridHeight = (calendarWeeks * cellSize) + ((calendarWeeks - 1) * 6.0) + 4.0;
-    final today = DateTime.now();
-    final isCurrentMonth = today.year == year && today.month == month;
-    final monthlyPct = daysInMonth == 0 ? 0 : ((activeDays.length / daysInMonth) * 100).round();
+    final range = activityRange;
+    final today = now();
+    final streak = range.currentStreak(today);
+    final periodLabel = _isWeek ? 'This week' : _monthName(range.days.first.month);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('ACTIVITY TRACKER', style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor)),
         const SizedBox(height: 4),
-        Text('${activeDays.length} of $daysInMonth days completed',
+        Text('${range.completedCount} of ${range.dayCount} days completed',
             style: InsightTheme.inter(14.5, w: FontWeight.w600, c: textColor)),
+        const SizedBox(height: 2),
+        Text(periodLabel, style: InsightTheme.inter(11.5, c: mutedTextColor)),
         const SizedBox(height: 12),
         Row(
           children: [
-            for (final d in const ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
+            for (final d in _weekdayLabels)
               Expanded(
                 child: Center(
                   child: Text(d, style: InsightTheme.inter(12, w: FontWeight.w700, c: mutedTextColor)),
@@ -478,51 +517,67 @@ class ActivityHeatmapCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        SizedBox(
-          height: gridHeight,
-          child: GridView.builder(
-            physics: const NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            padding: EdgeInsets.zero,
-            itemCount: totalCells,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              mainAxisSpacing: 6,
-              crossAxisSpacing: 6,
-              childAspectRatio: 1,
-            ),
-            itemBuilder: (context, index) {
-              if (index < leadingBlanks) return const SizedBox.shrink();
-              final day = index - leadingBlanks + 1;
-              final isActive = activeDays.contains(day);
-              final isToday = isCurrentMonth && today.day == day;
-              return Container(
-                decoration: BoxDecoration(
-                  color: isActive ? activeColor : inactiveColor,
-                  borderRadius: BorderRadius.circular(8),
-                  border: isToday ? Border.all(color: activeColor, width: 2) : null,
+        // Square cells sized from the REAL available width. The previous fixed
+        // 24px assumption made this wrapper shorter than the grid the
+        // aspect-ratio delegate actually renders, clipping the final row.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const spacing = 6.0;
+            final cell = (constraints.maxWidth - (spacing * 6)) / 7;
+            final rows = range.calendarWeeks;
+            final gridHeight = rows * cell + (rows - 1) * spacing;
+            return SizedBox(
+              height: gridHeight,
+              child: GridView.builder(
+                physics: const NeverScrollableScrollPhysics(),
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: range.cellCount,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  mainAxisSpacing: spacing,
+                  crossAxisSpacing: spacing,
+                  childAspectRatio: 1,
                 ),
-                alignment: Alignment.center,
-                child: Text(
-                  '$day',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: isActive ? Colors.white : mutedTextColor,
-                  ),
-                ),
-              );
-            },
-          ),
+                itemBuilder: (context, index) {
+                  if (index < range.leadingBlanks) return const SizedBox.shrink();
+                  final date = range.days[index - range.leadingBlanks];
+                  final isActive = range.isActive(date);
+                  // Today and completed are independent: an incomplete today
+                  // keeps only its outline and is never counted as completed.
+                  final isToday = range.contains(today) &&
+                      today.year == date.year &&
+                      today.month == date.month &&
+                      today.day == date.day;
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: isActive ? activeColor : inactiveColor,
+                      borderRadius: BorderRadius.circular(8),
+                      border: isToday ? Border.all(color: activeColor, width: 2) : null,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '${date.day}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isActive ? Colors.white : mutedTextColor,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          },
         ),
         const SizedBox(height: 12),
         Divider(height: 1, color: inactiveColor),
         const SizedBox(height: 12),
         _StatRow(
           items: [
-            ('Current Streak', '$_currentStreak d'),
-            ('Completed', '${activeDays.length}'),
-            ('Monthly', '$monthlyPct%'),
+            ('Current Streak', '$streak d'),
+            ('Completed', '${range.completedCount}'),
+            (_isWeek ? 'Weekly' : 'Monthly', '${range.percentage}%'),
           ],
           textColor: textColor,
           mutedTextColor: mutedTextColor,
@@ -547,6 +602,10 @@ class ZoningTypeBreakdownCard extends StatelessWidget {
   /// repeated if not supplied, so existing callers don't break.
   final List<Color>? segmentColors;
 
+  /// 'Week' or 'Month' — the subtitle must describe what is actually counted,
+  /// which is completions inside the range, not all assigned applications.
+  final String? periodLabel;
+
   const ZoningTypeBreakdownCard({
     super.key,
     required this.entries,
@@ -555,6 +614,7 @@ class ZoningTypeBreakdownCard extends StatelessWidget {
     required this.textColor,
     required this.mutedTextColor,
     this.segmentColors,
+    this.periodLabel,
   });
 
   @override
@@ -577,7 +637,12 @@ class ZoningTypeBreakdownCard extends StatelessWidget {
                 children: [
                   Text('ZONING DISTRIBUTION', style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor)),
                   const SizedBox(height: 4),
-                  Text('Share of assigned applications', style: InsightTextStyles.caption(color: mutedTextColor)),
+                  Text(
+                  periodLabel == null
+                      ? 'Share of assigned applications'
+                      : 'Completed this ${periodLabel!.toLowerCase()}',
+                  style: InsightTextStyles.caption(color: mutedTextColor),
+                ),
                 ],
               ),
             ),

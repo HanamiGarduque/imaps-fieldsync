@@ -89,6 +89,7 @@ flutter:
   assets:
     - .env
     - assets/icon/
+    - assets/maps/
 
 flutter_launcher_icons:
   android: true

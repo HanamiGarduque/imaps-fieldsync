@@ -61,7 +61,7 @@ void main() {
       expectConsumerBehavior(
         status: 'in_progress',
         isSelfScheduled: true,
-        isActiveAssignment: false,
+        isActiveAssignment: true,
         dashboardPresentation: 'Ongoing',
         cardLabel: 'Ongoing',
       );

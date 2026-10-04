@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/models/user_profile.dart';
 import '../models/dashboard_stats.dart';
+import '../models/analytics_activity_range.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../auth_startup/screens/splash_screen.dart' show LoginScreen;
@@ -18,7 +19,6 @@ import '../widgets/dashboard_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/services/app_info_service.dart';
-
 
 import '../../../core/theme/insight_theme.dart';
 
@@ -43,7 +43,8 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateMixin, SpringEntrance {
+class _ProfileScreenState extends State<ProfileScreen>
+    with TickerProviderStateMixin, SpringEntrance {
   late UserProfile _currentProfile;
 
   InspectorDashboardStats _stats = InspectorDashboardStats.empty();
@@ -57,15 +58,6 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
   int _analyticsTabIndex = 0;
   bool _analyticsIsWeek = true;
   final GlobalKey _analyticsSectionKey = GlobalKey();
-
-  // Drives the identity header's expand<->collapse crossfade as the user
-  // scrolls — see _IdentityHeaderDelegate. Tracked in the scroll controller
-  // (not a NotificationListener) since that's the more direct signal for a
-  // SliverPersistentHeader tied to a single CustomScrollView.
-  final ScrollController _scrollController = ScrollController();
-
-  static const double _expandedHeaderHeight = 220.0;
-  static const double _collapsedHeaderHeight = 78.0;
 
   @override
   void initState() {
@@ -91,7 +83,6 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
 
   @override
   void dispose() {
-    _scrollController.dispose();
     disposeSpringEntrance();
     super.dispose();
   }
@@ -169,30 +160,55 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
           builder: (ctx, setDialogState) {
             return Dialog(
               backgroundColor: InsightTheme.surface,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Log out', style: InsightTheme.urbanist(18, w: FontWeight.w700, c: InsightTheme.ink)),
+                    Text(
+                      'Log out',
+                      style: InsightTheme.urbanist(
+                        18,
+                        w: FontWeight.w700,
+                        c: InsightTheme.ink,
+                      ),
+                    ),
                     const SizedBox(height: 10),
                     Text(
                       "You'll need to sign in again to continue your inspections.",
-                      style: InsightTheme.inter(13.5, c: InsightTheme.ink2, h: 1.4),
+                      style: InsightTheme.inter(
+                        13.5,
+                        c: InsightTheme.ink2,
+                        h: 1.4,
+                      ),
                     ),
                     const SizedBox(height: 22),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         TextButton(
-                          onPressed: isLoggingOut ? null : () => Navigator.pop(dialogContext),
+                          onPressed: isLoggingOut
+                              ? null
+                              : () => Navigator.pop(dialogContext),
                           style: TextButton.styleFrom(
                             minimumSize: const Size(60, 44),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
                           ),
-                          child: Text('Cancel', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink2)),
+                          child: Text(
+                            'Cancel',
+                            style: InsightTheme.inter(
+                              14,
+                              w: FontWeight.w600,
+                              c: InsightTheme.ink2,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         ElevatedButton(
@@ -203,21 +219,46 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   await _performSignOut(dialogContext);
                                 },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color.fromARGB(255, 234, 12, 12),
-                            disabledBackgroundColor: const Color.fromARGB(255, 234, 12, 12).withValues(alpha: 0.7),
+                            backgroundColor: const Color.fromARGB(
+                              255,
+                              234,
+                              12,
+                              12,
+                            ),
+                            disabledBackgroundColor: const Color.fromARGB(
+                              255,
+                              234,
+                              12,
+                              12,
+                            ).withValues(alpha: 0.7),
                             foregroundColor: Colors.white,
                             elevation: 0,
                             minimumSize: const Size(90, 44),
-                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                           child: isLoggingOut
                               ? const SizedBox(
                                   width: 16,
                                   height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.2,
+                                    color: Colors.white,
+                                  ),
                                 )
-                              : Text('Log out', style: InsightTheme.inter(14, w: FontWeight.w700, c: Colors.white)),
+                              : Text(
+                                  'Log out',
+                                  style: InsightTheme.inter(
+                                    14,
+                                    w: FontWeight.w700,
+                                    c: Colors.white,
+                                  ),
+                                ),
                         ),
                       ],
                     ),
@@ -257,7 +298,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     // biometric button) has nothing to restore over the network — it's
     // just un-hiding it.
     try {
-      await SupabaseService.logSecurityEvent(eventType: 'logout', severity: 'info');
+      await SupabaseService.logSecurityEvent(
+        eventType: 'logout',
+        severity: 'info',
+      );
     } catch (e) {
       debugPrint('[SIGNOUT] logSecurityEvent error: $e');
     }
@@ -282,60 +326,52 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
     }
   }
 
-
-
-  String _getInitials(String name) {
-    if (name.trim().isEmpty) return "JR";
-    List<String> parts = name.trim().split(' ');
-    if (parts.length > 1) {
-      return "${parts[0][0]}${parts[1][0]}".toUpperCase();
-    }
-    return parts[0].substring(0, name.length >= 2 ? 2 : 1).toUpperCase();
-  }
-
-  String _getFirstNameInitialAndLastName(String name) {
-    if (name.trim().isEmpty) return "J. Reyes";
-    List<String> parts = name.trim().split(' ');
-    if (parts.length > 1) {
-      return "${parts[0][0]}. ${parts.sublist(1).join(' ')}";
-    }
-    return name;
-  }
-
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
-    final initials = _getInitials(_currentProfile.fullName);
-    final displayName = _getFirstNameInitialAndLastName(_currentProfile.fullName);
-    
+    final initials = UserProfile.avatarInitials(_currentProfile.fullName);
+    final displayName = UserProfile.displayFullName(_currentProfile.fullName);
+
     final currentUser = SupabaseService.client.auth.currentUser;
     final userEmail = currentUser?.email ?? 'No email found';
-    final positionLabel = _currentProfile.isAdmin ? 'Administrator' : 'Zoning Officer I';
+    final positionLabel = _currentProfile.isAdmin
+        ? 'Administrator'
+        : 'Zoning Officer I';
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
-      extendBody: true, 
+      extendBody: true,
       body: Stack(
         children: [
           // Background Blobs for Premium Feel
           Positioned(
-            top: -60, right: -60,
+            top: -60,
+            right: -60,
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
-                width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.20)),
+                width: 260,
+                height: 260,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: InsightTheme.blue1.withValues(alpha: 0.20),
+                ),
               ),
             ),
           ),
           Positioned(
-            bottom: -80, left: -80,
+            bottom: -80,
+            left: -80,
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
-                width: 220, height: 220,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.10)),
+                width: 220,
+                height: 220,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: InsightTheme.blue1.withValues(alpha: 0.10),
+                ),
               ),
             ),
           ),
@@ -345,30 +381,24 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
             child: RefreshIndicator(
               color: InsightTheme.blue1,
               onRefresh: () async {
-                await Future.wait([
-                  _refreshProfileFromServer(),
-                  _loadStats(),
-                ]);
+                await Future.wait([_refreshProfileFromServer(), _loadStats()]);
               },
-              // CustomScrollView + a pinned SliverPersistentHeader replaces
-              // the plain ListView so the identity card can collapse into a
-              // compact bar on scroll and expand back at the top — see
-              // _IdentityHeaderDelegate.
               child: CustomScrollView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
                 slivers: [
-                  SliverPersistentHeader(
-                    pinned: true,
-                    delegate: _IdentityHeaderDelegate(
-                      expandedHeight: _expandedHeaderHeight,
-                      collapsedHeight: _collapsedHeaderHeight,
-                      avatarUrl: _currentProfile.avatarUrl,
-                      initials: initials,
-                      displayName: displayName,
-                      positionLabel: positionLabel,
-                      userEmail: userEmail,
-                      onEditTap: _openEditScreen,
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+                      child: ProfileIdentityCard(
+                        avatarUrl: _currentProfile.avatarUrl,
+                        initials: initials,
+                        displayName: displayName,
+                        positionLabel: positionLabel,
+                        userEmail: userEmail,
+                        onEditTap: _openEditScreen,
+                      ),
                     ),
                   ),
                   SliverPadding(
@@ -388,7 +418,9 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   beginOffset: const Offset(0, 34),
                                   child: _buildStatCard(
                                     'Pending / Ongoing',
-                                    _isLoadingStats ? '—' : '${_stats.tasksTodayOrPendingCount}',
+                                    _isLoadingStats
+                                        ? '—'
+                                        : '${_stats.tasksTodayOrPendingCount}',
                                     Icons.access_time_rounded,
                                     InsightTheme.surface2,
                                     InsightTheme.blue1,
@@ -402,7 +434,9 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   beginOffset: const Offset(0, 34),
                                   child: _buildStatCard(
                                     'Completed Inspections',
-                                    _isLoadingStats ? '—' : '${_stats.completedCount}',
+                                    _isLoadingStats
+                                        ? '—'
+                                        : '${_stats.completedCount}',
                                     Icons.check_circle_outline_rounded,
                                     InsightTheme.blueTint,
                                     InsightTheme.blueInk,
@@ -425,7 +459,9 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                         else if (_isLoadingStats)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 40),
-                            child: Center(child: ImapsLoadingIndicator(size: 50)),
+                            child: Center(
+                              child: ImapsLoadingIndicator(size: 50),
+                            ),
                           )
                         else
                           KeyedSubtree(
@@ -449,12 +485,15 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                 _ActionTile(
                                   icon: Icons.fingerprint_rounded,
                                   title: 'Security & Protection',
-                                  subtitle: 'Biometric login, auto-lock & protection',
+                                  subtitle:
+                                      'Biometric login, auto-lock & protection',
                                   onTap: () {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) => SecuritySettingsScreen(profile: _currentProfile),
+                                        builder: (_) => SecuritySettingsScreen(
+                                          profile: _currentProfile,
+                                        ),
                                       ),
                                     );
                                   },
@@ -466,7 +505,9 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   onTap: () {
                                     Navigator.push(
                                       context,
-                                      MaterialPageRoute(builder: (_) => const HelpFaqScreen()),
+                                      MaterialPageRoute(
+                                        builder: (_) => const HelpFaqScreen(),
+                                      ),
                                     );
                                   },
                                 ),
@@ -477,7 +518,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   onTap: () {
                                     Navigator.push(
                                       context,
-                                      MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const DiagnosticsScreen(),
+                                      ),
                                     );
                                   },
                                 ),
@@ -491,7 +535,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   onTap: () {
                                     Navigator.push(
                                       context,
-                                      MaterialPageRoute(builder: (_) => const TermsPrivacyScreen()),
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const TermsPrivacyScreen(),
+                                      ),
                                     );
                                   },
                                 ),
@@ -502,7 +549,10 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                                   onTap: () {
                                     Navigator.push(
                                       context,
-                                      MaterialPageRoute(builder: (_) => const AboutInsightScreen()),
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const AboutInsightScreen(),
+                                      ),
                                     );
                                   },
                                 ),
@@ -552,7 +602,8 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
       duration: const Duration(milliseconds: 220),
       switchInCurve: Curves.easeOut,
       switchOutCurve: Curves.easeIn,
-      transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+      transitionBuilder: (child, anim) =>
+          FadeTransition(opacity: anim, child: child),
       child: KeyedSubtree(
         key: ValueKey(_analyticsTabIndex),
         child: _buildAnalyticsBody(),
@@ -580,11 +631,19 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Performance Analytics',
-                        style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
+                    Text(
+                      'Performance Analytics',
+                      style: InsightTheme.urbanist(
+                        15,
+                        w: FontWeight.w700,
+                        c: InsightTheme.ink,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text('MPDO Field Operational Metrics',
-                        style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                    Text(
+                      'MPDO Field Operational Metrics',
+                      style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                    ),
                   ],
                 ),
               ),
@@ -598,8 +657,16 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _timeframePill('Week', _analyticsIsWeek, () => setState(() => _analyticsIsWeek = true)),
-                    _timeframePill('Month', !_analyticsIsWeek, () => setState(() => _analyticsIsWeek = false)),
+                    _timeframePill(
+                      'Week',
+                      _analyticsIsWeek,
+                      () => setState(() => _analyticsIsWeek = true),
+                    ),
+                    _timeframePill(
+                      'Month',
+                      !_analyticsIsWeek,
+                      () => setState(() => _analyticsIsWeek = false),
+                    ),
                   ],
                 ),
               ),
@@ -629,10 +696,18 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                         alignment: Alignment.center,
                         padding: const EdgeInsets.symmetric(vertical: 6),
                         decoration: BoxDecoration(
-                          color: _analyticsTabIndex == i ? InsightTheme.surface : Colors.transparent,
+                          color: _analyticsTabIndex == i
+                              ? InsightTheme.surface
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: _analyticsTabIndex == i
-                              ? const [BoxShadow(color: Color(0x0A141628), blurRadius: 6, offset: Offset(0, 2))]
+                              ? const [
+                                  BoxShadow(
+                                    color: Color(0x0A141628),
+                                    blurRadius: 6,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ]
                               : null,
                         ),
                         child: Column(
@@ -641,15 +716,21 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
                             Icon(
                               tabs[i].$1,
                               size: 16,
-                              color: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink2,
+                              color: _analyticsTabIndex == i
+                                  ? InsightTheme.blueInk
+                                  : InsightTheme.ink2,
                             ),
                             const SizedBox(height: 3),
                             Text(
                               tabs[i].$2,
                               style: InsightTheme.inter(
                                 12,
-                                w: _analyticsTabIndex == i ? FontWeight.w700 : FontWeight.w500,
-                                c: _analyticsTabIndex == i ? InsightTheme.blueInk : InsightTheme.ink2,
+                                w: _analyticsTabIndex == i
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                c: _analyticsTabIndex == i
+                                    ? InsightTheme.blueInk
+                                    : InsightTheme.ink2,
                               ),
                             ),
                           ],
@@ -706,25 +787,37 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
   }
 
   Widget _buildAnalyticsBody() {
+    // One range drives ALL four tabs. Built once per build so Bars, Activity,
+    // Gauge and Sectors can never disagree about what period is selected.
+    final range = AnalyticsActivityRange.selected(
+      range: _analyticsIsWeek ? AnalyticsRange.week : AnalyticsRange.month,
+      now: DateTime.now(),
+      activeDays: _stats.activeSubmissionDates,
+    );
+    final periodLabel = _analyticsIsWeek ? 'Week' : 'Month';
+
     switch (_analyticsTabIndex) {
       case 0:
+        // Weekly Performance: one bar per day of the selected range — 7 for a
+        // week, one per calendar day for a month. Real counts only.
         return WeeklyTrendCard(
-          points: _stats.weeklyTrend,
+          points: _stats.submissionTrendFor(range.days),
           barColor: InsightTheme.blue1,
           textColor: InsightTheme.ink,
           mutedTextColor: InsightTheme.ink2,
+          periodLabel: periodLabel,
         );
       case 1:
         return ActivityHeatmapCard(
-          activeDays: _stats.activeDaysThisMonth,
-          month: _stats.currentMonth,
-          year: _stats.currentYear,
+          activityRange: range,
           activeColor: InsightTheme.green,
           inactiveColor: InsightTheme.surface2,
           textColor: InsightTheme.ink,
           mutedTextColor: InsightTheme.ink2,
         );
       case 2:
+        // Completion Goals: scheduled-cohort rate for the selected period.
+        // A period with nothing scheduled renders N/A, not a confident 0%.
         return CompletionGaugeCard(
           rate: _stats.completionRate,
           totalApplications: _stats.totalAssigned,
@@ -733,11 +826,16 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
           fillColor: InsightTheme.blue1,
           textColor: InsightTheme.ink,
           mutedTextColor: InsightTheme.ink2,
+          periodMetrics: range.metricsFor(_stats.scheduledCohort),
+          periodLabel: periodLabel,
         );
       case 3:
       default:
+        // Zoning Distribution: only inspections completed inside the range.
+        // Scheduling plays no part here, and pending work is excluded.
         return ZoningTypeBreakdownCard(
-          entries: _stats.typeBreakdown,
+          entries: _stats.completedTypeBreakdownFor(range.days),
+          periodLabel: periodLabel,
           barColor: InsightTheme.blue1,
           trackColor: InsightTheme.surface2,
           textColor: InsightTheme.ink,
@@ -769,7 +867,12 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
           for (int i = 0; i < tiles.length; i++) ...[
             tiles[i],
             if (i != tiles.length - 1)
-              const Divider(height: 1, color: InsightTheme.line, indent: 64, endIndent: 20),
+              const Divider(
+                height: 1,
+                color: InsightTheme.line,
+                indent: 64,
+                endIndent: 20,
+              ),
           ],
         ],
       ),
@@ -801,9 +904,20 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
         children: [
           Row(
             children: [
-              const Icon(Icons.error_outline_rounded, color: InsightTheme.coral, size: 18),
+              const Icon(
+                Icons.error_outline_rounded,
+                color: InsightTheme.coral,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Couldn\'t load your analytics', style: InsightTheme.urbanist(14, w: FontWeight.w600, c: InsightTheme.ink)),
+              Text(
+                'Couldn\'t load your analytics',
+                style: InsightTheme.urbanist(
+                  14,
+                  w: FontWeight.w600,
+                  c: InsightTheme.ink,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -813,7 +927,14 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
             child: Container(
               constraints: const BoxConstraints(minHeight: 44),
               alignment: Alignment.centerLeft,
-              child: Text('Tap to retry', style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
+              child: Text(
+                'Tap to retry',
+                style: InsightTheme.inter(
+                  13,
+                  w: FontWeight.w700,
+                  c: InsightTheme.blueInk,
+                ),
+              ),
             ),
           ),
         ],
@@ -824,7 +945,13 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
   // WIDGET: Stat Card — matches HTML reference: clean white surface card,
   // neutral icon chip (surface2 for pending, blueTint for completed),
   // no color tinting on the card background itself.
-  Widget _buildStatCard(String title, String count, IconData icon, Color iconBg, Color iconFg) {
+  Widget _buildStatCard(
+    String title,
+    String count,
+    IconData icon,
+    Color iconBg,
+    Color iconFg,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -847,147 +974,44 @@ class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateM
             child: Icon(icon, size: 20, color: iconFg),
           ),
           const SizedBox(height: 14),
-          Text(count,
-              style: InsightTheme.urbanist(26, w: FontWeight.w800, c: InsightTheme.ink)),
+          Text(
+            count,
+            style: InsightTheme.urbanist(
+              26,
+              w: FontWeight.w800,
+              c: InsightTheme.ink,
+            ),
+          ),
           const SizedBox(height: 2),
-          Text(title,
-              style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis),
+          Text(
+            title,
+            style: InsightTheme.inter(
+              12,
+              w: FontWeight.w600,
+              c: InsightTheme.ink2,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
   }
 }
 
-/// ==================================================================
-/// IDENTITY HEADER — pinned SliverPersistentHeader that crossfades
-/// between the full identity card (expanded) and a compact bar
-/// (collapsed) as the user scrolls, then restores the full card once
-/// they scroll back to the top. Both states are always laid out; only
-/// their opacity/hit-testing swaps, which avoids any layout jump.
-/// ==================================================================
-class _IdentityHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final double expandedHeight;
-  final double collapsedHeight;
-  final String? avatarUrl;
-  final String initials;
-  final String displayName;
-  final String positionLabel;
-  final String userEmail;
-  final VoidCallback onEditTap;
-
-  _IdentityHeaderDelegate({
-    required this.expandedHeight,
-    required this.collapsedHeight,
-    required this.avatarUrl,
-    required this.initials,
-    required this.displayName,
-    required this.positionLabel,
-    required this.userEmail,
-    required this.onEditTap,
-  });
-
-  @override
-  double get minExtent => collapsedHeight;
-
-  @override
-  double get maxExtent => expandedHeight;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    final range = expandedHeight - collapsedHeight;
-    final t = range <= 0 ? 0.0 : (shrinkOffset / range).clamp(0.0, 1.0);
-
-    // Smoothly interpolated values — single widget morphs, no dual-layer
-    // overlap artifact. Full card opacity drops to 0 in the first 60% of
-    // scroll; compact bar fades in from 40% onward. The two windows overlap
-    // briefly in the 40–60% band but each is below 0.5 opacity there, so
-    // the visual bleed is imperceptible. ClipRect prevents any overflow
-    // from the full card bleeding outside the header bounds during shrink.
-    final fullOpacity   = Curves.easeIn.transform((1 - t * 1.4).clamp(0.0, 1.0));
-    final compactOpacity = Curves.easeOut.transform(((t - 0.35) / 0.65).clamp(0.0, 1.0));
-
-    // Avatar size interpolates from 56 (expanded) → 36 (collapsed).
-    final avatarSize = lerpDouble(56.0, 36.0, t)!;
-    final avatarFontSize = lerpDouble(18.0, 12.0, t)!;
-
-    return ClipRect(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-        child: Stack(
-          children: [
-            // — Compact bar: fades in as user scrolls down —
-            Positioned.fill(
-              child: Opacity(
-                opacity: compactOpacity,
-                child: IgnorePointer(
-                  ignoring: t < 0.5,
-                  child: _CompactIdentityBar(
-                    avatarUrl: avatarUrl,
-                    initials: initials,
-                    displayName: displayName,
-                    positionLabel: positionLabel,
-                    onEditTap: onEditTap,
-                    avatarSize: avatarSize,
-                    avatarFontSize: avatarFontSize,
-                  ),
-                ),
-              ),
-            ),
-            // — Full card: fades out as user scrolls down —
-            // OverflowBox lets the card always lay out at the full expanded
-            // height so Flutter never measures it against the shrinking
-            // header height and emits the "bottom overflowed by N px" warning.
-            // ClipRect (above) already clips the visual output, so there is
-            // no visible change — only the yellow stripe is gone.
-            Positioned.fill(
-              child: Opacity(
-                opacity: fullOpacity,
-                child: IgnorePointer(
-                  ignoring: t > 0.5,
-                  child: OverflowBox(
-                    alignment: Alignment.topCenter,
-                    maxHeight: expandedHeight,
-                    child: _FullIdentityCard(
-                      avatarUrl: avatarUrl,
-                      initials: initials,
-                      displayName: displayName,
-                      positionLabel: positionLabel,
-                      userEmail: userEmail,
-                      onEditTap: onEditTap,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  bool shouldRebuild(covariant _IdentityHeaderDelegate oldDelegate) {
-    return oldDelegate.avatarUrl != avatarUrl ||
-        oldDelegate.initials != initials ||
-        oldDelegate.displayName != displayName ||
-        oldDelegate.positionLabel != positionLabel ||
-        oldDelegate.userEmail != userEmail ||
-        oldDelegate.expandedHeight != expandedHeight ||
-        oldDelegate.collapsedHeight != collapsedHeight;
-  }
-}
-
-/// WIDGET: Circular avatar — gradient fill + initials fallback, shared by
-/// both the full and compact identity states so they always agree visually.
+/// Identity avatar — gradient fill + initials fallback.
 class _Avatar extends StatelessWidget {
   final String? avatarUrl;
   final String initials;
   final double size;
   final double fontSize;
 
-  const _Avatar({required this.avatarUrl, required this.initials, this.size = 56, this.fontSize = 18});
+  const _Avatar({
+    required this.avatarUrl,
+    required this.initials,
+    this.size = 56,
+    this.fontSize = 18,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1015,7 +1039,9 @@ class _Avatar extends StatelessWidget {
         border: Border.all(color: Colors.white, width: borderWidth),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius > borderWidth ? radius - borderWidth : radius),
+        borderRadius: BorderRadius.circular(
+          radius > borderWidth ? radius - borderWidth : radius,
+        ),
         child: (avatarUrl != null && avatarUrl!.isNotEmpty)
             ? Image.network(
                 avatarUrl!,
@@ -1025,14 +1051,22 @@ class _Avatar extends StatelessWidget {
                 errorBuilder: (context, error, stackTrace) => Center(
                   child: Text(
                     initials,
-                    style: InsightTheme.urbanist(fontSize, w: FontWeight.w800, c: Colors.white),
+                    style: InsightTheme.urbanist(
+                      fontSize,
+                      w: FontWeight.w800,
+                      c: Colors.white,
+                    ),
                   ),
                 ),
               )
             : Center(
                 child: Text(
                   initials,
-                  style: InsightTheme.urbanist(fontSize, w: FontWeight.w800, c: Colors.white),
+                  style: InsightTheme.urbanist(
+                    fontSize,
+                    w: FontWeight.w800,
+                    c: Colors.white,
+                  ),
                 ),
               ),
       ),
@@ -1040,12 +1074,12 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-/// WIDGET: Full identity card — matches HTML reference exactly:
+/// Content-sized identity card; names and roles can wrap at any text scale.
 /// • Avatar is a rounded-2xl gradient square chip (not a circle)
 /// • Role shown in a blueTint pill with jetBrains uppercase text
 /// • Email row below divider
 /// • Edit button: icon + "Edit" text label
-class _FullIdentityCard extends StatelessWidget {
+class ProfileIdentityCard extends StatelessWidget {
   final String? avatarUrl;
   final String initials;
   final String displayName;
@@ -1053,7 +1087,8 @@ class _FullIdentityCard extends StatelessWidget {
   final String userEmail;
   final VoidCallback onEditTap;
 
-  const _FullIdentityCard({
+  const ProfileIdentityCard({
+    super.key,
     required this.avatarUrl,
     required this.initials,
     required this.displayName,
@@ -1070,7 +1105,11 @@ class _FullIdentityCard extends StatelessWidget {
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x08141628), blurRadius: 20, offset: Offset(0, 6)),
+          BoxShadow(
+            color: Color(0x08141628),
+            blurRadius: 20,
+            offset: Offset(0, 6),
+          ),
         ],
       ),
       child: Column(
@@ -1081,59 +1120,92 @@ class _FullIdentityCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Gradient rounded-square avatar chip (matches HTML rounded-2xl)
-              _Avatar(avatarUrl: avatarUrl, initials: initials, size: 56, fontSize: 18),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(displayName,
-                        style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 6),
-                    // Role badge pill — blueTint bg, blueInk jetBrains uppercase
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: InsightTheme.blueTint,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.18)),
-                      ),
-                      child: Text(
-                        positionLabel.toUpperCase(),
-                        style: InsightTheme.mono(12, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.5),
+              _Avatar(
+                avatarUrl: avatarUrl,
+                initials: initials,
+                size: 56,
+                fontSize: 18,
+              ),
+              const Spacer(),
+              // Edit button: icon + "Edit" label, blueTint bg (min 44x44 touch target)
+              Semantics(
+                button: true,
+                label: 'Edit profile',
+                child: GestureDetector(
+                  key: const Key('profile-edit-button'),
+                  onTap: onEditTap,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minHeight: 44,
+                      minWidth: 44,
+                    ),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.blueTint,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: InsightTheme.blue1.withValues(alpha: 0.15),
                       ),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              // Edit button: icon + "Edit" label, blueTint bg (min 44x44 touch target)
-              GestureDetector(
-                onTap: onEditTap,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  constraints: const BoxConstraints(minHeight: 44, minWidth: 44),
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: InsightTheme.blueTint,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.15)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.person_outline_rounded, size: 16, color: InsightTheme.blueInk),
-                      const SizedBox(width: 5),
-                      Text('Edit', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
-                    ],
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.person_outline_rounded,
+                          size: 16,
+                          color: InsightTheme.blueInk,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'Edit',
+                          style: InsightTheme.inter(
+                            13,
+                            w: FontWeight.w600,
+                            c: InsightTheme.blueInk,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            displayName,
+            key: const Key('profile-visible-name'),
+            style: InsightTheme.urbanist(
+              16,
+              w: FontWeight.w700,
+              c: InsightTheme.ink,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            key: const Key('profile-role-badge'),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: InsightTheme.blueTint,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: InsightTheme.blue1.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Text(
+              positionLabel.toUpperCase(),
+              style: InsightTheme.mono(
+                12,
+                w: FontWeight.w700,
+                c: InsightTheme.blueInk,
+                ls: 0.5,
+              ),
+            ),
           ),
           const SizedBox(height: 14),
           Divider(height: 1, color: InsightTheme.line),
@@ -1141,92 +1213,23 @@ class _FullIdentityCard extends StatelessWidget {
           // Email row
           Row(
             children: [
-              const Icon(Icons.mail_outline_rounded, size: 15, color: InsightTheme.ink2),
+              const Icon(
+                Icons.mail_outline_rounded,
+                size: 15,
+                color: InsightTheme.ink2,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   userEmail,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: InsightTheme.inter(13, w: FontWeight.w500, c: InsightTheme.ink2),
+                  style: InsightTheme.inter(
+                    13,
+                    w: FontWeight.w500,
+                    c: InsightTheme.ink2,
+                  ),
                 ),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// WIDGET: Compact identity bar shown once the user has scrolled — carries
-/// the same avatar/name identity forward instead of leaving a blank gap,
-/// echoing the requested "collapses into a slim bar" behavior but themed
-/// to this screen's light surface and without a non-functional back arrow
-/// (this screen is a bottom-nav tab, not a pushed route — a back affordance
-/// that did nothing would violate "never let users guess what happens next").
-class _CompactIdentityBar extends StatelessWidget {
-  final String? avatarUrl;
-  final String initials;
-  final String displayName;
-  final String positionLabel;
-  final VoidCallback onEditTap;
-  // Interpolated from the header delegate so the avatar size morphs
-  // continuously rather than snapping between two fixed sizes.
-  final double avatarSize;
-  final double avatarFontSize;
-
-  const _CompactIdentityBar({
-    required this.avatarUrl,
-    required this.initials,
-    required this.displayName,
-    required this.positionLabel,
-    required this.onEditTap,
-    this.avatarSize = 38,
-    this.avatarFontSize = 13,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(color: Color(0x08141628), blurRadius: 16, offset: Offset(0, 6)),
-        ],
-      ),
-      child: Row(
-        children: [
-          _Avatar(avatarUrl: avatarUrl, initials: initials, size: avatarSize, fontSize: avatarFontSize),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(displayName,
-                    style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                Text(positionLabel,
-                    style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: onEditTap,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-              alignment: Alignment.center,
-              padding: const EdgeInsets.all(7),
-              decoration: const BoxDecoration(color: InsightTheme.blueTint, shape: BoxShape.circle),
-              child: const Icon(Icons.edit_outlined, size: 16, color: InsightTheme.blueInk),
-            ),
           ),
         ],
       ),
@@ -1279,15 +1282,29 @@ class _ActionTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(title, style: InsightTheme.urbanist(15, w: FontWeight.w600, c: fgColor)),
+                    Text(
+                      title,
+                      style: InsightTheme.urbanist(
+                        15,
+                        w: FontWeight.w600,
+                        c: fgColor,
+                      ),
+                    ),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
-                      Text(subtitle!, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
-                    ]
+                      Text(
+                        subtitle!,
+                        style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: InsightTheme.ink3, size: 20),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: InsightTheme.ink3,
+                size: 20,
+              ),
             ],
           ),
         ),

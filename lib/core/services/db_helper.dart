@@ -6,6 +6,7 @@ import 'package:path/path.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
+import 'route_service.dart';
 
 class DBHelper {
   static Database? _database;
@@ -14,6 +15,11 @@ class DBHelper {
   /// closes an application database; the test owns the connection lifecycle.
   @visibleForTesting
   static void useDatabaseForTesting(Database? db) => _database = db;
+
+  /// The route-cache DDL, for migration tests that rebuild the schema against
+  /// an isolated temporary database. Never used at runtime.
+  @visibleForTesting
+  static String get localRouteCacheSchemaForTesting => _localRouteCacheSchema;
 
   static Future<Database> get database async {
     if (_database != null) return _database!;
@@ -129,7 +135,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 13,
+      version: 14,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -235,6 +241,24 @@ class DBHelper {
             'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT',
           );
         }
+        if (oldVersion < 14) {
+          // Road-route continuity: a successfully fetched OSRM route is cached
+          // per job so Step 1 can still draw REAL road geometry while offline,
+          // instead of a synthetic line that only looked like a road.
+          //
+          // Purely local navigation-support data: a NEW isolated table, so no
+          // existing table is touched, and no lifecycle/photo/checklist/sync
+          // query can accidentally read or write it. Deliberately has NO sync
+          // flag and NO outbox action type — it never leaves the device and is
+          // safe to lose. Destination coordinates are intentionally NOT stored
+          // here: local_jobs.parcel_lat/parcel_lng remain authoritative, so
+          // duplicating them would allow the two to disagree.
+          //
+          // Additive and idempotent (CREATE TABLE IF NOT EXISTS), so it is safe
+          // on both a fresh install and every upgrade path. Rollback: drop this
+          // one table; nothing else references it.
+          await db.execute(_localRouteCacheSchema);
+        }
       },
       onCreate: (db, version) async {
         await createInspectionRetentionTable(db);
@@ -307,9 +331,34 @@ class DBHelper {
 
         // Phase 6 — Detailed Sync Logs (see _syncLogEntriesSchema below).
         await db.execute(_syncLogEntriesSchema);
+
+        // Road-route cache for offline Step 1 (see onUpgrade, oldVersion < 14).
+        await db.execute(_localRouteCacheSchema);
       },
     );
   }
+
+  /// Per-job cache of a real OSRM road route.
+  ///
+  /// [geometry_json] is the ordered OSRM/GeoJSON coordinate array, stored as
+  /// `[longitude, latitude]` pairs (see RouteService.encodeRoutePoints).
+  /// [origin_lat]/[origin_lng] record where the route started, so a future
+  /// off-route/staleness check can tell how far the inspector has travelled
+  /// since it was fetched. [fetched_at] is an ISO-8601 UTC timestamp.
+  ///
+  /// This table is intentionally disposable: it carries no lifecycle status,
+  /// no sync flag and no Supabase id, and is never enqueued to the outbox.
+  static const String _localRouteCacheSchema = '''
+    CREATE TABLE IF NOT EXISTS local_route_cache(
+      job_id TEXT PRIMARY KEY NOT NULL,
+      geometry_json TEXT NOT NULL,
+      distance_meters REAL,
+      duration_seconds REAL,
+      origin_lat REAL NOT NULL,
+      origin_lng REAL NOT NULL,
+      fetched_at TEXT NOT NULL
+    )
+  ''';
 
   static const String _pendingActionsSchema = '''
     CREATE TABLE IF NOT EXISTS pending_actions(
@@ -670,6 +719,56 @@ class DBHelper {
     return await db.query('local_jobs');
   }
 
+  // --- ROAD-ROUTE CACHE (local navigation support; never synced) ---------
+  //
+  // Deliberately NOT an outbox action and NOT mirrored to Supabase: a cached
+  // route is disposable help for drawing the map offline. Losing it costs a
+  // redraw, never data.
+
+  /// Stores (or replaces) the real road route cached for [CachedRoute.jobId].
+  ///
+  /// Keyed on the exact `field_jobs.id`, so one task's route can never be read
+  /// as another's. Replaces any previous row for the same job.
+  static Future<void> saveRouteCache(CachedRoute route) async {
+    final db = await database;
+    await db.insert(
+      'local_route_cache',
+      route.toRow(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Returns the cached road route for [jobId], or null when this task has
+  /// never had one fetched. A row whose geometry is unreadable is treated as
+  /// absent rather than surfaced as a broken route.
+  static Future<CachedRoute?> getRouteCache(String jobId) async {
+    final db = await database;
+    final rows = await db.query(
+      'local_route_cache',
+      where: 'job_id = ?',
+      whereArgs: [jobId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    try {
+      return CachedRoute.fromRow(rows.single);
+    } on FormatException catch (e) {
+      debugPrint('[DB] Discarding unusable cached route for job $jobId: $e');
+      return null;
+    }
+  }
+
+  /// Removes the cached route for [jobId]. Used when a task is no longer
+  /// relevant locally so navigation data does not outlive the work.
+  static Future<void> deleteRouteCache(String jobId) async {
+    final db = await database;
+    await db.delete(
+      'local_route_cache',
+      where: 'job_id = ?',
+      whereArgs: [jobId],
+    );
+  }
+
   static Future<String?> getCachedJobUpdatedAt(String jobId) async {
     final db = await database;
     final rows = await db.query(
@@ -939,8 +1038,8 @@ class DBHelper {
           await txn.update(
             'pending_actions',
             {
-            'payload': jsonEncode(payload),
-            'status': 'failed',
+              'payload': jsonEncode(payload),
+              'status': 'failed',
               'last_error':
                   'Interrupted claim: remote reconciliation required.',
             },
@@ -951,7 +1050,7 @@ class DBHelper {
           await txn.update(
             'pending_actions',
             {
-            'status': 'conflict',
+              'status': 'conflict',
               'last_error':
                   'Interrupted claim has invalid payload; review required.',
             },
@@ -1166,7 +1265,7 @@ class DBHelper {
     try {
       final totalLogs =
           Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM sync_log_entries'),
+            await db.rawQuery('SELECT COUNT(*) FROM sync_log_entries'),
           ) ??
           0;
 
@@ -1202,10 +1301,10 @@ class DBHelper {
           final message = status == 'synced'
               ? '$actionTitle synchronized successfully.'
               : (status == 'failed'
-                  ? '$actionTitle sync failed: ${lastError ?? "Network error"}'
-                  : (status == 'conflict'
-                      ? '$actionTitle conflict detected.'
-                      : '$actionTitle queued for sync.'));
+                    ? '$actionTitle sync failed: ${lastError ?? "Network error"}'
+                    : (status == 'conflict'
+                          ? '$actionTitle conflict detected.'
+                          : '$actionTitle queued for sync.'));
 
           await db.insert('sync_log_entries', {
             'id': a['id'] ?? const Uuid().v4(),

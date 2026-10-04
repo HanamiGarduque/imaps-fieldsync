@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:imaps_fieldsync/main.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/widgets/dashboard_widgets.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/models/analytics_activity_range.dart';
 
 void main() {
   testWidgets('App builds and shows login screen', (WidgetTester tester) async {
@@ -30,14 +31,18 @@ void main() {
             child: SizedBox(
               width: 360,
               height: 340,
-              child: ActivityHeatmapCard(
-                activeDays: const {1, 3, 5, 11, 17, 21, 23, 26},
-                month: 8,
-                year: 2026,
-                activeColor: Colors.green,
-                inactiveColor: const Color(0xFFE9EEF6),
-                textColor: Colors.black,
-                mutedTextColor: const Color(0xFF5D6472),
+              child: SingleChildScrollView(
+                child: ActivityHeatmapCard(
+                  activityRange: AnalyticsActivityRange.month(
+                    2026,
+                    8,
+                    const {},
+                  ),
+                  activeColor: Colors.green,
+                  inactiveColor: const Color(0xFFE9EEF6),
+                  textColor: Colors.black,
+                  mutedTextColor: const Color(0xFF5D6472),
+                ),
               ),
             ),
           ),

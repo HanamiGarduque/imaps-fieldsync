@@ -24,6 +24,8 @@ import '../../../core/theme/insight_theme.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 import '../widgets/inspection_step_header.dart';
+import '../widgets/rosario_boundary_overlay.dart';
+import '../widgets/map_connectivity_recovery.dart';
 
 /// Site Verification (Step 1). Full-bleed map (matches Master's reference
 /// picture 1 — edge-to-edge, floating glass controls) with a bent,
@@ -70,6 +72,10 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   // is unavailable (offline/timeout/error) — the UI then falls back to the
   // stylized bent line and the existing straight-line/RPC distance.
   List<ll.LatLng>? _routePoints;
+  // True when the displayed road route came from local cache rather than a
+  // live OSRM response. Drives the honest "Cached road route · Offline" label
+  // so a replayed route is never presented as freshly calculated.
+  bool _routeFromCache = false;
   double? _routeDistanceMeters;
   double? _routeDurationSeconds;
   // Live GPS tracking (Phase B): the device marker and the authoritative
@@ -92,6 +98,11 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   // control and the OSM attribution stay visible; the toggle flips icon.
   bool _fullscreen = false;
 
+  // Offline → ONLINE recovery: retries the OSM basemap and the OSRM road
+  // route without the inspector leaving Step 1. Holds no map or business
+  // state — see MapConnectivityRecovery.
+  final MapConnectivityRecovery _recovery = MapConnectivityRecovery();
+
   /// Phase C: Arrival detection — true when the inspector is sufficiently
   /// close to the target site. Uses the same threshold as GPS Verification
   /// (Step 2) so the experience is consistent across the workflow.
@@ -103,13 +114,38 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_startRecovery());
+    // Restore any previously cached real route first, so opening this task
+    // offline still draws genuine road geometry.
+    unawaited(_restoreCachedRoute());
     _loadMapData();
+  }
+
+  /// Seeds the watcher with the connectivity state this screen actually opened
+  /// in, so only a genuine later transition counts as a recovery.
+  Future<void> _startRecovery() async {
+    final online = await _checkOnline();
+    if (!mounted) return;
+    await _recovery.start(
+      initiallyOnline: online,
+      onOnline: _onConnectivityRecovered,
+    );
+  }
+
+  /// Network is back: drop the grey OSM tiles so they refetch, and retry the
+  /// road route once for the current device position + target. A failed retry
+  /// leaves the existing fallback polyline untouched.
+  Future<void> _onConnectivityRecovered() async {
+    if (!mounted) return;
+    _recovery.resetTiles();
+    await _fetchRouteAndUpdate(online: true);
   }
 
   @override
   void dispose() {
     _positionSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_recovery.stop());
     super.dispose();
   }
 
@@ -276,28 +312,6 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     );
   }
 
-  /// Stylized route path between two points — NOT a real road-network
-  /// route (no routing-service dependency here, see class doc comment).
-  /// Purely a presentation choice so the line reads like a real route
-  /// instead of a straight "as the crow flies" line.
-  List<ll.LatLng> _buildRoutePath(ll.LatLng start, ll.LatLng end) {
-    final dLat = end.latitude - start.latitude;
-    final dLng = end.longitude - start.longitude;
-    final p1 = ll.LatLng(
-      start.latitude + dLat * 0.10,
-      start.longitude + dLng * 0.52,
-    );
-    final p2 = ll.LatLng(
-      start.latitude + dLat * 0.62,
-      start.longitude + dLng * 0.52,
-    );
-    final p3 = ll.LatLng(
-      start.latitude + dLat * 0.62,
-      start.longitude + dLng * 0.86,
-    );
-    return [start, p1, p2, p3, end];
-  }
-
   /// Starts live GPS tracking for this screen using the SAME shared
   /// LocationService stream Step 2 uses (high accuracy, 4 m distance
   /// filter). Idempotent: safe to call from load completion and on every
@@ -430,10 +444,51 @@ class _SiteMapScreenState extends State<SiteMapScreen>
       _routePoints = result.points;
       _routeDistanceMeters = result.distanceMeters;
       _routeDurationSeconds = result.durationSeconds;
+      _routeFromCache = false;
+      unawaited(_persistRoute(result, start));
     } finally {
       if (requestVersion == _routeRequestVersion) {
         _routeRequestInFlight = false;
       }
+    }
+  }
+
+  /// Persists a freshly fetched REAL route so it survives going offline.
+  ///
+  /// Best-effort by design: a cache write failure must never take down the
+  /// route the inspector is already looking at, nor Step 1 itself. On failure
+  /// the route simply stays online-only until the next successful fetch.
+  Future<void> _persistRoute(RouteResult result, ll.LatLng origin) async {
+    try {
+      await DBHelper.saveRouteCache(
+        CachedRoute.fromRoute(
+          jobId: widget.task.id,
+          route: result,
+          origin: origin,
+        ),
+      );
+    } catch (e) {
+      debugPrint('[SITE MAP] Could not cache road route: $e');
+    }
+  }
+
+  /// Restores this task's previously cached real road route.
+  ///
+  /// Runs on every open, offline or not, BEFORE any network fetch. A fresh
+  /// online route fetched later simply overwrites both the displayed geometry
+  /// and the cache, so showing the cached copy first costs nothing and means an
+  /// offline open still draws genuine road geometry.
+  Future<void> _restoreCachedRoute() async {
+    try {
+      final cached = await DBHelper.getRouteCache(widget.task.id);
+      if (cached == null || !mounted) return;
+      _routePoints = cached.points;
+      _routeDistanceMeters = cached.distanceMeters;
+      _routeDurationSeconds = cached.durationSeconds;
+      _routeFromCache = true;
+      setState(() {});
+    } catch (e) {
+      debugPrint('[SITE MAP] Could not read cached road route: $e');
     }
   }
 
@@ -478,14 +533,22 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                     urlTemplate:
                         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.imaps.fieldsync',
+                    // Lets a recovered network evict the tiles that failed
+                    // while offline and refetch them (see MapConnectivityRecovery).
+                    reset: _recovery.tileResetStream,
+                    evictErrorTileStrategy:
+                        EvictErrorTileStrategy.notVisibleRespectMargin,
                   ),
-                  if (_deviceLatLng != null)
+                  const RosarioBoundaryOverlay(),
+                  // Only ever real road geometry: a live OSRM route, or the
+                  // same route restored from local cache while offline. There
+                  // is deliberately NO synthetic fallback — a made-up line
+                  // must not be drawn as if it were a road.
+                  if (_routePoints != null)
                     PolylineLayer(
                       polylines: [
                         Polyline(
-                          points:
-                              _routePoints ??
-                              _buildRoutePath(_deviceLatLng!, _parcelLatLng!),
+                          points: _routePoints!,
                           strokeWidth: 4,
                           color: InsightTheme.blue1.withValues(alpha: 0.75),
                           borderStrokeWidth: 1,
@@ -541,6 +604,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                   RichAttributionWidget(
                     attributions: [
                       TextSourceAttribution('© OpenStreetMap contributors'),
+                      TextSourceAttribution('Municipal boundary: MPDO Rosario'),
                     ],
                     popupBackgroundColor: Colors.white,
                     showFlutterMapAttribution: false,
@@ -629,10 +693,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                             const SizedBox(width: 6),
                             Text(
                               'Target Site',
-                              style: InsightTheme.inter(
-                                12,
-                                w: FontWeight.w600,
-                              ),
+                              style: InsightTheme.inter(12, w: FontWeight.w600),
                             ),
                           ],
                         ),
@@ -692,7 +753,38 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    'Road route: ${_formatRouteDistance(_routeDistanceMeters!)} · ~${_formatRouteDuration(_routeDurationSeconds ?? 0)}',
+                                    // Cached geometry is labelled as such so a
+                                    // replayed route is never mistaken for one
+                                    // just calculated from here.
+                                    '${_routeFromCache ? 'Cached road route · Offline' : 'Road route'}'
+                                    ': ${_formatRouteDistance(_routeDistanceMeters!)} · ~${_formatRouteDuration(_routeDurationSeconds ?? 0)}',
+                                    style: InsightTheme.inter(
+                                      12,
+                                      w: FontWeight.w600,
+                                      c: InsightTheme.ink2,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        // No real road geometry and none cached: say so plainly
+                        // instead of drawing a line that only looks like a road.
+                        // Purely informational — Step 1 stays fully usable.
+                        if (_routePoints == null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.route_rounded,
+                                  size: 14,
+                                  color: InsightTheme.ink3,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Road route unavailable offline. Connect once to load route guidance.',
                                     style: InsightTheme.inter(
                                       12,
                                       w: FontWeight.w600,

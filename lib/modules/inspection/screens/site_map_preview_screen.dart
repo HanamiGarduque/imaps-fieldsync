@@ -9,6 +9,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 
 import '../services/location_service.dart';
+import '../../../core/services/auth_service.dart';
+import '../widgets/rosario_boundary_overlay.dart';
+import '../widgets/map_connectivity_recovery.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
@@ -50,18 +53,39 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
       ? null
       : ll.LatLng(_position!.latitude, _position!.longitude);
 
+  /// Same grey-basemap recovery as Step 1: when the network returns, evict the
+  /// tiles that failed while offline. This screen has no road route, so tile
+  /// recovery is the whole of its behavior change.
+  final MapConnectivityRecovery _recovery = MapConnectivityRecovery();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startCompass();
+    unawaited(_startRecovery());
     _loadLocation();
+  }
+
+  Future<void> _startRecovery() async {
+    final online = await AuthService.hasConnectivity();
+    if (!mounted) return;
+    await _recovery.start(
+      initiallyOnline: online,
+      onOnline: _onConnectivityRecovered,
+    );
+  }
+
+  Future<void> _onConnectivityRecovered() async {
+    if (!mounted) return;
+    _recovery.resetTiles();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _compassSub?.cancel();
+    unawaited(_recovery.stop());
     super.dispose();
   }
 
@@ -135,7 +159,11 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
                     urlTemplate:
                         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.imaps.fieldsync',
+                    reset: _recovery.tileResetStream,
+                    evictErrorTileStrategy:
+                        EvictErrorTileStrategy.notVisibleRespectMargin,
                   ),
+                  const RosarioBoundaryOverlay(),
                   MarkerLayer(
                     markers: [
                       Marker(
