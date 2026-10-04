@@ -7,8 +7,10 @@ import '../services/auth_service.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import '../services/sync_outbox_service.dart';
+import '../services/db_helper.dart';
 import '../widgets/insight_bottom_nav.dart';
 import '../widgets/sync_progress_banner.dart';
+import '../widgets/offline_banner.dart';
 import '../widgets/quick_actions_sheet.dart';
 import '../../modules/auth_startup/screens/app_resume_lock_screen.dart';
 import '../../modules/analytics_dashboard/screens/home_dashboard_screen.dart';
@@ -63,13 +65,89 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   bool _profileAnalyticsRequested = false;
 
   // ── Tasks-tab badge ──────────────────────────────────────────────────
-  // ASSUMPTION (flagged to Master — no existing "new since last viewed"
-  // signal exists for tasks; see roadmap open item): this is a session-only
-  // proxy, not a persisted "unseen task" concept. The dot shows until the
-  // inspector opens the Tasks tab once this session, then clears and stays
-  // cleared until the app restarts. A real "new insert" signal would need
-  // a small data-layer addition — flagged separately, not done here.
-  bool _tasksVisitedThisSession = false;
+  // The dot means NEW / UNSEEN TASK ASSIGNMENT — nothing else.
+  //
+  // Historically this was `!_tasksVisitedThisSession`: a session-only flag with
+  // no relationship to any task, so the dot appeared on every cold start even
+  // with nothing assigned and stayed until the inspector happened to open
+  // Tasks. It now compares the CURRENT awaiting assignments against the
+  // persisted set this inspector has already opened, so an old pending task
+  // cannot resurrect the dot and a genuinely new one always raises it.
+  //
+  // Acknowledgement is stored per authenticated user id in SecurePrefsService,
+  // which is why Inspector A's seen state can never suppress Inspector B's
+  // badge on a shared device. No SQLite and no Supabase schema is involved.
+  Set<String> _awaitingTaskIds = const {};
+  Set<String> _acknowledgedTaskIds = const {};
+
+  /// The authenticated user id used to namespace acknowledgement. This is the
+  /// Supabase auth UUID that `profiles.id` carries — the same identity
+  /// LocalDataGuardService uses for local-data ownership.
+  String get _inspectorId => _currentProfile.id;
+
+  /// Rebuilds the badge inputs from the existing local cache plus the persisted
+  /// acknowledgement set. No schema change, no network call.
+  Future<void> _refreshTaskAttention() async {
+    Set<String> awaiting;
+    try {
+      final rows = await DBHelper.getCachedJobs();
+      awaiting = rows
+          .where((r) => r['id'] != null)
+          .where((r) => kAwaitingTaskStatuses.contains(r['status']))
+          .map((r) => r['id'].toString())
+          .toSet();
+    } catch (_) {
+      // A cache read failure must never strand the dot in a visible state.
+      awaiting = const {};
+    }
+
+    var acknowledged = const <String>{};
+    try {
+      acknowledged = await SecurePrefsService.getAcknowledgedTaskIds(
+        _inspectorId,
+      );
+    } catch (_) {
+      // Unreadable preference → treat everything as unseen rather than
+      // silently hiding a genuinely new assignment.
+    }
+
+    if (!mounted) return;
+    // Drop acknowledgements for work that is no longer awaiting (completed,
+    // reassigned, removed) so the stored set cannot grow forever. Trivial, and
+    // scoped to this inspector only.
+    final stale = acknowledged.difference(awaiting);
+    if (stale.isNotEmpty) {
+      acknowledged = acknowledged.difference(stale);
+      try {
+        await SecurePrefsService.setAcknowledgedTaskIds(
+          _inspectorId,
+          acknowledged,
+          pruneTo: awaiting,
+        );
+      } catch (_) {
+        // Non-fatal: the badge is already correct from the in-memory set.
+      }
+    }
+
+    setState(() {
+      _awaitingTaskIds = awaiting;
+      _acknowledgedTaskIds = acknowledged;
+    });
+  }
+
+  /// Opening the Tasks tab is the acknowledgement gesture: everything awaiting
+  /// right now has been seen. Persisted per inspector, so it survives restart.
+  Future<void> _acknowledgeAwaitingTasks() async {
+    final ids = _awaitingTaskIds;
+    if (ids.isEmpty) return;
+    _acknowledgedTaskIds = {..._acknowledgedTaskIds, ...ids};
+    try {
+      await SecurePrefsService.acknowledgeTasks(_inspectorId, ids);
+    } catch (_) {
+      // Non-fatal: the in-memory state already clears the dot for this
+      // session; it simply may reappear after a restart.
+    }
+  }
 
   static const _items = [
     InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
@@ -83,8 +161,8 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     super.initState();
     _currentIndex = widget.initialIndex;
     _currentProfile = widget.profile;
-    _tasksVisitedThisSession = _currentIndex == 1;
     _isOnline = !widget.offlineSession;
+    _refreshTaskAttention();
     _checkInitialConnectivity();
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
       if (mounted) {
@@ -167,8 +245,13 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   }
 
   void _openTab(int index) {
-    if (index == 1) _tasksVisitedThisSession = true;
     setState(() => _currentIndex = index);
+    // Tasks/Home repopulate `local_jobs` on refresh, so re-read the badge
+    // inputs whenever the inspector moves through the tab that owns that data.
+    if (index == 1) {
+      _acknowledgeAwaitingTasks();
+      _refreshTaskAttention();
+    }
   }
 
   Future<void> _openProfileEdit() async {
@@ -392,38 +475,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                     // Real-time "Offline mode" banner shown whenever the device
                     // has no network connectivity. Automatically hidden when
                     // connectivity returns to reclaim vertical space.
-                    if (!_isOnline)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: InsightTheme.redTint,
-                          border: Border(
-                            bottom: BorderSide(color: InsightTheme.red.withValues(alpha: 0.25)),
-                          ),
-                        ),
-                        child: SafeArea(
-                          bottom: false,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Container(
-                                width: 6,
-                                height: 6,
-                                decoration: const BoxDecoration(
-                                  color: InsightTheme.red,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Offline mode',
-                                style: InsightTheme.inter(11.5, w: FontWeight.w700, c: InsightTheme.redInk),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    if (!_isOnline) const OfflineBanner(),
                     Expanded(
                       child: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 450),
@@ -441,7 +493,14 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                             ),
                           );
                         },
-                        child: _buildPage(_currentIndex),
+                        // One shared rule for all four tabs: the banner above
+                        // already cleared the status bar, so the page beneath
+                        // must not clear it a second time. Online there is no
+                        // banner and the page keeps its own single inset.
+                        child: PageUnderOfflineBanner(
+                          isOnline: _isOnline,
+                          child: _buildPage(_currentIndex),
+                        ),
                       ),
                     ),
                   ],
@@ -510,7 +569,13 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
             InsightNavItem(
               icon: _items[1].icon,
               label: _items[1].label,
-              showBadge: !_tasksVisitedThisSession,
+              // NEW / UNSEEN assignment only — never a bare session flag and
+              // never a pending count. An assignment already opened stays
+              // acknowledged across restarts.
+              showBadge: shouldShowTasksAttentionDot(
+                awaitingTaskIds: _awaitingTaskIds,
+                acknowledgedTaskIds: _acknowledgedTaskIds,
+              ),
             ),
             InsightNavItem(
               icon: _items[2].icon,

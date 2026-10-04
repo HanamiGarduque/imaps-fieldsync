@@ -257,6 +257,108 @@ class SecurePrefsService {
   static Future<void> setLocalDataOwnerId(String userId) =>
       _storage.write(key: _kLocalDataOwnerId, value: userId);
 
+  // ── Task acknowledgement (Tasks tab attention dot) ───────────────────────
+  // The orange dot on the Tasks nav item means "there is a NEW assignment you
+  // have not looked at yet". Once the inspector opens Tasks, the assignments
+  // that were awaiting are acknowledged — and that must survive an app restart,
+  // so the state cannot live in a widget field.
+  //
+  // Stored in this service (rather than a new DB table) because it is already
+  // the app's per-identity preference store and it needs no schema change.
+  //
+  // PER-USER NAMESPACE: the value is a JSON map keyed by the authenticated
+  // Supabase user id — the same identity LocalDataGuardService uses. On a
+  // shared device, Inspector A's acknowledgement therefore can never suppress
+  // Inspector B's badge.
+  //
+  // Deliberately NOT cleared on logout: an assignment the inspector already
+  // reviewed must not come back as "new" when they sign in again. Isolation
+  // comes from the namespacing, not from wiping.
+
+  static const _kAcknowledgedTaskIds = 'sp_acknowledged_task_ids';
+
+  /// In-memory stand-in for the platform keystore, used by tests only.
+  /// Mirrors DBHelper.useDatabaseForTesting so no test needs a real device.
+  @visibleForTesting
+  static Map<String, String>? storageOverrideForTesting;
+
+  @visibleForTesting
+  static void useStorageForTesting(Map<String, String>? initial) =>
+      storageOverrideForTesting = initial == null ? null : Map.of(initial);
+
+  static Future<String?> _read(String key) async {
+    final override = storageOverrideForTesting;
+    if (override != null) return override[key];
+    return _storage.read(key: key);
+  }
+
+  static Future<void> _write(String key, String value) async {
+    final override = storageOverrideForTesting;
+    if (override != null) {
+      override[key] = value;
+      return;
+    }
+    await _storage.write(key: key, value: value);
+  }
+
+  /// Task ids this inspector has already opened in the Tasks tab.
+  /// Returns an empty set for an unknown id or unreadable/corrupt value —
+  /// a broken preference must never crash startup or invent a badge.
+  static Future<Set<String>> getAcknowledgedTaskIds(String userId) async {
+    if (userId.isEmpty) return <String>{};
+    final raw = await _read(_kAcknowledgedTaskIds);
+    if (raw == null || raw.isEmpty) return <String>{};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return <String>{};
+      final mine = decoded[userId];
+      if (mine is! List) return <String>{};
+      return mine.whereType<String>().toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  /// Replaces this inspector's acknowledged set, leaving other inspectors'
+  /// entries untouched. [pruneTo] opportunistically drops ids that are no
+  /// longer awaiting, so the stored set cannot grow without bound; ids for
+  /// other inspectors are never pruned from here.
+  static Future<void> setAcknowledgedTaskIds(
+    String userId,
+    Set<String> ids, {
+    Set<String>? pruneTo,
+  }) async {
+    if (userId.isEmpty) return;
+    final raw = await _read(_kAcknowledgedTaskIds);
+    final all = <String, dynamic>{};
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) all.addAll(decoded.cast<String, dynamic>());
+      } catch (_) {
+        // Corrupt value: start clean rather than propagate it.
+      }
+    }
+    final kept = pruneTo == null
+        ? ids
+        : ids.where(pruneTo.contains).toSet();
+    all[userId] = kept.toList()..sort();
+    await _write(_kAcknowledgedTaskIds, jsonEncode(all));
+  }
+
+  /// Marks [taskIds] as seen for this inspector, unioned with whatever was
+  /// already acknowledged so a concurrent arrival is never dropped.
+  static Future<void> acknowledgeTasks(
+    String userId,
+    Iterable<String> taskIds,
+  ) async {
+    if (userId.isEmpty) return;
+    final ids = taskIds.toSet();
+    if (ids.isEmpty) return;
+    final existing = await getAcknowledgedTaskIds(userId);
+    await setAcknowledgedTaskIds(userId, {...existing, ...ids});
+  }
+
   // ── Bulk clear ──────────────────────────────────────────────────────────
 
   /// Call on logout / account switch. Wipes all auth prefs.
