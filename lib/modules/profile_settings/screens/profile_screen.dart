@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/models/user_profile.dart';
 import '../models/dashboard_stats.dart';
+import '../models/analytics_activity_range.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../auth_startup/screens/splash_screen.dart' show LoginScreen;
@@ -786,25 +787,37 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildAnalyticsBody() {
+    // One range drives ALL four tabs. Built once per build so Bars, Activity,
+    // Gauge and Sectors can never disagree about what period is selected.
+    final range = AnalyticsActivityRange.selected(
+      range: _analyticsIsWeek ? AnalyticsRange.week : AnalyticsRange.month,
+      now: DateTime.now(),
+      activeDays: _stats.activeSubmissionDates,
+    );
+    final periodLabel = _analyticsIsWeek ? 'Week' : 'Month';
+
     switch (_analyticsTabIndex) {
       case 0:
+        // Weekly Performance: one bar per day of the selected range — 7 for a
+        // week, one per calendar day for a month. Real counts only.
         return WeeklyTrendCard(
-          points: _stats.weeklyTrend,
+          points: _stats.submissionTrendFor(range.days),
           barColor: InsightTheme.blue1,
           textColor: InsightTheme.ink,
           mutedTextColor: InsightTheme.ink2,
+          periodLabel: periodLabel,
         );
       case 1:
         return ActivityHeatmapCard(
-          activeDays: _stats.activeDaysThisMonth,
-          month: _stats.currentMonth,
-          year: _stats.currentYear,
+          activityRange: range,
           activeColor: InsightTheme.green,
           inactiveColor: InsightTheme.surface2,
           textColor: InsightTheme.ink,
           mutedTextColor: InsightTheme.ink2,
         );
       case 2:
+        // Completion Goals: scheduled-cohort rate for the selected period.
+        // A period with nothing scheduled renders N/A, not a confident 0%.
         return CompletionGaugeCard(
           rate: _stats.completionRate,
           totalApplications: _stats.totalAssigned,
@@ -813,11 +826,16 @@ class _ProfileScreenState extends State<ProfileScreen>
           fillColor: InsightTheme.blue1,
           textColor: InsightTheme.ink,
           mutedTextColor: InsightTheme.ink2,
+          periodMetrics: range.metricsFor(_stats.scheduledCohort),
+          periodLabel: periodLabel,
         );
       case 3:
       default:
+        // Zoning Distribution: only inspections completed inside the range.
+        // Scheduling plays no part here, and pending work is excluded.
         return ZoningTypeBreakdownCard(
-          entries: _stats.typeBreakdown,
+          entries: _stats.completedTypeBreakdownFor(range.days),
+          periodLabel: periodLabel,
           barColor: InsightTheme.blue1,
           trackColor: InsightTheme.surface2,
           textColor: InsightTheme.ink,

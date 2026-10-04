@@ -19,6 +19,43 @@ class TypeBreakdownEntry {
   const TypeBreakdownEntry({required this.label, required this.count, required this.share});
 }
 
+/// The existing zoning label for a task: application type when present, else
+/// declared land use, else "Unclassified". Shared by the lifetime breakdown and
+/// the range-scoped one so both speak the same vocabulary.
+String _zoningLabel(TaskItem t) =>
+    (t.applicationType?.trim().isNotEmpty ?? false)
+        ? t.applicationType!.trim()
+        : (t.landUseClass.trim().isNotEmpty
+            ? t.landUseClass.trim()
+            : 'Unclassified');
+
+/// A completed inspection with the day it was submitted and the zoning label it
+/// already carries. Produced once during aggregation so the Sectors tab never
+/// has to re-parse timestamps or invent a label.
+@immutable
+class CompletedTaskDay {
+  final DateTime date;
+  final String label;
+
+  const CompletedTaskDay({required this.date, required this.label});
+}
+
+/// A task that carries a usable `scheduled_date`, used to build the Gauge's
+/// scheduled cohort. Tasks without a schedule are simply absent — the Gauge
+/// must never quietly treat them as either numerator or denominator.
+@immutable
+class ScheduledCohortTask {
+  final String id;
+  final DateTime scheduledDate;
+  final bool isCompleted;
+
+  const ScheduledCohortTask({
+    required this.id,
+    required this.scheduledDate,
+    required this.isCompleted,
+  });
+}
+
 /// All numbers the Profile analytics dashboard needs, derived once from the
 /// inspector's own job list (already scoped server-side to
 /// assigned_inspector_id by SupabaseService.fetchMyJobs()). Keeping this as
@@ -34,9 +71,32 @@ class InspectorDashboardStats {
   final double completionRate; // 0.0 - 1.0, completed / totalAssigned
   final List<TrendPoint> weeklyTrend; // last 7 days, oldest -> newest
   final Set<int> activeDaysThisMonth; // day-of-month numbers with a submission
+  /// Every calendar day that had at least one submission. The lossless form of
+  /// [activeDaysThisMonth], so a weekly range is derived from the same
+  /// authoritative set rather than a second, separately-computed one.
+  final Set<DateTime> activeSubmissionDates;
+
+  /// Every submission date, **with duplicates** — two inspections finished on
+  /// the same day must count as two submissions on the Bars chart, not one.
+  /// [activeSubmissionDates] is the de-duplicated form used by the heatmap.
+  final List<DateTime> submissionDates;
   final int currentMonth;
   final int currentYear;
   final List<TypeBreakdownEntry> typeBreakdown;
+
+  /// The per-day submission counts behind the Bars chart, one point for every
+  /// day of the selected range. Bars consumes this so Week shows 7 points and
+  /// Month shows one per calendar day — real counts, never padded or invented.
+  /// See [submissionTrendFor].
+  ///
+  /// Every task that has a scheduled date, with that date and whether it is
+  /// Completed. The Gauge builds its scheduled cohort from this: a task with no
+  /// `scheduled_date` is excluded entirely rather than assumed.
+  final List<ScheduledCohortTask> scheduledCohort;
+
+  /// Completed tasks paired with their real submission day and their existing
+  /// zoning label. Consumed by [completedTypeBreakdownFor].
+  final List<CompletedTaskDay> completedTasksWithDate;
 
   const InspectorDashboardStats({
     required this.totalAssigned,
@@ -47,9 +107,13 @@ class InspectorDashboardStats {
     required this.completionRate,
     required this.weeklyTrend,
     required this.activeDaysThisMonth,
+    required this.activeSubmissionDates,
+    required this.submissionDates,
     required this.currentMonth,
     required this.currentYear,
     required this.typeBreakdown,
+    required this.scheduledCohort,
+    required this.completedTasksWithDate,
   });
 
   factory InspectorDashboardStats.empty() {
@@ -63,9 +127,13 @@ class InspectorDashboardStats {
       completionRate: 0,
       weeklyTrend: const [],
       activeDaysThisMonth: const {},
+      activeSubmissionDates: const {},
+      submissionDates: const [],
       currentMonth: now.month,
       currentYear: now.year,
       typeBreakdown: const [],
+      scheduledCohort: const [],
+      completedTasksWithDate: const [],
     );
   }
 
@@ -108,18 +176,20 @@ class InspectorDashboardStats {
 
     // ── Activity heatmap: which days *this month* had a submission.
     final activeDays = <int>{};
+    // Same submission days, kept as real dates so both the month heatmap and a
+    // weekly range come from one authoritative set.
+    final activeDates = <DateTime>{};
     for (final d in submittedDates) {
       if (d.year == today.year && d.month == today.month) {
         activeDays.add(d.day);
       }
+      activeDates.add(d);
     }
 
     // ── Zoning / application type distribution.
     final typeCounts = <String, int>{};
     for (final t in tasks) {
-      final label = (t.applicationType?.trim().isNotEmpty ?? false)
-          ? t.applicationType!.trim()
-          : (t.landUseClass.trim().isNotEmpty ? t.landUseClass.trim() : 'Unclassified');
+      final label = _zoningLabel(t);
       typeCounts[label] = (typeCounts[label] ?? 0) + 1;
     }
     final typeTotal = typeCounts.values.fold<int>(0, (a, b) => a + b);
@@ -132,6 +202,43 @@ class InspectorDashboardStats {
         .toList()
       ..sort((a, b) => b.count.compareTo(a.count));
 
+    // ── Scheduled cohort for the Gauge: only tasks that actually carry a
+    // parseable scheduled_date. A task without a schedule is excluded rather
+    // than defaulted, so an empty cohort stays honestly empty.
+    final cohort = <ScheduledCohortTask>[];
+    for (final t in tasks) {
+      if (t.scheduledDate.isEmpty) continue;
+      DateTime parsed;
+      try {
+        parsed = DateTime.parse(t.scheduledDate);
+      } catch (_) {
+        continue;
+      }
+      cohort.add(ScheduledCohortTask(
+        id: t.id,
+        scheduledDate: DateTime(parsed.year, parsed.month, parsed.day),
+        isCompleted: t.category == 'Completed',
+      ));
+    }
+
+    // ── Completed tasks with their submission day and zoning label, so the
+    // Sectors tab can filter by period without re-parsing anything.
+    final completedTasks = <CompletedTaskDay>[];
+    for (final t in tasks) {
+      if (t.category != 'Completed') continue;
+      if (t.submittedAt == null || t.submittedAt!.isEmpty) continue;
+      DateTime d;
+      try {
+        d = DateTime.parse(t.submittedAt!).toLocal();
+      } catch (_) {
+        continue;
+      }
+      completedTasks.add(CompletedTaskDay(
+        date: DateTime(d.year, d.month, d.day),
+        label: _zoningLabel(t),
+      ));
+    }
+
     return InspectorDashboardStats(
       totalAssigned: total,
       completedCount: completed,
@@ -141,9 +248,57 @@ class InspectorDashboardStats {
       completionRate: completionRate,
       weeklyTrend: weeklyTrend,
       activeDaysThisMonth: activeDays,
+      activeSubmissionDates: activeDates,
+      submissionDates: List.unmodifiable(submittedDates),
       currentMonth: today.month,
       currentYear: today.year,
       typeBreakdown: typeBreakdown,
+      scheduledCohort: cohort,
+      completedTasksWithDate: completedTasks,
     );
+  }
+
+  /// Builds the per-day submission series for the selected [days] — one point
+  /// per calendar day, so Bars shows 7 for a week and one per day for a month.
+  /// Counts come straight from [activeSubmissionDates]; no day is padded,
+  /// duplicated or invented.
+  /// SECTORS — zoning/application-type distribution restricted to inspections
+  /// actually COMPLETED inside [days].
+  ///
+  /// Pending/Ongoing work is excluded: this is a distribution of output, not of
+  /// workload. Scheduling plays no part here — completion date decides. Uses the
+  /// exact same label vocabulary as the lifetime breakdown, so no new zoning
+  /// classification is ever introduced.
+  List<TypeBreakdownEntry> completedTypeBreakdownFor(List<DateTime> days) {
+    final inRange = days.toSet();
+    final counts = <String, int>{};
+    for (final t in completedTasksWithDate) {
+      if (!inRange.contains(t.date)) continue;
+      counts[t.label] = (counts[t.label] ?? 0) + 1;
+    }
+    if (counts.isEmpty) return const [];
+    final total = counts.values.fold<int>(0, (a, b) => a + b);
+    return counts.entries
+        .map((e) => TypeBreakdownEntry(
+              label: e.key,
+              count: e.value,
+              share: e.value / total,
+            ))
+        .toList()
+      ..sort((a, b) => b.count.compareTo(a.count));
+  }
+
+  List<TrendPoint> submissionTrendFor(List<DateTime> days) {
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return [
+      for (final day in days)
+        TrendPoint(
+          date: day,
+          label: dayLabels[day.weekday - 1],
+          // Counts SUBMISSIONS, not distinct active days: three inspections
+          // finished on one Monday must read as a bar of 3.
+          count: submissionDates.where((d) => d == day).length,
+        ),
+    ];
   }
 }
