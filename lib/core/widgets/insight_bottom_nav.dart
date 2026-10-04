@@ -57,6 +57,40 @@ class InsightNavItem {
   });
 }
 
+/// Cached job statuses that count as an assignment still waiting on the
+/// inspector, and therefore a candidate for the attention dot.
+///
+/// In-progress, ongoing and completed work are excluded on purpose: the dot
+/// means NEW / UNSEEN ASSIGNMENT, never "you have ongoing or completed work".
+const Set<String> kAwaitingTaskStatuses = {'assigned', 'Pending', 'pending'};
+
+/// The awaiting assignments this inspector has not looked at yet.
+///
+/// This is the whole meaning of the orange dot: a NEW / UNSEEN task
+/// assignment. It is deliberately NOT a count of pending work — an old pending
+/// task that has already been opened must never resurrect the dot on the next
+/// cold start.
+///
+/// [awaitingTaskIds] comes from the CURRENT local cache, so an assignment that
+/// was completed, reassigned or removed simply stops appearing here and cannot
+/// hold the badge alive. [acknowledgedTaskIds] is the persisted, per-inspector
+/// set of assignments already opened in Tasks.
+Set<String> unseenTaskIds({
+  required Iterable<String> awaitingTaskIds,
+  required Set<String> acknowledgedTaskIds,
+}) =>
+    awaitingTaskIds.toSet().difference(acknowledgedTaskIds);
+
+/// Whether the Tasks tab shows its orange attention dot.
+bool shouldShowTasksAttentionDot({
+  required Iterable<String> awaitingTaskIds,
+  required Set<String> acknowledgedTaskIds,
+}) =>
+    unseenTaskIds(
+      awaitingTaskIds: awaitingTaskIds,
+      acknowledgedTaskIds: acknowledgedTaskIds,
+    ).isNotEmpty;
+
 class InsightBottomNav extends StatelessWidget {
   final int currentIndex;
   final List<InsightNavItem> items;
