@@ -3,39 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// ==================================================================
-/// THEME COLORS & TOKENS
-/// ==================================================================
-class InsightTheme {
-  static const Color bg = Color(0xFFF2F4FB);
-  static const Color surface = Colors.white;
-  
-  static const Color ink = Color(0xFF12141F);
-  static const Color ink2 = Color(0xFF666C82);
-  static const Color ink3 = Color(0xFFA2A7BC);
-  
-  static const Color blue1 = Color(0xFF3D6BFF);
-  static const Color blue2 = Color(0xFF0B2FBF);
-  static const Color blueTint = Color(0xFFE7EDFF);
-  static const Color blueInk = Color(0xFF1A3FC4);
-  
-  static const Color redTint = Color(0xFFFDECEE);
-  static const Color redInk = Color(0xFFB72A3B);
-  
-  static const Color greenTint = Color(0xFFE3F8EC);
-  static const Color greenInk = Color(0xFF0D7A3C);
-  
-  static const Color amberTint = Color(0xFFFEF3DE);
-  static const Color amberInk = Color(0xFFA66C00);
-  
-  static const Color line = Color(0x12141628); 
-  
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w600, Color? c, double? h, double? ls}) => 
-      GoogleFonts.poppins(fontSize: size, fontWeight: w, color: c ?? ink, height: h ?? 1.2, letterSpacing: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w400, Color? c, double? h}) => 
-      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? ink2, height: h ?? 1.5);
-}
+import '../theme/insight_theme.dart';
 
 /// ==================================================================
 /// SCREEN 4 — NOTIFICATIONS
