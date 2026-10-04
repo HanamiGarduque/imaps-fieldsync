@@ -13,7 +13,7 @@ import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
 import '../../auth_startup/screens/security_settings_screen.dart';
 import 'terms_privacy_screen.dart';
-import 'diagnostics_screen.dart';
+import 'reports_support_screen.dart';
 import 'help_faq_screen.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
@@ -513,14 +513,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                                 ),
                                 _ActionTile(
                                   icon: Icons.flag_outlined,
-                                  title: 'Diagnostics & Support',
-                                  subtitle: 'Report an issue to the MPDO team',
+                                  title: 'Reports & Support',
+                                  subtitle:
+                                      'Report a problem or an application concern',
                                   onTap: () {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) =>
-                                            const DiagnosticsScreen(),
+                                            const ReportsSupportScreen(),
                                       ),
                                     );
                                   },

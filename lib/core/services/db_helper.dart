@@ -7,14 +7,35 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import 'route_service.dart';
+import 'report_queue_schema.dart';
 
 class DBHelper {
   static Database? _database;
 
+  /// The in-flight `_initDB()` future, memoised.
+  ///
+  /// Without this, two callers that reach [database] before the first open
+  /// finishes BOTH run `_initDB()`, and each performs its own
+  /// `openDatabase(..., version: 15, onUpgrade: ...)`. On a real device that
+  /// is reachable at cold start: MainShellScreen's report-queue recovery, the
+  /// Tasks screen, and startup all resolve the database concurrently. Both
+  /// opens read the same pre-v15 `user_version`, both decide to upgrade, one
+  /// commits the v15 ALTERs and bumps the version, and the loser then runs
+  /// `ALTER TABLE local_jobs ADD COLUMN supabase_application_id` against a
+  /// table that already has it — the observed
+  /// "duplicate column name: supabase_application_id".
+  ///
+  /// Memoising the future guarantees exactly one open, one version check and
+  /// one migration per process.
+  static Future<Database>? _opening;
+
   /// Inject an isolated SQLite connection in persistence tests. Never opens or
   /// closes an application database; the test owns the connection lifecycle.
   @visibleForTesting
-  static void useDatabaseForTesting(Database? db) => _database = db;
+  static void useDatabaseForTesting(Database? db) {
+    _database = db;
+    _opening = null;
+  }
 
   /// The route-cache DDL, for migration tests that rebuild the schema against
   /// an isolated temporary database. Never used at runtime.
@@ -22,9 +43,21 @@ class DBHelper {
   static String get localRouteCacheSchemaForTesting => _localRouteCacheSchema;
 
   static Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDB();
-    return _database!;
+    final existing = _database;
+    if (existing != null) return existing;
+    return _opening ??= _initDB().then(
+      (db) {
+        _database = db;
+        // A failed open must not be cached, or one transient error would poison
+        // the whole process.
+        _opening = null;
+        return db;
+      },
+      onError: (Object error, StackTrace stack) {
+        _opening = null;
+        throw error;
+      },
+    );
   }
 
   /// Cryptographically-random 32-byte key, generated once and reused for
@@ -135,7 +168,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 14,
+      version: 15,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -259,6 +292,16 @@ class DBHelper {
           // one table; nothing else references it.
           await db.execute(_localRouteCacheSchema);
         }
+        if (oldVersion < 15) {
+          // Reports & Support: inspector-authored reports persist locally
+          // before any network attempt, so typed text survives offline and a
+          // restart. Additive only — two nullable identity columns on
+          // local_jobs (so Application Support can carry the EXACT
+          // field_job_id + application + bridge-source triple instead of
+          // inferring one) plus one new isolated queue table. No lifecycle row
+          // is touched, no existing table is rewritten, nothing is dropped.
+          await ReportQueueSchema.applyV15(db);
+        }
       },
       onCreate: (db, version) async {
         await createInspectionRetentionTable(db);
@@ -287,7 +330,9 @@ class DBHelper {
             parcel_lng REAL,
             lot_area_sqm REAL,
             declared_land_use TEXT,
-            parcel_address TEXT
+            parcel_address TEXT,
+            supabase_application_id TEXT,
+            bridge_source_id TEXT
           )
         ''');
 
@@ -334,6 +379,9 @@ class DBHelper {
 
         // Road-route cache for offline Step 1 (see onUpgrade, oldVersion < 14).
         await db.execute(_localRouteCacheSchema);
+
+        // Reports & Support offline queue (see onUpgrade, oldVersion < 15).
+        await ReportQueueSchema.createTable(db);
       },
     );
   }
@@ -572,6 +620,12 @@ class DBHelper {
       'deadline_date': job['deadline_date'],
       'is_self_scheduled': (job['is_self_scheduled'] == true) ? 1 : 0,
       'supabase_parcel_id': job['supabase_parcel_id'],
+      // Exact remote identity for the Application Support queue. These travel
+      // with the job into local_jobs so the report selector never infers a
+      // namespace from display text. NULL only for upgraded v14 rows that have
+      // not been refreshed online yet — those rows block Application Support.
+      'supabase_application_id': job['supabase_application_id'],
+      'bridge_source_id': job['bridge_source_id'],
       'applicant_name': app['applicant_name'] ?? 'Unknown Applicant',
       'barangay': app['barangay'] ?? 'No barangay listed',
       'reference_number': app['reference_number'] ?? '',

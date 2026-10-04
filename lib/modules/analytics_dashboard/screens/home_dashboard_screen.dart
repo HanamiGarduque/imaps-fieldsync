@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../../../core/models/user_profile.dart';
+import '../models/activity_event_category.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
@@ -81,9 +82,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   bool _isLoadingActivity = true;
   int _unreadCount = 0;
 
-  // Recent Activity — category filter (All / Tasks / Sync / Profile).
-  // Filtering happens client-side over the already-fetched batch (see
-  // _kRecentActivityLimit below) rather than re-querying per tap.
+  // Recent Activity — category filter (All / Tasks / Sync / Reports / Profile).
+  // Buckets are owned by ActivityEventCategory so the mapping is testable
+  // without a widget tree; filtering happens client-side over the already-fetched
+  // batch (see _kRecentActivityLimit below) rather than re-querying per tap.
   String _activityFilter = 'all';
 
   // Calendar strip / modal — visual day selector only (no filtering wired
@@ -299,6 +301,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
         return {'icon': Icons.security_rounded, 'color': InsightTheme.amber};
       case 'diagnostic_report_submitted':
         return {'icon': Icons.flag_rounded, 'color': InsightTheme.orange};
+      case 'report_resolved':
+        return {'icon': Icons.check_circle_rounded, 'color': InsightTheme.green};
+      case 'report_wont_fix':
+        return {'icon': Icons.block_rounded, 'color': InsightTheme.ink3};
       case 'gps_confirmed':
         return {'icon': Icons.gps_fixed_rounded, 'color': InsightTheme.blueInk};
       default:
@@ -311,42 +317,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // written by SupabaseService.logActivity() across the app (inspection
   // provider, inspection progress, notification service, GPS confirm,
   // rework) — see core/services/supabase_service.dart.
-  String _eventCategory(String eventType) {
-    switch (eventType) {
-      case 'inspection_completed':
-      case 'rework_started':
-      case 'step_completed':
-      case 'gps_confirmed':
-        return 'tasks';
-      case 'photos_synced':
-      case 'sync_manual':
-      case 'sync_inspection':
-      case 'cache_cleared':
-        return 'sync';
-      case 'push_received':
-      case 'profile_updated':
-      case 'security_updated':
-      case 'diagnostic_report_submitted':
-        return 'profile';
-      default:
-        // Unclassified/system events read as account-level notices.
-        return 'profile';
-    }
-  }
+  String _eventCategory(String eventType) =>
+      ActivityEventCategory.categoryFor(eventType);
 
   // Human-readable label for the category chip on the redesigned Recent
-  // Activity tile (Master's Image 3 reference) — reuses _eventCategory's
-  // same three buckets, just capitalized for display.
-  String _eventCategoryLabel(String eventType) {
-    switch (_eventCategory(eventType)) {
-      case 'tasks':
-        return 'Task';
-      case 'sync':
-        return 'Sync';
-      default:
-        return 'Profile';
-    }
-  }
+  // Activity tile (Master's Image 3 reference) — one label per bucket in
+  // ActivityEventCategory.filters, just capitalized for display.
+  String _eventCategoryLabel(String eventType) =>
+      ActivityEventCategory.labelFor(_eventCategory(eventType));
 
   List<Map<String, dynamic>> get _filteredActivity {
     if (_activityFilter == 'all') return _recentActivity;
@@ -1140,6 +1118,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       const SizedBox(width: 6),
                       Expanded(
                         child: _ActivityFilterChip(
+                          icon: Icons.assignment_rounded,
+                          label: ActivityEventCategory.labelFor(
+                            ActivityEventCategory.reports,
+                          ),
+                          selected:
+                              _activityFilter == ActivityEventCategory.reports,
+                          onTap: () => setState(
+                            () => _activityFilter = ActivityEventCategory.reports,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _ActivityFilterChip(
                           icon: Icons.person_rounded,
                           label: 'Profile',
                           selected: _activityFilter == 'profile',
@@ -1427,22 +1419,34 @@ class _ActivityFilterChip extends StatelessWidget {
                 width: 1.2,
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, size: 13, color: selected ? Colors.white : InsightTheme.ink3),
-                  const SizedBox(width: 4),
-                ],
-                Text(
-                  label,
-                  style: InsightTheme.inter(
-                    12,
-                    w: FontWeight.w700,
-                    c: selected ? Colors.white : InsightTheme.ink2,
+            // Five chips share one row, so at ~390 logical pixels each gets ~67px
+            // and the widest label no longer fits beside its icon. FittedBox
+            // scales the whole icon+label group down to the available width instead
+            // of letting the Row overflow, which keeps the existing visual language
+            // and the 44px tap target intact at any width or text scale. scaleDown
+            // only shrinks - a chip with room for its label renders identically to
+            // before, so nothing changes on a wide screen.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 13, color: selected ? Colors.white : InsightTheme.ink3),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: InsightTheme.inter(
+                      12,
+                      w: FontWeight.w700,
+                      c: selected ? Colors.white : InsightTheme.ink2,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

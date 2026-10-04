@@ -507,6 +507,8 @@ class SupabaseService {
       started_at,
       submitted_at,
       supabase_parcel_id,
+      supabase_application_id,
+      bridge_source_id,
       assignment_instructions,
       assigned_by_imaps_user_id,
       assigned_by_name,
@@ -1217,6 +1219,8 @@ class SupabaseService {
           submitted_at,
           inspection_result,
           is_compliant,
+          supabase_application_id,
+          bridge_source_id,
           supabase_zoning_applications!supabase_application_id (
             reference_number,
             applicant_name,
