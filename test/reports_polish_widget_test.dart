@@ -421,7 +421,7 @@ void main() {
     String status = 'resolved',
     String? message = 'testing. okay na beh',
     String? responder = 'Jyerine Desunia',
-    DateTime? stamp,
+    bool omitStamp = false,
   }) => DiagnosticReport(
     id: 'remote',
     referenceCode: 'DR-2026-0005',
@@ -433,7 +433,7 @@ void main() {
     updatedAt: DateTime.utc(2026),
     responseMessage: message,
     respondedByName: responder,
-    respondedAt: stamp ?? DateTime(2026, 10, 4, 7, 3),
+    respondedAt: omitStamp ? null : DateTime(2026, 10, 4, 7, 3),
   );
 
   const stalePlaceholder =
@@ -494,7 +494,7 @@ void main() {
           status: 'submitted',
           message: null,
           responder: null,
-          stamp: null,
+          omitStamp: true,
         ),
       ),
       size: const Size(390, 1400),
@@ -521,7 +521,7 @@ void main() {
           status: 'in_review',
           message: null,
           responder: null,
-          stamp: null,
+          omitStamp: true,
         ),
       ),
       size: const Size(390, 1400),
@@ -573,7 +573,7 @@ void main() {
   ) async {
     await pump(
       tester,
-      ReportDetailScreen(report: responded(stamp: null)),
+      ReportDetailScreen(report: responded(omitStamp: true)),
       size: const Size(390, 1400),
     );
     await tester.scrollUntilVisible(
@@ -583,6 +583,8 @@ void main() {
     );
     expect(find.text('MPDO RESPONSE'), findsOneWidget);
     expect(find.text('Jyerine Desunia'), findsOneWidget);
+    expect(find.text('RESPONDED AT'), findsNothing);
+    expect(find.text('Oct 4, 2026, 7:03 AM'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

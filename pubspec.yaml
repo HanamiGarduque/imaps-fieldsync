@@ -79,6 +79,10 @@ dev_dependencies:
 
   flutter_lints: ^6.0.0
 
+  # Already present transitively through supabase_flutter. Used directly only to
+  # fake the PostgREST boundary in test/report_notification_test.dart.
+  http: ^1.6.0
+
   # App icon generator
   flutter_launcher_icons: ^0.13.1
   integration_test:
