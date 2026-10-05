@@ -23,6 +23,17 @@ import '../../../core/theme/insight_theme.dart';
 /// ==================================================================
 /// CONSTANTS
 /// ==================================================================
+
+/// Height reserved for the pinned Pending/Ongoing/Completed bar in
+/// AppBar.bottom, including its 12px bottom gap and the 1px divider.
+///
+/// Derived from the bar's own metrics rather than guessed: segmented container
+/// padding 4+4, tab vertical padding 10+10 around a ~15px row, then the 12px
+/// bottom gap and the 1px divider. A regression test asserts the bar still fits
+/// (no overflow) at several widths and text scales, so if the tab metrics ever
+/// change this constant fails loudly instead of silently clipping.
+const double kCategoryBarHeight = 56;
+
 const List<String> rosarioBarangays = [
   'All Barangays', 'Alupay', 'Antipolo', 'Bagong Tubig', 'Bayawang', 'Bulihan', 
   'Cahigam', 'Calantas', 'Colongan', 'Itlugan', 'Lumbangan', 'Macalamcam A', 
@@ -1004,6 +1015,69 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     return map;
   }
 
+  /// ACTIVE MONITORING pill + the ASSIGNED counter.
+  /// The Pending / Ongoing / Completed segmented switcher.
+  ///
+  /// Extracted so the exact same widget can be mounted in AppBar.bottom (where
+  /// it stays pinned) without duplicating it or leaving a second copy behind in
+  /// the scroll view. Same `_currentTabIndex` state and same tap handlers —
+  /// presentation only, category logic untouched.
+  Widget _buildCategoryBar(
+      int pendingCount, int ongoingCount, int completedCount) {
+    // The opaque outer surface is what makes this safe to pin: the Search /
+    // Filter row scrolling up disappears behind it rather than bleeding through.
+    return Container(
+      color: InsightTheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: SpringSlide(
+          animation: springFor(2),
+          beginOffset: const Offset(0, 22),
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface2,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Wrapped in Expanded — without it, a 2-digit count (e.g.
+                // "Completed 21") pushes this tab's intrinsic width past the
+                // row's available space and the row overflows on the right,
+                // since a plain spaceBetween Row doesn't constrain child widths.
+                Expanded(
+                  child: _SegmentTab(
+                    text: "Pending",
+                    count: pendingCount,
+                    isActive: _currentTabIndex == 0,
+                    onTap: () => setState(() => _currentTabIndex = 0),
+                  ),
+                ),
+                Expanded(
+                  child: _SegmentTab(
+                    text: "Ongoing",
+                    count: ongoingCount,
+                    isActive: _currentTabIndex == 1,
+                    onTap: () => setState(() => _currentTabIndex = 1),
+                  ),
+                ),
+                Expanded(
+                  child: _SegmentTab(
+                    text: "Completed",
+                    count: completedCount,
+                    isActive: _currentTabIndex == 2,
+                    onTap: () => setState(() => _currentTabIndex = 2),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final categorized = _categorizeAndFilter();
@@ -1034,8 +1108,13 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
       appBar: AppBar(
         backgroundColor: InsightTheme.surface,
         elevation: 0,
-        automaticallyImplyLeading: false, 
+        automaticallyImplyLeading: false,
         surfaceTintColor: Colors.transparent,
+        // The My Tasks header GROUP — ACTIVE MONITORING, "My Tasks" and the
+        // ASSIGNED counter — stays together exactly as originally arranged,
+        // and the whole group is pinned because it is Scaffold app-bar chrome.
+        // Only Search / Filter scroll away; the category switcher below is a
+        // pinned sliver that parks directly under this complete header.
         toolbarHeight: 85,
         title: SpringSlide(
           animation: springFor(0),
@@ -1198,49 +1277,29 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                   ),
                                 ),
                                 const SizedBox(height: 14),
-                                
-                                // CATEGORY SEGMENTED TABS — evenly divided,
-                                // no horizontal scroll needed for 3 items
-                                // (was a left-packed scrolling chip row).
-                                // Same _currentTabIndex state/logic, visual only.
-                                SpringSlide(
-                                  animation: springFor(2),
-                                  beginOffset: const Offset(0, 22),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    margin: const EdgeInsets.only(bottom: 12),
-                                    decoration: BoxDecoration(
-                                      color: InsightTheme.surface2,
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        // Wrapped in Expanded — without it, a
-                                        // 2-digit count (e.g. "Completed 21")
-                                        // pushes this tab's intrinsic width
-                                        // past the row's available space and
-                                        // the row overflows on the right,
-                                        // since a plain spaceBetween Row
-                                        // doesn't constrain child widths.
-                                        Expanded(
-                                          child: _SegmentTab(text: "Pending", count: pending.length + scheduled.length, isActive: _currentTabIndex == 0, onTap: () => setState(() => _currentTabIndex = 0)),
-                                        ),
-                                        Expanded(
-                                          child: _SegmentTab(text: "Ongoing", count: ongoing.length, isActive: _currentTabIndex == 1, onTap: () => setState(() => _currentTabIndex = 1)),
-                                        ),
-                                        Expanded(
-                                          child: _SegmentTab(text: "Completed", count: completed.length, isActive: _currentTabIndex == 2, onTap: () => setState(() => _currentTabIndex = 2)),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
                               ],
                             ),
                           ),
                         ),
-                        
+                        // Pinned Pending / Ongoing / Completed switcher.
+                        //
+                        // Placed AFTER Search/Filter so the original visual
+                        // order is preserved, and pinned so it stays directly
+                        // under the (already pinned) "My Tasks" title once the
+                        // user scrolls. Its opaque surface means the Search /
+                        // Filter row travelling up passes behind it instead of
+                        // showing through.
+                        SliverPersistentHeader(
+                          pinned: true,
+                          delegate: _CategoryBarHeaderDelegate(
+                            child: _buildCategoryBar(
+                              pending.length + scheduled.length,
+                              ongoing.length,
+                              completed.length,
+                            ),
+                          ),
+                        ),
+
                         // ACTIVE LIST VIEW
                         if (selectedTasks.isEmpty)
                           SliverToBoxAdapter(
@@ -1433,6 +1492,34 @@ class _PendingSectionHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Pins the Pending/Ongoing/Completed switcher to the top of the scroll view.
+///
+/// Fixed extent (min == max) because the bar is a constant-height control, so
+/// there is nothing to collapse or expand — the whole band just parks under the
+/// pinned "My Tasks" app bar. The rebuild/shrink paths are implemented for
+/// completeness but are never exercised at a fixed extent.
+class _CategoryBarHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _CategoryBarHeaderDelegate({required this.child});
+
+  final Widget child;
+
+  @override
+  double get minExtent => kCategoryBarHeight;
+
+  @override
+  double get maxExtent => kCategoryBarHeight;
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return SizedBox(height: kCategoryBarHeight, child: child);
+  }
+
+  @override
+  bool shouldRebuild(covariant _CategoryBarHeaderDelegate oldDelegate) =>
+      oldDelegate.child != child;
 }
 
 class _SegmentTab extends StatelessWidget {

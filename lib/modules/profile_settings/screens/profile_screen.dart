@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -344,37 +343,10 @@ class _ProfileScreenState extends State<ProfileScreen>
       extendBody: true,
       body: Stack(
         children: [
-          // Background Blobs for Premium Feel
-          Positioned(
-            top: -60,
-            right: -60,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withValues(alpha: 0.20),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -80,
-            left: -80,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: Container(
-                width: 220,
-                height: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withValues(alpha: 0.10),
-                ),
-              ),
-            ),
-          ),
+          // The two decorative blurred blue circles that used to sit here were
+          // removed so Profile matches the other main pages' plain neutral
+          // background. They were page-background ornament only — no blue was
+          // removed from any legitimate control on this screen.
 
           SafeArea(
             bottom: false,

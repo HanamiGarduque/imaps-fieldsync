@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
@@ -977,22 +976,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
       extendBody: true,
       body: Stack(
         children: [
-          Positioned(
-            top: -120,
-            right: -60,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
-              child: Container(
-                width: 320,
-                height: 320,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withValues(alpha: 0.1),
-                ),
-              ),
-            ),
-          ),
-
           SafeArea(
             bottom: false,
             child: _loading
@@ -1002,12 +985,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                       label: "Syncing data...",
                     ),
                   )
-                : RefreshIndicator(
-                    onRefresh: () => _refresh(replay: true),
-                    child: ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.only(bottom: kInsightBottomNavReserve),
-                      children: [
+                : Column(
+                  children: [
                         // 1. TOP UTILITY HEADER — white surface background
                         // with a bottom hairline divider, matching the
                         // Tasks screen's AppBar treatment (InsightTheme.surface
@@ -1198,6 +1177,14 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           ),
                         ),
                         ),
+
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: () => _refresh(replay: true),
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.only(bottom: kInsightBottomNavReserve),
+                          children: [
 
                         const SizedBox(height: 20),
 
@@ -1538,9 +1525,12 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                             ],
                           ),
                         ),
-                      ],
+                          ],
+                        ),
+                      )
                     ),
-                  ),
+                  ],
+                ),
           ),
 
           // --- Floating toast (matches design reference) ---

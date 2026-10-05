@@ -22,7 +22,6 @@ import '../../modules/profile_settings/screens/profile_edit_screen.dart';
 import '../../modules/profile_settings/screens/notifications_screen.dart';
 import '../../modules/inspection/screens/site_map_preview_screen.dart';
 import '../../modules/inspection/screens/compass_preview_screen.dart';
-import '../theme/insight_theme.dart';
 
 /// Single shell for the 4 primary tabs with fluid tab transitions
 /// and per-visit spring entrance animations.
@@ -444,30 +443,14 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
         extendBody: true,
         body: Stack(
         children: [
-          // ── Ambient mesh blur background ──────────────────────────────
-          // Same blurred-blob pattern already established in
-          // site_map_screen.dart / gps_verification_screen.dart (blue,
-          // two soft circles) — reused here behind the whole shell for
-          // consistency rather than inventing a new background treatment.
-          Positioned(
-            top: -80, right: -80,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-              child: Container(
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.16)),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -100, left: -100,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-              child: Container(
-                width: 260, height: 260,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue2.withValues(alpha: 0.10)),
-              ),
-            ),
-          ),
+          // Decorative ambient mesh-blur circles were removed from here.
+          // They were two large blurred blue discs sitting behind every page in
+          // the shell, which made the background treatment inconsistent with the
+          // clean neutral pages and read as a glow halo rather than content.
+          // Each page already paints its own opaque `InsightTheme.bg`
+          // Scaffold background, so nothing is left showing through and no new
+          // background token was needed — the pages simply share one plain
+          // surface now.
 
           // ── Main content — blurs + scales down slightly while Quick
           // Actions is open (the reference's "Main Content Focus Effect"),
