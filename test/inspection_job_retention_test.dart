@@ -12,6 +12,7 @@ import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider
 import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
+import 'package:imaps_fieldsync/core/services/inspection_authority.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -139,7 +140,18 @@ void main() {
           task: TaskItem.fromJob(payload), fetchedJob: payload,
         )),
       ));
-      await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 100)));
+      // Entry now also proves local ownership before hydrating the draft, so wait
+      // for the observable hydration instead of a fixed delay.
+      for (var i = 0; i < 100 && provider.activeTask?.id != jobA; i++) {
+        await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      if (resume) {
+        for (var i = 0; i < 100 && provider.notes != 'Unfinished restored notes'; i++) {
+          await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 20)));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+      }
       await tester.pumpAndSettle();
       await tester.runAsync(() async {
         expect(await DBHelper.getCachedJobs(), isEmpty);
@@ -169,8 +181,9 @@ void main() {
         expect(row['local_inspection_id'], 123);
         expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
         await submitFixture(jobA);
-        expect((await DBHelper.getCachedJobs()).single['status'], 'completed');
-        expect(await db.query('inspection_job_retention'), isEmpty);
+        // Queued submission is preserved intent, not proven completion.
+        expect((await DBHelper.getCachedJobs()).single['status'], 'assigned');
+        expect(await db.query('inspection_job_retention'), hasLength(1));
         expect((await DBHelper.getActionableActions()).single['job_id'], jobA);
       });
       await tester.pumpWidget(const SizedBox.shrink());
@@ -335,7 +348,7 @@ void main() {
         'submitted_at',
       ]));
 
-      expect(source, contains('version: 16,'));
+      expect(source, contains('version: 17,'));
       expect(source, contains('if (oldVersion < 10)'));
       expect(source, contains('if (oldVersion < 11)'));
       expect(source, contains('if (oldVersion < 12)'));
@@ -343,6 +356,7 @@ void main() {
       expect(source, contains('if (oldVersion < 14)'));
       expect(source, contains('if (oldVersion < 15)'));
         expect(source, contains('if (oldVersion < 16)'));
+      expect(source, contains('if (oldVersion < 17)'));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT').allMatches(source), hasLength(1));
       expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT').allMatches(source), hasLength(1));
@@ -390,31 +404,45 @@ void main() {
     expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'], 'completed');
   });
 
-  for (final entry in {'pending_actions': 'INSERT', 'local_jobs': 'UPDATE', 'inspection_job_retention': 'DELETE'}.entries) {
-    test('offline failure at ${entry.key} rolls back all three effects', () async {
-      await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
-      await db.execute('CREATE TRIGGER reject_write BEFORE ${entry.value} ON ${entry.key} '
-          "BEGIN SELECT RAISE(ABORT, 'isolated failure'); END");
-      await expectLater(submitFixture(jobA), throwsA(isA<DatabaseException>()));
-      expect(await DBHelper.getActionableActions(), isEmpty);
-      expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
-      expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
-    });
-  }
+  test('offline queue failure rolls back without touching local evidence', () async {
+    await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
+    await db.execute('CREATE TRIGGER reject_write BEFORE INSERT ON pending_actions '
+        "BEGIN SELECT RAISE(ABORT, 'isolated failure'); END");
+    await expectLater(submitFixture(jobA), throwsA(isA<DatabaseException>()));
+    expect(await DBHelper.getActionableActions(), isEmpty);
+    expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
+    expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
+  });
 
   test('online cleanup is idempotent isolated and failure leaves recovery evidence', () async {
     await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
     await DBHelper.cacheJobs([fetchedJob(jobB)]);
     await db.execute("CREATE TRIGGER reject_cleanup BEFORE DELETE ON inspection_job_retention BEGIN SELECT RAISE(ABORT, 'cleanup failure'); END");
-    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA), isFalse);
+    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA,
+        remoteResult: InspectionAuthorityResult.authorized), isFalse);
     expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
     expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'], 'in_progress');
     expect(await DBHelper.getActionableActions(), isEmpty);
     await db.execute('DROP TRIGGER reject_cleanup');
-    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA), isTrue);
-    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA), isTrue);
+    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA,
+        remoteResult: InspectionAuthorityResult.authorized), isTrue);
+    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA,
+        remoteResult: InspectionAuthorityResult.authorized), isTrue);
     expect(await db.query('inspection_job_retention'), isEmpty);
     expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobB)['status'], 'in_progress');
+  });
+
+  test('unproven completion never releases retention or completes the cache', () async {
+    await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
+    for (final result in [
+      InspectionAuthorityResult.notAssignedOrUnavailable,
+      InspectionAuthorityResult.authRequired,
+      InspectionAuthorityResult.offlineOrUnverifiable,
+    ]) {
+      expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA, remoteResult: result), isFalse);
+    }
+    expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
+    expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
   });
 
   test('missing or mismatched UUID rejects entry without marker or fake row', () async {
@@ -424,24 +452,36 @@ void main() {
     expect(await db.query('inspection_job_retention'), isEmpty);
   });
 
-  test('offline completion survives restart by pending protection, then releases', () async {
+  test('offline submission keeps retention across restart until proven', () async {
     await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
     await DBHelper.cacheJobs([fetchedJob(jobB)]);
     expect(await db.query('inspection_job_retention'), hasLength(1));
     await submitFixture(jobA);
-    expect(await db.query('inspection_job_retention'), isEmpty);
+    // Preserved intent: retention and the unfinished lifecycle both remain.
+    expect(await db.query('inspection_job_retention'), hasLength(1));
+    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'],
+        'in_progress');
     final action = (await DBHelper.getActionableActions()).single;
     await reopen();
     await DBHelper.cacheJobs([fetchedJob(jobB)]);
     final cached = await DBHelper.getCachedJobs();
-    expect(cached.firstWhere((j) => j['id'] == jobA)['status'], 'completed');
+    expect(cached.firstWhere((j) => j['id'] == jobA)['status'], 'in_progress');
     expect(cached.firstWhere((j) => j['id'] == jobB)['status'], 'in_progress');
     expect((await DBHelper.getActionableActions()).single['id'], action['id']);
+    expect(await db.query('inspection_job_retention'), hasLength(1));
+    // A proven remote acceptance is the only thing that finalizes and releases.
+    await DBHelper.finalizeAcceptedOnlineInspection(jobA,
+        remoteResult: InspectionAuthorityResult.authorized);
+    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'],
+        'completed');
     expect(await db.query('inspection_job_retention'), isEmpty);
-    await DBHelper.markActionSyncing(action['id'] as String);
-    await DBHelper.markActionSynced(action['id'] as String);
     await DBHelper.cacheJobs([fetchedJob(jobA, status: 'completed'), fetchedJob(jobB)]);
     expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'], 'completed');
+    // The completed round stays protected while its submission is unacknowledged.
+    await DBHelper.cacheJobs([fetchedJob(jobB)]);
+    expect((await DBHelper.getCachedJobs()).map((j) => j['id']), [jobA, jobB]);
+    await DBHelper.markActionSyncing(action['id'] as String);
+    await DBHelper.markActionSynced(action['id'] as String);
     await DBHelper.cacheJobs([fetchedJob(jobB)]);
     expect((await DBHelper.getCachedJobs()).single['id'], jobB);
   });

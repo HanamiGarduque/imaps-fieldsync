@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'db_helper.dart';
+import 'inspection_authority.dart';
+export 'inspection_authority.dart';
 
 enum PhotoObjectState { exists, missing, unknown }
 
@@ -16,6 +18,71 @@ class PhotoRecoveryUnknownException implements Exception {
 }
 
 class SupabaseService {
+  /// Live session identity, or null when no client session exists. Reading it
+  /// never throws, so a caller can demand a session only at the point it
+  /// actually performs a remote write.
+  static String? get _sessionUid {
+    try {
+      return client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Refuse any remote write once the session is gone or has changed.
+  static void _requireSession(String? uid) {
+    if (uid == null || _sessionUid != uid) {
+      throw const InspectionAuthorityException(
+        InspectionAuthorityResult.authRequired,
+      );
+    }
+  }
+
+  /// One authority-checked write. Zero returned rows are never success: only a
+  /// current authoritative read can tell an idempotent no-op from lost or
+  /// unverifiable authority.
+  static Future<InspectionAuthorityResult> _writeWithAuthority(
+    String jobId,
+    Future<List<Map<String, dynamic>>> Function(String uid) write, {
+    bool Function(Map<String, dynamic>)? satisfied,
+  }) async {
+    final uid = client.auth.currentUser?.id;
+    if (uid == null) return InspectionAuthorityResult.authRequired;
+    try {
+      final rows = await write(uid).timeout(const Duration(seconds: 10));
+      if (client.auth.currentUser?.id != uid) return InspectionAuthorityResult.authRequired;
+      if (rows.length == 1 &&
+          rows.single['id'] == jobId &&
+          rows.single['assigned_inspector_id'] == uid) {
+        return satisfied == null || satisfied(rows.single)
+          ? InspectionAuthorityResult.authorized
+          : InspectionAuthorityResult.offlineOrUnverifiable;
+      }
+      if (rows.isNotEmpty) return InspectionAuthorityResult.offlineOrUnverifiable;
+      final row = await client
+          .from('field_jobs')
+          .select()
+          .eq('id', jobId)
+          .eq('assigned_inspector_id', uid)
+          .maybeSingle()
+          .retry(enabled: false)
+          .timeout(const Duration(seconds: 10));
+      if (client.auth.currentUser?.id != uid) return InspectionAuthorityResult.authRequired;
+      if (row == null) return InspectionAuthorityResult.notAssignedOrUnavailable;
+      if (row['id'] != jobId || row['assigned_inspector_id'] != uid) {
+        return InspectionAuthorityResult.offlineOrUnverifiable;
+      }
+      return satisfied != null && satisfied(row)
+        ? InspectionAuthorityResult.authorized : InspectionAuthorityResult.offlineOrUnverifiable;
+    } on AuthException {
+      return InspectionAuthorityResult.authRequired;
+    } on PostgrestException catch (e) {
+      return const {'401','PGRST301','PGRST302','PGRST303','28000','28P01'}.contains(e.code)
+        ? InspectionAuthorityResult.authRequired : InspectionAuthorityResult.offlineOrUnverifiable;
+    } catch (_) {
+      return InspectionAuthorityResult.offlineOrUnverifiable;
+    }
+  }
   static Future<void> initialize() async {
     await Supabase.initialize(
       url: dotenv.env['SUPABASE_URL']!,
@@ -165,6 +232,7 @@ class SupabaseService {
     List<Map<String, dynamic>> photos, {
     bool allowMissingResume = false,
   }) async {
+    final uid = _sessionUid;
     final paths = <String>[];
     for (final photo in photos) {
       final localPath = photo['photoPath'];
@@ -230,6 +298,7 @@ class SupabaseService {
         if (!allowMissingResume) {
           throw StateError('Missing photo object without valid durable base');
         }
+        _requireSession(uid);
         await client.storage
             .from('inspection-photos')
             .upload(
@@ -267,6 +336,7 @@ class SupabaseService {
 
       if (row == null) {
         // INSERT, not upsert: a concurrent metadata row must not be overwritten.
+        _requireSession(uid);
         await client.from('field_job_photos').insert({
           'id': id,
           'field_job_id': jobId,
@@ -584,7 +654,7 @@ class SupabaseService {
   //   TaskItem.category treats any future scheduled_date as "Scheduled",
   //   so this alone is enough to move the card into that tab.
   // ─────────────────────────────────────────────────────────────────────────
-  static Future<void> scheduleJob({
+  static Future<InspectionAuthorityResult> scheduleJob({
     required String jobId,
     required DateTime date,
   }) async {
@@ -592,11 +662,14 @@ class SupabaseService {
         '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     // Scheduling is a pending-task operation. The lifecycle predicate makes a
     // stale card/action a safe no-op after another client completes the job.
-    await client
+    return _writeWithAuthority(jobId, (uid) => client
         .from('field_jobs')
         .update({'scheduled_date': dateStr, 'is_self_scheduled': true})
         .eq('id', jobId)
-        .eq('status', 'assigned');
+        .eq('assigned_inspector_id', uid)
+        .eq('status', 'assigned').select().retry(enabled: false),
+      satisfied: (row) =>
+          row['scheduled_date'] == dateStr && row['is_self_scheduled'] == true);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -624,23 +697,15 @@ class SupabaseService {
   //   so the task shows under "Ongoing" once the inspector has opened it
   //   and stepped away, without clobbering a status a later step already set.
   // ─────────────────────────────────────────────────────────────────────────
-  static Future<bool> markJobOngoing(String jobId) async {
-    try {
-      final uid = client.auth.currentUser?.id;
-      if (uid == null) return false;
-      final startedAt = DateTime.now().toUtc().toIso8601String();
-      await client
+  static Future<InspectionAuthorityResult> markJobOngoing(String jobId) =>
+    _writeWithAuthority(jobId, (uid) => client
           .from('field_jobs')
-          .update({'status': 'in_progress', 'started_at': startedAt})
+          .update({'status': 'in_progress', 'started_at': DateTime.now().toUtc().toIso8601String()})
           .eq('id', jobId)
           .eq('assigned_inspector_id', uid)
-          .eq('status', 'assigned');
-      return true;
-    } catch (e) {
-      debugPrint('Error marking job ongoing: $e');
-      return false;
-    }
-  }
+          .eq('status', 'assigned').select().retry(enabled: false),
+      satisfied: (row) => (row['status'] == 'in_progress' && row['started_at'] != null)
+        || (row['status'] == 'completed' && row['current_step'] == 6 && row['submitted_at'] != null));
 
   // ─────────────────────────────────────────────────────────────────────────
   // CONFIRM GPS ON-SITE  (GPS verification screen → marks job in_progress)
@@ -656,7 +721,7 @@ class SupabaseService {
       final confirmedAt = DateTime.now().toUtc().toIso8601String();
       // GPS is evidence. It may be corrected during completed-task rework,
       // but must never carry a lifecycle assignment that reopens the job.
-      await client
+      final evidence = await _writeWithAuthority(jobId, (uid) => client
           .from('field_jobs')
           .update({
             'confirmed_latitude': latitude,
@@ -664,12 +729,9 @@ class SupabaseService {
             'gps_accuracy_m': accuracyMeters,
             'gps_confirmed_at': confirmedAt,
           })
-          .eq('id', jobId);
-      await client
-          .from('field_jobs')
-          .update({'status': 'in_progress', 'started_at': confirmedAt})
-          .eq('id', jobId)
-          .eq('status', 'assigned');
+          .eq('id', jobId).eq('assigned_inspector_id', uid).select().retry(enabled: false));
+      evidence.requireAuthorized();
+      (await markJobOngoing(jobId)).requireAuthorized();
       await logActivity(
         eventType: 'gps_confirmed',
         title: 'GPS verified on-site',
@@ -772,6 +834,10 @@ class SupabaseService {
     photosData, // Changed from List<String> localPaths
     void Function(int photoIndex, int photoTotal)? onProgress,
   }) async {
+    // Session identity is captured here and demanded at each write point, so
+    // a queued action with nothing to upload still replays under a session that
+    // was proven current when the drain began.
+    final uid = _sessionUid;
     final List<String> uploadedUrls = [];
     final List<String> failedPaths = [];
 
@@ -846,7 +912,7 @@ class SupabaseService {
         // the photo from the resubmission with no error surfaced at all.
         if (photo['isRemoteUrl'] == true) {
           final objectPath = extractStorageObjectPath(path);
-          if (objectPath == null) {
+          if (objectPath == null || objectPath.split('/')[1] != jobId) {
             throw StateError('Remote photo identity is not a canonical object');
           }
           final objectState = await photoObjectState(objectPath);
@@ -866,6 +932,7 @@ class SupabaseService {
               .eq('field_job_id', jobId)
               .maybeSingle();
           if (existing == null || existing['photo_url'] is! String) {
+            _requireSession(uid);
             await client.from('field_job_photos').upsert({
               'id': rowId,
               'field_job_id': jobId,
@@ -902,6 +969,7 @@ class SupabaseService {
         }
         if (objectState == PhotoObjectState.missing) {
           // Repair the same canonical object; never create a second identity.
+          _requireSession(uid);
           await client.storage
               .from('inspection-photos')
               .upload(
@@ -920,6 +988,7 @@ class SupabaseService {
         // Only repair metadata when the deterministic metadata identity is
         // absent. Existing historical rows keep their stored URL/values.
         if (!metadataExists) {
+          _requireSession(uid);
           // 2. Upsert (not insert) metadata into field_job_photos, keyed by
           //    the same deterministic id derived from the photo's storage
           //    path. A retry updates this one row in place — it never adds
@@ -941,6 +1010,7 @@ class SupabaseService {
         }
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
+        if (e is InspectionAuthorityException) rethrow;
         failedPaths.add(path);
       }
     }
@@ -951,13 +1021,14 @@ class SupabaseService {
         'Check your connection and try submitting again.',
       );
     }
+    _requireSession(uid);
     return uploadedUrls;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // SUBMIT INSPECTION  (Review & submit screen → marks job completed)
   // ─────────────────────────────────────────────────────────────────────────
-  static Future<void> submitInspection({
+  static Future<InspectionAuthorityResult> submitInspection({
     required String jobId,
     required String findings,
     required bool isCompliant,
@@ -974,6 +1045,8 @@ class SupabaseService {
     String? locationLabel,
     String? submittedAt,
   }) async {
+    final uid = client.auth.currentUser?.id;
+    if (uid == null) return InspectionAuthorityResult.authRequired;
     try {
       // Preserve the first successful submission time. A final-submit retry or
       // completed-task evidence correction must not replace that lifecycle
@@ -982,13 +1055,16 @@ class SupabaseService {
           .from('field_jobs')
           .select('status,submitted_at')
           .eq('id', jobId)
+          .eq('assigned_inspector_id', uid)
           .maybeSingle();
-      final existingSubmittedAt = existing?['submitted_at']?.toString();
+      if (client.auth.currentUser?.id != uid) return InspectionAuthorityResult.authRequired;
+      if (existing == null) return InspectionAuthorityResult.notAssignedOrUnavailable;
+      final existingSubmittedAt = existing['submitted_at']?.toString();
       final effectiveSubmittedAt =
           existingSubmittedAt ??
           submittedAt ??
           DateTime.now().toUtc().toIso8601String();
-      await client
+      final result = await _writeWithAuthority(jobId, (owner) => client
           .from('field_jobs')
           .update({
             'status': 'completed',
@@ -1014,16 +1090,21 @@ class SupabaseService {
             // "close out an in-progress task."
             'rework_started_at': null,
           })
-          .eq('id', jobId);
-      await logActivity(
+          .eq('id', jobId).eq('assigned_inspector_id', owner).select().retry(enabled: false),
+        satisfied: (row) => row['status'] == 'completed' && row['current_step'] == 6
+          && row['submitted_at'] != null && row['findings'] == findings
+          && row['inspection_result'] == inspectionResult && row['is_compliant'] == isCompliant);
+      if (result != InspectionAuthorityResult.authorized) return result;
+      try { await logActivity(
         eventType: 'inspection_completed',
         title: 'Inspection completed',
         subtitle: locationLabel,
         fieldJobId: jobId,
-      );
+      ); } catch (_) { debugPrint('Completion accepted; activity delivery unverified.'); }
+      return result;
     } catch (e) {
-      debugPrint('Error submitting inspection: $e');
-      rethrow;
+      return e is AuthException ? InspectionAuthorityResult.authRequired
+        : InspectionAuthorityResult.offlineOrUnverifiable;
     }
   }
 
@@ -1162,7 +1243,9 @@ class SupabaseService {
       );
     }
     try {
-      await client.from('field_jobs').update(updateData).eq('id', jobId);
+      final result = await _writeWithAuthority(jobId, (uid) => client.from('field_jobs')
+        .update(updateData).eq('id', jobId).eq('assigned_inspector_id', uid).select().retry(enabled: false));
+      result.requireAuthorized();
     } catch (e) {
       debugPrint('Error updating field job: $e');
       rethrow;
@@ -1171,7 +1254,7 @@ class SupabaseService {
 
   /// Advances ordinary inspection progress without ever lowering it or
   /// changing the terminal Step 6 of a completed job.
-  static Future<void> advanceJobInspectionProgress({
+  static Future<InspectionAuthorityResult> advanceJobInspectionProgress({
     required String jobId,
     required int currentStep,
     Map<String, String>? stepTimestamps,
@@ -1179,9 +1262,7 @@ class SupabaseService {
     if (currentStep < 0 || currentStep > 6) {
       throw RangeError.range(currentStep, 0, 6, 'currentStep');
     }
-    final uid = client.auth.currentUser?.id;
-    if (uid == null) throw StateError('Progress requires authenticated session');
-    await client
+    return _writeWithAuthority(jobId, (uid) => client
         .from('field_jobs')
         .update({
           'current_step': currentStep,
@@ -1190,7 +1271,9 @@ class SupabaseService {
         .eq('id', jobId)
         .eq('assigned_inspector_id', uid)
         .neq('status', 'completed')
-        .lt('current_step', currentStep);
+        .lt('current_step', currentStep).select().retry(enabled: false),
+      satisfied: (row) => row['current_step'] is num && row['current_step'] >= currentStep
+        && (row['status'] != 'completed' || row['current_step'] == 6));
   }
 
   // ─────────────────────────────────────────────────────────────────────────

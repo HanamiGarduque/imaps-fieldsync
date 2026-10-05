@@ -49,9 +49,23 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
 
   Future<void> _handleSubmit() async {
     if (_submitting) return;
+    final provider = context.read<InspectionProvider>();
+    // Prove the session BEFORE disabling the button, so a lapsed session
+    // leaves the screen usable with an explanation instead of a dead control.
+    final String uid;
+    try {
+      provider.requireOwner();
+      uid = DBHelper.requireInspector();
+    } on StateError {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(InspectionAuthorityResult.authRequired.message),
+        ));
+      }
+      return;
+    }
     HapticFeedback.heavyImpact();
     setState(() => _submitting = true);
-    final provider = context.read<InspectionProvider>();
 
     final checklist = <Map<String, dynamic>>[
       ...provider.siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
@@ -70,16 +84,19 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
 
     // Try the real thing first — unchanged happy path when online.
     bool queuedOffline = false;
+    var submission = InspectionAuthorityResult.offlineOrUnverifiable;
     try {
       final photoPaths = await SupabaseService.uploadInspectionPhotos(jobId: widget.task.id, photosData: photosData);      
+      DBHelper.requireSameInspector(uid);
       
-      await SupabaseService.submitInspection(
+      submission = await SupabaseService.submitInspection(
         jobId: widget.task.id, findings: provider.notes, isCompliant: _selectedStatus == 'Compliant', inspectionResult: _selectedStatus,
         observations: observations,
         discrepancies: provider.discrepancies.isNotEmpty ? provider.discrepancies : null, recommendations: provider.recommendations.isNotEmpty ? provider.recommendations : null,
         inspectorNotes: provider.notes, checklistData: checklist, checklistCompletedCount: checklistCompleted, checklistTotalCount: checklist.length,
         photoPaths: photoPaths, photoCount: photoPaths.length, locationLabel: widget.task.location,
       );
+      submission.requireAuthorized();
     } catch (e) {
       // Couldn't reach Supabase (or a photo failed mid-upload) — rather
       // than lose everything the inspector just entered, queue the whole
@@ -87,12 +104,16 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       // FieldSync outbox and let them finish. It'll upload the photos and
       // submit for real once connectivity returns.
       try {
+        DBHelper.requireSameInspector(uid);
+        if (e is InspectionAuthorityException) submission = e.result;
         await SyncOutboxService.enqueueSubmitInspection(
           jobId: widget.task.id, findings: provider.notes, isCompliant: _selectedStatus == 'Compliant', inspectionResult: _selectedStatus,
           observations: observations,
           discrepancies: provider.discrepancies.isNotEmpty ? provider.discrepancies : null, recommendations: provider.recommendations.isNotEmpty ? provider.recommendations : null,
           inspectorNotes: provider.notes, checklistData: checklist, checklistCompletedCount: checklistCompleted, checklistTotalCount: checklist.length,
           photosData: photosData, locationLabel: widget.task.location, // UPDATED: Passing photosData
+          preserveOnly: submission == InspectionAuthorityResult.notAssignedOrUnavailable
+            || submission == InspectionAuthorityResult.authRequired,
         );
         queuedOffline = true;
       } catch (_) {
@@ -104,10 +125,23 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       }
     }
 
+    if (queuedOffline) {
+      if (mounted) {
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+          '${submission.message} Submission is saved locally; remote completion is not confirmed.')));
+      }
+      return;
+    }
+
     // Remote acceptance has already succeeded. Local cleanup must never enter
     // the catch above and enqueue/retry that successful business submission.
+    if (DBHelper.currentInspectorId != uid) {
+      if (mounted) setState(() => _submitting = false);
+      return;
+    }
     if (!queuedOffline && !provider.isReworkMode) {
-      final cleaned = await DBHelper.finalizeAcceptedOnlineInspection(widget.task.id);
+      final cleaned = await DBHelper.finalizeAcceptedOnlineInspection(widget.task.id, remoteResult: submission);
       if (!cleaned && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Inspection submitted. Local cache cleanup will retry on refresh.'),

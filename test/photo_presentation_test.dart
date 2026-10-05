@@ -6,6 +6,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:imaps_fieldsync/modules/inspection/services/photo_source_resolver.dart';
 import 'package:imaps_fieldsync/modules/inspection/widgets/photo_viewer.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
+
+import 'inspection_owner_fixture.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 
 void main() {
@@ -13,6 +15,10 @@ void main() {
   const path = 'inspections/$job/photo_fixture.jpg';
   final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9WQAAAAASUVORK5CYII=');
   setUp(() => dotenv.testLoad(fileInput: 'SUPABASE_URL=https://fixture.supabase.co'));
+  // Rework hydration records the session owner; this fixture has no Supabase
+  // session, so it supplies the local-only identity explicitly.
+  setUp(useOwnerFixture);
+  tearDown(clearOwnerFixture);
   testWidgets('private evidence renders bytes, never a NetworkImage', (tester) async {
     final calls = <String>[];
     final resolver = PhotoSourceResolver(projectUrl: Uri.parse('https://fixture.supabase.co'),

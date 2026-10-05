@@ -7,6 +7,8 @@ import 'package:imaps_fieldsync/core/services/supabase_service.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 
+import 'inspection_owner_fixture.dart';
+
 TaskItem task({String status = 'in_progress'}) => TaskItem(
       id: 'job-1',
       name: 'Fixture',
@@ -35,9 +37,11 @@ void main() {
       await db.execute(match.group(0)!);
     }
     DBHelper.useDatabaseForTesting(db);
+    useOwnerFixture();
   });
 
   tearDown(() async {
+    clearOwnerFixture();
     DBHelper.useDatabaseForTesting(null);
     await db.close();
     await temp.delete(recursive: true);

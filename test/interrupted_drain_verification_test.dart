@@ -5,6 +5,8 @@ import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'inspection_owner_fixture.dart';
+
 /// V1 defect reproduction, not a passing recovery regression.
 /// Reopens file-backed SQLite; does not simulate OS process death or remote ACK.
 /// No Supabase initialization, credentials, or remote writes.
@@ -25,10 +27,12 @@ void main() {
       await db.execute(match.group(0)!);
     }
     DBHelper.useDatabaseForTesting(db);
+    useOwnerFixture();
     await DBHelper.cacheJobs([{'id': jobA, 'status': 'in_progress'}]);
   });
 
   tearDown(() async {
+    clearOwnerFixture();
     DBHelper.useDatabaseForTesting(null);
     await db.close();
     await temporary.delete(recursive: true);
@@ -45,6 +49,7 @@ void main() {
       'last_error': null,
       'created_at': '2026-01-01T00:00:00.000',
       'updated_at': '2026-01-01T00:00:00.000',
+      'inspector_id': ownerFixture,
     });
   }
 

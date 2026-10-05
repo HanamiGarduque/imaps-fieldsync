@@ -91,16 +91,11 @@ void main() {
             'updated_at': '2026-01-02T00:00:00Z',
           };
         }
-        request.response.write(
-          jsonEncode(
-            request.method == 'PATCH' ||
-                    (request.headers['accept']?.toString() ?? '').contains(
-                      'application/vnd.pgrst.object+json',
-                    )
-                ? job
-                : [job],
-          ),
-        );
+        // A .maybeSingle() read asks for one object; a representation write asks for
+        // the row list. Honor the same Accept distinction PostgREST does.
+        final wantsObject = (request.headers['accept']?.toString() ?? '')
+            .contains('application/vnd.pgrst.object+json');
+        request.response.write(jsonEncode(wantsObject ? job : [job]));
       } else if (request.uri.path == '/rest/v1/field_job_photos') {
         if (request.method == 'GET') {
           request.response.write(
@@ -212,6 +207,7 @@ void main() {
         await db.insert('local_photos', {
           'id': localPhotoId,
           'job_id': 'a',
+          'inspector_id': 'inspector',
           'photo_path': file.path,
           'notes': 'fixture',
           'latitude': null,
@@ -224,6 +220,7 @@ void main() {
         'id': actionId,
         'type': actionType,
         'job_id': 'a',
+        'inspector_id': 'inspector',
         'status': actionStatus,
         'retry_count': 0,
         'created_at': base,
@@ -563,9 +560,9 @@ void main() {
         if (request.method == 'PATCH') {
           patches++;
         }
-        request.response.write(
-          jsonEncode(request.method == 'PATCH' ? job : [job]),
-        );
+        final wantsObject = (request.headers['accept']?.toString() ?? '')
+            .contains('application/vnd.pgrst.object+json');
+        request.response.write(jsonEncode(wantsObject ? job : [job]));
       } else if (request.uri.path == '/rest/v1/field_job_photos') {
         request.response.write(jsonEncode([metadata]));
       } else if (request.uri.path.startsWith('/storage/v1/object/')) {
@@ -609,6 +606,7 @@ void main() {
         'id': 'photos_a',
         'type': 'photos_update',
         'job_id': 'a',
+        'inspector_id': 'inspector',
         'status': 'syncing',
         'retry_count': 0,
         'created_at': baseTime,
@@ -660,7 +658,10 @@ void main() {
       request.response.headers.contentType = ContentType.json;
       if (request.uri.path == '/rest/v1/field_jobs') {
         if (request.method == 'PATCH') {
-          request.response.write('null');
+          // Zero affected rows: a single-object read gets null, a list read [].
+          final wantsObject = (request.headers['accept']?.toString() ?? '')
+              .contains('application/vnd.pgrst.object+json');
+          request.response.write(wantsObject ? 'null' : '[]');
         } else {
           request.response.write(
             jsonEncode([
@@ -733,6 +734,7 @@ void main() {
         'id': 'photos_a',
         'type': 'photos_update',
         'job_id': 'a',
+        'inspector_id': 'inspector',
         'status': 'syncing',
         'retry_count': 0,
         'created_at': baseTime,
@@ -764,6 +766,9 @@ void main() {
     }
   });
   test('r4RecoveryRequired marker does not discard original payload', () async {
+    // No Supabase session in this fixture: claim recovery is owner-scoped, so
+    // it declares the local-only identity explicitly.
+    DBHelper.inspectorIdForTesting = 'inspector';
     final tempDir = await Directory.systemTemp.createTemp('r4v2-marker-');
     final file = File('${tempDir.path}/test.jpg')..writeAsBytesSync([1]);
     final db = await databaseFactoryFfi.openDatabase('${tempDir.path}/test.db');
@@ -792,6 +797,7 @@ void main() {
       'id': 'photos_a',
       'type': 'photos_update',
       'job_id': 'a',
+      'inspector_id': 'inspector',
       'status': 'syncing',
       'retry_count': 0,
       'created_at': baseTime,
@@ -807,6 +813,7 @@ void main() {
     expect(rec['photos'][0]['photoPath'], file.path);
     expect(rec['photos'][0]['notes'], 'my note');
     DBHelper.useDatabaseForTesting(null);
+    DBHelper.inspectorIdForTesting = null;
     await db.close();
     await tempDir.delete(recursive: true);
   });
@@ -851,13 +858,10 @@ void main() {
             patchesB++;
           }
           final isA = (qs['id'] ?? '').contains('a');
-          request.response.write(
-            jsonEncode(
-              request.method == 'PATCH'
-                  ? (isA ? jobA : jobB)
-                  : [isA ? jobA : jobB],
-            ),
-          );
+          final row = isA ? jobA : jobB;
+          final wantsObject = (request.headers['accept']?.toString() ?? '')
+              .contains('application/vnd.pgrst.object+json');
+          request.response.write(jsonEncode(wantsObject ? row : [row]));
         } else if (request.uri.path == '/rest/v1/field_job_photos') {
           request.response.statusCode = 201;
           request.response.write('[]');
@@ -916,6 +920,7 @@ void main() {
           'id': 'photos_a',
           'type': 'photos_update',
           'job_id': 'a',
+          'inspector_id': 'inspector',
           'status': 'syncing',
           'retry_count': 0,
           'created_at': baseTime,
@@ -1004,10 +1009,14 @@ void main() {
               ...jsonDecode(body) as Map<String, dynamic>,
               'updated_at': '2026-01-02T00:00:00Z',
             };
-            req.response.write(jsonEncode(job));
+            final wantsObject = (req.headers['accept']?.toString() ?? '')
+                .contains('application/vnd.pgrst.object+json');
+            req.response.write(jsonEncode(wantsObject ? job : [job]));
           }
         } else {
-          req.response.write(jsonEncode([job]));
+          final wantsObject = (req.headers['accept']?.toString() ?? '')
+              .contains('application/vnd.pgrst.object+json');
+          req.response.write(jsonEncode(wantsObject ? job : [job]));
         }
       } else if (req.uri.path == '/rest/v1/field_job_photos') {
         if (req.method == 'GET') {
@@ -1089,6 +1098,7 @@ void main() {
         'id': 'photos_a',
         'type': 'photos_update',
         'job_id': 'a',
+        'inspector_id': 'inspector',
         'status': 'pending',
         'retry_count': 0,
         'created_at': baseTime,
@@ -1227,7 +1237,9 @@ void main() {
               ...jsonDecode(body) as Map<String, dynamic>,
               'updated_at': '2026-01-02T00:00:00Z',
             };
-            req.response.write(jsonEncode(job));
+            final wantsObject = (req.headers['accept']?.toString() ?? '')
+                .contains('application/vnd.pgrst.object+json');
+            req.response.write(jsonEncode(wantsObject ? job : [job]));
           } else {
             req.response.write(jsonEncode([job]));
           }
@@ -1301,6 +1313,7 @@ void main() {
           'id': 'photos_a',
           'type': 'photos_update',
           'job_id': 'a',
+          'inspector_id': 'inspector',
           'status': 'pending',
           'retry_count': 0,
           'created_at': baseTime,
@@ -1376,7 +1389,9 @@ void main() {
               ...jsonDecode(body) as Map<String, dynamic>,
               'updated_at': '2026-01-02T00:00:00Z',
             };
-            req.response.write(jsonEncode(job));
+            final wantsObject = (req.headers['accept']?.toString() ?? '')
+                .contains('application/vnd.pgrst.object+json');
+            req.response.write(jsonEncode(wantsObject ? job : [job]));
           } else {
             req.response.write(jsonEncode([job]));
           }
@@ -1449,6 +1464,7 @@ void main() {
         'id': 'photos_a',
         'type': 'photos_update',
         'job_id': 'a',
+        'inspector_id': 'inspector',
         'status': 'syncing',
         'retry_count': 0,
         'created_at': baseTime,

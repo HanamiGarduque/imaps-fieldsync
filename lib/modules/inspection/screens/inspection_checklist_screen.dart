@@ -177,8 +177,15 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           children: _siteCondition.entries.toList().asMap().entries.map((entry) {
                             var e = entry.value;
                             return _ChecklistItem(title: e.key, isChecked: e.value, isLast: entry.key == _siteCondition.length - 1, onTap: () {
+                              // Persist through the provider FIRST: it refuses a write that is no
+                              // longer owned by this session, and the visible
+                              // checkbox must never diverge from that.
+                              try {
+                                context.read<InspectionProvider>().setSiteCondition(e.key, !e.value);
+                              } catch (_) {
+                                return;
+                              }
                               setState(() => _siteCondition[e.key] = !e.value);
-                              context.read<InspectionProvider>().setSiteCondition(e.key, !e.value);
                               _syncChecklistProgress();
                             });
                           }).toList(),
@@ -198,8 +205,12 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           children: _zoningObservations.entries.toList().asMap().entries.map((entry) {
                             var e = entry.value;
                             return _ChecklistItem(title: e.key, isChecked: e.value, isLast: entry.key == _zoningObservations.length - 1, onTap: () {
+                              try {
+                                context.read<InspectionProvider>().setZoningObservation(e.key, !e.value);
+                              } catch (_) {
+                                return;
+                              }
                               setState(() => _zoningObservations[e.key] = !e.value);
-                              context.read<InspectionProvider>().setZoningObservation(e.key, !e.value);
                               _syncChecklistProgress();
                             });
                           }).toList(),

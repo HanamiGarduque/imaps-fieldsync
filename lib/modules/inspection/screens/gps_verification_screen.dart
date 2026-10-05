@@ -223,8 +223,12 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   /// call with that missing fallback, mirroring the pattern already used
   /// for GPS confirm below.
   Future<bool> _markOngoingWithFallback(String jobId) async {
-    final ok = await SupabaseService.markJobOngoing(jobId);
-    if (ok) return true;
+    final result = await SupabaseService.markJobOngoing(jobId);
+    if (result == InspectionAuthorityResult.authorized) return true;
+    if (result != InspectionAuthorityResult.offlineOrUnverifiable) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result.message)));
+      return false;
+    }
     try {
       await SyncOutboxService.enqueueMarkOngoing(jobId: jobId);
       return true; // queued — the exit dialog's "saved" message is now true

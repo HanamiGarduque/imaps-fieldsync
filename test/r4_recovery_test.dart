@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'inspection_owner_fixture.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 
@@ -25,6 +27,7 @@ void main() {
       await db.execute(sql);
     }
     DBHelper.useDatabaseForTesting(db);
+    useOwnerFixture();
     remote = {'id': 'a', 'status': 'assigned', 'updated_at': base, 'started_at': null};
     writes = 0;
     conditionalUpdates = 0;
@@ -42,6 +45,7 @@ void main() {
   });
   tearDown(() async {
     SyncOutboxService.resetRecoverySessionForTesting();
+    clearOwnerFixture();
     DBHelper.useDatabaseForTesting(null);
     await db.close();
   });
@@ -49,7 +53,8 @@ void main() {
       {String status = 'syncing', String id = 'action'}) async {
     await db.insert('pending_actions', {'id': id, 'type': type, 'job_id': 'a',
       'payload': jsonEncode({'cachedUpdatedAtSnapshot': base, ...payload}),
-      'status': status, 'retry_count': 2, 'created_at': base, 'updated_at': base});
+      'status': status, 'retry_count': 2, 'created_at': base, 'updated_at': base,
+      'inspector_id': ownerFixture});
   }
   Future<String> state() async => (await db.query('pending_actions')).first['status'] as String;
 
@@ -205,9 +210,9 @@ void main() {
     });
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // LOOP 1D-R4 FINAL CLOSURE PASS VERIFICATIONS
-  // ─────────────────────────────────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   test('submit_inspection preserves exact payload submittedAt', () async {
     const customTime = '2026-05-15T10:30:00.000Z';
@@ -228,6 +233,7 @@ void main() {
       'id': 'submit_with_created_at',
       'type': 'submit_inspection',
       'job_id': 'a',
+      'inspector_id': ownerFixture,
       'payload': jsonEncode({'cachedUpdatedAtSnapshot': base, ...submit}),
       'status': 'syncing',
       'retry_count': 1,
@@ -247,6 +253,7 @@ void main() {
       'id': 'submit_no_ts',
       'type': 'submit_inspection',
       'job_id': 'a',
+      'inspector_id': ownerFixture,
       'payload': jsonEncode({'cachedUpdatedAtSnapshot': base, ...submit}),
       'status': 'syncing',
       'retry_count': 1,
@@ -333,6 +340,7 @@ void main() {
       'id': 'checklist_update_a',
       'type': 'checklist_update',
       'job_id': 'a',
+      'inspector_id': ownerFixture,
       'payload': jsonEncode({
         'cachedUpdatedAtSnapshot': base,
         'checklistData': <dynamic>[],
@@ -439,6 +447,7 @@ void main() {
       'id': 'job_a_action',
       'type': 'mark_ongoing',
       'job_id': 'a',
+      'inspector_id': ownerFixture,
       'payload': jsonEncode({'cachedUpdatedAtSnapshot': null, 'r4RecoveryRequired': true}),
       'status': 'syncing',
       'retry_count': 1,
@@ -451,6 +460,7 @@ void main() {
       'id': 'job_b_action',
       'type': 'mark_ongoing',
       'job_id': 'b',
+      'inspector_id': ownerFixture,
       'payload': jsonEncode({'cachedUpdatedAtSnapshot': base, 'r4RecoveryRequired': true}),
       'status': 'syncing',
       'retry_count': 1,

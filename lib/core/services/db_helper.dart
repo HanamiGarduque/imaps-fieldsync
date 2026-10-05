@@ -8,8 +8,51 @@ import 'package:uuid/uuid.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import 'route_service.dart';
 import 'report_queue_schema.dart';
+import 'inspection_ownership_schema.dart';
+import 'supabase_service.dart';
 
 class DBHelper {
+  /// Local-only fixtures explicitly supply an authenticated identity. Production
+  /// never falls back to a preference, assignment, name, or legacy NULL owner.
+  @visibleForTesting
+  static String? inspectorIdForTesting;
+  static String? get currentInspectorId {
+    if (inspectorIdForTesting != null) return inspectorIdForTesting;
+    try { return SupabaseService.client.auth.currentUser?.id; }
+    catch (_) { return null; }
+  }
+
+  static String requireInspector() {
+    final uid = currentInspectorId;
+    if (uid == null || uid.isEmpty) throw StateError('Authenticated inspector required');
+    return uid;
+  }
+
+  static void requireSameInspector(String uid) {
+    if (currentInspectorId != uid) throw StateError('Inspector session changed');
+  }
+
+  static Future<void> _requireOwnedRow(DatabaseExecutor db, String table,
+      String key, String id, String uid) async {
+    requireSameInspector(uid);
+    final rows = await db.query(table, columns: ['inspector_id'],
+      where: '$key = ?', whereArgs: [id]);
+    if (rows.any((r) => r['inspector_id'] != uid)) {
+      throw StateError('Local evidence belongs to another or unknown inspector');
+    }
+  }
+
+  /// All job-keyed evidence participates: a replacement assignee cannot create
+  /// a new draft over a retained legacy/foreign round on this device.
+  static Future<void> requireOwnedJob(DatabaseExecutor db, String jobId, String uid) async {
+    for (final entry in {
+      'local_jobs': 'id', 'local_inspections': 'id', 'local_photos': 'job_id',
+      'inspection_job_retention': 'job_id', 'pending_actions': 'job_id',
+    }.entries) {
+      await _requireOwnedRow(db, entry.key, entry.value, jobId, uid);
+    }
+    requireSameInspector(uid);
+  }
   static Database? _database;
 
   /// The in-flight `_initDB()` future, memoised.
@@ -168,7 +211,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 16,
+      version: 17,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -313,6 +356,7 @@ class DBHelper {
           // from a name, message or job.
           await ReportQueueSchema.applyV16(db);
         }
+        if (oldVersion < 17) await InspectionOwnershipSchema.applyV17(db);
       },
       onCreate: (db, version) async {
         await createInspectionRetentionTable(db);
@@ -344,6 +388,7 @@ class DBHelper {
             parcel_address TEXT,
             supabase_application_id TEXT,
             bridge_source_id TEXT
+            ,inspector_id TEXT
           )
         ''');
 
@@ -361,6 +406,7 @@ class DBHelper {
             step_timestamps TEXT,
             is_synced INTEGER DEFAULT 0,
             updated_at TEXT
+            ,inspector_id TEXT
           )
         ''');
 
@@ -375,6 +421,7 @@ class DBHelper {
             longitude REAL,
             captured_at TEXT,
             is_synced INTEGER DEFAULT 0
+            ,inspector_id TEXT
           )
         ''');
 
@@ -393,6 +440,7 @@ class DBHelper {
 
         // Reports & Support offline queue (see onUpgrade, oldVersion < 15).
         await ReportQueueSchema.createTable(db);
+        await InspectionOwnershipSchema.applyV17(db);
       },
     );
   }
@@ -430,6 +478,7 @@ class DBHelper {
       last_error TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+      ,inspector_id TEXT
     )
   ''';
 
@@ -468,6 +517,7 @@ class DBHelper {
       message TEXT NOT NULL,
       technical_details TEXT,
       created_at TEXT NOT NULL
+      ,inspector_id TEXT
     )
   ''';
 
@@ -477,6 +527,7 @@ class DBHelper {
         CREATE TABLE IF NOT EXISTS inspection_job_retention(
           job_id TEXT PRIMARY KEY NOT NULL,
           retained_at TEXT NOT NULL
+          ,inspector_id TEXT
         )
       ''');
 
@@ -487,11 +538,13 @@ class DBHelper {
     String jobId, {
     Map<String, dynamic>? fetchedJob,
   }) async {
+    final uid = requireInspector();
     if (jobId.isEmpty || (fetchedJob != null && fetchedJob['id'] != jobId)) {
       throw StateError('Inspection entry requires the exact field job.');
     }
     final db = await database;
     await db.transaction((txn) async {
+      await requireOwnedJob(txn, jobId, uid);
       if (fetchedJob != null) {
         final effective = _projectPendingCompletions([
           fetchedJob,
@@ -526,6 +579,7 @@ class DBHelper {
       await txn.insert('inspection_job_retention', {
         'job_id': jobId,
         'retained_at': DateTime.now().toUtc().toIso8601String(),
+        'inspector_id': uid,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
     });
   }
@@ -533,20 +587,25 @@ class DBHelper {
   /// Called only after confirmed online acceptance, outside the business
   /// submission catch. Failure leaves retention intact for recovery via cache.
   /// Returning false reports cleanup failure without resubmitting remote work.
-  static Future<bool> finalizeAcceptedOnlineInspection(String jobId) async {
+  static Future<bool> finalizeAcceptedOnlineInspection(String jobId, {
+    InspectionAuthorityResult remoteResult = InspectionAuthorityResult.offlineOrUnverifiable,
+  }) async {
+    if (remoteResult != InspectionAuthorityResult.authorized) return false;
     try {
+      final uid = requireInspector();
       final db = await database;
       await db.transaction((txn) async {
+        await requireOwnedJob(txn, jobId, uid);
         await txn.update(
           'local_jobs',
           {'status': 'completed'},
-          where: 'id = ?',
-          whereArgs: [jobId],
+          where: 'id = ? AND inspector_id = ?',
+          whereArgs: [jobId, uid],
         );
         await txn.delete(
           'inspection_job_retention',
-          where: 'job_id = ?',
-          whereArgs: [jobId],
+          where: 'job_id = ? AND inspector_id = ?',
+          whereArgs: [jobId, uid],
         );
       });
       return true;
@@ -566,12 +625,13 @@ class DBHelper {
     final rows = await db.rawQuery('''
       SELECT j.id FROM local_jobs j
       WHERE j.status IN ('completed', 'Completed', 'submitted')
+      AND j.inspector_id = ?
       AND EXISTS (
         SELECT 1 FROM pending_actions a
         WHERE a.job_id = j.id AND a.type = 'submit_inspection'
         AND a.status IN ('pending', 'failed', 'syncing', 'conflict')
       )
-    ''');
+    ''', [currentInspectorId]);
     return rows.map((row) => row['id'] as String).toSet();
   }
 
@@ -625,6 +685,7 @@ class DBHelper {
         : rawAssignedByName?.toString().trim();
     return {
       'id': job['id'],
+      'inspector_id': requireInspector(),
       'local_inspection_id': job['local_inspection_id'],
       'status': job['status'],
       'scheduled_date': job['scheduled_date'],
@@ -715,8 +776,11 @@ class DBHelper {
   }
 
   static Future<void> cacheJobs(List<Map<String, dynamic>> jobs) async {
+    final uid = currentInspectorId;
+    if (uid == null) return;
     final db = await database;
     await db.transaction((txn) async {
+      requireSameInspector(uid);
       final protectedIds = await _pendingCompletionJobIds(txn);
       final effectiveJobs = _projectPendingCompletions(jobs, protectedIds);
       // Only actual canonical remote completion releases unfinished retention.
@@ -724,8 +788,8 @@ class DBHelper {
       for (final job in jobs.where((job) => job['status'] == 'completed')) {
         await txn.delete(
           'inspection_job_retention',
-          where: 'job_id = ?',
-          whereArgs: [job['id']],
+          where: 'job_id = ? AND inspector_id = ?',
+          whereArgs: [job['id'], uid],
         );
       }
       final retained = await txn.query('inspection_job_retention');
@@ -735,17 +799,20 @@ class DBHelper {
       // Separate unfinished-work and pending-completion reasons protect rows.
       // Unretained rows still follow ordinary full-refresh replacement.
       if (protectedIds.isEmpty) {
-        batch.delete('local_jobs');
+        batch.delete('local_jobs', where: 'inspector_id = ?', whereArgs: [uid]);
       } else {
         batch.delete(
           'local_jobs',
           where:
-              'id NOT IN (${List.filled(protectedIds.length, '?').join(',')})',
-          whereArgs: protectedIds.toList(),
+              'inspector_id = ? AND id NOT IN (${List.filled(protectedIds.length, '?').join(',')})',
+          whereArgs: [uid, ...protectedIds],
         );
       }
 
       for (final job in effectiveJobs) {
+        final existingOwner = await txn.query('local_jobs', columns: ['inspector_id'],
+          where: 'id = ?', whereArgs: [job['id']]);
+        if (existingOwner.any((r) => r['inspector_id'] != uid)) continue;
         final incoming = Map<String, dynamic>.of(job);
         final existingRows = await txn.query(
           'local_jobs',
@@ -781,7 +848,7 @@ class DBHelper {
 
   static Future<List<Map<String, dynamic>>> getCachedJobs() async {
     final db = await database;
-    return await db.query('local_jobs');
+    return await db.query('local_jobs', where: 'inspector_id = ?', whereArgs: [currentInspectorId]);
   }
 
   // --- ROAD-ROUTE CACHE (local navigation support; never synced) ---------
@@ -839,8 +906,8 @@ class DBHelper {
     final rows = await db.query(
       'local_jobs',
       columns: ['cached_updated_at'],
-      where: 'id = ?',
-      whereArgs: [jobId],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [jobId, currentInspectorId],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -860,9 +927,13 @@ class DBHelper {
     required String boundaryStatus,
     int currentStep = 0,
   }) async {
+    final uid = requireInspector();
     final db = await database;
-    await db.insert('local_inspections', {
+    await db.transaction((txn) async {
+    await requireOwnedJob(txn, jobId, uid);
+    await txn.insert('local_inspections', {
       'id': jobId,
+      'inspector_id': uid,
       'actual_land_use': actualLandUse,
       'notes': notes,
       'is_compliant': isCompliant ? 1 : 0,
@@ -873,22 +944,43 @@ class DBHelper {
       'is_synced': 0,
       'updated_at': DateTime.now().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
   }
 
   static Future<Map<String, dynamic>?> getLocalInspection(String jobId) async {
     final db = await database;
     final results = await db.query(
       'local_inspections',
-      where: 'id = ?',
-      whereArgs: [jobId],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [jobId, currentInspectorId],
     );
     if (results.isEmpty) return null;
     return results.first;
   }
 
+  static Future<void> saveInspectionStep(String jobId, int step,
+      Map<String, String> timestamps, String inspectorId) async {
+    requireSameInspector(inspectorId);
+    final db = await database;
+    await db.transaction((txn) async {
+      await requireOwnedJob(txn, jobId, inspectorId);
+      final values = {
+        'current_step': step, 'step_timestamps': jsonEncode(timestamps),
+        'updated_at': DateTime.now().toIso8601String(), 'is_synced': 0,
+      };
+      final updated = await txn.update('local_inspections', values,
+        where:'id = ? AND inspector_id = ?', whereArgs:[jobId, inspectorId]);
+      if (updated == 0) {
+        requireSameInspector(inspectorId);
+        await txn.insert('local_inspections', {'id':jobId, 'inspector_id':inspectorId, ...values});
+      }
+    });
+  }
+
   static Future<List<Map<String, dynamic>>> getPendingInspections() async {
     final db = await database;
-    return await db.query('local_inspections', where: 'is_synced = 0');
+    return await db.query('local_inspections', where: 'is_synced = 0 AND inspector_id = ?',
+      whereArgs: [currentInspectorId]);
   }
 
   static Future<void> markInspectionSynced(String jobId) async {
@@ -896,8 +988,8 @@ class DBHelper {
     await db.update(
       'local_inspections',
       {'is_synced': 1},
-      where: 'id = ?',
-      whereArgs: [jobId],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [jobId, currentInspectorId],
     );
   }
 
@@ -911,9 +1003,14 @@ class DBHelper {
     required double? latitude,
     required double? longitude,
   }) async {
+    final uid = requireInspector();
     final db = await database;
-    await db.insert('local_photos', {
+    await db.transaction((txn) async {
+    await requireOwnedJob(txn, jobId, uid);
+    await _requireOwnedRow(txn, 'local_photos', 'id', photoId, uid);
+    await txn.insert('local_photos', {
       'id': photoId,
+      'inspector_id': uid,
       'job_id': jobId,
       'photo_path': photoPath,
       'notes': notes,
@@ -922,20 +1019,22 @@ class DBHelper {
       'captured_at': DateTime.now().toIso8601String(),
       'is_synced': 0,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
   }
 
   static Future<List<Map<String, dynamic>>> getLocalPhotos(String jobId) async {
     final db = await database;
     return await db.query(
       'local_photos',
-      where: 'job_id = ?',
-      whereArgs: [jobId],
+      where: 'job_id = ? AND inspector_id = ?',
+      whereArgs: [jobId, currentInspectorId],
     );
   }
 
   static Future<List<Map<String, dynamic>>> getPendingPhotos() async {
     final db = await database;
-    return await db.query('local_photos', where: 'is_synced = 0');
+    return await db.query('local_photos', where: 'is_synced = 0 AND inspector_id = ?',
+      whereArgs: [currentInspectorId]);
   }
 
   static Future<void> markPhotoSynced(String photoId) async {
@@ -943,8 +1042,8 @@ class DBHelper {
     await db.update(
       'local_photos',
       {'is_synced': 1},
-      where: 'id = ?',
-      whereArgs: [photoId],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [photoId, currentInspectorId],
     );
   }
 
@@ -962,8 +1061,8 @@ class DBHelper {
         await txn.update(
           'local_photos',
           {'is_synced': 1},
-          where: 'id = ?',
-          whereArgs: [id],
+          where: 'id = ? AND inspector_id = ?',
+          whereArgs: [id, currentInspectorId],
         );
       }
     });
@@ -973,8 +1072,8 @@ class DBHelper {
     final db = await database;
     final rows = await db.query(
       'local_photos',
-      where: 'id = ?',
-      whereArgs: [photoId],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [photoId, currentInspectorId],
       limit: 1,
     );
     return rows.isEmpty ? null : rows.first;
@@ -988,12 +1087,20 @@ class DBHelper {
     String photoId, {
     String? photoPath,
   }) async {
+    final uid = requireInspector();
+    final db = await database;
+    final rows = await db.query('local_photos', where: 'id = ? AND inspector_id = ?',
+      whereArgs: [photoId, uid]);
+    if (rows.isEmpty) return;
+    if (photoPath != null && photoPath != rows.single['photo_path']) {
+      throw StateError('Photo path does not match owned evidence');
+    }
     if (photoPath != null && photoPath.isNotEmpty) {
       final file = File(photoPath);
       if (await file.exists()) await file.delete();
     }
-    final db = await database;
-    await db.delete('local_photos', where: 'id = ?', whereArgs: [photoId]);
+    requireSameInspector(uid);
+    await db.delete('local_photos', where: 'id = ? AND inspector_id = ?', whereArgs: [photoId, uid]);
   }
 
   // --- PENDING ACTIONS OUTBOX (FieldSync) ---
@@ -1007,16 +1114,23 @@ class DBHelper {
     required String type,
     required String jobId,
     required Map<String, dynamic> payload,
+    bool preserveOnly = false,
+    String? expectedInspectorId,
   }) async {
+    final uid = requireInspector();
+    if (expectedInspectorId != null) requireSameInspector(expectedInspectorId);
     final db = await database;
     final now = DateTime.now().toIso8601String();
     await db.transaction((txn) async {
+      await requireOwnedJob(txn, jobId, uid);
+      await _requireOwnedRow(txn, 'pending_actions', 'id', id, uid);
       await txn.insert('pending_actions', {
         'id': id,
+        'inspector_id': uid,
         'type': type,
         'job_id': jobId,
         'payload': jsonEncode(payload),
-        'status': 'pending',
+        'status': preserveOnly ? 'conflict' : 'pending',
         'retry_count': 0,
         'last_error': null,
         'created_at': now,
@@ -1062,26 +1176,8 @@ class DBHelper {
         }
         // Unfinished inspection retention is deliberately not retired here.
       }
-      if (type == 'submit_inspection') {
-        // Field work is complete, delivery is not. Neither write may survive
-        // alone; a missing cache row is also a failed acceptance, not success.
-        final updated = await txn.update(
-          'local_jobs',
-          {'status': 'completed'},
-          where: 'id = ?',
-          whereArgs: [jobId],
-        );
-        if (updated != 1) {
-          throw StateError('Final Submit requires the exact cached field job.');
-        }
-        // Retention handoff: unfinished-work retention ends in the same
-        // transaction that durably accepts the offline completion.
-        await txn.delete(
-          'inspection_job_retention',
-          where: 'job_id = ?',
-          whereArgs: [jobId],
-        );
-      }
+      // A queued submission is preserved intent, not proof of completion.
+      // Keep lifecycle and retention until a verified remote acceptance.
     });
   }
 
@@ -1089,11 +1185,14 @@ class DBHelper {
   /// The durable marker routes retries back through reconciliation, NEVER
   /// ordinary replay. Preserve action identity, payload fields and retry count.
   static Future<void> recoverAbandonedClaims() async {
+    final uid = currentInspectorId;
+    if (uid == null) return;
     final db = await database;
     await db.transaction((txn) async {
       final rows = await txn.query(
         'pending_actions',
-        where: "status = 'syncing'",
+        where: "status = 'syncing' AND inspector_id = ?",
+        whereArgs: [uid],
       );
       for (final row in rows) {
         final raw = row['payload'] as String;
@@ -1133,7 +1232,8 @@ class DBHelper {
     final db = await database;
     return await db.query(
       'pending_actions',
-      where: "status IN ('pending', 'failed')",
+      where: "status IN ('pending', 'failed') AND inspector_id = ?",
+      whereArgs: [currentInspectorId],
       orderBy: 'created_at ASC',
     );
   }
@@ -1142,7 +1242,8 @@ class DBHelper {
     final db = await database;
     return await db.query(
       'pending_actions',
-      where: "status IN ('pending', 'failed', 'syncing', 'conflict')",
+      where: "status IN ('pending', 'failed', 'syncing', 'conflict') AND inspector_id = ?",
+      whereArgs: [currentInspectorId],
       orderBy: 'created_at ASC',
     );
   }
@@ -1150,31 +1251,10 @@ class DBHelper {
   static Future<int> getPendingActionsCount() async {
     final db = await database;
     final result = await db.rawQuery(
-      "SELECT COUNT(*) AS c FROM pending_actions WHERE status IN ('pending', 'failed', 'conflict')",
+      "SELECT COUNT(*) AS c FROM pending_actions WHERE status IN ('pending', 'failed', 'syncing', 'conflict') AND inspector_id = ?",
+      [currentInspectorId],
     );
     return Sqflite.firstIntValue(result) ?? 0;
-  }
-
-  /// Known Issue #4 (AUTH_SECURITY_MASTER_DOC.md §17) — clears every
-  /// locally-cached inspection-related table. This is a low-level
-  /// primitive only: it does NOT check for unsynced pending work first —
-  /// that safety check belongs to the caller (see
-  /// LocalDataGuardService.reconcileLocalDataOwnership), which must never
-  /// call this while getPendingActionsCount() > 0, or real unsynced field
-  /// inspection work would be destroyed permanently. Deliberately clears
-  /// rows rather than deleting the database file itself, so the SQLCipher
-  /// encryption key/setup is untouched.
-  static Future<void> wipeAllLocalData() async {
-    final db = await database;
-    await db.transaction((txn) async {
-      await txn.delete('inspection_job_retention');
-      await txn.delete('local_jobs');
-      await txn.delete('local_inspections');
-      await txn.delete('local_photos');
-      await txn.delete('pending_actions');
-      await txn.delete('sync_log_entries');
-    });
-    debugPrint('[DB] wipeAllLocalData: all local inspection tables cleared.');
   }
 
   static Future<void> markActionSyncing(String id) async {
@@ -1182,8 +1262,8 @@ class DBHelper {
     await db.update(
       'pending_actions',
       {'status': 'syncing', 'updated_at': DateTime.now().toIso8601String()},
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [id, currentInspectorId],
     );
   }
 
@@ -1195,16 +1275,17 @@ class DBHelper {
     await db.update(
       'pending_actions',
       {'status': 'synced', 'updated_at': DateTime.now().toIso8601String()},
-      where: "id = ? AND status = 'syncing'",
-      whereArgs: [id],
+      where: "id = ? AND status = 'syncing' AND inspector_id = ?",
+      whereArgs: [id, currentInspectorId],
     );
     await db.rawDelete('''
       DELETE FROM pending_actions
-      WHERE status = 'synced' AND id NOT IN (
-        SELECT id FROM pending_actions WHERE status = 'synced'
+      WHERE status = 'synced' AND inspector_id = ? AND id NOT IN (
+        SELECT id FROM pending_actions
+        WHERE status = 'synced' AND inspector_id = ?
         ORDER BY updated_at DESC LIMIT 50
       )
-    ''');
+    ''', [currentInspectorId, currentInspectorId]);
   }
 
   /// Real completed-sync history for the Sync Center's audit log —
@@ -1215,7 +1296,8 @@ class DBHelper {
     final db = await database;
     return await db.query(
       'pending_actions',
-      where: "status = 'synced'",
+      where: "status = 'synced' AND inspector_id = ?",
+      whereArgs: [currentInspectorId],
       orderBy: 'updated_at DESC',
       limit: limit,
     );
@@ -1225,8 +1307,8 @@ class DBHelper {
     final db = await database;
     await db.rawUpdate(
       "UPDATE pending_actions SET status = 'failed', retry_count = retry_count + 1, "
-      "last_error = ?, updated_at = ? WHERE id = ? AND status = 'syncing'",
-      [error, DateTime.now().toIso8601String(), id],
+      "last_error = ?, updated_at = ? WHERE id = ? AND status = 'syncing' AND inspector_id = ?",
+      [error, DateTime.now().toIso8601String(), id, currentInspectorId],
     );
   }
 
@@ -1239,8 +1321,8 @@ class DBHelper {
         'last_error': error,
         'updated_at': DateTime.now().toIso8601String(),
       },
-      where: "id = ? AND status = 'syncing'",
-      whereArgs: [id],
+      where: "id = ? AND status = 'syncing' AND inspector_id = ?",
+      whereArgs: [id, currentInspectorId],
     );
   }
 
@@ -1249,8 +1331,8 @@ class DBHelper {
     final rows = await db.query(
       'pending_actions',
       columns: ['payload'],
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [id, currentInspectorId],
       limit: 1,
     );
     if (rows.isEmpty) return;
@@ -1268,8 +1350,8 @@ class DBHelper {
         'last_error': null,
         'updated_at': DateTime.now().toIso8601String(),
       },
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [id, currentInspectorId],
     );
   }
 
@@ -1296,9 +1378,12 @@ class DBHelper {
     String? pendingActionId,
     Map<String, dynamic>? technicalDetails,
   }) async {
+    final uid = currentInspectorId;
+    if (uid == null) return;
     final db = await database;
     await db.insert('sync_log_entries', {
       'id': const Uuid().v4(),
+      'inspector_id': uid,
       'pending_action_id': pendingActionId,
       'job_id': jobId,
       'event_type': eventType,
@@ -1338,6 +1423,7 @@ class DBHelper {
         // Backfill from pending_actions so past sync history is visible
         final pastActions = await db.query(
           'pending_actions',
+          where: 'inspector_id = ?', whereArgs: [currentInspectorId],
           orderBy: 'updated_at DESC',
           limit: 50,
         );
@@ -1373,6 +1459,7 @@ class DBHelper {
 
           await db.insert('sync_log_entries', {
             'id': a['id'] ?? const Uuid().v4(),
+            'inspector_id': currentInspectorId,
             'pending_action_id': a['id'],
             'job_id': a['job_id'],
             'event_type': 'sync_$status',
@@ -1396,8 +1483,8 @@ class DBHelper {
     try {
       return await db.query(
         'sync_log_entries',
-        where: jobId != null ? 'job_id = ?' : null,
-        whereArgs: jobId != null ? [jobId] : null,
+        where: 'inspector_id = ?${jobId != null ? ' AND job_id = ?' : ''}',
+        whereArgs: [currentInspectorId, ?jobId],
         orderBy: 'created_at DESC',
         limit: limit,
         offset: offset,
@@ -1412,9 +1499,9 @@ class DBHelper {
     try {
       final result = await db.rawQuery(
         jobId != null
-            ? 'SELECT COUNT(*) as c FROM sync_log_entries WHERE job_id = ?'
-            : 'SELECT COUNT(*) as c FROM sync_log_entries',
-        jobId != null ? [jobId] : null,
+             ? 'SELECT COUNT(*) as c FROM sync_log_entries WHERE inspector_id = ? AND job_id = ?'
+             : 'SELECT COUNT(*) as c FROM sync_log_entries WHERE inspector_id = ?',
+        [currentInspectorId, ?jobId],
       );
       return Sqflite.firstIntValue(result) ?? 0;
     } catch (_) {
@@ -1451,19 +1538,21 @@ class DBHelper {
 
     final jobsCount =
         Sqflite.firstIntValue(
-          await db.rawQuery('SELECT COUNT(*) as c FROM local_jobs'),
+          await db.rawQuery('SELECT COUNT(*) as c FROM local_jobs WHERE inspector_id = ?', [currentInspectorId]),
         ) ??
         0;
 
     final syncedPhotoRows = await db.query(
       'local_photos',
       columns: ['photo_path'],
-      where: 'is_synced = 1',
+      where: 'is_synced = 1 AND inspector_id = ?',
+      whereArgs: [currentInspectorId],
     );
     final unsyncedPhotoCount =
         Sqflite.firstIntValue(
           await db.rawQuery(
-            'SELECT COUNT(*) as c FROM local_photos WHERE is_synced = 0',
+            'SELECT COUNT(*) as c FROM local_photos WHERE is_synced = 0 AND inspector_id = ?',
+            [currentInspectorId],
           ),
         ) ??
         0;
@@ -1500,10 +1589,12 @@ class DBHelper {
   /// message ("Freed 12 photo(s), 8.4 MB").
   static Future<int> clearSyncedPhotoCache() async {
     final db = await database;
-    final syncedRows = await db.query('local_photos', where: 'is_synced = 1');
+    final uid = requireInspector();
+    final syncedRows = await db.query('local_photos', where: 'is_synced = 1 AND inspector_id = ?', whereArgs: [uid]);
 
     var cleared = 0;
     for (final row in syncedRows) {
+      requireSameInspector(uid);
       final path = row['photo_path'] as String?;
       if (path == null) continue;
       try {
@@ -1520,7 +1611,8 @@ class DBHelper {
       }
     }
 
-    await db.delete('local_photos', where: 'is_synced = 1');
+    requireSameInspector(uid);
+    await db.delete('local_photos', where: 'is_synced = 1 AND inspector_id = ?', whereArgs: [uid]);
 
     return cleared;
   }
@@ -1538,16 +1630,16 @@ class DBHelper {
     await db.rawDelete(
       '''
       DELETE FROM sync_log_entries
-      WHERE id NOT IN (
-        SELECT id FROM sync_log_entries ORDER BY created_at DESC LIMIT ?
+      WHERE inspector_id = ? AND id NOT IN (
+        SELECT id FROM sync_log_entries WHERE inspector_id = ? ORDER BY created_at DESC LIMIT ?
       )
     ''',
-      [keep],
+      [currentInspectorId, currentInspectorId, keep],
     );
   }
 
   static Future<void> clearSyncLogEntries() async {
     final db = await database;
-    await db.delete('sync_log_entries');
+    await db.delete('sync_log_entries', where: 'inspector_id = ?', whereArgs: [currentInspectorId]);
   }
 }

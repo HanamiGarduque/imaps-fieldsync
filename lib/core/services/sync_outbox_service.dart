@@ -90,7 +90,6 @@ class SyncOutboxService {
   SyncOutboxService._();
 
   static bool _draining = false;
-  static bool _startupRecoveryDone = false;
 
   @visibleForTesting
   static Future<Map<String, dynamic>?> Function(String)? recoveryReadForTesting;
@@ -106,7 +105,6 @@ class SyncOutboxService {
   @visibleForTesting
   static void resetRecoverySessionForTesting() {
     if (_draining) throw StateError('Cannot reset a live drain');
-    _startupRecoveryDone = false;
     _knownGoodUpdatedAt.clear();
     recoveryReadForTesting = null;
     recoveryWriteForTesting = null;
@@ -217,6 +215,7 @@ class SyncOutboxService {
     required double accuracyMeters,
     String? locationLabel,
   }) async {
+    final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {
@@ -228,6 +227,7 @@ class SyncOutboxService {
     );
     return DBHelper.enqueueAction(
       id: 'gps_confirm_$jobId',
+      expectedInspectorId: uid,
       type: 'gps_confirm',
       jobId: jobId,
       payload: payload,
@@ -271,6 +271,7 @@ class SyncOutboxService {
     required int checklistCompletedCount,
     required int checklistTotalCount,
   }) async {
+    final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {
@@ -281,6 +282,7 @@ class SyncOutboxService {
     );
     return DBHelper.enqueueAction(
       id: 'checklist_update_$jobId',
+      expectedInspectorId: uid,
       type: 'checklist_update',
       jobId: jobId,
       payload: payload,
@@ -310,12 +312,14 @@ class SyncOutboxService {
     required String jobId,
     required List<Map<String, dynamic>> photosData,
   }) async {
+    final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {'photos': photosData},
     );
     return DBHelper.enqueueAction(
       id: 'photos_update_$jobId',
+      expectedInspectorId: uid,
       type: 'photos_update',
       jobId: jobId,
       payload: payload,
@@ -332,6 +336,7 @@ class SyncOutboxService {
     required String? recommendations,
     required String inspectorNotes,
   }) async {
+    final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {
@@ -343,6 +348,7 @@ class SyncOutboxService {
     );
     return DBHelper.enqueueAction(
       id: 'findings_update_$jobId',
+      expectedInspectorId: uid,
       type: 'findings_update',
       jobId: jobId,
       payload: payload,
@@ -368,12 +374,14 @@ class SyncOutboxService {
     // covers it and the latest offline state always wins.
     Map<String, String>? stepTimestamps,
   }) async {
+    final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {'currentStep': step, 'stepTimestamps': ?stepTimestamps},
     );
     return DBHelper.enqueueAction(
       id: 'current_step_update_$jobId',
+      expectedInspectorId: uid,
       type: 'current_step_update',
       jobId: jobId,
       payload: payload,
@@ -399,7 +407,9 @@ class SyncOutboxService {
     required List<Map<String, dynamic>>
     photosData, // UPDATED: Changed to expect Map data
     String? locationLabel,
+    bool preserveOnly = false,
   }) async {
+    final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
       jobId: jobId,
       payload: {
@@ -420,8 +430,10 @@ class SyncOutboxService {
     return DBHelper.enqueueAction(
       id: const Uuid().v4(),
       type: 'submit_inspection',
+      expectedInspectorId: uid,
       jobId: jobId,
       payload: payload,
+      preserveOnly: preserveOnly,
     );
   }
 
@@ -449,12 +461,14 @@ class SyncOutboxService {
     String? onlyJobId,
   }) async {
     if (_draining) return;
+    final uid = DBHelper.currentInspectorId;
+    if (uid == null) return;
     _draining = true;
     try {
-      if (!_startupRecoveryDone) {
-        await DBHelper.recoverAbandonedClaims();
-        _startupRecoveryDone = true;
-      }
+      // Recovery is scoped per session; a different inspector's claims are
+      // preserved, not changed or acknowledged by this drain.
+      await DBHelper.recoverAbandonedClaims();
+      if (DBHelper.currentInspectorId != uid) return;
       final allActions = await DBHelper.getActionableActions();
       final actions = onlyJobId == null
           ? allActions
@@ -481,6 +495,7 @@ class SyncOutboxService {
 
       for (var i = 0; i < actions.length; i++) {
         final action = actions[i];
+        if (DBHelper.currentInspectorId != uid || action['inspector_id'] != uid) break;
         final id = action['id'] as String;
         final type = action['type'] as String;
         final jobId = action['job_id'] as String;
@@ -499,6 +514,7 @@ class SyncOutboxService {
         );
         try {
           await _executeAction(action);
+          DBHelper.requireSameInspector(uid);
           await DBHelper.markActionSynced(id);
           await _recordSuccessfulSync();
           successCount++;
@@ -510,6 +526,7 @@ class SyncOutboxService {
             pendingActionId: id,
           );
         } on _OutboxConflictException catch (e) {
+          if (DBHelper.currentInspectorId != uid) break;
           debugPrint(
             'SyncOutboxService: action $id (${action['type']}) conflict: ${e.message}',
           );
@@ -524,7 +541,21 @@ class SyncOutboxService {
             pendingActionId: id,
             technicalDetails: {'reason': e.message},
           );
+        } on InspectionAuthorityException catch (e) {
+          if (DBHelper.currentInspectorId != uid) break;
+          debugPrint(
+            'SyncOutboxService: action $id (${action['type']}) has no proven '
+            'authority (${e.result.name}); not acknowledged.',
+          );
+          if (e.result == InspectionAuthorityResult.notAssignedOrUnavailable) {
+            await DBHelper.markActionConflict(id, e.result.message);
+            conflictCount++;
+          } else {
+            await DBHelper.markActionFailed(id, e.result.message);
+            failCount++;
+          }
         } catch (e) {
+          if (DBHelper.currentInspectorId != uid) break;
           debugPrint(
             'SyncOutboxService: action $id (${action['type']}) failed: $e',
           );
@@ -554,6 +585,7 @@ class SyncOutboxService {
         }
       }
 
+      if (DBHelper.currentInspectorId != uid) return;
       await DBHelper.logSyncEvent(
         eventType: 'queue_finished',
         result: failCount > 0
@@ -634,6 +666,10 @@ class SyncOutboxService {
   }
 
   static Future<void> _executeAction(Map<String, dynamic> action) async {
+    final owner = action['inspector_id'];
+    if (owner is! String || owner != DBHelper.currentInspectorId) {
+      throw StateError('Queued inspection owner does not match session');
+    }
     final type = action['type'] as String;
     final jobId = action['job_id'] as String;
     final payload = Map<String, dynamic>.from(
@@ -650,6 +686,7 @@ class SyncOutboxService {
       if (remote == null) {
         throw _OutboxConflictException('Missing or reassigned job');
       }
+      DBHelper.requireSameInspector(owner);
       if (remote['status'] == 'completed') {
         // A start/status replay is superseded by completion. A late progress
         // replay is satisfied only at Step 6; neither may write the row.
@@ -666,6 +703,7 @@ class SyncOutboxService {
       jobId: jobId,
       payload: payload,
     );
+    DBHelper.requireSameInspector(owner);
 
     switch (type) {
       case 'gps_confirm':
@@ -678,15 +716,8 @@ class SyncOutboxService {
         );
         break;
       case 'mark_ongoing':
-        // markJobOngoing() catches its own exceptions and returns a bool
-        // rather than throwing (unlike confirmGpsOnSite) — so unlike every
-        // other case here, a plain `await` wouldn't surface a failure to
-        // the drain loop's try/catch above, and the action would get
-        // marked synced even though nothing actually happened server-side.
-        // Explicitly throw on `false` so retry/failed-action handling
-        // above behaves the same as it does for every other action type.
-        final ok = await SupabaseService.markJobOngoing(jobId);
-        if (!ok) throw Exception('markJobOngoing did not succeed');
+        // Accept the authority result before acknowledging the local action.
+        (await SupabaseService.markJobOngoing(jobId)).requireAuthorized();
         break;
       case 'submit_inspection':
         // Photos couldn't be uploaded while this was queued (that needs a
@@ -752,8 +783,8 @@ class SyncOutboxService {
         final checklistData = (payload['checklistData'] as List)
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
-
-        await SupabaseService.submitInspection(
+        DBHelper.requireSameInspector(owner);
+        final submission = await SupabaseService.submitInspection(
           jobId: jobId,
           findings: payload['findings'] as String,
           isCompliant: payload['isCompliant'] as bool,
@@ -770,6 +801,9 @@ class SyncOutboxService {
           locationLabel: payload['locationLabel'] as String?,
           submittedAt: action['created_at'] as String?,
         );
+        submission.requireAuthorized();
+        DBHelper.requireSameInspector(owner);
+        await DBHelper.finalizeAcceptedOnlineInspection(jobId, remoteResult: submission);
         await _acknowledgeQueuedLocalPhotos(photosData);
         break;
       case 'checklist_update':
@@ -789,13 +823,14 @@ class SyncOutboxService {
         // F1 fix: carry the per-step saved times through the offline queue
         // so field_jobs.step_timestamps is updated by the same drain pass.
         final stepTs = payload['stepTimestamps'];
-        await SupabaseService.advanceJobInspectionProgress(
+        final result = await SupabaseService.advanceJobInspectionProgress(
           jobId: jobId,
           currentStep: payload['currentStep'] as int,
           stepTimestamps: stepTs is Map
               ? stepTs.map((k, v) => MapEntry(k.toString(), v.toString()))
               : null,
         );
+        result.requireAuthorized();
         break;
       case 'photos_update':
         final photosData = (payload['photos'] as List)
@@ -805,6 +840,7 @@ class SyncOutboxService {
           jobId: jobId,
           photosData: photosData,
         );
+        DBHelper.requireSameInspector(owner);
         await SupabaseService.updateJobInspectionProgress(
           jobId: jobId,
           updateData: {
@@ -879,6 +915,8 @@ class SyncOutboxService {
         await (recoveryReadForTesting ?? SupabaseService.readOutboxRecoveryJob)(
           jobId,
         );
+    final owner = action['inspector_id'] as String;
+    DBHelper.requireSameInspector(owner);
     if (remote == null) {
       throw _OutboxConflictException('Missing or reassigned job');
     }
@@ -1012,6 +1050,7 @@ class SyncOutboxService {
                 version is String &&
                 _sameInstant(base, version),
           );
+          DBHelper.requireSameInspector(owner);
           await _acknowledgeQueuedLocalPhotos(
             photos.map((p) => Map<String, dynamic>.from(p as Map)).toList(),
           );
@@ -1088,6 +1127,7 @@ class SyncOutboxService {
         'No defensible unchanged durable base for recovery',
       );
     }
+    DBHelper.requireSameInspector(owner);
     final result =
         await (recoveryWriteForTesting ??
             SupabaseService.conditionalOutboxUpdate)(

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
@@ -49,6 +47,7 @@ class InspectionProgress extends ChangeNotifier {
   // progress to silently carry over into an unrelated task.
   String? _activeTaskId;
   String? _activeTaskLabel;
+  String? _inspectorId;
 
   // FIX (device-test finding — "progress showed 1/6 after reaching step 2"):
   // markStepComplete() used to fire _persistCurrentStep() unawaited, so two
@@ -65,10 +64,10 @@ class InspectionProgress extends ChangeNotifier {
   // completed, regardless of how fast each one's own I/O happens to be.
   Future<void> _persistQueue = Future.value();
 
-  int get highestCompleted => _highestCompleted;
-  int get currentStep => (_highestCompleted + 1).clamp(1, totalSteps);
-  bool get isComplete => _highestCompleted >= totalSteps;
-  bool isDone(int step) => step <= _highestCompleted;
+  int get highestCompleted => _inspectorId == DBHelper.currentInspectorId ? _highestCompleted : 0;
+  int get currentStep => (highestCompleted + 1).clamp(1, totalSteps);
+  bool get isComplete => highestCompleted >= totalSteps;
+  bool isDone(int step) => step <= highestCompleted;
   bool isCurrent(int step) => step == currentStep;
   bool isLocked(int step) => step > currentStep;
   String get currentStepTitle => stepTitles[currentStep - 1];
@@ -83,6 +82,7 @@ class InspectionProgress extends ChangeNotifier {
   /// Call when a step's "Continue" action fires, right before navigating
   /// forward. Steps can only be completed in order.
   void markStepComplete(int step) {
+    if (_inspectorId == null || _inspectorId != DBHelper.currentInspectorId) return;
     if (step == _highestCompleted + 1) {
       _highestCompleted = step;
       // F1 fix: stamp the real moment this save/proceed happened. Every
@@ -97,7 +97,9 @@ class InspectionProgress extends ChangeNotifier {
         // have already switched to a different task, and _activeTaskId
         // would no longer be the one this particular step belongs to.
         final taskId = _activeTaskId!;
-        _persistQueue = _persistQueue.then((_) => _persistCurrentStep(taskId, step));
+        final uid = _inspectorId!;
+        final timestamps = _stepCompletedAt.map((k,v) => MapEntry(k.toString(),v));
+        _persistQueue = _persistQueue.then((_) => _persistCurrentStep(taskId, step, uid, timestamps));
       }
 
       if (step < totalSteps && _activeTaskId != null) {
@@ -114,38 +116,13 @@ class InspectionProgress extends ChangeNotifier {
   /// Saves the exact step number to SQLite (always) and Supabase (best-
   /// effort, if online). This gives us a real stored value alongside the
   /// derivedHighestStep heuristic — belt-and-suspenders, doesn't replace it.
-  Future<void> _persistCurrentStep(String taskId, int step) async {
-    // F1 fix: persist the accumulated per-step saved times alongside the
-    // step number. Keys are stringified step numbers ("1".."6") so the map
-    // round-trips through JSON and Supabase's jsonb cleanly.
-    final timestampsJson = jsonEncode(
-      _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
-    );
+  Future<void> _persistCurrentStep(String taskId, int step, String uid,
+      Map<String,String> timestamps) async {
     try {
-      final db = await DBHelper.database;
-      final existing = await DBHelper.getLocalInspection(taskId);
-      if (existing != null) {
-        await db.update(
-          'local_inspections',
-          {
-            'current_step': step,
-            'step_timestamps': timestampsJson,
-            'updated_at': DateTime.now().toIso8601String(),
-          },
-          where: 'id = ?',
-          whereArgs: [taskId],
-        );
-      } else {
-        await db.insert('local_inspections', {
-          'id': taskId,
-          'current_step': step,
-          'step_timestamps': timestampsJson,
-          'is_synced': 0,
-          'updated_at': DateTime.now().toIso8601String(),
-        });
-      }
+      await DBHelper.saveInspectionStep(taskId, step, timestamps, uid);
     } catch (e) {
       debugPrint('_persistCurrentStep (SQLite) failed: $e');
+      return;
     }
 
     try {
@@ -153,19 +130,21 @@ class InspectionProgress extends ChangeNotifier {
       final online = connectivityResult is List
           ? connectivityResult.any((r) => r != ConnectivityResult.none)
           : connectivityResult != ConnectivityResult.none;
+      DBHelper.requireSameInspector(uid);
       if (online) {
-        await SupabaseService.advanceJobInspectionProgress(
+        final result = await SupabaseService.advanceJobInspectionProgress(
           jobId: taskId,
           currentStep: step,
           stepTimestamps:
-              _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
+               timestamps,
         );
+        result.requireAuthorized();
       } else {
         await SyncOutboxService.enqueueCurrentStepUpdate(
           jobId: taskId,
           step: step,
           stepTimestamps:
-              _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
+               timestamps,
         );
       }
     } catch (e) {
@@ -184,11 +163,12 @@ class InspectionProgress extends ChangeNotifier {
       // this is now the only writer of current_step.)
       debugPrint('_persistCurrentStep (Supabase) failed, queuing for retry — $e');
       try {
+        DBHelper.requireSameInspector(uid);
         await SyncOutboxService.enqueueCurrentStepUpdate(
           jobId: taskId,
           step: step,
           stepTimestamps:
-              _stepCompletedAt.map((k, v) => MapEntry(k.toString(), v)),
+               timestamps,
         );
       } catch (e2) {
         debugPrint('_persistCurrentStep: failed to queue current_step update — $e2');
@@ -219,7 +199,9 @@ class InspectionProgress extends ChangeNotifier {
   /// current by the Bug 1 fix, so trusting it here is exactly "always read
   /// from the database, not from what the UI happened to have in memory."
   void ensureActiveInspection(String taskId, {String? label, int? initialStep}) {
-    final isDifferentTask = _activeTaskId != taskId;
+    final uid = DBHelper.currentInspectorId;
+    final isDifferentTask = _activeTaskId != taskId || _inspectorId != uid;
+    _inspectorId = uid;
     _activeTaskId = taskId;
     _activeTaskLabel = label ?? _activeTaskLabel;
     // F1 fix: per-step saved times belong to one task only — a different
@@ -240,6 +222,7 @@ class InspectionProgress extends ChangeNotifier {
     _highestCompleted = 0;
     _activeTaskId = null;
     _activeTaskLabel = null;
+    _inspectorId = null;
     _stepCompletedAt.clear();
     notifyListeners();
   }

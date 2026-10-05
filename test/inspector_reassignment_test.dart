@@ -272,13 +272,14 @@ void main() {
     await expectNoStart();
   });
 
-  test('account switch with stale A cache only allows B when B is assignee', () async {
+  test('account switch cannot consume A-owned local cache even after reassignment', () async {
     await signInInspector(inspectorB);
     expect(await InspectionStartService.prepareJob(jobX), InspectionStartResult.notAssignedOrUnavailable);
     await expectNoStart();
     remote['assigned_inspector_id'] = inspectorB;
-    expect(await InspectionStartService.prepareJob(jobX), InspectionStartResult.authorized);
-    expect((await db.query('inspection_job_retention')).single['job_id'], jobX);
+    expect(await InspectionStartService.prepareJob(jobX), InspectionStartResult.notAssignedOrUnavailable);
+    expect(await db.query('inspection_job_retention'), isEmpty);
+    expect((await db.query('local_jobs', where:'id = ?', whereArgs:[jobX])).single['inspector_id'], inspectorA);
   });
 
   test('ordinary refresh prunes A pre-start row and supplies same job to B', () async {
@@ -291,7 +292,8 @@ void main() {
     final jobs = await SupabaseService.fetchMyJobs();
     expect(jobs.single['id'], jobX);
     await DBHelper.cacheJobs(jobs);
-    expect((await DBHelper.getCachedJobs()).map((r) => r['id']), unorderedEquals([jobX, jobY]));
+    expect((await DBHelper.getCachedJobs()).map((r) => r['id']), [jobX]);
+    expect((await db.query('local_jobs', where:'id = ?', whereArgs:[jobY])).single['inspector_id'], inspectorA);
     expect(await InspectionStartService.prepareJob(jobX), InspectionStartResult.authorized);
   });
 
@@ -345,7 +347,7 @@ void main() {
     expect(await InspectionStartService.prepareJob(jobX), InspectionStartResult.authorized);
     await SupabaseService.advanceJobInspectionProgress(jobId: jobX, currentStep: 1);
     expect(remote['current_step'], 1);
-    expect(await SupabaseService.markJobOngoing(jobX), isTrue);
+    expect(await SupabaseService.markJobOngoing(jobX), InspectionStartResult.authorized);
     expect(remote['status'], 'in_progress');
     expect(remote['started_at'], isNotNull);
   });

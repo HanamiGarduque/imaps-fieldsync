@@ -1937,10 +1937,20 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             ? null
                             : () async {
                                 try {
-                                  await SupabaseService.scheduleJob(
+                                  // A zero-row write is never a successful
+                                  // schedule; report the real outcome.
+                                  final result = await SupabaseService.scheduleJob(
                                     jobId: widget.task.id,
                                     date: pickedDate!,
                                   );
+                                  if (result != InspectionAuthorityResult.authorized) {
+                                    if (sheetContext.mounted) {
+                                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                        SnackBar(content: Text(result.message)),
+                                      );
+                                    }
+                                    return;
+                                  }
                                   if (sheetContext.mounted) Navigator.pop(sheetContext);
                                   widget.onScheduled?.call();
                                 } catch (e) {

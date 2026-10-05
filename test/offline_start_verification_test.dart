@@ -7,6 +7,8 @@ import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'inspection_owner_fixture.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -25,6 +27,7 @@ void main() {
         await db.execute(match.group(0)!);
       }
       DBHelper.useDatabaseForTesting(db);
+      useOwnerFixture();
       await DBHelper.cacheJobs([
         {'id': a, 'status': 'assigned'},
         {'id': b, 'status': 'assigned'},
@@ -72,6 +75,7 @@ void main() {
           reason: 'Accepted offline GPS start must establish local Ongoing lifecycle; '
               'reconstructed category was $category');
     } finally {
+      clearOwnerFixture();
       DBHelper.useDatabaseForTesting(null);
       await db.close();
       await directory.delete(recursive: true);

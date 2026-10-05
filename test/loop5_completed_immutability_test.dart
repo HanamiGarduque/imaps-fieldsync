@@ -9,6 +9,8 @@ import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'inspection_owner_fixture.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -30,6 +32,7 @@ void main() {
       'retry_count': 1,
       'created_at': '2026-09-23T01:00:00Z',
       'updated_at': '2026-09-23T02:00:00Z',
+      'inspector_id': ownerFixture,
     });
   }
 
@@ -44,6 +47,7 @@ void main() {
       await db.execute(match.group(0)!);
     }
     DBHelper.useDatabaseForTesting(db);
+    useOwnerFixture();
     remote = {
       'id': 'round-1',
       'status': 'completed',
@@ -62,6 +66,7 @@ void main() {
 
   tearDown(() async {
     SyncOutboxService.resetRecoverySessionForTesting();
+    clearOwnerFixture();
     DBHelper.useDatabaseForTesting(null);
     await db.close();
   });
@@ -170,7 +175,7 @@ void main() {
         expect(provider, contains(evidence));
       }
       final submit = RegExp(
-        r'static Future<void> submitInspection\([\s\S]*?(?=\n  // ─)',
+        r'static Future<InspectionAuthorityResult> submitInspection\([\s\S]*?(?=\n  // ─)',
       ).firstMatch(service)!.group(0)!;
       expect(submit, contains("'current_step': 6"));
       expect(submit, contains('existingSubmittedAt ??'));

@@ -7,6 +7,8 @@ import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'inspection_owner_fixture.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
@@ -37,9 +39,11 @@ void main() {
       await db.execute(match.group(0)!);
     }
     DBHelper.useDatabaseForTesting(db);
+    useOwnerFixture();
   });
 
   tearDown(() async {
+    clearOwnerFixture();
     DBHelper.useDatabaseForTesting(null);
     await db.close();
     await directory.delete(recursive: true);
@@ -89,6 +93,7 @@ void main() {
         // Existing action must survive a failed deterministic replacement too.
         await db.insert('pending_actions', {
           'id': '${type}_$a', 'type': type, 'job_id': a,
+          'inspector_id': ownerFixture,
           'payload': '{"old":true}', 'status': 'failed', 'retry_count': 2,
           'created_at': '2026-01-01T00:00:00.000',
           'updated_at': '2026-01-01T00:00:00.000',

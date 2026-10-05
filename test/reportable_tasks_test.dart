@@ -12,6 +12,8 @@ import 'package:imaps_fieldsync/core/services/reportable_tasks.dart';
 import 'package:imaps_fieldsync/core/services/report_submission_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'inspection_owner_fixture.dart';
+
 const _app = 'app-uuid-1';
 const _source = 'rosario-imaps-local-0921-a';
 
@@ -74,7 +76,8 @@ void main() {
             declared_land_use TEXT,
             parcel_address TEXT,
             supabase_application_id TEXT,
-            bridge_source_id TEXT
+            bridge_source_id TEXT,
+            inspector_id TEXT
           )
         ''');
           // cacheJobs() reads both of these through the existing retention and
@@ -89,25 +92,29 @@ void main() {
             retry_count INTEGER NOT NULL DEFAULT 0,
             last_error TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            inspector_id TEXT
           )
         ''');
           await database.execute('''
           CREATE TABLE inspection_job_retention(
             job_id TEXT PRIMARY KEY,
-            retained_at TEXT NOT NULL
+            retained_at TEXT NOT NULL,
+            inspector_id TEXT
           )
         ''');
         },
       ),
     );
     DBHelper.useDatabaseForTesting(db);
+    useOwnerFixture();
     ReportableTasks.resetTestHooks();
     ReportQueueService.resetTestHooks();
   });
 
   tearDown(() async {
     ReportableTasks.resetTestHooks();
+    clearOwnerFixture();
     DBHelper.useDatabaseForTesting(null);
     await db.close();
     if (dir.existsSync()) {
@@ -133,6 +140,7 @@ void main() {
       'application_type': 'New Application',
       'supabase_application_id': row['supabase_application_id'],
       'bridge_source_id': row['bridge_source_id'],
+      'inspector_id': ownerFixture,
     });
   }
 

@@ -11,6 +11,11 @@ import '../../tasks/screens/tasks_screen.dart'; // To access TaskItem class
 
 class InspectionProvider extends ChangeNotifier {
   TaskItem? _activeTask;
+  String? _inspectorId;
+  void _requireOwner() {
+    if (_inspectorId == null) throw StateError('Inspection has no recorded session owner');
+    DBHelper.requireSameInspector(_inspectorId!);
+  }
   int _currentStep = 1;
 
   // Checklist State
@@ -47,45 +52,56 @@ class InspectionProvider extends ChangeNotifier {
   bool _reworkModifiedMarked = false;
 
   // Getters
-  TaskItem? get activeTask => _activeTask;
-  int get currentStep => _currentStep;
-  Map<String, bool> get siteCondition => _siteCondition;
-  Map<String, bool> get zoningObservations => _zoningObservations;
-  List<Map<String, dynamic>> get capturedPhotos => _capturedPhotos;
-  String get actualLandUse => _actualLandUse;
-  String get notes => _notes;
-  String get discrepancies => _discrepancies;
-  String get recommendations => _recommendations;
-  String get boundaryStatus => _boundaryStatus;
-  String get inspectionResult => _inspectionResult;
+  bool get _visible => _inspectorId != null && _inspectorId == DBHelper.currentInspectorId;
+  TaskItem? get activeTask => _visible ? _activeTask : null;
+  int get currentStep => _visible ? _currentStep : 1;
+  Map<String, bool> get siteCondition => _visible ? _siteCondition : {};
+  Map<String, bool> get zoningObservations => _visible ? _zoningObservations : {};
+  List<Map<String, dynamic>> get capturedPhotos => _visible ? _capturedPhotos : [];
+  String get actualLandUse => _visible ? _actualLandUse : '';
+  String get notes => _visible ? _notes : '';
+  String get discrepancies => _visible ? _discrepancies : '';
+  String get recommendations => _visible ? _recommendations : '';
+  String get boundaryStatus => _visible ? _boundaryStatus : '';
+  String get inspectionResult => _visible ? _inspectionResult : 'Compliant';
   bool get isSyncing => _isSyncing;
-  bool get isReworkMode => _isReworkMode;
+  bool get isReworkMode => _visible && _isReworkMode;
+
+  void requireOwner() => _requireOwner();
+
+  /// Clears every field observation. Used by both entry paths so no session's
+  /// answers can reach another session's report.
+  void _resetFieldState() {
+    _siteCondition.updateAll(
+      (key, value) =>
+          key == 'Surrounding developments noted' ||
+              key == 'Signage / commercial activity present'
+          ? false
+          : true,
+    );
+    _zoningObservations.updateAll(
+      (key, value) => key == 'Accessibility & road frontage' ? true : false,
+    );
+    _capturedPhotos.clear();
+    _actualLandUse = 'Single-detached residential';
+    _notes = '';
+    _discrepancies = '';
+    _recommendations = '';
+    _boundaryStatus = 'Compliant';
+    _inspectionResult = 'Compliant';
+  }
 
   // --- INITIALIZATION & NAVIGATION ---
 
   Future<void> startInspection(TaskItem task) async {
+  _inspectorId = DBHelper.requireInspector();
+  await DBHelper.requireOwnedJob(await DBHelper.database, task.id, _inspectorId!);
   _activeTask = task;
   _isReworkMode = false;
 
   // Reset defaults first
-  _siteCondition.updateAll(
-    (key, value) =>
-        key == 'Surrounding developments noted' ||
-            key == 'Signage / commercial activity present'
-        ? false
-        : true,
-  );
-  _zoningObservations.updateAll(
-    (key, value) => key == 'Accessibility & road frontage' ? true : false,
-  );
-  _capturedPhotos.clear();
-    _photosWithRemoteWork.clear();
-  _actualLandUse = 'Single-detached residential';
-  _notes = '';
-  _discrepancies = '';
-  _recommendations = '';
-  _boundaryStatus = 'Compliant';
-  _inspectionResult = 'Compliant';
+  _photosWithRemoteWork.clear();
+  _resetFieldState();
 
   // Load persisted draft AFTER reset — this restores checklist, findings,
   // photos, AND current_step from the task's own SQLite row.
@@ -134,12 +150,14 @@ class InspectionProvider extends ChangeNotifier {
   }
 
   void setSiteCondition(String key, bool value) {
+    _requireOwner();
     _siteCondition[key] = value;
     _markReworkModifiedIfNeeded();
     notifyListeners();
   }
 
   void setZoningObservation(String key, bool value) {
+    _requireOwner();
     _zoningObservations[key] = value;
     _markReworkModifiedIfNeeded();
     notifyListeners();
@@ -165,6 +183,7 @@ class InspectionProvider extends ChangeNotifier {
   /// path. This is intentionally session-local: a later delete must not claim
   /// the photo is still local-only after an upload/queue attempt.
   void markPhotosSubmitted() {
+    _requireOwner();
     for (final photo in _capturedPhotos) {
       _markPhotoHasRemoteWork(photo);
     }
@@ -176,6 +195,7 @@ class InspectionProvider extends ChangeNotifier {
     required double? latitude,
     required double? longitude,
   }) {
+    _requireOwner();
     _markReworkModifiedIfNeeded();
     _capturedPhotos.add({
       // ROOT-CAUSE FIX (2026-07-23) — Duplicate Photos Bug: this id used
@@ -209,6 +229,7 @@ class InspectionProvider extends ChangeNotifier {
   /// Returns false without changing memory when removal is not permitted or
   /// local cleanup fails, so the caller cannot report a false success.
   Future<bool> removePhoto(int index) async {
+    _requireOwner();
     if (index < 0 || index >= _capturedPhotos.length) return false;
 
     final photo = _capturedPhotos[index];
@@ -255,6 +276,7 @@ class InspectionProvider extends ChangeNotifier {
     required String recommendations,
     required String boundaryStatus,
   }) {
+    _requireOwner();
     // Unlike the checklist toggles above, this is called from the step's
     // exit-save regardless of whether the inspector actually changed
     // anything — so mark-modified only if something genuinely differs,
@@ -279,12 +301,14 @@ class InspectionProvider extends ChangeNotifier {
   // confirmation, so Step 5 (Findings) reflects the real GPS result
   // instead of a hardcoded placeholder string.
   void recordGpsVerification({required double distanceMeters}) {
+    _requireOwner();
     _boundaryStatus =
         'Verified on-site — ${distanceMeters.round()}m from declared location';
     notifyListeners();
   }
 
   void updateResult(String result) {
+    _requireOwner();
     _inspectionResult = result;
     notifyListeners();
   }
@@ -294,6 +318,7 @@ class InspectionProvider extends ChangeNotifier {
   /// step" — unlike startInspection, this does NOT reset anything, so the
   /// inspector doesn't lose the other steps' answers.
   void hydrateForRework(TaskItem task) {
+    _inspectorId = DBHelper.requireInspector();
     _activeTask = task;
     _isReworkMode = true;
     _currentStep = 1;
@@ -304,6 +329,11 @@ class InspectionProvider extends ChangeNotifier {
     // here so a fresh rework session starts clean.
     _reworkModifiedMarked = false;
     _photosWithRemoteWork.clear();
+    // A previous session's in-memory field observations must never survive
+    // into this one. The rework payload below re-populates what it actually
+    // carries; anything it does not carry starts from the same defaults
+    // startInspection() uses rather than leaking a prior inspector's answer.
+    _resetFieldState();
 
     // Match stored checklist entries back onto the two known maps.
     // FIX (Completed/Rework audit, Finding 2): this used to read
@@ -391,6 +421,8 @@ class InspectionProvider extends ChangeNotifier {
   // --- LOCAL SQLite DRAFT RECOVERY ---
 
   Future<void> _loadLocalDraftIfExists(String jobId) async {
+    // Ownership was already established at entry, and every read below is
+    // inspector-scoped, so this only hydrates memory.
     final draft = await DBHelper.getLocalInspection(jobId);
     if (draft != null) {
       _actualLandUse = draft['actual_land_use'] ?? _actualLandUse;
@@ -440,6 +472,7 @@ class InspectionProvider extends ChangeNotifier {
   // --- LOCAL SAVE & ONLINE SYNC ---
 
   Future<bool> saveInspectionProgress() async {
+    _requireOwner();
     if (_activeTask == null) return false;
 
     // Save Checklist observations
@@ -465,6 +498,7 @@ class InspectionProvider extends ChangeNotifier {
       // Reuse the stable id set in addPhoto()/reload instead of minting a
       // new one each call — see the fix comment in addPhoto() for why.
       final photoId = photo['id'] as String? ?? const Uuid().v4();
+      _requireOwner();
       await DBHelper.savePhotoLocally(
         photoId: photoId,
         jobId: _activeTask!.id,
@@ -489,6 +523,7 @@ class InspectionProvider extends ChangeNotifier {
   // --- REWORK: PER-STEP SAVE (writes immediately, no need to reach Submit) ---
 
   Future<bool> saveStepPhotos() async {
+    _requireOwner();
     if (_activeTask == null) return false;
     // Filter out any entries without a valid photo path, but keep the full Map structure
     final photosToUpload = _capturedPhotos
@@ -505,6 +540,7 @@ class InspectionProvider extends ChangeNotifier {
       );
 
       // Update the main field_jobs table to maintain the array of URLs for quick access
+      _requireOwner();
       await SupabaseService.updateJobInspectionProgress(
         jobId: _activeTask!.id,
         updateData: {
@@ -521,6 +557,7 @@ class InspectionProvider extends ChangeNotifier {
       // step's save.
       debugPrint('saveStepPhotos: direct push failed, queuing for retry — $e');
       try {
+        _requireOwner();
         await SyncOutboxService.enqueuePhotosUpdate(
           jobId: _activeTask!.id,
           photosData: photosToUpload,
@@ -534,6 +571,7 @@ class InspectionProvider extends ChangeNotifier {
   }
 
   Future<bool> saveStepChecklist() async {
+    _requireOwner();
     if (_activeTask == null) return false;
     final checklist = <Map<String, dynamic>>[
       ..._siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
@@ -566,6 +604,7 @@ class InspectionProvider extends ChangeNotifier {
         'saveStepChecklist: direct push failed, queuing for retry — $e',
       );
       try {
+        _requireOwner();
         await SyncOutboxService.enqueueChecklistUpdate(
           jobId: _activeTask!.id,
           checklistData: checklist,
@@ -581,6 +620,7 @@ class InspectionProvider extends ChangeNotifier {
   }
 
   Future<bool> saveStepFindings() async {
+    _requireOwner();
     if (_activeTask == null) return false;
     final observations =
         'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.';
@@ -607,6 +647,7 @@ class InspectionProvider extends ChangeNotifier {
         'saveStepFindings: direct push failed, queuing for retry — $e',
       );
       try {
+        _requireOwner();
         await SyncOutboxService.enqueueFindingsUpdate(
           jobId: _activeTask!.id,
           observations: observations,
@@ -642,6 +683,7 @@ class InspectionProvider extends ChangeNotifier {
   /// snapshot and also preserves the current rework mode alongside the
   /// task context for later resume/review flows.
   Future<bool> saveAllInspectionState() async {
+    _requireOwner();
     if (_activeTask == null) return false;
 
     final Map<String, bool> combinedChecklist = {
@@ -670,6 +712,7 @@ class InspectionProvider extends ChangeNotifier {
       // ever uploaded/counted once, no matter how many times progress
       // gets auto-saved.
       final photoId = photo['id'] as String? ?? const Uuid().v4();
+      _requireOwner();
       await DBHelper.savePhotoLocally(
         photoId: photoId,
         jobId: _activeTask!.id,
@@ -684,6 +727,7 @@ class InspectionProvider extends ChangeNotifier {
 
     final isConnected = await _checkConnectivity();
     if (isConnected) {
+      _requireOwner();
       await syncToServer();
       return true;
     }
@@ -709,6 +753,7 @@ class InspectionProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final uid = DBHelper.requireInspector();
       final supabase = SupabaseService.client;
 
       // 1. Sync pending local photos through the one canonical remote writer.
@@ -733,6 +778,7 @@ class InspectionProvider extends ChangeNotifier {
 
       final Map<String, List<String>> uploadedUrlsByJob = {};
       for (final entry in pendingPhotosByJob.entries) {
+        DBHelper.requireSameInspector(uid);
         for (final photo in entry.value) {
           _markPhotoHasRemoteWork(photo);
         }
@@ -741,12 +787,6 @@ class InspectionProvider extends ChangeNotifier {
           photosData: entry.value,
         );
         uploadedUrlsByJob[entry.key] = uploadedUrls;
-        for (final photo in entry.value) {
-          final localPhotoId = photo['localPhotoId'] as String?;
-          if (localPhotoId != null) {
-            await DBHelper.markPhotoSynced(localPhotoId);
-          }
-        }
       }
 
       // Patch field_jobs.photo_paths / photo_count using the canonical
@@ -765,10 +805,12 @@ class InspectionProvider extends ChangeNotifier {
               )
               .toList();
           final merged = {...existingPaths, ...entry.value}.toList();
-          await supabase
-              .from('field_jobs')
-              .update({'photo_paths': merged, 'photo_count': merged.length})
-              .eq('id', entry.key);
+          DBHelper.requireSameInspector(uid);
+          await SupabaseService.updateJobInspectionProgress(jobId: entry.key,
+            updateData: {'photo_paths': merged, 'photo_count': merged.length});
+          DBHelper.requireSameInspector(uid);
+          await DBHelper.markPhotosSynced(pendingPhotosByJob[entry.key]!
+            .map((p) => p['localPhotoId'] as String?));
         } catch (e) {
           debugPrint(
             'Could not patch field_jobs.photo_paths for ${entry.key}: $e',
@@ -787,6 +829,7 @@ class InspectionProvider extends ChangeNotifier {
       // 2. Sync Pending Inspections
       final pendingInspections = await DBHelper.getPendingInspections();
       for (final insp in pendingInspections) {
+        DBHelper.requireSameInspector(uid);
         final Map<String, dynamic> checklist = jsonDecode(
           insp['checklist_json'],
         );
@@ -794,14 +837,10 @@ class InspectionProvider extends ChangeNotifier {
             .map((e) => '${e.key}: ${e.value == true ? "Yes" : "No"}')
             .join('; ');
 
-        await supabase
-            .from('field_jobs')
-            .update({
-              'status': 'completed',
-              'current_step': 6,
-              // Legacy local-inspection replay has no separate submitted_at;
-              // its durable local update time is the original completion time.
-              'submitted_at': insp['updated_at'],
+        // A saved draft is evidence, not final-submit intent. Only the explicit
+        // submission path may prove completion and release retention.
+        await SupabaseService.updateJobInspectionProgress(jobId: insp['id'] as String,
+            updateData: {
               'findings': '${insp['notes']}\n\nChecklist: $checklistSummary',
               'is_compliant': insp['is_compliant'] == 1,
               'inspection_result':
@@ -809,17 +848,15 @@ class InspectionProvider extends ChangeNotifier {
                   (insp['is_compliant'] == 1
                       ? 'Compliant'
                       : 'With Discrepancy'),
-              'updated_at': insp['updated_at'],
-            })
-            .eq('id', insp['id']);
-
+            });
+        DBHelper.requireSameInspector(uid);
         await DBHelper.markInspectionSynced(insp['id']);
       }
 
       if (pendingInspections.isNotEmpty) {
         await SupabaseService.logActivity(
-          eventType: 'inspection_completed',
-          title: 'Offline inspection synced',
+          eventType: 'inspection_progress_synced',
+          title: 'Offline inspection draft synced',
           subtitle: '${pendingInspections.length} report(s) uploaded',
         );
       }

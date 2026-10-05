@@ -6,23 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'db_helper.dart';
 import 'supabase_service.dart';
-
-enum InspectionStartResult {
-  authorized,
-  notAssignedOrUnavailable,
-  authRequired,
-  offlineOrUnverifiable;
-
-  String get message => switch (this) {
-    authorized => '',
-    notAssignedOrUnavailable =>
-      'This job is no longer available to start from your account. '
-          'Refresh your assignments or contact the Planning Office.',
-    authRequired => 'Your session has expired. Please sign in again.',
-    offlineOrUnverifiable =>
-      'Connect to verify that this job is still assigned to you before starting.',
-  };
-}
+export 'inspection_authority.dart';
 
 /// Phase A gates only new field work. Retained work and persisted drafts keep
 /// their existing continuation/recovery path; transferring them belongs to #9.
@@ -83,18 +67,23 @@ class InspectionStartService {
     String jobId, {
     Map<String, dynamic>? fetchedJob,
   }) async {
+    final uid = DBHelper.currentInspectorId;
+    if (uid == null) return InspectionStartResult.authRequired;
     final db = await DBHelper.database;
+    try { await DBHelper.requireOwnedJob(db, jobId, uid); }
+    on StateError { return InspectionStartResult.notAssignedOrUnavailable; }
     final started = await db.rawQuery('''
-      SELECT job_id FROM inspection_job_retention WHERE job_id = ?
-      UNION ALL SELECT id FROM local_inspections WHERE id = ?
+      SELECT job_id FROM inspection_job_retention WHERE job_id = ? AND inspector_id = ?
+      UNION ALL SELECT id FROM local_inspections WHERE id = ? AND inspector_id = ?
       LIMIT 1
-    ''', [jobId, jobId]);
+    ''', [jobId, uid, jobId, uid]);
     if (started.isEmpty) {
       final result = await verifyCurrentInspectorMayStartJob(jobId);
       if (result != InspectionStartResult.authorized) return result;
     }
     // This is client-local, not a server lease. Later server writes still rely
     // on authenticated ownership predicates/RLS if assignment changes now.
+    if (DBHelper.currentInspectorId != uid) return InspectionStartResult.authRequired;
     await DBHelper.retainInspectionJob(jobId, fetchedJob: fetchedJob);
     return InspectionStartResult.authorized;
   }
