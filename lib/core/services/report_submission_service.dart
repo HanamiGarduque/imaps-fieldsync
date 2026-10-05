@@ -62,6 +62,10 @@ class ReportQueueService {
   static Future<String> enqueueTechnicalIssue(TechnicalIssueDraft draft) async {
     final problem = draft.validationError;
     if (problem != null) throw ReportSubmissionException(problem);
+    // Ownership is captured BEFORE the row exists: a row is never created
+    // without an author, so there is no window in which an unattributable
+    // provisional report could reach the device.
+    final uid = _requireInspectorId();
     return _enqueue(
       LocalReportRow(
         id: newLocalId(),
@@ -71,7 +75,9 @@ class ReportQueueService {
         retryCount: 0,
         createdAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
+        inspectorId: uid,
       ),
+      uid,
     );
   }
 
@@ -82,6 +88,7 @@ class ReportQueueService {
   ) async {
     final problem = draft.validationError;
     if (problem != null) throw ReportSubmissionException(problem);
+    final uid = _requireInspectorId();
     return _enqueue(
       LocalReportRow(
         id: newLocalId(),
@@ -95,15 +102,26 @@ class ReportQueueService {
         supabaseApplicationId: draft.supabaseApplicationId,
         bridgeSourceId: draft.bridgeSourceId,
         localJobId: draft.fieldJobId,
+        inspectorId: uid,
       ),
+      uid,
     );
   }
 
-  static Future<String> _enqueue(LocalReportRow row) async {
+  /// The one place an authenticated inspector is demanded.
+  ///
+  /// With no authenticated Supabase user there is no authoritative owner to
+  /// record, so the report is refused through the existing safe auth/session
+  /// error path instead of creating a row nobody may ever see.
+  static String _requireInspectorId() {
     final uid = _inspectorId;
-    if (uid == null) {
+    if (uid == null || uid.isEmpty) {
       throw ReportSubmissionException('Sign in again before sending a report.');
     }
+    return uid;
+  }
+
+  static Future<String> _enqueue(LocalReportRow row, String inspectorId) async {
     if (_submitInProgress) {
       throw ReportSubmissionException(
         'A report is already being submitted. Please wait.',
@@ -112,6 +130,8 @@ class ReportQueueService {
     _submitInProgress = true;
     try {
       final db = await DBHelper.database;
+      // The row is written with its owner in the same statement. There is no
+      // insert-then-claim window.
       await db.insert('local_report_queue', row.toRow());
       // Keep the submit guard through dispatch, including slow online sends.
       // The row is durable before the existing processor touches the network.
@@ -197,10 +217,36 @@ class ReportQueueService {
 
   // ── Reads ──────────────────────────────────────────────────────────────
 
-  static Future<List<LocalReportRow>> allRows() async {
+  /// EVERY report row on the device, across all inspector accounts.
+  ///
+  /// UNSAFE FOR ANY USER-FACING PATH. This unscoped read is what leaked one
+  /// inspector's provisional report cards — type, category and message text —
+  /// to another inspector on a shared device. It is retained only for
+  /// maintenance/diagnostics and for tests that need to assert on the raw
+  /// table (including legacy rows nobody may see). Use
+  /// [allRowsForInspector] everywhere a person can read a list.
+  @visibleForTesting
+  static Future<List<LocalReportRow>> allRowsOnDevice() async {
     final db = await DBHelper.database;
     final rows = await db.query(
       'local_report_queue',
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(LocalReportRow.fromMap).toList();
+  }
+
+  /// The rows [inspectorId] is allowed to see: exactly the reports that
+  /// inspector created.
+  ///
+  /// A `NULL` `inspector_id` matches nothing. Legacy pre-v16 rows carry no
+  /// author, and this contract forbids inventing one, so they are invisible to
+  /// every inspector rather than shown to an arbitrary one.
+  static Future<List<LocalReportRow>> allRowsForInspector(String inspectorId) async {
+    final db = await DBHelper.database;
+    final rows = await db.query(
+      'local_report_queue',
+      where: 'inspector_id = ?',
+      whereArgs: [inspectorId],
       orderBy: 'created_at DESC',
     );
     return rows.map(LocalReportRow.fromMap).toList();
@@ -218,9 +264,39 @@ class ReportQueueService {
     return LocalReportRow.fromMap(rows.first);
   }
 
-  /// Rows eligible for an automatic send. Never includes `sent` or
-  /// `delivery_unknown`.
-  static Future<List<LocalReportRow>> autoRetryableRows() async {
+  /// Rows [inspectorId] may see. Convenience for user-facing code: resolves
+  /// the authenticated user and returns an empty list when there is none, so
+  /// an unauthenticated session shows no reports at all instead of everyone's.
+  static Future<List<LocalReportRow>> myRows() async {
+    final uid = _inspectorId;
+    if (uid == null || uid.isEmpty) return const [];
+    return allRowsForInspector(uid);
+  }
+
+  /// Rows eligible for an automatic send **for this inspector only**. Never
+  /// includes `sent`, `delivery_unknown`, or another inspector's rows.
+  static Future<List<LocalReportRow>> retryableRowsForInspector(
+    String inspectorId,
+  ) async {
+    final db = await DBHelper.database;
+    final rows = await db.query(
+      'local_report_queue',
+      where: "inspector_id = ? AND queue_state IN ('pending','failed_retryable')",
+      whereArgs: [inspectorId],
+      orderBy: 'created_at ASC',
+    );
+    return rows
+        .map(LocalReportRow.fromMap)
+        .where((r) => !isNonRetryable(r))
+        .toList();
+  }
+
+  /// Device-wide automatic-retry candidate list. UNSAFE FOR USER-FACING AND
+  /// RETRY PATHS — it spans every account, including legacy rows that belong
+  /// to nobody. Retained for maintenance/diagnostics and tests only; the
+  /// processor itself must use [retryableRowsForInspector].
+  @visibleForTesting
+  static Future<List<LocalReportRow>> autoRetryableRowsOnDevice() async {
     final db = await DBHelper.database;
     final rows = await db.query(
       'local_report_queue',
@@ -267,13 +343,20 @@ class ReportQueueService {
 
   /// Serial, tightly controlled. Safe to call from startup, an online
   /// transition, or a manual "try again" — never a busy loop.
+  /// Sends only the AUTHENTICATED inspector's eligible rows.
+  ///
+  /// Scoping here is the point: with inspector B signed in, inspector A's
+  /// pending row is not merely hidden from B's list, it is not picked up by
+  /// the automatic retry at all. With no authenticated user, nothing is sent.
   static Future<void> processPending() async {
+    final uid = _inspectorId;
+    if (uid == null || uid.isEmpty) return;
     if (connectivityOverride != null) {
       if (!await connectivityOverride!()) return;
     } else if (!await AuthService.hasConnectivity()) {
       return;
     }
-    for (final row in await autoRetryableRows()) {
+    for (final row in await retryableRowsForInspector(uid)) {
       await sendOnce(row);
     }
   }
@@ -281,9 +364,16 @@ class ReportQueueService {
   /// Manual retry for a row the inspector chose to resend. For
   /// `delivery_unknown` this can create a duplicate: the server has no client
   /// idempotency key, so the UI must warn before calling this.
+  ///
+  /// Ownership is re-checked before the send: a row id alone is not authority.
+  /// A legacy `NULL`-owner row is refused outright — there is nobody to
+  /// attribute a remote write to.
   static Future<void> retryManually(String localRowId) async {
+    final uid = _inspectorId;
+    if (uid == null || uid.isEmpty) return;
     final row = await rowById(localRowId);
     if (row == null) return;
+    if (row.inspectorId != uid) return;
     if (row.queueState == ReportQueueState.sent) return;
     if (connectivityOverride == null && !await AuthService.hasConnectivity()) {
       return;
@@ -309,6 +399,32 @@ class ReportQueueService {
 
   static Future<ReportQueueState> _sendOnce(LocalReportRow row) async {
     final db = await DBHelper.database;
+
+    // THE MANDATORY GUARD, before ANY remote write.
+    //
+    // A queued report is only ever sent by the inspector who wrote it. If the
+    // live session is somebody else — or nobody, or the row is a legacy row
+    // with no recorded owner — the send is refused outright. Without this, a
+    // report typed by inspector A could reach the network while inspector B was
+    // signed in and be attributed to B, because the remote `inspector_id` used
+    // to be read from the live session at send time.
+    //
+    // The row is deliberately left untouched: not deleted, not marked failed.
+    // Its owner logs back in and it becomes eligible again.
+    final currentAuthUid = _inspectorId;
+    if (currentAuthUid == null ||
+        currentAuthUid.isEmpty ||
+        row.inspectorId == null ||
+        row.inspectorId!.isEmpty ||
+        row.inspectorId != currentAuthUid) {
+      debugPrint(
+        '[REPORTS] blocked send: row ${row.id} is owned by '
+        '${row.inspectorId ?? '(legacy, no owner)'} but the authenticated '
+        'inspector is ${currentAuthUid ?? '(none)'}. Not sending.',
+      );
+      return row.queueState;
+    }
+
     final attempt = row.retryCount + 1;
     await db.update(
       'local_report_queue',
@@ -404,8 +520,12 @@ class ReportQueueService {
   @visibleForTesting
   static Map<String, dynamic> remoteInsertFor(LocalReportRow row) {
     final p = row.payload;
+    // The remote author is the row's OWN stored owner, never the live session.
+    // `_sendOnce` has already proven the two are equal before we get here, so
+    // this cannot diverge; reading it from the row keeps that guarantee even if
+    // a future caller reaches this function from a new path.
     final insert = <String, dynamic>{
-      'inspector_id': _inspectorId,
+      'inspector_id': row.inspectorId,
       'report_type': row.reportType.dbValue,
       'title': p['title'],
       'summary': p['summary'],

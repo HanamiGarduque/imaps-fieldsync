@@ -298,6 +298,7 @@ class LocalReportRow {
     this.referenceCode,
     this.lastError,
     this.lastAttemptAt,
+    this.inspectorId,
   });
 
   final String id;
@@ -315,6 +316,21 @@ class LocalReportRow {
   final String? referenceCode;
   final String? lastError;
   final DateTime? lastAttemptAt;
+
+  /// The authenticated Supabase user id that created this report.
+  ///
+  /// Authoritative ownership, taken verbatim from
+  /// `SupabaseService.client.auth.currentUser.id` at enqueue time — never
+  /// derived from a display name, email, job or message. It is also the ONLY
+  /// value that may become the remote `inspector_id` (see
+  /// `ReportQueueService`'s send guard), so queued ownership, the
+  /// authenticated submitter and the remote author are always the same person.
+  ///
+  /// `null` means a pre-v16 legacy row: physically stored, attributed to
+  /// nobody, and therefore visible to nobody and retryable by nobody. Its
+  /// owner is unknowable from what was stored, and this contract forbids
+  /// inferring one.
+  final String? inspectorId;
 
   factory LocalReportRow.fromMap(Map<String, dynamic> map) => LocalReportRow(
     id: map['id'] as String,
@@ -334,6 +350,7 @@ class LocalReportRow {
     lastAttemptAt: map['last_attempt_at'] == null
         ? null
         : DateTime.parse(map['last_attempt_at'] as String),
+    inspectorId: map['inspector_id'] as String?,
   );
 
   Map<String, dynamic> toRow() => {
@@ -352,6 +369,7 @@ class LocalReportRow {
     'reference_code': referenceCode,
     'last_error': lastError,
     'last_attempt_at': lastAttemptAt?.toUtc().toIso8601String(),
+    'inspector_id': inspectorId,
   };
 
   LocalReportRow copyWith({
@@ -377,6 +395,9 @@ class LocalReportRow {
     referenceCode: referenceCode ?? this.referenceCode,
     lastError: lastError ?? this.lastError,
     lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
+    // Ownership is immutable for the life of a row: never carried through a
+    // copyWith that omits it, because that would silently orphan a row.
+    inspectorId: inspectorId,
   );
 }
 

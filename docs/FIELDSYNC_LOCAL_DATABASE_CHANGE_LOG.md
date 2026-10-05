@@ -10,6 +10,128 @@ Every version bump and every `onUpgrade` branch must have an entry here.
 
 ---
 
+## VERSION 15 → 16
+
+**CHANGE:** add one nullable ownership column, `local_report_queue.inspector_id`,
+plus its read index.
+
+### WHY
+
+Version 15 created the report queue but never recorded **who** wrote a report.
+That produced two defects on a device shared between inspector accounts:
+
+1. `ReportQueueService.allRows()` read the table with no `WHERE` clause, so My
+   Reports rendered provisional cards — report type, support category and the
+   inspector's own message text — that a *different* inspector account had
+   typed. The leak was in the summary itself; the card detail was merely harder
+   to open.
+2. `remoteInsertFor()` stamped the remote `inspector_id` from the **live
+   session** at send time. A report written by inspector A could therefore sit
+   pending, be picked up by the automatic retry while inspector B was signed in,
+   and reach the server attributed to B.
+
+Neither can be fixed by filtering alone: with no owner stored, there is nothing
+authoritative to filter on. The identity has to be persisted first.
+
+### NEW COLUMN
+
+`local_report_queue.inspector_id TEXT`, nullable, declared **last** in the DDL so
+a fresh install and an upgraded device end up with identical column order
+(`ALTER TABLE ... ADD COLUMN` always appends). Index:
+`idx_local_report_queue_inspector`.
+
+The value is `SupabaseService.client.auth.currentUser.id`, captured at enqueue
+time and written in the same INSERT — never a display name, email, job
+reference, application reference or message text.
+
+### OWNERSHIP CONTRACT
+
+- A new row is **never** created without an authenticated inspector. With no
+  authenticated Supabase user the report is refused through the existing
+  `Sign in again before sending a report.` path, so no unattributable row can
+  exist on the device.
+- Reads and retries are scoped: `allRowsForInspector(uid)`,
+  `myRows()`, `retryableRowsForInspector(uid)`.
+- The unscoped `allRowsOnDevice()` / `autoRetryableRowsOnDevice()` remain only
+  for maintenance, diagnostics and tests, and are marked `@visibleForTesting`.
+  No UI or retry path calls them.
+- `processPending()` sends only the signed-in inspector's rows, so A's pending
+  report is not retried while B is signed in — it stays intact and becomes
+  eligible again when A returns.
+- `retryManually()` re-checks ownership; a row id alone is not authority.
+
+### LEGACY ROWS
+
+Existing rows migrate to `inspector_id IS NULL`. Their owner is **not**
+inferred from job ownership, display name, email, message content, report type
+or application reference — none of those is authoritative, and guessing would
+recreate the leak. A NULL-owner row is therefore:
+
+- still physically stored (never deleted by the migration)
+- visible to nobody
+- retryable by nobody
+- never sent remotely
+
+A future explicit recovery/cleanup workflow may address them; that is out of
+scope here.
+
+### REMOTE INSERT GUARD
+
+`_sendOnce()` refuses to send **before any network write** unless
+`currentAuthUid == row.inspectorId`. If either side is null, or they differ, the
+row is left completely untouched — not deleted, not marked failed — and the send
+is blocked. `remoteInsertFor()` then reads the remote `inspector_id` from the
+row itself rather than the session, so queued ownership, the authenticated
+submitter and the remote author can never diverge.
+
+### NOT IN SCOPE
+
+No Supabase schema change. Report lifecycle states, Technical Issue authority,
+Application Support current-PO routing, Development Support, official response
+and the terminal notification contract are all untouched. `LocalDataGuardService`
+is unchanged: it tracks one device-wide owner for *inspection* data only, and its
+`wipeAllLocalData()` never touches `local_report_queue` — isolation here is by
+ownership, never by destructive cleanup on logout.
+
+### MIGRATION SAFETY
+
+Additive and idempotent (`addColumnIfMissing` + `CREATE TABLE/INDEX IF NOT
+EXISTS`), exactly as v15 shipped. No table dropped or recreated, no row
+rewritten, no unrelated table touched.
+
+### VERIFICATION
+
+- `test/sqlite_v16_report_ownership_test.dart`
+  - a real v15-shaped database genuinely lacks the column
+  - 15 → 16 preserves the table, every row, row content and all unrelated data
+  - legacy rows migrate to `NULL` and are never backfilled
+  - fresh v16 install already has the column and the index
+  - fresh and upgraded tables have identical columns
+  - reapplying v16 is a no-op
+  - the migration contains no `DROP`/`DELETE`
+- `test/report_account_isolation_test.dart`
+  - new Technical Issue / Application Support rows record the authenticated owner
+  - no authenticated inspector → refused, and no row is created
+  - A's rows visible to A, absent for B; B's rows visible to B; switching back
+    restores them
+  - legacy NULL rows hidden from A and B, still stored, excluded from every
+    retry path, and refused on manual retry
+  - A's row is not retried while B is signed in, survives untouched, and sends
+    once A returns
+  - logout/login never destroys another inspector's queued rows
+  - **security:** a pending report can never be created remotely under another
+    account — blocked before the remote write, including via a direct
+    `sendOnce` and with no authenticated user
+  - the remote `inspector_id` equals the stored row owner
+  - a confirmed row is not double-listed against its remote twin
+- `test/inspection_job_retention_test.dart` asserts `version: 16,` and both the
+  `oldVersion < 15` and `oldVersion < 16` branches exist.
+
+All destructive migration testing runs against **isolated temporary databases**
+built from the real pre-v16 DDL. The device database is never opened by tests.
+
+---
+
 ## VERSION 14 → 15
 
 **CHANGE:** create `local_report_queue` for offline Reports & Support, and add

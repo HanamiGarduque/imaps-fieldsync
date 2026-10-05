@@ -35,7 +35,10 @@ const _kCoral = InsightTheme.red;
 class ReportsSupportScreen extends StatefulWidget {
   const ReportsSupportScreen({
     super.key,
-    this.loadLocal = ReportQueueService.allRows,
+    // Scoped to the authenticated inspector, never the whole device. This is
+    // the user-facing "not yet sent" summary, so it must not be able to surface
+    // another inspector account's queued report text on a shared device.
+    this.loadLocal = ReportQueueService.myRows,
   });
 
   final Future<List<LocalReportRow>> Function() loadLocal;

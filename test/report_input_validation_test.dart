@@ -77,7 +77,7 @@ void main() {
               enqueue(technical, {...base, field: value}),
               throwsA(isA<ReportSubmissionException>()),
             );
-            expect(await ReportQueueService.allRows(), isEmpty);
+            expect(await ReportQueueService.allRowsOnDevice(), isEmpty);
             expect(remoteCalls, 0);
           },
         );
@@ -113,7 +113,7 @@ void main() {
             );
             expect(values[entry.key], pasted);
           }
-          expect(await ReportQueueService.allRows(), isEmpty);
+          expect(await ReportQueueService.allRowsOnDevice(), isEmpty);
           expect(remoteCalls, 0);
         },
       );
@@ -191,7 +191,7 @@ void main() {
             throwsA(isA<ReportSubmissionException>()),
           );
         }
-        expect(await ReportQueueService.allRows(), isEmpty);
+        expect(await ReportQueueService.allRowsOnDevice(), isEmpty);
       },
     );
 
@@ -219,7 +219,7 @@ void main() {
           response.complete({'id': 'remote', 'reference_code': 'DR-test'});
           await first;
         }
-        expect(await ReportQueueService.allRows(), hasLength(1));
+        expect(await ReportQueueService.allRowsOnDevice(), hasLength(1));
         expect(remoteCalls, 1);
       },
       timeout: const Timeout(Duration(seconds: 10)),
@@ -241,7 +241,7 @@ void main() {
           throwsA(isA<ReportSubmissionException>()),
         );
       }
-      expect(await ReportQueueService.allRows(), isEmpty);
+      expect(await ReportQueueService.allRowsOnDevice(), isEmpty);
     },
   );
 }

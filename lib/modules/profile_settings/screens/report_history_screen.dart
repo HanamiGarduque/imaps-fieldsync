@@ -51,7 +51,10 @@ String formatResponseStamp(DateTime value) {
 class ReportHistoryScreen extends StatefulWidget {
   const ReportHistoryScreen({
     super.key,
-    this.loadLocal = ReportQueueService.allRows,
+    // Scoped to the authenticated inspector. An unscoped read here was what
+    // rendered another account's provisional report cards — type, category and
+    // message text — under "NOT YET CONFIRMED BY THE SERVER".
+    this.loadLocal = ReportQueueService.myRows,
     this.loadRemote = DiagnosticsService.fetchMyReports,
   });
 

@@ -116,7 +116,7 @@ void main() {
     final a = await ReportQueueService.enqueueApplicationSupport(_supportDraft);
     final b = await ReportQueueService.enqueueApplicationSupport(_supportDraft);
     expect(a, isNot(b));
-    expect((await ReportQueueService.allRows()).length, 2);
+    expect((await ReportQueueService.allRowsOnDevice()).length, 2);
   });
 
   test('persisted pending survives an app restart', () async {
@@ -173,7 +173,7 @@ void main() {
     expect(row.queueState, ReportQueueState.failedRetryable);
     expect(ReportQueueService.isNonRetryable(row), isFalse);
     expect(
-      (await ReportQueueService.autoRetryableRows()).map((r) => r.id),
+      (await ReportQueueService.autoRetryableRowsOnDevice()).map((r) => r.id),
       contains(id),
     );
   });
@@ -206,7 +206,7 @@ void main() {
         // Explicitly excluded from automatic retry.
         expect(ReportQueueService.isNonRetryable(row), isTrue);
         expect(
-          (await ReportQueueService.autoRetryableRows()).map((r) => r.id),
+          (await ReportQueueService.autoRetryableRowsOnDevice()).map((r) => r.id),
           isNot(contains(id)),
         );
       });
@@ -575,7 +575,7 @@ void main() {
     final results = await Future.wait([attempt(), attempt()]);
     expect(results.length, 2);
     expect(
-      (await ReportQueueService.allRows()).length,
+      (await ReportQueueService.allRowsOnDevice()).length,
       1,
       reason: 'concurrent submits must not both persist a row',
     );
@@ -621,6 +621,6 @@ void main() {
     );
 
     await ReportQueueService.enqueueTechnicalIssue(_techDraft);
-    expect((await ReportQueueService.allRows()).length, 1);
+    expect((await ReportQueueService.allRowsOnDevice()).length, 1);
   });
 }

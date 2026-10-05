@@ -168,7 +168,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 15,
+      version: 16,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -301,6 +301,17 @@ class DBHelper {
           // inferring one) plus one new isolated queue table. No lifecycle row
           // is touched, no existing table is rewritten, nothing is dropped.
           await ReportQueueSchema.applyV15(db);
+        }
+        if (oldVersion < 16) {
+          // Reports & Support: per-inspector queue ownership. Before this the
+          // queue stored no author at all, so on a shared device one inspector
+          // saw the provisional report cards another inspector had typed —
+          // report type, category and message text across accounts. One
+          // nullable column, additive and idempotent like every step above:
+          // existing rows keep all their data and simply have no author
+          // recorded, so they are attributed to nobody rather than guessed at
+          // from a name, message or job.
+          await ReportQueueSchema.applyV16(db);
         }
       },
       onCreate: (db, version) async {
