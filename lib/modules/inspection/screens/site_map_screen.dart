@@ -20,6 +20,7 @@ import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/quick_actions_sheet.dart' show MapDetailPanel;
 import '../../../core/theme/insight_theme.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
@@ -660,13 +661,23 @@ class _SiteMapScreenState extends State<SiteMapScreen>
             // modern card (matches reference picture 1's bottom-card
             // style) instead of a separate status pill + button below it.
             if (!_loading && _error == null && !_fullscreen)
+              // Map-first, and collapsible: a compact right-hand side pane in
+              // landscape/tablet, a content-sized floating card otherwise, with
+              // an explicit hide control so the map is never permanently
+              // covered. Sized to its content so there is no dead space below
+              // the CTA.
               Positioned(
-                left: 16,
-                right: 16,
+                left: 0,
+                right: 0,
+                top: 0,
                 bottom: 0,
                 child: SafeArea(
-                  top: false,
-                  child: Container(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: MapDetailPanel(
+                        child: Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
                     decoration: BoxDecoration(
@@ -680,9 +691,34 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                         ),
                       ],
                     ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+                    // Content-sized: the Column is mainAxisSize.min, so the
+                    // card ends at the CTA instead of stretching to fill the
+                    // pane. A side pane can be shorter than the card needs,
+                    // so it scrolls internally while the map stays visible.
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: _detailCardChildren(context),
+                      ),
+                    ),
+                  ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+  }
+
+  /// The detail card's rows, unchanged in content and order.
+  ///
+  /// Portrait floats this at the bottom of the map; landscape and tablet use it
+  /// as the secondary pane. Target Site, distance, road route and the Proceed to
+  /// Location action are identical either way.
+  List<Widget> _detailCardChildren(BuildContext context) => <Widget>[
                         Row(
                           children: [
                             const Icon(
@@ -865,7 +901,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                                 context,
                                 MaterialPageRoute(
                                   builder: (_) =>
-                                      GpsVerificationScreen(task: task),
+                                      GpsVerificationScreen(task: widget.task),
                                 ),
                               );
                             },
@@ -920,16 +956,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+      ];
 }
 
 class _GlassIconButton extends StatelessWidget {

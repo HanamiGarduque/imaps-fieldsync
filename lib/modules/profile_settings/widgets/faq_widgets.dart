@@ -5,32 +5,6 @@ import 'package:flutter/services.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../models/faq_item.dart';
 
-class FaqWidgets {
-  static Widget backgroundBlob({
-    double? top,
-    double? bottom,
-    double? left,
-    double? right,
-    required double size,
-    required Color color,
-  }) {
-    return Positioned(
-      top: top,
-      bottom: bottom,
-      left: left,
-      right: right,
-      child: ImageFiltered(
-        imageFilter: ImageFilter.blur(sigmaX: 45, sigmaY: 45),
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-        ),
-      ),
-    );
-  }
-}
-
 class FaqExpansionTile extends StatefulWidget {
   final FaqItem item;
   final bool isTagalog;

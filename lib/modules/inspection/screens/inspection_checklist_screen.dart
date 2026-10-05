@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../../../core/layout/responsive_layout.dart';
 import 'package:flutter/services.dart';
 
 import 'field_findings_screen.dart';
@@ -145,10 +146,11 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                   ),
                 ),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    physics: const BouncingScrollPhysics(),
-                    children: [
+                  child: ConstrainedContent(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      physics: const BouncingScrollPhysics(),
+                      children: [
                       // GAP-9.5 fix: live checklist counter. _doneCount /
                       // _totalCount were always correct and rebuilt instantly
                       // on every toggle — they were simply never displayed.
@@ -207,6 +209,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       ),
                     ],
                   ),
+                ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),

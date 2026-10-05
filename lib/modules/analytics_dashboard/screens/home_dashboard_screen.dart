@@ -12,6 +12,7 @@ import '../../../core/navigation/parcel_detail_screen.dart';
 import '../../profile_settings/screens/notifications_screen.dart';
 import '../../profile_settings/screens/profile_edit_screen.dart'; 
 import '../../../core/widgets/insight_bottom_nav.dart'; // kInsightBottomNavReserve (scroll padding) only
+import '../../../core/layout/responsive_layout.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
@@ -65,6 +66,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     with TickerProviderStateMixin, SpringEntrance {
 
   late PageController _pageController;
+
+  /// Carousel page width for a given viewport width.
+  ///
+  /// Portrait keeps the accepted 0.88, so a card still peeks at the next one.
+  /// A wider viewport would otherwise turn a single card into a giant
+  /// full-bleed banner, so the fraction tightens until a card stays near its
+  /// portrait proportion and the next one remains visible.
+  static double carouselViewportFraction(double viewportWidth) {
+    if (viewportWidth < InsightBreakpoints.mediumWidth) return 0.88;
+    if (viewportWidth < InsightBreakpoints.expandedWidth) return 0.46;
+    // Wide viewports show more of the next card rather than an enormous one.
+    return (420.0 / viewportWidth).clamp(0.22, 0.40);
+  }
   int _currentCardIndex = 0;
 
   List<TaskItem> _upcomingTasks = [];
@@ -107,10 +121,43 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncCarouselToViewport();
+  }
+
+  /// Rebuild the carousel controller when the viewport width class changes, so
+  /// a rotation or a resized window gets the right card proportion. The page
+  /// index is preserved so the current card stays current.
+  void _syncCarouselToViewport() {
+    final fraction = carouselViewportFraction(context.responsive.width);
+    if ((_carouselFraction - fraction).abs() < 0.001) return;
+    final page = _pageController.hasClients && _pageController.page != null
+        ? _pageController.page!.toDouble()
+        : _currentCardIndex.toDouble();
+    _pageController.dispose();
+    _pageController = PageController(
+      viewportFraction: fraction,
+      initialPage: _currentCardIndex,
+    );
+    _carouselFraction = fraction;
+    // Restore the visible page after the new controller has attached. The
+    // clamp keeps it inside the list when the task set shrank on refresh.
+    final maxPage = (_upcomingTasks.length - 1).clamp(0, double.infinity).toDouble();
+    final target = page.clamp(0.0, maxPage);
+    if (target == page) return; // already showing the clamped page
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_pageController.hasClients) return;
+      _pageController.jumpTo(target);
+    });
+  }
+
+  double _carouselFraction = 0.88;
+
+  @override
   void initState() {
     super.initState();
     _pageController = PageController(viewportFraction: 0.88);
-    
     _checkInitialConnectivity();
 
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
@@ -900,6 +947,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                           )
                         : PageView.builder(
                             controller: _pageController,
+                            // Reuses the same controller; only the visible
+                            // fraction adapts, so the page index and the
+                            // spring-scale effect keep working unchanged.
                             itemCount: _upcomingTasks.length,
                             clipBehavior: Clip.none,
                             onPageChanged: (index) => setState(() => _currentCardIndex = index),

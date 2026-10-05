@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/insight_theme.dart';
+import '../layout/responsive_layout.dart';
 
 /// ==================================================================
 /// SHARED BOTTOM NAV — used by Home, Tasks, Updates, Profile.
@@ -39,6 +42,32 @@ import '../theme/insight_theme.dart';
 /// a small buffer). Used by scrollable tab screens as
 /// `padding: EdgeInsets.only(bottom: kInsightBottomNavReserve)`.
 const double kInsightBottomNavReserve = 180.0;
+
+/// Bottom clearance a floating panel needs to clear the quick-actions trigger.
+///
+/// Derived once from the nav's own geometry so the two can never drift apart.
+/// From the bottom of the screen, upwards: 10px nav padding, the 64px rail, the
+/// 12px trigger-to-rail gap, the 64px trigger, then a 12px visual gap above it.
+///
+/// The trigger therefore occupies offsets 150..214. The previous hardcoded
+/// `bottom: 190` fell INSIDE that band, which is exactly why the quick-actions
+/// panel sat on top of the trigger button.
+const double kInsightBottomNavTriggerClearance =
+    10 /* nav vertical padding */ +
+    64 /* rail */ +
+    12 /* trigger-to-rail gap */ +
+    64 /* trigger height */ +
+    64 /* trigger width is also its height: the circle */ +
+    12 /* visual gap above the trigger */;
+
+/// Widest the bottom-nav pill is allowed to become.
+///
+/// A phone in portrait lays the rail out at ~346px, so this cap does not engage
+/// there and the accepted design is untouched. In landscape and on tablets it
+/// stops the pill stretching edge to edge while still fitting every item: the
+/// cap actually applied is `max(naturalWidth, min(this, availableWidth))`, so a
+/// text-scaled label is never squeezed.
+const double kInsightBottomNavMaxWidth = 360.0;
 
 class InsightNavItem {
   final IconData icon;
@@ -127,6 +156,8 @@ class InsightBottomNav extends StatelessWidget {
   static const double _railAndTriggerSize = 64;
   static const double _outerCornerRadius = 32;
   static const double _railInnerPad = 8;
+  /// The rail's 1px border, counted once per side in the width budget.
+  static const double _railBorderWidth = 1;
   static const double _triggerGap = 12; // gap between trigger and rail
 
   static const double _iconSize = 20; // reference: w-5 h-5
@@ -166,6 +197,25 @@ class InsightBottomNav extends StatelessWidget {
         i == currentIndex ? activeWidth : compactWidth,
     ];
 
+    // The rail is `border + padding + SizedBox + padding + border`, so the cap has
+    // to be measured against the OUTER width and the chrome subtracted here.
+    // Forgetting the 1px border is how a "360px cap" silently shipped a 362px
+    // rail - indistinguishable from phone portrait's full-bleed width.
+    const chrome = _railInnerPad * 2 + _railBorderWidth * 2;
+
+    // Widest the rail needs for its own items. Lower bound for the cap, so a
+    // text-scaled label can never be squeezed: the cap only shrinks surplus.
+    final naturalWidth =
+        widths.fold<double>(0, (a, b) => a + b) + _itemGap * (items.length - 1) + chrome;
+
+    // Compact (phones in portrait) keeps the accepted full-bleed rail exactly
+    // as it was. Wider viewports get the same pill, centred and capped, instead
+    // of four icons spread across the whole screen.
+    final capWidth = math.max(
+      naturalWidth,
+      math.min(kInsightBottomNavMaxWidth, context.responsive.width),
+    );
+
     final rail = Container(
       padding: const EdgeInsets.all(_railInnerPad),
       decoration: BoxDecoration(
@@ -177,6 +227,7 @@ class InsightBottomNav extends StatelessWidget {
         ],
       ),
       child: SizedBox(
+        width: context.responsive.isCompactWidth ? null : capWidth - chrome,
         height: _itemHeight,
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -251,10 +302,11 @@ class InsightBottomNav extends StatelessWidget {
             child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // Rail — anchored at the bottom of this box.
+              // Rail — anchored at the bottom of this box, and centred when the
+              // viewport is wider than the capped pill.
               Positioned(
                 left: 0, right: 0, bottom: 0,
-                child: rail,
+                child: Center(child: rail),
               ),
               // Trigger stays fully visible and interactive above the rail.
               if (onQuickActionsTap != null)

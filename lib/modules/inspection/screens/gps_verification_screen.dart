@@ -14,6 +14,7 @@ import 'capture_photo_screen.dart';
 import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import '../widgets/exit_confirm_dialog.dart';
+import '../../../core/layout/responsive_layout.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../../core/services/db_helper.dart';
@@ -22,6 +23,32 @@ import '../inspection_constants.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/theme/insight_theme.dart';
+
+/// Vertical room the alignment tip needs below the dial: the 14px gap plus its
+/// text, which the theme floors at 12pt.
+const double kGpsCompassTipAllowance = 62.0;
+
+/// Diameter for the GPS compass dial that fits the space it was given.
+///
+/// The original build used `.clamp(160.0, 268.0)`. That 160px floor is what
+/// made a short landscape viewport overflow: the fixed header (~112) and
+/// verification card (~274) left the compass an ~80px slot while the dial
+/// insisted on 160 — the "BOTTOM OVERFLOWED BY 80 PIXELS" stripe.
+///
+/// There is deliberately no minimum. A small dial beats a layout error, and in
+/// the split layout the compass still owns the primary pane, so it stays large
+/// wherever there is room for it.
+double fitCompassDiameter({
+  required double availableWidth,
+  required double availableHeight,
+  required double ceiling,
+}) {
+  final budget = math.max(0.0, availableHeight - kGpsCompassTipAllowance);
+  return math
+      .min(availableWidth * 0.86, math.min(budget * 0.92, ceiling))
+      .clamp(0.0, ceiling)
+      .toDouble();
+}
 
 class GpsVerificationScreen extends StatefulWidget {
   final TaskItem task;
@@ -298,13 +325,124 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     return '${(d / 1000).toStringAsFixed(d < 10000 ? 1 : 0)} km';
   }
 
+  /// The verification card is the primary action, so it is only omitted while
+  /// there is genuinely nothing to confirm (loading or errored).
+  bool get _detailsAvailable => !_loading && _error == null;
+
+  /// Compass + alignment tip.
+  ///
+  /// Sized from the space it is actually given and never allowed to demand
+  /// more than that. The previous build clamped it to a 160px floor, which is
+  /// what turned a cramped landscape viewport into a hard
+  /// "BOTTOM OVERFLOWED BY 80 PIXELS" instead of simply a smaller dial.
+  ///
+  /// The tip is *inside* the same scroll view as the dial so that a slot too
+  /// short even for a minimum dial cannot overflow the column either.
+  Widget _buildCompassPane() {
+    if (_loading) return const Center(child: _LoadingState());
+    if (_error != null) {
+      return Center(
+        child: _ErrorState(message: _error!, onRetry: _checkLocation),
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // In a split layout the compass owns the primary pane and may grow;
+        // stacked portrait keeps the accepted 268px ceiling.
+        final ceiling = context.responsive.canSplitTwoPane ? 300.0 : 268.0;
+
+        Widget build(double slot) {
+          final compassSize = fitCompassDiameter(
+            availableWidth: constraints.maxWidth,
+            availableHeight: slot,
+            ceiling: ceiling,
+          );
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                alignment: Alignment.topCenter,
+                children: [
+                  // Fixed top heading pointer.
+                  Positioned(
+                    top: 0,
+                    child: CustomPaint(
+                      size: Size(compassSize * 0.07, compassSize * 0.05),
+                      painter: _TopPointerPainter(color: InsightTheme.amber),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.only(top: compassSize * 0.07),
+                    child: _Compass(
+                      size: compassSize,
+                      heading: _heading,
+                      bearingToParcel: _bearingToParcel,
+                      headingCardinal: _headingCardinal,
+                      verified: _verified,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _AlignmentTip(
+                verified: _verified,
+                bearingToParcel: _bearingToParcel,
+                compassUnavailable: _compassUnavailable,
+              ),
+            ],
+          );
+        }
+
+        // Tall enough for the dial and the tip together: centre it.
+        final roomy = constraints.maxHeight - kGpsCompassTipAllowance;
+        if (roomy > 0) {
+          final size = fitCompassDiameter(
+            availableWidth: constraints.maxWidth,
+            availableHeight: roomy,
+            ceiling: ceiling,
+          );
+          // Anything the dial needs beyond half the slot is worth scrolling
+          // rather than squeezing the tip out of view.
+          if (size * 2 <= constraints.maxHeight) {
+            return Center(child: build(roomy));
+          }
+        }
+        // Otherwise scroll: a short slot must not clip the confirm affordance
+        // or the tip, it must scroll them.
+        return SingleChildScrollView(child: build(constraints.maxHeight));
+      },
+    );
+  }
+
+  /// Coordinate readout for the verification card, null until a fix exists.
+  String? get _coordsText => (_latitude != null && _longitude != null)
+      ? "${_formatCoord(_latitude!, 'NS')}   ${_formatCoord(_longitude!, 'EW')}"
+      : null;
+
+  /// Verification card. When it shares a pane with the compass it scrolls
+  /// independently, so no metric and not the confirm action can be pushed
+  /// off-screen.
+  Widget _buildDetailPane({bool scrollable = false}) {
+    final card = _VerificationCard(
+      distanceText: _distanceText,
+      accuracy: _accuracy,
+      verified: _verified,
+      heading: _heading,
+      headingCardinal: _headingCardinal,
+      coords: _coordsText,
+      location: widget.task.location,
+      submitting: _submitting,
+      isReworkMode: context.read<InspectionProvider>().isReworkMode,
+      onConfirm: _startInspection,
+    );
+    if (!scrollable) return card;
+    return SingleChildScrollView(child: card);
+  }
+
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final isReworkMode = context.read<InspectionProvider>().isReworkMode;
-    final coords = (_latitude != null && _longitude != null)
-        ? "${_formatCoord(_latitude!, 'NS')}   ${_formatCoord(_longitude!, 'EW')}"
-        : null;
 
     return SensitiveScreen(
       child: PopScope(
@@ -325,95 +463,31 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
           body: SafeArea(
             child: Stack(
               children: [
-                Column(
-                  children: [
-                    // ── Header block: back + title card + fullscreen toggle,
-                    // then the step progress card. Hidden in fullscreen. ──
-                    if (!_fullscreen)
-                      _GpsHeader(
-                        location: widget.task.location,
-                        verified: _verified,
-                        onBack: () => handleInspectionExit(
-                          context,
-                          onSaveProgress: () => _markOngoingWithFallback(widget.task.id),
-                          isReworkMode: isReworkMode,
+                // ── Responsive composition ────────────────────────────────
+                // Portrait keeps the accepted vertical stack. Where a split
+                // is worthwhile the spatial compass becomes the primary pane
+                // and the detail card moves beside it in its own scroll view,
+                // so the verification metrics and the primary action stay
+                // reachable without the compass ever being pushed off-screen.
+                HeaderSplitBody(
+                  header: _fullscreen
+                      // Immersive mode drops the header entirely.
+                      ? null
+                      : _GpsHeader(
+                          location: widget.task.location,
+                          verified: _verified,
+                          onBack: () => handleInspectionExit(
+                            context,
+                            onSaveProgress: () =>
+                                _markOngoingWithFallback(widget.task.id),
+                            isReworkMode: isReworkMode,
+                          ),
+                          onToggleFullscreen: () =>
+                              setState(() => _fullscreen = !_fullscreen),
                         ),
-                        onToggleFullscreen: () => setState(() => _fullscreen = !_fullscreen),
-                      ),
-
-                    // ── Compass + alignment tip. ────────────────────────
-                    Expanded(
-                      child: _loading
-                          ? const Center(child: _LoadingState())
-                          : _error != null
-                              ? Center(child: _ErrorState(message: _error!, onRetry: _checkLocation))
-                              : LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    // Compass scales with the smaller of available
-                                    // width/height so it never forces the card
-                                    // below it off-screen (small devices,
-                                    // landscape).
-                                    final compassSize = math.min(
-                                      constraints.maxWidth * 0.72,
-                                      math.min(constraints.maxHeight * 0.62, 268.0),
-                                    ).clamp(160.0, 268.0).toDouble();
-
-                                    return Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Stack(
-                                            alignment: Alignment.topCenter,
-                                            children: [
-                                              // Fixed top heading pointer.
-                                              Positioned(
-                                                top: 0,
-                                                child: CustomPaint(
-                                                  size: Size(compassSize * 0.07, compassSize * 0.05),
-                                                  painter: _TopPointerPainter(color: InsightTheme.amber),
-                                                ),
-                                              ),
-                                              Padding(
-                                                padding: EdgeInsets.only(top: compassSize * 0.07),
-                                                child: _Compass(
-                                                  size: compassSize,
-                                                  heading: _heading,
-                                                  bearingToParcel: _bearingToParcel,
-                                                  headingCardinal: _headingCardinal,
-                                                  verified: _verified,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 14),
-                                          _AlignmentTip(
-                                            verified: _verified,
-                                            bearingToParcel: _bearingToParcel,
-                                            compassUnavailable: _compassUnavailable,
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                ),
-                    ),
-
-                    // ── Verification card. Stays visible in fullscreen —
-                    // confirming is the screen's primary action. ──────────
-                    if (!_loading && _error == null)
-                      _VerificationCard(
-                        distanceText: _distanceText,
-                        accuracy: _accuracy,
-                        verified: _verified,
-                        heading: _heading,
-                        headingCardinal: _headingCardinal,
-                        coords: coords,
-                        location: widget.task.location,
-                        submitting: _submitting,
-                        isReworkMode: isReworkMode,
-                        onConfirm: _startInspection,
-                      ),
-                  ],
+                  primary: _buildCompassPane(),
+                  secondary:
+                      _detailsAvailable ? _buildDetailPane(scrollable: true) : null,
                 ),
 
                 // Fullscreen exit toggle — the header that used to carry it

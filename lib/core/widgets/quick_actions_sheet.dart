@@ -1,6 +1,11 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/insight_theme.dart';
+import '../layout/responsive_layout.dart';
+import 'insight_bottom_nav.dart'
+    show kInsightBottomNavTriggerClearance;
 
 /// ==================================================================
 /// QUICK ACTIONS SHEET
@@ -22,6 +27,109 @@ class QuickAction {
   final VoidCallback onTap;
   const QuickAction({required this.icon, required this.title, this.subtitle, required this.onTap});
 }
+
+/// A map-first detail panel: a compact side pane where a split is worthwhile,
+/// a content-sized floating card otherwise, with an explicit control to hide
+/// it so the spatial surface is never permanently obscured.
+///
+/// The collapse is local presentation state only — nothing about the map, the
+/// location data, or the actions inside is affected.
+class MapDetailPanel extends StatefulWidget {
+  const MapDetailPanel({
+    super.key,
+    required this.child,
+    this.sidePanelWidthFactor = 0.36,
+    this.minSidePanelWidth = 280,
+    this.maxSidePanelWidth = 400,
+  });
+
+  final Widget child;
+  final double sidePanelWidthFactor;
+  final double minSidePanelWidth;
+  final double maxSidePanelWidth;
+
+  /// Widest the floating form of this panel becomes.
+  static const double kCardMaxWidth = 520;
+
+  @override
+  State<MapDetailPanel> createState() => _MapDetailPanelState();
+}
+
+class _MapDetailPanelState extends State<MapDetailPanel> {
+  bool _collapsed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bp = context.responsive;
+
+    // The expand/collapse control: always present, always reachable, and a
+    // comfortable tap target.
+    final toggle = Semantics(
+      button: true,
+      label: _collapsed ? 'Show details' : 'Hide details',
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        elevation: 3,
+        child: InkWell(
+          onTap: () => setState(() => _collapsed = !_collapsed),
+          borderRadius: BorderRadius.circular(14),
+          // 48px: the accessibility floor, and it has to stay reachable with the
+          // map underneath it.
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Icon(
+              _collapsed
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.keyboard_arrow_down_rounded,
+              size: 22,
+              color: InsightTheme.ink2,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (!bp.canSplitTwoPane || _collapsed) {
+      // Floating card, content-sized and bounded; the toggle sits just above it.
+      final panel = ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: MapDetailPanel.kCardMaxWidth),
+        child: widget.child,
+      );
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          toggle,
+          const SizedBox(height: 8),
+          if (_collapsed) const SizedBox.shrink() else panel,
+        ],
+      );
+    }
+
+    // Side pane on the right: the map keeps the primary share.
+    final width = (bp.width * widget.sidePanelWidthFactor)
+        .clamp(widget.minSidePanelWidth, widget.maxSidePanelWidth)
+        .toDouble();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Spacer(),
+        SizedBox(width: width, child: widget.child),
+        const SizedBox(width: 8),
+        toggle,
+      ],
+    );
+  }
+}
+
+/// Widest the floating quick-actions panel may become.
+///
+/// A full-bleed sheet read as a cut-off strip in landscape. Bounding it makes it
+/// the compact floating panel the design calls for; a phone in portrait lays out
+/// under this cap and is completely unchanged.
+const double kPanelMaxWidth = 460.0;
 
 class QuickActionsSheet extends StatefulWidget {
   final List<QuickAction> actions;
@@ -46,7 +154,18 @@ class QuickActionsSheet extends StatefulWidget {
 class _QuickActionsSheetState extends State<QuickActionsSheet> {
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // Bounded and centred. The host hands this a tight width (left/right
+    // positioned), so the cap has to sit ABOVE the container — constraining a
+    // child cannot shrink a parent that was given tight constraints. Without
+    // this the panel runs edge to edge and reads as a cut-off strip.
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: _maxHostHeight(context),
+          maxWidth: kPanelMaxWidth,
+        ),
+        child: Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -56,18 +175,28 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
           BoxShadow(color: Color(0x1A000000), blurRadius: 32, offset: Offset(0, 16)),
         ],
       ),
+      // The actions scroll inside the bounded panel, so a landscape viewport
+      // can never push rows off-screen.
       child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Quick actions',
-                  style: InsightTheme.urbanist(20, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.3),
+                // Flexible + ellipsis: at a 1.3x text scale the 20pt title is
+                // wider than the sheet, which painted a right overflow in every
+                // viewport including phone portrait.
+                Flexible(
+                  child: Text(
+                    'Quick actions',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: InsightTheme.urbanist(20, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.3),
+                  ),
                 ),
+                const SizedBox(width: 8),
                 GestureDetector(
                   onTap: widget.onClose,
                   behavior: HitTestBehavior.opaque,
@@ -85,18 +214,89 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
               ],
             ),
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (int i = 0; i < widget.actions.length; i++)
-                _StaggeredEntry(
-                  index: i,
-                  child: _QuickActionRow(action: widget.actions[i], onClose: widget.onClose),
-                ),
-            ],
-          ),
-        ],
+          Flexible(child: SingleChildScrollView(child: _buildActions())),
+          ],
+        ),
+        ),
       ),
+    );
+  }
+
+  /// Vertical clearance the host must leave below this sheet.
+///
+/// The nav's quick-actions trigger is a 64px circle sitting `_triggerGap` (12)
+/// above the 64px rail, and the nav block itself is padded 10 and wrapped in a
+/// SafeArea. The previous fixed `bottom: 190` overlapped that trigger by
+/// roughly 16px on a device with a gesture bar. Deriving the offset from the
+/// nav's own geometry keeps the panel clear of the trigger on every device.
+  static const double kHostBottomOffset = kInsightBottomNavTriggerClearance;
+
+  /// Height the host can give this sheet.
+  ///
+  /// Always leaves room for the header plus one row, so the close control and
+  /// the first action can never be scrolled out of reach.
+  static const double kHeaderAllowance = 72.0;
+
+  double _maxHostHeight(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final insets = media.padding.top + media.padding.bottom;
+    final usable = media.size.height - kHostBottomOffset - insets;
+    // Never hand back less than the header plus one row, or the close control
+    // and the first action would be scrolled out of reach.
+    return math.max(kHeaderAllowance + 48.0, usable);
+  }
+
+  /// Width below which two columns would squeeze a row's icon, label and
+  /// chevron into an overflow. Two columns need real room, not just width.
+  static const double kTwoColumnMinWidth = 520.0;
+
+  /// Every action, always all of them and in the same order.
+  ///
+  /// Portrait keeps the accepted single-column list. Where the panel is wide
+  /// enough the same actions flow into two columns, so a landscape viewport
+  /// stops spending its height on a tall portrait-shaped sheet.
+  Widget _buildActions() {
+    final actions = widget.actions;
+
+    Widget entry(int i, Widget child) =>
+        _StaggeredEntry(index: i, child: child);
+
+    // canSplitTwoPane alone is not enough: a half-width row still has to fit a
+    // 48px icon, a label and a chevron. Below that, one column is the correct
+    // answer even on a wide-but-short viewport.
+    final twoColumns = context.responsive.canSplitTwoPane &&
+        MediaQuery.sizeOf(context).width >= kTwoColumnMinWidth;
+    if (!twoColumns) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < actions.length; i++)
+            entry(i, _QuickActionRow(action: actions[i], onClose: widget.onClose)),
+        ],
+      );
+    }
+
+    // Split the list in half so the two columns hold a similar number of rows.
+    final split = (actions.length / 2).ceil();
+    final left = actions.sublist(0, split);
+    final right = actions.sublist(split);
+    Widget column(List<QuickAction> items, int offset) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int i = 0; i < items.length; i++)
+              entry(offset + i,
+                  _QuickActionRow(action: items[i], onClose: widget.onClose)),
+          ],
+        );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(child: column(left, 0)),
+        const SizedBox(width: 8),
+        Flexible(child: column(right, split)),
+      ],
     );
   }
 }

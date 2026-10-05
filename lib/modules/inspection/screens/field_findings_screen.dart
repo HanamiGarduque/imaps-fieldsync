@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../../../core/layout/responsive_layout.dart';
 import 'package:flutter/services.dart';
 
 import 'review_submit_screen.dart';
@@ -140,11 +141,12 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                   ),
                 ),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    physics: const BouncingScrollPhysics(),
-                    children: [
-                      _SectionLabel(title: 'OBSERVATIONS'),
+                  child: ConstrainedContent(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      physics: const BouncingScrollPhysics(),
+                      children: [
+                        _SectionLabel(title: 'OBSERVATIONS'),
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(16),
@@ -214,6 +216,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                         child: TextField(controller: _recommendationsController, maxLines: 3, minLines: 2, style: InsightTheme.inter(14, c: InsightTheme.ink), decoration: InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none, hintText: 'Enter recommendation for this application (e.g., required permits, follow-up actions)...')),
                       ),
                     ],
+                  ),
                   ),
                 ),
                 Padding(

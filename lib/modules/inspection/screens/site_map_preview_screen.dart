@@ -16,6 +16,9 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/quick_actions_sheet.dart' show MapDetailPanel;
+import '../../../core/widgets/insight_bottom_nav.dart'
+    show kInsightBottomNavReserve;
 
 /// Standalone Site Map viewer — full-bleed map showing only the
 /// inspector's own live position as a pulsing beacon marker. No route
@@ -198,11 +201,13 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
               ),
             ),
 
-            // ── Floating recenter button, above the bottom card. ────────
+            // ── Floating recenter button. ───────────────────────────────
+            // Anchored below the nav reserve rather than to a guessed 210,
+            // which collided with the info card in a short landscape viewport.
             if (!_loading && _error == null)
               Positioned(
                 right: 16,
-                bottom: 210,
+                bottom: kInsightBottomNavReserve,
                 child: SafeArea(
                   top: false,
                   child: _GlassIconButton(
@@ -212,16 +217,24 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
                 ),
               ),
 
-            // ── Bottom info card — "Your current location" + actual
+            // ── Info card — "Your current location" + actual
             // coordinates/accuracy/heading, instead of a bare label. ────
+            // Map-first: this is a compact side pane in landscape/tablet and a
+            // collapsible, content-sized card otherwise, so the map is never
+            // permanently covered.
             if (!_loading && _error == null && _position != null)
               Positioned(
-                left: 16,
-                right: 16,
+                left: 0,
+                right: 0,
                 bottom: 0,
+                top: 0,
                 child: SafeArea(
-                  top: false,
-                  child: Container(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: MapDetailPanel(
+                        child: Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
                     decoration: BoxDecoration(
@@ -305,6 +318,9 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
                           ],
                         ),
                       ],
+                    ),
+                        ),
+                      ),
                     ),
                   ),
                 ),

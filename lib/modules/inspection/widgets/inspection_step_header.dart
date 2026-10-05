@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/layout/responsive_layout.dart';
 
 /// ==================================================================
 /// INSPECTION STEP HEADER
@@ -14,6 +15,18 @@ class InspectionStepHeader extends StatelessWidget {
   final String stepSubtitle; // e.g. 'LOCATE TARGET', 'VERIFY COORDINATES'
   final VoidCallback onBack;
 
+  /// Hide the title/subtitle pill and the progress bar, leaving only the back
+  /// button.
+  ///
+  /// A rotated phone or a tablet has very little vertical room, and this header
+  /// is ~138px of it — more than a third of a 390px landscape viewport. The
+  /// content is what matters there, not the banner.
+  ///
+  /// Left null it resolves itself from the viewport: shown in portrait, hidden
+  /// when the height is scarce. Pass an explicit bool to override. Every call
+  /// site keeps the accepted portrait appearance with no changes.
+  final bool? compact;
+
   const InspectionStepHeader({
     super.key,
     required this.title,
@@ -21,10 +34,13 @@ class InspectionStepHeader extends StatelessWidget {
     required this.stepNumber,
     required this.stepSubtitle,
     required this.onBack,
+    this.compact,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Vertical space is the scarce resource in landscape; spend it on content.
+    final isCompact = compact ?? context.responsive.isShortHeight;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
@@ -32,46 +48,53 @@ class InspectionStepHeader extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           // ── Row 1: Floating back button + Floating title container ──
+          // In compact mode only the back button remains, so the step's own
+          // content gets the vertical space the banner was using.
           Row(
             children: [
               _StepGlassIconButton(
                 icon: Icons.arrow_back_ios_new_rounded,
                 onTap: onBack,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StepGlassPill(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        style: InsightTheme.poppins(
-                          15,
-                          w: FontWeight.w700,
-                          c: InsightTheme.ink,
+              if (!isCompact) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StepGlassPill(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          title,
+                          style: InsightTheme.poppins(
+                            15,
+                            w: FontWeight.w700,
+                            c: InsightTheme.ink,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 1),
-                      Text(
-                        subtitle,
-                        style: InsightTheme.inter(11, c: InsightTheme.ink2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                        const SizedBox(height: 1),
+                        Text(
+                          subtitle,
+                          style: InsightTheme.inter(11, c: InsightTheme.ink2),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
 
-          const SizedBox(height: 10),
+          if (!isCompact) const SizedBox(height: 10),
 
           // ── Row 2: Floating Step Progress bar container ──────────────
+          // Hidden in compact mode: the step number is already known from the
+          // workflow, and this pill costs ~48px of scarce landscape height.
+          if (!isCompact)
           _StepGlassPill(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Column(
