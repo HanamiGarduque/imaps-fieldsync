@@ -192,32 +192,40 @@ What it does **not** establish, and why client checks cannot substitute:
 Server-side enforcement is the only acceptable boundary here. The client work in
 this commit is defense in depth, not a substitute.
 
-## Proposed backend delta — NOT APPLIED
+## Proposed backend delta — APPLIED (005_harden_inspection_photo_authorization.sql)
 
-Per the locked instruction, the following is a proposal only. No migration was
-created, staged, or applied.
+Migration file: `supabase/migrations/005_harden_inspection_photo_authorization.sql`
+Target: shared Supabase project (sanitized `laapipjyprmmaylunxib`).
 
-1. Tighten the Storage INSERT/UPDATE `WITH CHECK` to require the canonical
-   prefix for the *same* job the row is already assigned to, for both the
-   existing row and the newly proposed path on upsert:
+Applied on the current HEAD (`feat/midflight-handover-prerequisites`) after
+structural verification and a rolled-back CHECK/operation-gate probe
+(`field_job_photos_path_namespace_chk` is live, `005/005` pre-state rows were all
+canonical, and `storage.allow_only_operation('storage.object.upload_update')`
+returns FALSE in a non-Storage-API request context).
 
-   ```sql
-   bucket_id = 'inspection-photos'
-   AND name LIKE ('inspections/' || <job-uuid> || '/%')
-   AND (storage.foldername(name))[2] = <job-uuid>::text
-   ```
+The migration contains exactly, and no more than, the approved delta:
 
-2. Require a Storage UPDATE policy with both a `USING` (existing row in an
-   authorized namespace) and a `WITH CHECK` (new path in an authorized namespace),
-   so an object cannot be moved between job namespaces.
-3. Preserve the existing DELETE prohibition for evidence; do not add one.
-4. Add metadata/path coherence: either a `CHECK` constraint tying `photo_url` to
-   `inspections/<field_job_id>/%`, or a trigger, so metadata cannot reference an
-   object outside its own job namespace.
-5. Review the full deployed policy set for any additional permissive policy that
-   ORs wider than these predicates.
-6. Keep the narrowed metadata UPDATE policy only if correcting protected
-   metadata during rework remains a proven requirement; otherwise revoke it.
+1. Storage INSERT tightened to authenticated-only, canonical prefix, valid
+   `photo_<base64url>.jpg` filename, and the current assigned inspector.
+2. Storage UPDATE retained ONLY for the Storage upload-overwrite operation via
+   `storage.allow_only_operation('storage.object.upload_update')`, in both the
+   `USING` and `WITH CHECK` clauses, with the same canonical/current-assignee
+   predicates. `storage.object.move`/rename and raw non-Storage-API UPDATE
+   contexts evaluate FALSE through the operation gate.
+3. Metadata namespace coherence via `field_job_photos_path_namespace_chk` on
+   `public.field_job_photos`.
+
+No DELETE permission, no admin write permission, no bucket change, no custom
+trigger/function on `storage.objects`. FieldSync client retains `upsert: true`.
+
+Canonical path contract: `inspection-photos/inspections/<field_job_uuid>/photo_<base64url-key>.jpg`.
+Metadata `photo_url` is stored as the same relative object key, and the CHECK
+guarantees path-shape + job-namespace coherence. It does **not** assert that the
+Storage object physically exists; existence is enforced by the Storage RLS, not
+by the column CHECK.
+
+Full mid-flight handover is NOT IMPLEMENTED. The rules preserved here are
+prerequisites, not a transfer mechanism.
 
 **Tests to accompany the delta:** an authenticated non-assignee cannot create,
 upsert, or move an object into or within another job's namespace; cannot insert
@@ -225,9 +233,12 @@ metadata for another job; cannot update protected metadata for another job;
 cannot delete evidence; the assigned inspector's normal upload, resume-repair,
 and rework-metadata-correction paths still succeed.
 
-**Rollback:** the delta is expressed as policy replacement plus one optional
-constraint/trigger; reverting restores the prior policy definitions and drops the
-added object. No data migration is involved.
+**Applied delta:** `supabase/migrations/005_harden_inspection_photo_authorization.sql`
+was applied to the shared project and verified structurally and via a rolled-back
+runtime probe. Rollback is the exact inverse captured at Phase 4 of that run;
+do not run it unless a validation failure emerges. Known limitations: full
+mid-flight handover is still NOT implemented, and the in-app count/existence of
+NULLowner legacy queue rows is intentionally hidden under row-level ownership.
 
 ## Verification
 
