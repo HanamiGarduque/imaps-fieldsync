@@ -539,9 +539,10 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
           Positioned(
             left: 16,
             right: 16,
-            bottom: 190, // raised — the trigger now sits above the rail,
-                         // not beside it, so the sheet needs more
-                         // clearance to avoid overlapping the trigger.
+            // Derived from the nav's own geometry so the panel always clears
+            // the quick-actions trigger. The old fixed 190 sat ~16px too low
+            // and clipped the trigger button.
+            bottom: kInsightBottomNavTriggerClearance,
             child: IgnorePointer(
               ignoring: !_quickActionsOpen,
               child: AnimatedSlide(

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme/insight_theme.dart';
@@ -59,18 +59,6 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
       backgroundColor: InsightTheme.bg,
       body: Stack(
         children: [
-          FaqWidgets.backgroundBlob(
-            top: -60,
-            right: -40,
-            size: 240,
-            color: InsightTheme.blue1.withValues(alpha: 0.18),
-          ),
-          FaqWidgets.backgroundBlob(
-            bottom: -80,
-            left: -60,
-            size: 200,
-            color: InsightTheme.blue2.withValues(alpha: 0.12),
-          ),
           SafeArea(
             bottom: false,
             child: Column(

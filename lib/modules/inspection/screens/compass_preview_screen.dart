@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 
+import '../../../core/layout/responsive_layout.dart';
+import 'gps_verification_screen.dart' show fitCompassDiameter;
+
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
 
@@ -128,13 +131,15 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
             ),
 
             SafeArea(
-              child: Column(
-                children: [
-                  // App Bar / Top Navigation
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                    child: Row(
-                      children: [
+              // Portrait keeps the accepted stack: dial above the metrics card.
+              // Landscape and tablet put the dial left as the primary pane and
+              // the metrics beside it, so the dial stays large instead of being
+              // squeezed to fit a portrait-shaped card.
+              child: HeaderSplitBody(
+                header: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Row(
+                    children: [
                         _GlassIconButton(
                           icon: Icons.arrow_back_ios_new_rounded,
                           onTap: () => Navigator.pop(context),
@@ -189,17 +194,13 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                         ),
                       ],
                     ),
-                  ),
-
-                  // Center Compass Dial Area
-                  Expanded(
-                    child: _compassUnavailable
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 32,
-                              ),
-                              child: Container(
+                ),
+                // Center Compass Dial Area
+                primary: _compassUnavailable
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 32),
+                          child: Container(
                                 padding: const EdgeInsets.all(24),
                                 decoration: BoxDecoration(
                                   color: InsightTheme.surface,
@@ -207,87 +208,84 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                                     InsightTheme.radiusLg,
                                   ),
                                   border: Border.all(color: InsightTheme.line),
-                                  boxShadow: InsightTheme.cardShadow,
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      width: 48,
-                                      height: 48,
-                                      decoration: BoxDecoration(
-                                        color: InsightTheme.amberTint,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: InsightTheme.amber.withValues(
-                                            alpha: 0.2,
-                                          ),
-                                        ),
-                                      ),
-                                      child: const Icon(
-                                        Icons.explore_off_rounded,
-                                        size: 24,
-                                        color: InsightTheme.amber,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 14),
-                                    Text(
-                                      'Compass sensor unavailable',
-                                      style: InsightTheme.poppins(
-                                        15,
-                                        w: FontWeight.w700,
-                                        c: InsightTheme.ink,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      'A magnetometer sensor was not detected on this hardware. Orientation data cannot be provided.',
-                                      textAlign: TextAlign.center,
-                                      style: InsightTheme.inter(
-                                        12,
-                                        c: InsightTheme.ink2,
-                                      ),
-                                    ),
-                                  ],
+                          boxShadow: InsightTheme.cardShadow,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: InsightTheme.amberTint,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: InsightTheme.amber.withValues(
+                                    alpha: 0.2,
+                                  ),
                                 ),
                               ),
+                              child: const Icon(
+                                Icons.explore_off_rounded,
+                                size: 24,
+                                color: InsightTheme.amber,
+                              ),
                             ),
-                          )
-                        : LayoutBuilder(
-                            builder: (context, constraints) {
-                              final compassSize = math
-                                  .min(
-                                    constraints.maxWidth * 0.76,
-                                    math.min(
-                                      constraints.maxHeight * 0.70,
-                                      270.0,
-                                    ),
-                                  )
-                                  .clamp(160.0, 270.0)
-                                  .toDouble();
-
-                              return Center(
-                                child: _StandaloneCompassDial(
-                                  size: compassSize,
-                                  heading: _heading,
-                                  headingCardinal: _headingCardinal,
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-
-                  // Bottom Orientation Metrics Card
-                  if (!_compassUnavailable)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: _StandaloneOrientationCard(
-                        heading: _heading,
-                        headingCardinal: _headingCardinal,
-                        accuracy: _accuracy,
+                            const SizedBox(height: 14),
+                            Text(
+                              'Compass sensor unavailable',
+                              style: InsightTheme.poppins(
+                                15,
+                                w: FontWeight.w700,
+                                c: InsightTheme.ink,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'A magnetometer sensor was not detected on this hardware. Orientation data cannot be provided.',
+                              textAlign: TextAlign.center,
+                              style: InsightTheme.inter(
+                                12,
+                                c: InsightTheme.ink2,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                ],
+                  )
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          // Same fitting rule as GPS Verification: no minimum,
+                          // so the dial can never demand more than the space it
+                          // was given.
+                          final compassSize = fitCompassDiameter(
+                            availableWidth: constraints.maxWidth,
+                            availableHeight: constraints.maxHeight,
+                            ceiling: 270.0,
+                          );
+
+                          return Center(
+                            child: _StandaloneCompassDial(
+                              size: compassSize,
+                              heading: _heading,
+                              headingCardinal: _headingCardinal,
+                            ),
+                          );
+                        },
+                      ),
+                // Orientation metrics: below the dial in portrait, beside it
+                // once there is room.
+                secondary: _compassUnavailable
+                    ? null
+                    : Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: _StandaloneOrientationCard(
+                          heading: _heading,
+                          headingCardinal: _headingCardinal,
+                          accuracy: _accuracy,
+                        ),
+                      ),
               ),
             ),
           ],

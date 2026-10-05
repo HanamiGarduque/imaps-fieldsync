@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -16,21 +15,6 @@ class AboutInsightScreen extends StatelessWidget {
       body: Stack(
         children: [
           // Background Glow
-          Positioned(
-            top: -60,
-            right: -60,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withValues(alpha: 0.20),
-                ),
-              ),
-            ),
-          ),
 
           SafeArea(
             child: Column(

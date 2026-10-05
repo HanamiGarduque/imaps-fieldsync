@@ -45,36 +45,6 @@ class _InspectionResultScreenState extends State<InspectionResultScreen> {
           // ----------------------------------------------------
           // BACKGROUND GRADIENT BLOBS
           // ----------------------------------------------------
-          Positioned(
-            top: -60,
-            right: -60,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withValues(alpha: 0.20),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -80,
-            left: -80,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: Container(
-                width: 220,
-                height: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: InsightTheme.blue1.withValues(alpha: 0.10),
-                ),
-              ),
-            ),
-          ),
 
           // ----------------------------------------------------
           // MAIN CONTENT

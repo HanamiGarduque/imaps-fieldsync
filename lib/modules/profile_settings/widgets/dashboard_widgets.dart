@@ -455,6 +455,14 @@ class WeeklyTrendCard extends StatelessWidget {
 /// ACTIVITY TRACKER — weekday header makes the calendar scannable at a
 /// glance; footer surfaces the streak, which the raw grid can't show.
 /// ==================================================================
+/// Largest day-cell the activity calendar will draw.
+///
+/// The grid is always seven square columns filling the available width, so on a
+/// wide viewport each cell grew to ~165px and the card became ~1000px tall.
+/// Capping the cell keeps the calendar a readable size and centred; the column
+/// count and every date calculation are untouched.
+const double kAnalyticsHeatmapMaxCell = 56.0;
+
 class ActivityHeatmapCard extends StatelessWidget {
   /// Exactly which days are shown and which of them were completed. The
   /// denominator, calendar shape and "today" outline all come from this — never
@@ -523,22 +531,30 @@ class ActivityHeatmapCard extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             const spacing = 6.0;
-            final cell = (constraints.maxWidth - (spacing * 6)) / 7;
+            // Seven square columns fill the width, which on a wide viewport
+            // produced ~165px cells and a ~1000px-tall card. The cells stay
+            // square (that is what the gridHeight maths relies on) but stop
+            // growing past a readable size; the grid itself stays full width.
+            final fullCell = (constraints.maxWidth - (spacing * 6)) / 7;
+            final cell = fullCell.clamp(0.0, kAnalyticsHeatmapMaxCell);
             final rows = range.calendarWeeks;
             final gridHeight = rows * cell + (rows - 1) * spacing;
             return SizedBox(
               height: gridHeight,
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                itemCount: range.cellCount,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 7,
-                  mainAxisSpacing: spacing,
-                  crossAxisSpacing: spacing,
-                  childAspectRatio: 1,
-                ),
+              child: Center(
+                child: SizedBox(
+                  width: cell * 7 + spacing * 6,
+                  child: GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    itemCount: range.cellCount,
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 7,
+                      mainAxisSpacing: spacing,
+                      crossAxisSpacing: spacing,
+                      childAspectRatio: 1,
+                    ),
                 itemBuilder: (context, index) {
                   if (index < range.leadingBlanks) return const SizedBox.shrink();
                   final date = range.days[index - range.leadingBlanks];
@@ -567,9 +583,11 @@ class ActivityHeatmapCard extends StatelessWidget {
                   );
                 },
               ),
-            );
-          },
-        ),
+            ),
+          ),
+        );
+      },
+    ),
         const SizedBox(height: 12),
         Divider(height: 1, color: inactiveColor),
         const SizedBox(height: 12),

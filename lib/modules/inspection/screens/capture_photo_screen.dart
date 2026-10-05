@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import '../../../core/layout/responsive_layout.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
@@ -221,10 +222,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                   ),
                 ),
                 Expanded(
-                  child: GridView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    physics: const BouncingScrollPhysics(),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1),
+                  child: ConstrainedContent(
+                    child: GridView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      physics: const BouncingScrollPhysics(),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1),
                     itemCount: _capturedPhotos.length + (_capturedPhotos.length < maxPhotos ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index < _capturedPhotos.length) {
@@ -240,6 +242,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                       }
                       return _AddPhotoCell(onTap: () => setState(() => _isCameraMode = true));
                     },
+                  ),
                   ),
                 ),
                 Padding(

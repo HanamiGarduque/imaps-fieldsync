@@ -3,6 +3,7 @@ import '../../../core/services/auth_service.dart';
 import '../services/biometric_service.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/layout/responsive_layout.dart';
 import 'splash_screen.dart' show LoginScreen;
 
 /// Shown two places: (1) app-resume, per the original §5d design, and
@@ -105,9 +106,16 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
           backgroundColor: InsightTheme.bg,
           body: SafeArea(
             child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Column(
+              // Bounded and scrollable: the fixed column below summed to ~304px
+              // with only ~26px of slack, so a wrapped bio label or a system
+              // inset overflowed a 390px-tall landscape viewport.
+              child: ConstrainedContent(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 16,
+                  ),
+                  child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
@@ -168,6 +176,7 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
                       ),
                     ),
                   ],
+                  ),
                 ),
               ),
             ),

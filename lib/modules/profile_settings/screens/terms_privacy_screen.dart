@@ -34,26 +34,6 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
       body: Stack(
         children: [
           // Shrunk Premium Background Blobs
-          Positioned(
-            top: -60, right: -40,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-              child: Container(
-                width: 220, height: 220,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.18)),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -80, left: -60,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
-              child: Container(
-                width: 180, height: 180,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue2.withValues(alpha: 0.12)),
-              ),
-            ),
-          ),
 
           SafeArea(
             bottom: false,

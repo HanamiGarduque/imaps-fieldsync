@@ -18,6 +18,7 @@ import '../../../core/widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
 import '../../../core/navigation/main_shell_screen.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/layout/responsive_layout.dart';
 import '../../../core/services/app_info_service.dart';
 import '../../profile_settings/screens/terms_privacy_screen.dart';
 
@@ -915,6 +916,10 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Center(
+          child: ConstrainedContent(
+          // The outer scroll view already absorbs short heights; this only stops
+          // the form stretching to ~1228px wide on a tablet. Phone portrait
+          // stays exactly as accepted, because 390 < the cap.
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 20),
             physics: const BouncingScrollPhysics(),
@@ -1219,6 +1224,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ],
+            ),
             ),
           ),
         ),

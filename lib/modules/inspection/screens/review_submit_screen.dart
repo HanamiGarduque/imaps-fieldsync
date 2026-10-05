@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../../../core/layout/responsive_layout.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -193,11 +194,12 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   onBack: () => handleInspectionExit(context, onSaveProgress: () async => true),
                 ),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    physics: const BouncingScrollPhysics(),
-                    children: [
-                      Container(
+                  child: ConstrainedContent(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      physics: const BouncingScrollPhysics(),
+                      children: [
+                        Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
                           color: InsightTheme.surface,
@@ -242,6 +244,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                         HapticFeedback.selectionClick(); setState(() => _selectedStatus = o.title); context.read<InspectionProvider>().updateResult(o.title);
                       })),
                     ],
+                  ),
                   ),
                 ),
                 Padding(

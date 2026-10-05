@@ -20,6 +20,7 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/services/app_info_service.dart';
 
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/layout/responsive_layout.dart';
 
 /// ==================================================================
 /// SCREEN 17 — PROFILE
@@ -360,16 +361,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
+                  // Phone portrait lays these out exactly as before. Wider
+                  // viewports bound the identity card so it does not become a
+                  // ~1240px-wide banner.
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-                      child: ProfileIdentityCard(
-                        avatarUrl: _currentProfile.avatarUrl,
-                        initials: initials,
-                        displayName: displayName,
-                        positionLabel: positionLabel,
-                        userEmail: userEmail,
-                        onEditTap: _openEditScreen,
+                      child: ConstrainedContent.wide(
+                        child: ProfileIdentityCard(
+                          avatarUrl: _currentProfile.avatarUrl,
+                          initials: initials,
+                          displayName: displayName,
+                          positionLabel: positionLabel,
+                          userEmail: userEmail,
+                          onEditTap: _openEditScreen,
+                        ),
                       ),
                     ),
                   ),
@@ -583,7 +589,10 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
 
-    return Container(
+    // Bounded on wide viewports so a chart card does not stretch to ~1240px.
+    // Phone portrait (390) is under the cap and lays out exactly as before.
+    return ConstrainedContent.wide(
+      child: Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -730,6 +739,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             child: chartBody,
           ),
         ],
+      ),
       ),
     );
   }
