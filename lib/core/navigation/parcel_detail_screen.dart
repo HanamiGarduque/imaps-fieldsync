@@ -17,7 +17,7 @@ import '../../modules/inspection/widgets/photo_viewer.dart';
 import '../../modules/inspection/services/photo_source_resolver.dart';
 
 import '../theme/insight_theme.dart';
-import '../services/db_helper.dart';
+import '../services/inspection_start_service.dart';
 
 class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
@@ -146,7 +146,16 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       if (!provider.isReworkMode) {
         // Task Overview is passive. The first actual normal step tap is the
         // durable boundary, repeated on resume before any step can proceed.
-        await DBHelper.retainInspectionJob(task.id, fetchedJob: widget.fetchedJob);
+        final result = await InspectionStartService.prepareJob(
+          task.id, fetchedJob: widget.fetchedJob,
+        );
+        if (!context.mounted) return;
+        if (result != InspectionStartResult.authorized) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(result.message)),
+          );
+          return;
+        }
         await (_draftLoad ??= _loadDraft());
       }
       if (!context.mounted) return;

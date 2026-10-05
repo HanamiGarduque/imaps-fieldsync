@@ -150,6 +150,50 @@ Opening an active job presents the Task Overview with a six-step protocol. Openi
 
 Each step persists progress as the inspector works. Step order is sequential and the overview tracks the highest finished step so work resumes from where the inspector left off, including after app restarts.
 
+### 5.0 Inspector Reassignment — Phase A (Pre-Start Ownership)
+
+Workstream #8 Phase A. It protects work that has **not** started. Mid-flight handover of already-started work is Workstream #9 and is deliberately out of scope.
+
+**Authority and identity**
+
+* Authoritative current assignment: `public.field_jobs.assigned_inspector_id`.
+* Inspector identity: the authenticated Supabase auth UUID (`client.auth.currentUser.id`). Both `field_jobs.assigned_inspector_id` and `profiles.id` reference `auth.users.id`, so no name, email, or reference-number matching is used anywhere.
+
+**RLS is intentional and load-bearing**
+
+`field_jobs` row-level security gives an authenticated inspector `SELECT`/`UPDATE` only where `auth.uid() = assigned_inspector_id`. Consequently a job that is reassigned to another inspector, unassigned, or missing are *deliberately indistinguishable*. FieldSync reports all three as one result and never reveals current ownership:
+
+* `AUTHORIZED` — the exact `field_jobs.id` is visible to the authenticated inspector.
+* `NOT_ASSIGNED_OR_UNAVAILABLE` — no visible exact row.
+* `AUTH_REQUIRED` — no authenticated session, a session that changed mid-check, or a server-side auth rejection.
+* `OFFLINE_OR_UNVERIFIABLE` — transport failure, timeout, server error, or an unexpected response shape.
+
+**Where the gate lives**
+
+`InspectionStartService.verifyCurrentInspectorMayStartJob()` owns auth resolution, the authoritative exact-job read, RLS interpretation, and error classification. `InspectionStartService.prepareJob()` is the single normal step-entry seam used by `ParcelDetailScreen._goToStep()`; it runs the check immediately before `DBHelper.retainInspectionJob()` and before the draft is restored. Cached job data is never authority for starting new work.
+
+**Denial is side-effect free**
+
+Any result other than `AUTHORIZED` writes nothing: no retention marker, no local inspection row, no photo row, no `pending_actions` entry, no `current_step` advancement, no `mark_ongoing`, no local lifecycle change, no remote write, and no navigation into the step. The only effects are the existing-style snackbar message and normal refresh/reconciliation.
+
+**Already-started work is untouched**
+
+A job with a durable `inspection_job_retention` marker or a persisted `local_inspections` draft is treated as legitimately started and keeps its existing offline continuation and recovery behavior, with no verification round trip. Cached jobs remain viewable; only first field-work entry is gated. Nothing is deleted, transferred, re-owned, or adopted.
+
+**Refresh behavior is unchanged**
+
+Normal refresh still runs `fetchMyJobs()` (inspector-scoped) then `cacheJobs()`, which replaces unprotected cache rows while preserving retained work and protected pending completions. A reassigned pre-start job therefore disappears from the previous inspector and appears for the new one. No second pruning mechanism was added.
+
+**Race protection and its residual boundary**
+
+Every authoritative write made after a successful start check remains ownership-scoped: `advanceJobInspectionProgress()` and `markJobOngoing()` now also filter on `assigned_inspector_id = auth.uid()`, and the outbox recovery path already used `readOutboxRecoveryJob()` / `conditionalOutboxUpdate()` with the same identity predicate. If assignment changes after the check but before those writes, RLS plus those predicates make the server writes no-ops, so no unauthorized server mutation is possible.
+
+Residual boundary, stated precisely: `prepareJob()` is client-local, not a distributed server lease. In the narrow window between a successful check and the first write, a device that has already retained the job may hold local state for a job it is no longer assigned. That is local state only; the subsequent server writes are refused. Closing that window entirely would require a backend lease, which is not authorized and is not required for Phase A.
+
+**No schema impact**
+
+No SQLite migration (version 16 unchanged), no PostgreSQL/RLS/function/trigger change, and no iMAPS database change.
+
 ### 5.1 Contents of Each Step
 
 * **Step 1, Site Verification screen:** shows a titled header with the task location and a step progress bar. The map displays a red Target Site marker at the parcel coordinates plus a blue "You are here" marker for the device position. The device position updates live during the inspection via continuous GPS streaming, and the authoritative distance to the parcel recalculates in real time. When connectivity is available, the screen additionally draws a road-network route between the two positions (fetched asynchronously after the map is already usable) and shows the road-route distance and estimated travel time beside the authoritative boundary distance. When routing is unavailable, a schematic guide line and the straight-line/boundary distance remain.

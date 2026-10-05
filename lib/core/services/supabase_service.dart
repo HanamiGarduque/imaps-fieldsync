@@ -626,11 +626,14 @@ class SupabaseService {
   // ─────────────────────────────────────────────────────────────────────────
   static Future<bool> markJobOngoing(String jobId) async {
     try {
+      final uid = client.auth.currentUser?.id;
+      if (uid == null) return false;
       final startedAt = DateTime.now().toUtc().toIso8601String();
       await client
           .from('field_jobs')
           .update({'status': 'in_progress', 'started_at': startedAt})
           .eq('id', jobId)
+          .eq('assigned_inspector_id', uid)
           .eq('status', 'assigned');
       return true;
     } catch (e) {
@@ -1176,6 +1179,8 @@ class SupabaseService {
     if (currentStep < 0 || currentStep > 6) {
       throw RangeError.range(currentStep, 0, 6, 'currentStep');
     }
+    final uid = client.auth.currentUser?.id;
+    if (uid == null) throw StateError('Progress requires authenticated session');
     await client
         .from('field_jobs')
         .update({
@@ -1183,6 +1188,7 @@ class SupabaseService {
           'step_timestamps': ?stepTimestamps,
         })
         .eq('id', jobId)
+        .eq('assigned_inspector_id', uid)
         .neq('status', 'completed')
         .lt('current_step', currentStep);
   }

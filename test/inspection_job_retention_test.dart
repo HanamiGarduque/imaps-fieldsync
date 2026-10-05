@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
@@ -12,8 +13,13 @@ import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.
 import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'offline_completion_persistence_test.dart' show submitFixture;
+import 'inspector_reassignment_test.dart' show signInInspector, inspectorA;
 
 const jobA = '11111111-1111-4111-8111-111111111111';
 const jobB = '22222222-2222-4222-8222-222222222222';
@@ -45,6 +51,27 @@ void main() {
   late Database db;
   late String path;
   late String source;
+
+  setUpAll(() async {
+    // Normal first entry now verifies assignment. Keep this retention test on
+    // the real guard/query, with only its HTTP boundary supplied by the fixture.
+    SharedPreferences.setMockInitialValues({});
+    await Supabase.initialize(
+      url: 'https://retention.test', publishableKey: 'isolated-test-key',
+      authOptions: FlutterAuthClientOptions(autoRefreshToken: false,
+        detectSessionInUri: false, localStorage: EmptyLocalStorage()),
+      httpClient: MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.path, '/rest/v1/field_jobs');
+        expect(request.url.queryParameters['id'], 'eq.$jobA');
+        return http.Response(jsonEncode([{
+          'id': jobA, 'assigned_inspector_id': inspectorA,
+        }]), 200, request: request);
+      }),
+    );
+    await signInInspector(inspectorA);
+  });
+  tearDownAll(() async => Supabase.instance.dispose());
 
   Future<void> reopen() async {
     DBHelper.useDatabaseForTesting(null);
@@ -124,7 +151,12 @@ void main() {
       final step = find.text('Review & Submit');
       await tester.ensureVisible(step);
       await tester.tap(step);
-      await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 150)));
+      // The real entry now includes an authenticated read plus SQLite work.
+      // Await the observable route rather than assuming 150ms finishes FFI I/O.
+      for (var i = 0; i < 100 && find.byType(ReviewSubmitScreen).evaluate().isEmpty; i++) {
+        await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
       await tester.pumpAndSettle();
       expect(find.byType(ReviewSubmitScreen), findsOneWidget);
       expect(find.byType(TasksScreen), findsNothing);
