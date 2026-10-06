@@ -136,6 +136,13 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
               // the metrics beside it, so the dial stays large instead of being
               // squeezed to fit a portrait-shaped card.
               child: HeaderSplitBody(
+                landscapeBackButton: SizedBox.square(
+                  dimension: InsightBreakpoints.minTouchTarget,
+                  child: _GlassIconButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                ),
                 header: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: Row(

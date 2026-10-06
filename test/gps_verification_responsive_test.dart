@@ -338,12 +338,12 @@ Widget buildRealComposition(
       expect(src, contains('HeaderSplitBody('),
           reason: 'composition goes through the shared foundation widget');
       expect(src, contains("'../../../core/layout/responsive_layout.dart'"));
-      // No screen-specific breakpoint numbers anywhere in the screen.
-      for (final magic in ['600', '900', '720', '480', 'isLandscape']) {
-        expect(src.contains('MediaQuery'), isFalse,
-            reason: 'the screen must not read MediaQuery directly');
-        expect(magic, isNotEmpty);
-      }
+      // Layout decisions remain shared. Reading the text scaler is necessary
+      // to fit the live bearing chip without reducing readable font sizes.
+      expect(src, contains('landscapeBackButton:'));
+      expect(src, isNot(contains('MediaQuery.sizeOf')));
+      expect(src, isNot(contains('.orientation')));
+      expect(src, contains('MediaQuery.textScalerOf(context)'));
     });
 
     test('the 160px compass floor is gone from executable code', () {
