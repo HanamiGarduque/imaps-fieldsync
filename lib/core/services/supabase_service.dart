@@ -655,11 +655,12 @@ class SupabaseService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SCHEDULE A PENDING JOB  (Tasks screen → long-press a Pending card)
+  // SCHEDULE / RESCHEDULE A JOB  (Tasks screen → a Pending or Ongoing card)
   //   Inspector picks a specific future date (never past deadline_date,
   //   enforced both here and by the date picker's lastDate on the UI side).
-  //   TaskItem.category treats any future scheduled_date as "Scheduled",
-  //   so this alone is enough to move the card into that tab.
+  //   Both `assigned` and `in_progress` are schedulable: rescheduling an
+  //   Ongoing task is an explicit product flow, and the write returns it to
+  //   `pending` so the card lands under Pending → Scheduled.
   // ─────────────────────────────────────────────────────────────────────────
   static Future<InspectionAuthorityResult> scheduleJob({
     required String jobId,
@@ -667,16 +668,25 @@ class SupabaseService {
   }) async {
     final dateStr =
         '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    // Scheduling is a pending-task operation. The lifecycle predicate makes a
-    // stale card/action a safe no-op after another client completes the job.
+    // The lifecycle predicate keeps a stale card/action a safe no-op after
+    // another client completes the job: `completed` is excluded, so this can
+    // never resurrect a finished round.
     return _writeWithAuthority(jobId, (uid) => client
         .from('field_jobs')
-        .update({'scheduled_date': dateStr, 'is_self_scheduled': true})
+        .update({
+          'scheduled_date': dateStr,
+          'is_self_scheduled': true,
+          'status': 'pending',
+        })
         .eq('id', jobId)
         .eq('assigned_inspector_id', uid)
-        .eq('status', 'assigned').select().retry(enabled: false),
+        .inFilter('status', ['assigned', 'in_progress'])
+        .select()
+        .retry(enabled: false),
       satisfied: (row) =>
-          row['scheduled_date'] == dateStr && row['is_self_scheduled'] == true);
+          row['scheduled_date'] == dateStr &&
+          row['is_self_scheduled'] == true &&
+          row['status'] == 'pending');
   }
 
   // ─────────────────────────────────────────────────────────────────────────
