@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/user_profile.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import 'supabase_service.dart';
+import 'auth_failure.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
 
 class AuthService {
@@ -28,13 +29,24 @@ class AuthService {
     required String email,
     required String password,
   }) async {
-    final res = await _client.auth.signInWithPassword( //[cite: 2]
-      email: email,
-      password: password,
-    );
+    final AuthResponse res;
+    try {
+      res = await _client.auth.signInWithPassword( //[cite: 2]
+        email: email,
+        password: password,
+      );
+    } catch (e) {
+      throw AuthFailure.classify(e,
+          fallback: AuthFailure.unknownPostAuth, credentialRequest: true);
+    }
     // Any real password login — including the one-time biometric
     // confirmation login — means the session should read as logged in.
-    await _setSoftLoggedOut(false);
+    try {
+      await _setSoftLoggedOut(false);
+    } catch (e) {
+      // The session is already live; only the local flag failed.
+      throw AuthFailure.classify(e, fallback: AuthFailure.unknownPostAuth);
+    }
     return res;
   }
 
@@ -106,19 +118,25 @@ class AuthService {
     return DateTime.fromMillisecondsSinceEpoch(exp * 1000).isBefore(DateTime.now());
   }
 
-  /// Tries to refresh the current session using the stored refresh token.
-  /// A session can look "expired" simply because the access token's 1hr
-  /// lifetime passed while the app was closed — that's still recoverable
-  /// as long as the refresh token itself hasn't been revoked. Returns
-  /// true only on a genuine successful refresh.
-  static Future<bool> tryRefreshSession() async {
+  /// Tries to restore an expired session using the stored refresh token.
+  ///
+  /// A transport failure is NOT a session failure: the refresh token may be
+  /// perfectly valid and merely unredeemable right now, so the caller keeps the
+  /// live session and may use the owner-matched cached profile. A server-side
+  /// rejection (revoked/rotated token) throws [AuthFailure.sessionRestoreFailed],
+  /// which is never presented as a credential problem.
+  static Future<void> restoreSessionOfflineAware() async {
     try {
-      if (_client.auth.currentSession == null) return false;
+      if (_client.auth.currentSession == null) {
+        throw AuthFailure.sessionRestoreFailed;
+      }
       final res = await _client.auth.refreshSession();
-      return res.session != null;
+      if (res.session == null) throw AuthFailure.sessionRestoreFailed;
     } catch (e) {
-      debugPrint('[AUTH] Session refresh failed: $e');
-      return false;
+      final failure = AuthFailure.classify(e,
+          fallback: AuthFailure.sessionRestoreFailed);
+      debugPrint('[AUTH] Session restore: ${failure.name}');
+      if (failure != AuthFailure.networkUnavailable) throw failure;
     }
   }
 
@@ -156,13 +174,25 @@ class AuthService {
     final user = _client.auth.currentUser; //[cite: 2]
     if (user == null) return null; //[cite: 2]
 
-    final data = await _client //[cite: 2]
-        .from('profiles')
-        .select()
-        .eq('id', user.id)
-        .single();
-
-    return UserProfile.fromMap(data, email: user.email);
+    try {
+      final data = await _client //[cite: 2]
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .single();
+      // A usable profile needs the identity, name and role the UI relies on;
+      // a row that resolves but cannot fill them is not a working account.
+      if (data['id'] != user.id ||
+          data['full_name'] is! String ||
+          (data['full_name'] as String).trim().isEmpty ||
+          data['role'] is! String ||
+          (data['role'] as String).trim().isEmpty) {
+        throw AuthFailure.profileUnavailable;
+      }
+      return UserProfile.fromMap(data, email: user.email);
+    } catch (e) {
+      throw AuthFailure.classify(e, fallback: AuthFailure.profileUnavailable);
+    }
   }
 
   /// True if the device currently appears to have network connectivity.
@@ -183,13 +213,7 @@ class AuthService {
   /// deactivated account, etc.). Text-matching is a fallback signal only —
   /// callers should check [hasConnectivity] first.
   static bool looksLikeConnectivityError(Object error) {
-    final msg = error.toString().toLowerCase();
-    return msg.contains('socketexception') ||
-        msg.contains('failed host lookup') ||
-        msg.contains('network is unreachable') ||
-        msg.contains('connection timed out') ||
-        msg.contains('clientexception') ||
-        msg.contains('timeoutexception');
+    return AuthFailure.isNetworkError(error);
   }
 
   /// Like [getCurrentProfile], but falls back to the last-known-good
@@ -213,10 +237,13 @@ class AuthService {
       }
       return profile;
     } catch (e) {
-      final offline = !(await hasConnectivity()) || looksLikeConnectivityError(e);
-      if (!offline) rethrow;
+      // Only a connectivity failure may fall back to the cache. Any other
+      // refusal keeps its own stage so it cannot masquerade as one.
+      if (!looksLikeConnectivityError(e)) {
+        throw AuthFailure.classify(e, fallback: AuthFailure.unknownPostAuth);
+      }
 
-      debugPrint('[AUTH] Profile fetch failed offline, trying cache: $e');
+      debugPrint('[AUTH] Profile fetch: networkUnavailable; trying cache');
       final cached = await SecurePrefsService.getCachedProfile();
       if (cached != null && cached.id == user.id) return cached;
       rethrow; // no usable cache for this specific user — surface the real error

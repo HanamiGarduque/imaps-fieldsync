@@ -8,6 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:crypto/crypto.dart';
 
 import '../../../core/services/auth_service.dart';
+import '../../../core/services/auth_failure.dart';
 import '../../profile_settings/services/notification_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
@@ -86,28 +87,13 @@ class _SplashScreenState extends State<SplashScreen> {
 
       // ── STEP 2: Refresh expired token if needed ───────────────────────
       if (AuthService.isLocalSessionExpired) {
-        final refreshed = await AuthService.tryRefreshSession();
-        if (!refreshed) {
-          // Only treat this as a real logout if the refresh actually failed
-          // for a reason other than "no connectivity" — e.g. the refresh
-          // token was genuinely revoked. Offline, the refresh token itself
-          // may still be perfectly valid; we just can't reach the server
-          // to redeem it right now. Wiping in that case would lock out an
-          // inspector with an otherwise-valid session for no real reason.
-          if (await AuthService.hasConnectivity()) {
-            await AuthService.signOut();
-            await _goToLogin();
-            return;
-          }
-          debugPrint('[SPLASH] Refresh failed offline — proceeding with cached session/profile.');
-        }
-
+        await AuthService.restoreSessionOfflineAware();
       }
 
       // ── STEP 3: Fetch profile (offline-aware) ──────────────────────────
       final profile = await AuthService.getCurrentProfileOfflineAware();
       if (profile == null || !mounted) {
-        await _goToLogin();
+        await _goToLogin(AuthFailure.profileUnavailable);
         return;
       }
 
@@ -146,19 +132,21 @@ class _SplashScreenState extends State<SplashScreen> {
         );
       }
     } catch (e) {
-      debugPrint('[SPLASH] Session check error: $e');
-      await _goToLogin();
+      final failure = AuthFailure.classify(e,
+          fallback: AuthFailure.sessionRestoreFailed);
+      debugPrint('[SPLASH] Session check: ${failure.name}');
+      await _goToLogin(failure);
     }
   }
 
 
-  Future<void> _goToLogin() async {
+  Future<void> _goToLogin([AuthFailure? failure]) async {
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 700),
         pageBuilder: (_, anim, _) =>
-            FadeTransition(opacity: anim, child: const LoginScreen()),
+            FadeTransition(opacity: anim, child: LoginScreen(initialFailure: failure)),
       ),
     );
   }
@@ -241,7 +229,11 @@ class _SplashScreenState extends State<SplashScreen> {
 /// REFINED LOGIN SCREEN
 /// ------------------------------------------------------------------
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.initialFailure});
+
+  /// Sanitized reason a previous stage could not complete, so a user sent back
+  /// here is never left believing their passcode was rejected.
+  final AuthFailure? initialFailure;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -319,6 +311,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    _errorMessage = widget.initialFailure?.message;
     _loadSavedEmailAndBio();
     _startConnectivityListener();
   }
@@ -466,28 +459,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await AuthService.clearSoftLogout();
 
       if (AuthService.isLocalSessionExpired) {
-        final refreshed = await AuthService.tryRefreshSession();
-        if (!refreshed) {
-          // Same distinction as the cold-start path: only wipe if this is a
-          // genuine revocation, not just "couldn't reach the server right
-          // now." A stolen/lost device losing biometric access the moment
-          // it goes offline would actually be the *wrong* failure mode for
-          // an offline-first field app — the wipe should be reserved for
-          // when we can positively confirm the session is actually dead.
-          if (await AuthService.hasConnectivity()) {
-            await AuthService.signOut(revokeEverywhere: true);
-            await BiometricService.clearEnrollment();
-            await SecurePrefsService.clearAll();
-            if (mounted) {
-              setState(() {
-                _isLoading = false;
-                _errorMessage = 'Session unrecoverable. Please sign in with password.';
-              });
-            }
-            return;
-          }
-          debugPrint('[BIOMETRIC] Refresh failed offline — proceeding with cached session/profile.');
-        }
+        await AuthService.restoreSessionOfflineAware();
       }
 
       final profile = await AuthService.getCurrentProfileOfflineAware();
@@ -502,7 +474,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // misleading "Biometric authentication error" message. It'll
         // naturally succeed next time this runs while online.
         NotificationService.registerCurrentDevice().catchError(
-          (e) => debugPrint('[BIOMETRIC] registerCurrentDevice failed (non-fatal): $e'),
+          (e) => debugPrint('[BIOMETRIC] registerCurrentDevice failed (non-fatal).'),
         );
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
@@ -510,14 +482,16 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       } else {
         setState(() {
-          _errorMessage = 'Login succeeded, but profile was not found.';
+          _errorMessage = AuthFailure.profileUnavailable.message;
         });
       }
     } catch (e) {
-      debugPrint('BIOMETRIC LOGIN ERROR: $e');
+      final failure = AuthFailure.classify(e,
+          fallback: AuthFailure.sessionRestoreFailed);
+      debugPrint('[BIOMETRIC] Login: ${failure.name}');
       if (mounted) {
         setState(() {
-          _errorMessage = 'Biometric authentication error. Please use passcode.';
+          _errorMessage = failure.message;
         });
       }
     } finally {
@@ -605,7 +579,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Fire-and-forget — see the same fix in _handleBiometricLogin for
       // why this must not be able to block a successful login.
       NotificationService.registerCurrentDevice().catchError(
-        (e) => debugPrint('[LOGIN] registerCurrentDevice failed (non-fatal): $e'),
+        (e) => debugPrint('[LOGIN] registerCurrentDevice failed (non-fatal).'),
       );
 
       // Known Issue #4 fix — only meaningful right after a *fresh*
@@ -641,7 +615,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (profile != null) {
         SupabaseService.logSecurityEvent(eventType: 'login_success', severity: 'info')
-            .catchError((e) => debugPrint('[LOGIN] login_success log error: $e'));
+            .catchError((e) => debugPrint('[LOGIN] login_success log failed.'));
 
         await SecurePrefsService.setSavedEmail(_emailController.text.trim());
         await SecurePrefsService.setAcceptedLegalVersion(SecurePrefsService.currentLegalVersion);
@@ -676,47 +650,20 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       } else {
         setState(() {
-          _errorMessage = 'Login succeeded, but no profile found. Contact Administrator.';
+          _errorMessage = AuthFailure.profileUnavailable.message;
         });
       }
 
     } catch (e) {
-      debugPrint('LOGIN ERROR: $e');
+      final failure = AuthFailure.classify(e,
+          fallback: AuthFailure.unknownPostAuth);
+      debugPrint('[LOGIN] ${failure.name}');
       if (mounted) {
-        // AuthService.signIn() is a network call — a connectivity failure
-        // throws here too, and was previously shown as "Invalid ID or
-        // passcode," which sends someone with a correct password and no
-        // signal down the wrong troubleshooting path entirely. Password
-        // login fundamentally requires connectivity (the password is never
-        // checked locally, only Supabase's server verifies it).
-        //
-        // Check real connectivity first (connectivity_plus is already a
-        // project dependency) rather than only guessing from the
-        // exception's message text, since that varies by platform and SDK
-        // version. Fall back to the text-based guess only if connectivity
-        // *looks* fine but the request still failed (e.g. connected to
-        // Wi-Fi with no actual internet, or a Supabase outage).
-        // `dynamic` binding mirrors SiteMapScreen._checkOnline(): it keeps
-        // the dual-API shape (list vs single result) without the analyzer
-        // flagging the type check as always-true on connectivity_plus 6.x.
-        final dynamic connectivityResult = await Connectivity().checkConnectivity();
-        final hasConnection = connectivityResult is List
-            ? connectivityResult.any((r) => r != ConnectivityResult.none)
-            : connectivityResult != ConnectivityResult.none;
-        final msg = e.toString().toLowerCase();
-        final looksLikeNetworkError = msg.contains('socketexception') ||
-            msg.contains('failed host lookup') ||
-            msg.contains('network is unreachable') ||
-            msg.contains('connection timed out') ||
-            msg.contains('clientexception') ||
-            msg.contains('timeoutexception');
-
+        // Classified at the Auth/profile/session boundary (see AuthFailure), so
+        // "Invalid ID or passcode" can only ever mean Supabase Auth rejected the
+        // credentials. Every other stage keeps its own honest message.
         setState(() {
-          _errorMessage = (!hasConnection || looksLikeNetworkError)
-              ? 'No internet connection. Password sign-in needs connectivity. '
-                'Try biometric or pattern unlock if you\'ve set one up, or '
-                'reconnect and try again.'
-              : 'Invalid ID or passcode. Please try again.';
+          _errorMessage = failure.message;
         });
       }
     } finally {
@@ -818,23 +765,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     // ── 7. Handle expired local session (same as biometric) ──────────
     if (AuthService.isLocalSessionExpired) {
-      final refreshed = await AuthService.tryRefreshSession();
-      if (!refreshed) {
-        if (await AuthService.hasConnectivity()) {
-          await AuthService.signOut(revokeEverywhere: true);
-          await BiometricService.clearEnrollment();
-          await SecurePrefsService.clearAll();
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _errorMessage = 'Session unrecoverable. Please sign in with password.';
-            });
-          }
-          return false;
-        }
-        debugPrint('[OFFLINE LOGIN] Refresh failed offline — '
-            'proceeding with cached session/profile.');
-      }
+      await AuthService.restoreSessionOfflineAware();
     }
 
     // ── 8. Load cached/offline-aware profile ──────────────────────────
@@ -844,7 +775,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (profile != null) {
       // Fire-and-forget device registration (non-fatal, may fail offline).
       NotificationService.registerCurrentDevice().catchError(
-        (e) => debugPrint('[OFFLINE LOGIN] registerCurrentDevice failed (non-fatal): $e'),
+        (e) => debugPrint('[OFFLINE LOGIN] registerCurrentDevice failed (non-fatal).'),
       );
       await SecurePrefsService.setAcceptedLegalVersion(SecurePrefsService.currentLegalVersion);
       if (!mounted) return false;
@@ -857,7 +788,7 @@ class _LoginScreenState extends State<LoginScreen> {
     } else {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Login succeeded, but profile was not found.';
+        _errorMessage = AuthFailure.profileUnavailable.message;
       });
       return false;
     }

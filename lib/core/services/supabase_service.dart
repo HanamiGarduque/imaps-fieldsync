@@ -6,6 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'db_helper.dart';
 import 'inspection_authority.dart';
+import 'supabase_endpoint.dart';
 export 'inspection_authority.dart';
 
 enum PhotoObjectState { exists, missing, unknown }
@@ -84,8 +85,14 @@ class SupabaseService {
     }
   }
   static Future<void> initialize() async {
+    // Release builds fail before any network call when the bundled endpoint is
+    // not a public HTTPS host; the message never echoes the configured value.
+    final url = validateSupabaseEndpoint(
+      dotenv.env['SUPABASE_URL'],
+      release: kReleaseMode,
+    );
     await Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL']!,
+      url: url,
       publishableKey: dotenv.env['SUPABASE_PUBLISHABLE_KEY']!,
     );
   }
