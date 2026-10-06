@@ -536,13 +536,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
           // override for this one element — see quick_actions_sheet.dart).
           // Mounted/unmounted with the open state so its internal
           // staggered row animation replays every time it's opened.
-          Positioned(
-            left: 16,
-            right: 16,
-            // Derived from the nav's own geometry so the panel always clears
-            // the quick-actions trigger. The old fixed 190 sat ~16px too low
-            // and clipped the trigger button.
-            bottom: kInsightBottomNavTriggerClearance,
+          QuickActionsOverlay(
             child: IgnorePointer(
               ignoring: !_quickActionsOpen,
               child: AnimatedSlide(
@@ -557,6 +551,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
                           key: const ValueKey('quick_actions_open'),
                           actions: _buildQuickActions(),
                           onClose: _closeQuickActions,
+                          fillAvailableSpace: true,
                         )
                       : const SizedBox.shrink(),
                 ),

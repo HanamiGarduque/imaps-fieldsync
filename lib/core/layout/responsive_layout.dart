@@ -228,10 +228,15 @@ class HeaderSplitBody extends StatelessWidget {
     this.secondaryFlex = 38,
     this.splitGap = 16,
     this.stackGap = 0,
+    this.landscapeBackButton,
   });
 
   /// Constant header above the body. Omit for a fullscreen/immersive mode.
   final Widget? header;
+
+  /// Compass surfaces reclaim the header's space in landscape and keep only
+  /// this floating back control. Portrait retains the supplied header.
+  final Widget? landscapeBackButton;
 
   /// The primary content: a visual, map, dial or the main form section.
   final Widget primary;
@@ -248,7 +253,10 @@ class HeaderSplitBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasSecondary = secondary != null;
-    final split = hasSecondary && context.responsive.canSplitTwoPane;
+    final bp = context.responsive;
+    final immersiveLandscape = landscapeBackButton != null && bp.isLandscape;
+    final split = hasSecondary && (bp.canSplitTwoPane ||
+        (immersiveLandscape && !bp.isCompactWidth));
 
     final Widget body = split
         ? Row(
@@ -279,6 +287,14 @@ class HeaderSplitBody extends StatelessWidget {
             ],
           );
 
+    if (immersiveLandscape) {
+      return Stack(
+        children: [
+          Positioned.fill(child: body),
+          Positioned(left: 16, top: 12, child: landscapeBackButton!),
+        ],
+      );
+    }
     if (header == null) return body;
     return Column(
       children: [

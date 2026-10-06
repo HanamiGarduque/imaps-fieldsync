@@ -900,8 +900,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   beginOffset: const Offset(0, 20),
                   child: _SectionLabel(
                     title: "Active Assignments",
-                    icon: Icons.assignment_rounded,
-                    accentColor: InsightTheme.blue1,
                     trailing: _SectionActionButton(label: 'See All', onTap: _goToTasksTab),
                   ),
                 ),
@@ -1041,8 +1039,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   beginOffset: const Offset(0, 20),
                   child: _SectionLabel(
                     title: "TASK COMPLETION FLOW",
-                    icon: Icons.donut_large_rounded,
-                    accentColor: InsightTheme.green,
                     trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab),
                   ),
                 ),
@@ -1125,7 +1121,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 child: SpringSlide(
                   animation: springFor(8),
                   beginOffset: const Offset(0, 20),
-                  child: const _SectionLabel(title: "RECENT ACTIVITY", icon: Icons.history_rounded, accentColor: InsightTheme.blue1),
+                  child: const _SectionLabel(title: "RECENT ACTIVITY"),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1150,7 +1146,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       const SizedBox(width: 6),
                       Expanded(
                         child: _ActivityFilterChip(
-                          icon: Icons.checklist_rounded,
                           label: 'Tasks',
                           selected: _activityFilter == 'tasks',
                           onTap: () => setState(() => _activityFilter = 'tasks'),
@@ -1159,7 +1154,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       const SizedBox(width: 6),
                       Expanded(
                         child: _ActivityFilterChip(
-                          icon: Icons.sync_rounded,
                           label: 'Sync',
                           selected: _activityFilter == 'sync',
                           onTap: () => setState(() => _activityFilter = 'sync'),
@@ -1168,7 +1162,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       const SizedBox(width: 6),
                       Expanded(
                         child: _ActivityFilterChip(
-                          icon: Icons.assignment_rounded,
                           label: ActivityEventCategory.labelFor(
                             ActivityEventCategory.reports,
                           ),
@@ -1182,7 +1175,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       const SizedBox(width: 6),
                       Expanded(
                         child: _ActivityFilterChip(
-                          icon: Icons.person_rounded,
                           label: 'Profile',
                           selected: _activityFilter == 'profile',
                           onTap: () => setState(() => _activityFilter = 'profile'),
@@ -1353,10 +1345,8 @@ class _NotificationBtn extends StatelessWidget {
 
 class _SectionLabel extends StatelessWidget {
   final String title;
-  final IconData icon;
-  final Color accentColor;
   final Widget? trailing;
-  const _SectionLabel({required this.title, required this.icon, this.accentColor = InsightTheme.blue1, this.trailing});
+  const _SectionLabel({required this.title, this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -1364,29 +1354,9 @@ class _SectionLabel extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Icon-in-tinted-square anchor — same treatment already used
-            // for Recent Activity chips and the Completion legend, so the
-            // header itself reads as a real component instead of a bare
-            // line of muted caps text sitting on the page.
-            Container(
-              width: 26, height: 26,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: accentColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, size: 14, color: accentColor),
-            ),
-            const SizedBox(width: 8),
-            // Bumped from ink3 (muted) to ink (full contrast) — the icon
-            // now carries the "secondary/label" weight, so the text can
-            // read as the actual heading it is.
-            Text(title, style: InsightTheme.urbanist(12.5, w: FontWeight.w800, ls: 0.8, c: InsightTheme.ink)),
-          ],
-        ),
+        // icon: ink3 (muted) -> ink (full contrast) so the text reads as the
+        // actual heading it is.
+        Text(title, style: InsightTheme.urbanist(12.5, w: FontWeight.w800, ls: 0.8, c: InsightTheme.ink)),
         ?trailing,
       ],
     );
@@ -1435,13 +1405,11 @@ class _SectionActionButton extends StatelessWidget {
 /// below the minimum. Width now comes from its Expanded parent (segmented-
 /// control layout), so content is centered rather than left-packed.
 class _ActivityFilterChip extends StatelessWidget {
-  final IconData? icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   const _ActivityFilterChip({
-    this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
@@ -1469,10 +1437,9 @@ class _ActivityFilterChip extends StatelessWidget {
                 width: 1.2,
               ),
             ),
-            // Five chips share one row, so at ~390 logical pixels each gets ~67px
-            // and the widest label no longer fits beside its icon. FittedBox
-            // scales the whole icon+label group down to the available width instead
-            // of letting the Row overflow, which keeps the existing visual language
+            // Five chips share one row, so at ~390 logical pixels each gets ~67px.
+            // FittedBox scales the whole label down to the available width instead
+            // of letting the Row overflow, which keeps the visual language
             // and the 44px tap target intact at any width or text scale. scaleDown
             // only shrinks - a chip with room for its label renders identically to
             // before, so nothing changes on a wide screen.
@@ -1481,10 +1448,6 @@ class _ActivityFilterChip extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: 13, color: selected ? Colors.white : InsightTheme.ink3),
-                    const SizedBox(width: 4),
-                  ],
                   Text(
                     label,
                     maxLines: 1,

@@ -131,14 +131,40 @@ class _MapDetailPanelState extends State<MapDetailPanel> {
 /// under this cap and is completely unchanged.
 const double kPanelMaxWidth = 460.0;
 
+/// Wide layouts leave a separate lane for the nav's 64px trigger.
+/// Insets come from the view because Scaffold consumes bottom viewPadding and
+/// extendBody adds the nav height to body padding.
+class QuickActionsOverlay extends StatelessWidget {
+  const QuickActionsOverlay({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = !context.responsive.isCompactWidth;
+    final insets = MediaQueryData.fromView(View.of(context)).viewPadding;
+    return Positioned(
+      left: 16 + (wide ? insets.left : 0),
+      right: wide ? insets.right + 14 + 64 + 12 : 16,
+      top: wide ? insets.top + 16 : null,
+      // The 64px rail plus its 1px border on each side, with a 12px gap.
+      bottom: wide ? insets.bottom + 10 + 66 + 12
+          : kInsightBottomNavTriggerClearance,
+      child: child,
+    );
+  }
+}
+
 class QuickActionsSheet extends StatefulWidget {
   final List<QuickAction> actions;
   final VoidCallback onClose;
+  final bool fillAvailableSpace;
 
   const QuickActionsSheet({
     super.key,
     required this.actions,
     required this.onClose,
+    this.fillAvailableSpace = false,
   });
 
   static const blue1 = InsightTheme.blue1;
@@ -158,12 +184,14 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
     // positioned), so the cap has to sit ABOVE the container — constraining a
     // child cannot shrink a parent that was given tight constraints. Without
     // this the panel runs edge to edge and reads as a cut-off strip.
+    return LayoutBuilder(builder: (context, constraints) {
+      final fill = widget.fillAvailableSpace && !context.responsive.isCompactWidth;
     return Align(
       alignment: Alignment.bottomCenter,
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxHeight: _maxHostHeight(context),
-          maxWidth: kPanelMaxWidth,
+          maxHeight: fill ? constraints.maxHeight : _maxHostHeight(context),
+          maxWidth: fill ? InsightBreakpoints.contentMaxWidthWide : kPanelMaxWidth,
         ),
         child: Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
@@ -178,7 +206,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
       // The actions scroll inside the bounded panel, so a landscape viewport
       // can never push rows off-screen.
       child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
           children: [
             Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
@@ -220,6 +248,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
         ),
       ),
     );
+    });
   }
 
   /// Vertical clearance the host must leave below this sheet.

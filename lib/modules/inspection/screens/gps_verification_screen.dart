@@ -397,23 +397,11 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
           );
         }
 
-        // Tall enough for the dial and the tip together: centre it.
-        final roomy = constraints.maxHeight - kGpsCompassTipAllowance;
-        if (roomy > 0) {
-          final size = fitCompassDiameter(
-            availableWidth: constraints.maxWidth,
-            availableHeight: roomy,
-            ceiling: ceiling,
-          );
-          // Anything the dial needs beyond half the slot is worth scrolling
-          // rather than squeezing the tip out of view.
-          if (size * 2 <= constraints.maxHeight) {
-            return Center(child: build(roomy));
-          }
-        }
-        // Otherwise scroll: a short slot must not clip the confirm affordance
-        // or the tip, it must scroll them.
-        return SingleChildScrollView(child: build(constraints.maxHeight));
+        // The fitting function already reserves room for the tip. Subtracting
+        // it again shrank the dial unnecessarily in short landscape panes.
+        return Center(
+          child: SingleChildScrollView(child: build(constraints.maxHeight)),
+        );
       },
     );
   }
@@ -474,6 +462,18 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                 // so the verification metrics and the primary action stay
                 // reachable without the compass ever being pushed off-screen.
                 HeaderSplitBody(
+                  landscapeBackButton: SizedBox.square(
+                    dimension: InsightBreakpoints.minTouchTarget,
+                    child: _HeaderButton(
+                      icon: Icons.arrow_back_ios_new_rounded,
+                      onTap: () => handleInspectionExit(
+                        context,
+                        onSaveProgress: () =>
+                            _markOngoingWithFallback(widget.task.id),
+                        isReworkMode: isReworkMode,
+                      ),
+                    ),
+                  ),
                   header: _fullscreen
                       // Immersive mode drops the header entirely.
                       ? null
@@ -497,7 +497,8 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                 // Fullscreen exit toggle — the header that used to carry it
                 // is hidden in this mode. Last Stack child = topmost hit
                 // target (lesson from the dead-button bug).
-                if (_fullscreen && !_loading && _error == null)
+                if (_fullscreen && !context.responsive.isLandscape &&
+                    !_loading && _error == null)
                   Positioned(
                     right: 16,
                     top: 8,
@@ -687,7 +688,21 @@ class _Compass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hubSize = size * 0.47;
+    var hubSize = size * 0.47;
+    if (bearingToParcel != null) {
+      final target = TextPainter(
+        text: TextSpan(
+          text: 'Target: ${bearingToParcel!.round()}°',
+          style: InsightTheme.mono(hubSize * 0.066, w: FontWeight.w600),
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      // Keep the bearing on one line at readable text sizes. Account for the
+      // chip padding and borders instead of shrinking text inside the dial.
+      hubSize = math.min(size * 0.7, math.max(hubSize, target.width / 0.86 + 8));
+      target.dispose();
+    }
 
     return SizedBox(
       width: size,
@@ -822,6 +837,8 @@ class _Compass extends StatelessWidget {
                     ),
                     child: Text(
                       'Target: ${bearingToParcel!.round()}°',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: InsightTheme.mono(hubSize * 0.066, w: FontWeight.w600, c: Colors.white.withValues(alpha: 0.85)),
                     ),
                   ),
@@ -1110,7 +1127,8 @@ class _VerificationCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('TARGET SITE', style: InsightTheme.mono(8.5, w: FontWeight.w800, ls: 1, c: InsightTheme.ink3)),
+                    Text('TARGET SITE', maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: InsightTheme.mono(8.5, w: FontWeight.w800, ls: 1, c: InsightTheme.ink3)),
                     Text(
                       location,
                       maxLines: 1,
@@ -1120,7 +1138,7 @@ class _VerificationCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Column(
+              Flexible(fit: FlexFit.tight, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1138,14 +1156,15 @@ class _VerificationCard extends StatelessWidget {
                         decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
                       ),
                       const SizedBox(width: 4),
-                      Text(
+                      Flexible(child: Text(
                         verified ? 'In Zone (< 30 m)' : 'Outside Zone',
+                        textAlign: TextAlign.right,
                         style: InsightTheme.inter(10, w: FontWeight.w700, c: accentInk),
-                      ),
+                      )),
                     ],
                   ),
                 ],
-              ),
+              )),
             ],
           ),
           const SizedBox(height: 10),
