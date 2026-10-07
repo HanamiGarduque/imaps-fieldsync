@@ -2,7 +2,8 @@ enum InspectionAuthorityResult {
   authorized,
   notAssignedOrUnavailable,
   authRequired,
-  offlineOrUnverifiable;
+  offlineOrUnverifiable,
+  localOwnershipIncomplete;
 
   String get message => switch (this) {
     authorized => '',
@@ -11,6 +12,8 @@ enum InspectionAuthorityResult {
     authRequired => 'Your session has expired. Please sign in again.',
     offlineOrUnverifiable => 'Connect to verify this job before continuing remote writes. '
       'Your local work is preserved.',
+    localOwnershipIncomplete => "This older task can't be safely resumed on this device because its "
+      'local ownership information is incomplete. Your local data is preserved.',
   };
 
   void requireAuthorized() {
