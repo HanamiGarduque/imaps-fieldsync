@@ -19,6 +19,7 @@ import 'dart:convert';
 class PlanningReviewMetadata {
   /// Canonical iMAPS decision, transported unchanged.
   final String decision;
+  final String? decisionReason;
 
   /// Reviewer display name (iMAPS Planning Officer), when available.
   final String? reviewedBy;
@@ -34,6 +35,7 @@ class PlanningReviewMetadata {
 
   const PlanningReviewMetadata({
     required this.decision,
+    this.decisionReason,
     this.reviewedBy,
     this.reviewedAt,
     this.technicalReviewId,
@@ -70,6 +72,7 @@ class PlanningReviewMetadata {
 
     return PlanningReviewMetadata(
       decision: rawDecision,
+      decisionReason: row['decision_reason']?.toString(),
       reviewedBy: (reviewedBy != null && reviewedBy.isNotEmpty) ? reviewedBy : null,
       reviewedAt: row['reviewed_at']?.toString(),
       technicalReviewId: (row['technical_review_id'] as num?)?.toInt(),
@@ -112,6 +115,7 @@ class PlanningReviewMetadata {
   /// Compact cache form, so previously synced metadata stays readable offline.
   Map<String, dynamic> toJson() => {
         'decision': decision,
+        'decision_reason': decisionReason,
         'reviewed_by_name': reviewedBy,
         'reviewed_at': reviewedAt,
         'technical_review_id': technicalReviewId,

@@ -8,6 +8,7 @@ import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider
 import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'inspection_owner_fixture.dart';
 
 void main() {
   sqfliteFfiInit();
@@ -72,6 +73,7 @@ void main() {
   };
 
   setUp(() async {
+    useOwnerFixture();
     temporary = await Directory.systemTemp.createTemp('fieldsync-loop4-');
     db = await databaseFactoryFfi.openDatabase('${temporary.path}/loop4.db');
     final source = File('lib/core/services/db_helper.dart').readAsStringSync();
@@ -85,6 +87,7 @@ void main() {
   });
 
   tearDown(() async {
+    clearOwnerFixture();
     DBHelper.useDatabaseForTesting(null);
     await db.close();
     await temporary.delete(recursive: true);
@@ -157,6 +160,8 @@ void main() {
 
       await db.insert('local_inspections', {
         'id': roundOneId,
+        'inspector_id': ownerFixture,
+        'actual_land_use': 'Agricultural',
         'notes': 'Round 1 findings',
         'checklist_json': jsonEncode({'old': true}),
         'current_step': 6,
@@ -180,6 +185,7 @@ void main() {
       expect(provider.currentStep, 1);
       expect(provider.capturedPhotos, isEmpty);
       expect(provider.notes, isEmpty);
+      expect(provider.actualLandUse, isNot('Agricultural'));
       expect(provider.siteCondition, isNot(containsPair('old', true)));
 
       InspectionProgress.instance.ensureActiveInspection(
@@ -196,8 +202,31 @@ void main() {
       final action = (await db.query('pending_actions')).single;
       expect(action['job_id'], roundTwoId);
       expect(action['id'], contains(roundTwoId));
+      await provider.startInspection(TaskItem.fromJob(jobOne));
+      expect(provider.actualLandUse, 'Agricultural');
+      expect(provider.notes, 'Round 1 findings');
+      expect(provider.currentStep, 6);
+      await provider.startInspection(TaskItem.fromJob(jobTwo));
+      expect(provider.currentStep, 1);
+      expect(provider.notes, isEmpty);
     },
   );
+
+  test('retention and pending actions are isolated in both round directions', () async {
+    final one=roundJob(id:roundOneId,localId:35,status:'in_progress',officerId:'4',officerName:'Officer',instructions:'One');
+    final two=roundJob(id:roundTwoId,localId:36,status:'assigned',officerId:'4',officerName:'Officer',instructions:'Two');
+    await DBHelper.cacheJobs([one,two]);
+    await DBHelper.retainInspectionJob(roundOneId);
+    await DBHelper.retainInspectionJob(roundTwoId);
+    await SyncOutboxService.enqueueCurrentStepUpdate(jobId:roundOneId,step:4);
+    await SyncOutboxService.enqueueCurrentStepUpdate(jobId:roundTwoId,step:1);
+    expect((await db.query('pending_actions')).map((r)=>r['job_id']).toSet(),{roundOneId,roundTwoId});
+    final beforeTwo=(await db.query('inspection_job_retention',where:'job_id = ?',whereArgs:[roundTwoId])).single;
+    await DBHelper.cacheJobs([{...one,'status':'completed'},two]);
+    expect(await db.query('inspection_job_retention',where:'job_id = ?',whereArgs:[roundOneId]),isEmpty);
+    expect((await db.query('inspection_job_retention',where:'job_id = ?',whereArgs:[roundTwoId])).single,beforeTwo);
+    expect((await db.query('pending_actions')).map((r)=>r['job_id']).toSet(),{roundOneId,roundTwoId});
+  });
 
   test('active writers and deterministic IDs are keyed by field job id', () {
     final dbSource = File(

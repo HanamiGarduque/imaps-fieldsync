@@ -11,6 +11,7 @@ import '../../../core/services/db_helper.dart';
 import '../../../core/navigation/parcel_detail_screen.dart';
 import '../../inspection/screens/completed_inspection_detail_screen.dart';
 import '../../inspection/screens/inspection_progress.dart';
+import '../../inspection/widgets/inspection_round_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
@@ -68,6 +69,11 @@ TaskLifecycleCategory mapTaskStatusToLifecycle(String? status) {
 
 class TaskItem {
   final String id;
+  final int? localInspectionId;
+  final int? inspectionRoundNumber;
+  final int? previousSiteInspectionId;
+  final String? reinspectionReason;
+  final String? reinspectionReviewedAt;
   final String? parcelId;
   final String name;
   final String location;
@@ -144,6 +150,8 @@ class TaskItem {
   final PlanningReviewMetadata? planningReview;
 
   TaskItem({
+    this.localInspectionId, this.inspectionRoundNumber,
+    this.previousSiteInspectionId, this.reinspectionReason, this.reinspectionReviewedAt,
     required this.id, this.parcelId, required this.name, required this.location,
     required this.parcels, required this.status, required this.inspectionNo, 
     this.scheduledDate = '', this.deadlineDate, this.landUseClass = 'Not yet on file', this.lotAreaSqm,
@@ -172,6 +180,11 @@ class TaskItem {
     final scheduledDate = job['scheduled_date'] as String? ?? '';
     return TaskItem(
       id: job['id']?.toString() ?? '',
+      localInspectionId: (job['local_inspection_id'] as num?)?.toInt(),
+      inspectionRoundNumber: (job['inspection_round_number'] as num?)?.toInt(),
+      previousSiteInspectionId: (job['previous_site_inspection_id'] as num?)?.toInt(),
+      reinspectionReason: job['reinspection_reason'] as String?,
+      reinspectionReviewedAt: job['reinspection_reviewed_at'] as String?,
       parcelId: job['supabase_parcel_id'] as String?,
       name: application?['applicant_name'] as String? ?? 'Unknown Applicant',
       location: application?['barangay'] as String? ?? 'No barangay listed',
@@ -231,6 +244,40 @@ class TaskItem {
       // Loop 8 — read-only review metadata, resolved by exact field_job_id.
       planningReview: PlanningReviewMetadata.fromJobRow(job),
     );
+  }
+
+  factory TaskItem.fromCachedJob(Map<String, dynamic> row) => TaskItem.fromJob({
+    ...row,
+    'is_self_scheduled': row['is_self_scheduled'] == 1,
+    'updated_at': row['cached_updated_at'],
+    'supabase_zoning_applications': {
+      'applicant_name': row['applicant_name'], 'barangay': row['barangay'],
+      'reference_number': row['reference_number'], 'application_type': row['application_type'],
+    },
+    'supabase_parcels': {
+      'land_use_class': row['declared_land_use'], 'lot_area_sqm': row['lot_area_sqm'],
+    },
+  });
+
+  bool get isReinspection => previousSiteInspectionId != null ||
+      (inspectionRoundNumber != null && inspectionRoundNumber! > 1);
+  String? get roundLabel => inspectionRoundNumber != null && inspectionRoundNumber! > 0
+      ? '${isReinspection ? 'Reinspection — ' : ''}Round $inspectionRoundNumber'
+      : (isReinspection ? 'Reinspection' : null);
+
+  bool sameApplicationAs(TaskItem other) => supabaseApplicationId != null &&
+      bridgeSourceId != null && supabaseApplicationId == other.supabaseApplicationId &&
+      bridgeSourceId == other.bridgeSourceId;
+
+  String previousRoundLabel(Iterable<TaskItem> rounds) {
+    for (final round in rounds) {
+      if (sameApplicationAs(round) && previousSiteInspectionId != null &&
+          round.localInspectionId == previousSiteInspectionId &&
+          round.inspectionRoundNumber != null && round.inspectionRoundNumber! > 0) {
+        return 'Round ${round.inspectionRoundNumber}';
+      }
+    }
+    return 'Previous inspection round';
   }
 
   /// Highest step (0-6) verifiably done, based on what's ACTUALLY saved in
@@ -477,6 +524,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             task: task,
             onTapDetail: () => _openTask(context, task),
             onScheduled: _loadTasks,
+            relatedRounds: _allTasks.where(task.sameApplicationAs).toList(),
+            onOpenRound: (round) => _openTask(context, round),
           ),
         ),
       ),
@@ -508,53 +557,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         final localJobs = await DBHelper.getCachedJobs();
         if (mounted) {
           setState(() {
-            _allTasks = localJobs.map((j) {
-              return TaskItem.fromJob({
-                'id': j['id'],
-                'supabase_parcel_id': j['supabase_parcel_id'],
-                'status': j['status'],
-                'local_inspection_id': j['local_inspection_id'],
-                'scheduled_date': j['scheduled_date'],
-                'deadline_date': j['deadline_date'],
-                'is_self_scheduled': j['is_self_scheduled'] == 1,
-                'assignment_instructions': j['assignment_instructions'],
-                'assigned_by_imaps_user_id': j['assigned_by_imaps_user_id'],
-                'assigned_by_name': j['assigned_by_name'],
-                'rework_started_at': j['rework_started_at'],
-                'supabase_application_id': j['supabase_application_id'],
-                'bridge_source_id': j['bridge_source_id'],
-                // Offline/online list parity: Completed is sorted by
-                // submitted_at, so the cached value must reach TaskItem or the
-                // offline sequence diverges from the online sequence.
-                'submitted_at': j['submitted_at'],
-                // Loop 8 — cached Planning Review metadata stays visible
-                // offline. Presentation only; never alters any lifecycle field.
-                'planning_review': j['planning_review'],
-                'supabase_zoning_applications': {
-                  'applicant_name': j['applicant_name'],
-                  'barangay': j['barangay'],
-                  'reference_number': j['reference_number'],
-                  'application_type': j['application_type'],
-                },
-                // Phase 1 audit fix (item #1 — Pre-Cache display gap):
-                // `local_jobs` already caches these parcel fields
-                // (see DBHelper.cacheJobs) but this offline branch never
-                // passed them through, so the Tasks List always showed
-                // "Not yet on file" for land use/lot area while offline
-                // even though GPS Verification (which reads local_jobs
-                // directly) already had the real cached values.
-                // NOTE: property_index_number and the applicant's
-                // contact_number/email are not cached in local_jobs at
-                // all today — those stay null/"Not yet on file" offline
-                // regardless of this fix. Caching them would need a
-                // schema change to local_jobs + cacheJobs(), which is a
-                // separate, larger change than this display-wiring fix.
-                'supabase_parcels': {
-                  'land_use_class': j['declared_land_use'],
-                  'lot_area_sqm': j['lot_area_sqm'],
-                },
-              });
-            }).toList();
+            _allTasks = localJobs.map(TaskItem.fromCachedJob).toList();
             _isLoading = false;
           });
           _maybeScrollToScheduledSection();
@@ -573,9 +576,13 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   void _openTask(BuildContext context, TaskItem task) async {
     HapticFeedback.selectionClick();
     if (task.category == 'Completed') {
-      await Navigator.push(context, MaterialPageRoute(builder: (_) => CompletedInspectionDetailScreen(task: task)));
+      final historical = task.planningReview?.decision == 'Requires Reinspection' ||
+          _allTasks.any((round) => task.sameApplicationAs(round) &&
+            round.previousSiteInspectionId == task.localInspectionId && task.localInspectionId != null);
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => CompletedInspectionDetailScreen(task: task, historicalReadOnly: historical)));
     } else {
-      await Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task)));
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task,
+        relatedRounds: _allTasks.where(task.sameApplicationAs).toList())));
     }
     if (mounted) _loadTasks();
   }
@@ -1607,11 +1614,14 @@ class _SegmentTab extends StatelessWidget {
 }
 
 class _CompactTaskCard extends StatefulWidget {
+  final List<TaskItem> relatedRounds;
+  final ValueChanged<TaskItem>? onOpenRound;
   final TaskItem task;
   final VoidCallback onTapDetail;
   final VoidCallback? onScheduled;
 
-  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled});
+  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled,
+    this.relatedRounds = const [], this.onOpenRound});
 
   @override
   State<_CompactTaskCard> createState() => _CompactTaskCardState();
@@ -2143,6 +2153,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.2),
                             ),
                           ),
+                          if (widget.task.roundLabel != null) ...[
+                            const SizedBox(height: 6),
+                            Text(widget.task.roundLabel!, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk)),
+                          ],
                           const SizedBox(height: 7),
                           Row(
                             children: [
@@ -2436,6 +2450,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             ),
                           ),
                         ),
+                        if (widget.relatedRounds.length > 1 && widget.onOpenRound != null) ...[
+                          const SizedBox(height: 12),
+                          InspectionRoundList(rounds: widget.relatedRounds, onOpen: widget.onOpenRound!),
+                        ],
                         if (canSchedule) ...[
                           const SizedBox(height: 8),
                           GestureDetector(

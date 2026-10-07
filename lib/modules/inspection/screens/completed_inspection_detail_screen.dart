@@ -29,7 +29,8 @@ CompletedDetailFetcher? completedDetailFetcherOverride;
 
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
-  const CompletedInspectionDetailScreen({super.key, required this.task});
+  final bool historicalReadOnly;
+  const CompletedInspectionDetailScreen({super.key, required this.task, this.historicalReadOnly = false});
 
   @override
   State<CompletedInspectionDetailScreen> createState() =>
@@ -40,6 +41,9 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   TaskItem? _fullTask;
   bool _isLoading = true;
   String? _error;
+  bool get _readOnly => widget.historicalReadOnly ||
+      widget.task.planningReview?.decision == 'Requires Reinspection' ||
+      _fullTask?.planningReview?.decision == 'Requires Reinspection';
 
   /// True when the full remote detail is unavailable and the already-cached
   /// task handed in by the caller is being shown instead. This is a read-only
@@ -138,6 +142,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   }
 
   Future<void> _reworkStep(int step) async {
+    if (_readOnly) return;
     final task = _fullTask;
     if (task == null) return;
 
@@ -170,7 +175,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || _readOnly) return;
 
     HapticFeedback.mediumImpact();
 
@@ -191,6 +196,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   }
 
   void _navigateToStep(int step, TaskItem task) {
+    if (_readOnly) return;
     final Widget target;
     switch (step) {
       case 1:
@@ -264,6 +270,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
       children: [
+        if (_readOnly) ...[
+          Text('Historical inspection — Read only', style: InsightTheme.inter(13, w: FontWeight.w700)),
+          const SizedBox(height: 12),
+        ],
         if (_isCachedFallback) _buildSavedDataNotice(),
         _buildHeaderCard(task),
         const SizedBox(height: 24),
@@ -345,7 +355,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           step: 1,
           title: 'Site Verification',
           icon: Icons.location_on_outlined,
-          onRework: () => _reworkStep(1),
+          onRework: _readOnly ? null : () => _reworkStep(1),
           content: _buildDetailRows({
             'Land use class': task.landUseClass,
             'Lot area (sqm)': task.lotAreaSqm?.toStringAsFixed(2) ?? '—',
@@ -356,7 +366,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           step: 2,
           title: 'GPS Verification',
           icon: Icons.satellite_alt_outlined,
-          onRework: () => _reworkStep(2),
+          onRework: _readOnly ? null : () => _reworkStep(2),
           content: _buildDetailRows({
             'Confirmed latitude': task.confirmedLatitude?.toStringAsFixed(6) ?? '—',
             'Confirmed longitude': task.confirmedLongitude?.toStringAsFixed(6) ?? '—',
@@ -368,14 +378,14 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           step: 3,
           title: 'Photographic Evidence',
           icon: Icons.camera_alt_outlined,
-          onRework: () => _reworkStep(3),
+          onRework: _readOnly ? null : () => _reworkStep(3),
           content: _buildPhotoGrid(task),
         ),
         _CollapsibleStepCard(
           step: 4,
           title: 'Checklist',
           icon: Icons.checklist_rtl_rounded,
-          onRework: () => _reworkStep(4),
+          onRework: _readOnly ? null : () => _reworkStep(4),
           content: _buildDetailRows({
             'Completed': '${task.checklistCompletedCount} of ${task.checklistTotalCount} verified',
           }),
@@ -384,7 +394,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           step: 5,
           title: 'Field Findings',
           icon: Icons.edit_document,
-          onRework: () => _reworkStep(5),
+          onRework: _readOnly ? null : () => _reworkStep(5),
           content: _buildDetailRows({
             'Observations': task.observations?.isNotEmpty == true ? task.observations! : 'None recorded',
             'Discrepancies': task.discrepancies?.isNotEmpty == true ? task.discrepancies! : 'None recorded',
@@ -396,7 +406,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           step: 6,
           title: 'Review & Submit',
           icon: Icons.verified_outlined,
-          onRework: () => _reworkStep(6),
+          onRework: _readOnly ? null : () => _reworkStep(6),
           content: _buildDetailRows({
             'Result': task.inspectionResult ?? '—',
             'Compliant': task.isCompliant == null ? '—' : (task.isCompliant! ? 'Yes' : 'No (Discrepancy Found)'),
@@ -426,6 +436,8 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     final review = task.planningReview!;
     final rows = <String, String>{
       'Decision': review.displayDecision,
+      if (review.decisionReason?.trim().isNotEmpty == true)
+        'Reason': review.decisionReason!,
       if (review.reviewedBy != null && review.reviewedBy!.isNotEmpty)
         'Reviewed by': review.reviewedBy!,
       if (review.reviewedAt != null && review.reviewedAt!.isNotEmpty)
@@ -554,6 +566,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                     ],
                   ],
                 ),
+                if (task.roundLabel != null) ...[
+                  const SizedBox(height: 4),
+                  Text(task.roundLabel!, style: InsightTheme.inter(13, w: FontWeight.w700)),
+                ],
                 const SizedBox(height: 2),
                 Text(
                   task.location,
@@ -734,7 +750,7 @@ class _CollapsibleStepCard extends StatefulWidget {
   final String title;
   final IconData icon;
   final Widget content;
-  final VoidCallback onRework;
+  final VoidCallback? onRework;
 
   const _CollapsibleStepCard({
     required this.step,
@@ -837,7 +853,7 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                   children: [
                     widget.content,
                     const SizedBox(height: 16),
-                    GestureDetector(
+                    if (widget.onRework != null) GestureDetector(
                       onTap: widget.onRework,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

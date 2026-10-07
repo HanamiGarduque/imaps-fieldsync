@@ -231,7 +231,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 17,
+      version: 18,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -377,6 +377,7 @@ class DBHelper {
           await ReportQueueSchema.applyV16(db);
         }
         if (oldVersion < 17) await InspectionOwnershipSchema.applyV17(db);
+        if (oldVersion < 18) await applyV18(db);
       },
       onCreate: (db, version) async {
         await createInspectionRetentionTable(db);
@@ -385,6 +386,10 @@ class DBHelper {
           CREATE TABLE local_jobs(
             id TEXT PRIMARY KEY,
             local_inspection_id INTEGER,
+            inspection_round_number INTEGER,
+            previous_site_inspection_id INTEGER,
+            reinspection_reason TEXT,
+            reinspection_reviewed_at TEXT,
             status TEXT,
             scheduled_date TEXT,
             deadline_date TEXT,
@@ -695,6 +700,22 @@ class DBHelper {
     }).toList();
   }
 
+  /// Additive cache upgrade; legacy rows retain NULL context and all evidence.
+  static Future<void> applyV18(DatabaseExecutor db) async {
+    final existing = (await db.rawQuery('PRAGMA table_info(local_jobs)'))
+        .map((row) => row['name']).toSet();
+    for (final column in const {
+      'inspection_round_number': 'INTEGER',
+      'previous_site_inspection_id': 'INTEGER',
+      'reinspection_reason': 'TEXT',
+      'reinspection_reviewed_at': 'TEXT',
+    }.entries) {
+      if (!existing.contains(column.key)) {
+        await db.execute('ALTER TABLE local_jobs ADD COLUMN ${column.key} ${column.value}');
+      }
+    }
+  }
+
   /// Shared single-job cache mapping. Used by full-list cacheJobs() and
   /// normal inspection entry so both persist identical metadata.
   static Map<String, dynamic> _cachedJobRow(Map<String, dynamic> job) {
@@ -708,6 +729,10 @@ class DBHelper {
       'id': job['id'],
       'inspector_id': requireInspector(),
       'local_inspection_id': job['local_inspection_id'],
+      'inspection_round_number': job['inspection_round_number'],
+      'previous_site_inspection_id': job['previous_site_inspection_id'],
+      'reinspection_reason': job['reinspection_reason'],
+      'reinspection_reviewed_at': job['reinspection_reviewed_at'],
       'status': job['status'],
       'scheduled_date': job['scheduled_date'],
       'deadline_date': job['deadline_date'],
@@ -770,6 +795,7 @@ class DBHelper {
     try {
       return jsonEncode({
         'decision': decision,
+        'decision_reason': row['decision_reason'],
         'reviewed_by_name': row['reviewed_by_name'],
         'reviewed_at': row['reviewed_at'],
         'technical_review_id': row['technical_review_id'],

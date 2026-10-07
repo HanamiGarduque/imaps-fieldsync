@@ -14,6 +14,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 
 void main() {
   group('offline/online Completed order parity', () {
@@ -36,18 +37,12 @@ void main() {
     });
 
     test('offline task reconstruction passes submitted_at into TaskItem', () {
-      final source = File('lib/modules/tasks/screens/tasks_screen.dart').readAsStringSync();
-
-      // The offline branch maps cached columns into a job map for fromJob().
-      final offlineBranch = source.substring(
-        source.indexOf('final localJobs = await DBHelper.getCachedJobs();'),
-      );
-      expect(
-        offlineBranch,
-        contains("'submitted_at': j['submitted_at']"),
-        reason: 'Offline tasks must receive the cached submitted_at, otherwise the '
-            'Completed sort has no key and the order diverges from online.',
-      );
+      final task = TaskItem.fromCachedJob({
+        'id': 'cached-round', 'status': 'completed',
+        'submitted_at': '2026-10-07T01:02:03Z',
+      });
+      expect(task.submittedAt, '2026-10-07T01:02:03Z',
+        reason: 'The actual offline mapper must retain the Completed sort key.');
     });
 
     test('Completed is still sorted newest-first by submitted_at', () {
@@ -61,7 +56,6 @@ void main() {
 
     test('parity fix does not touch lifecycle or the review contract', () {
       final cache = File('lib/core/services/db_helper.dart').readAsStringSync();
-      final screen = File('lib/modules/tasks/screens/tasks_screen.dart').readAsStringSync();
 
       // No lifecycle column may be introduced or reordered by this fix. Scoped
       // to the job-cache mapper: local_inspections legitimately stores its own
@@ -79,7 +73,13 @@ void main() {
 
       // Planning Review cache stays presentational and untouched.
       expect(cache, contains('planning_review'));
-      expect(screen, contains("'planning_review': j['planning_review']"));
+      final task = TaskItem.fromCachedJob({
+        'id': 'reviewed-round', 'status': 'completed',
+        'planning_review': '{"decision":"Requires Reinspection"}',
+      });
+      expect(task.planningReview!.decision, 'Requires Reinspection');
+      expect(task.category, 'Completed');
+      expect(task.currentStep, 0, reason: 'Review metadata must not create progress.');
     });
   });
 }

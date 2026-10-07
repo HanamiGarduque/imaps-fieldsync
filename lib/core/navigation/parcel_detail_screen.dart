@@ -15,17 +15,20 @@ import '../../modules/inspection/providers/inspection_provider.dart';
 import '../../core/widgets/sensitive_screen.dart';
 import '../../modules/inspection/widgets/photo_viewer.dart';
 import '../../modules/inspection/services/photo_source_resolver.dart';
+import '../../modules/inspection/screens/completed_inspection_detail_screen.dart';
+import '../../modules/inspection/widgets/inspection_round_widgets.dart';
 
 import '../theme/insight_theme.dart';
 import '../services/inspection_start_service.dart';
 
 class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
+  final List<TaskItem> relatedRounds;
 
   // Dashboard supplies the real fetch; Tasks/offline entry uses its cached row.
   final Map<String, dynamic>? fetchedJob;
 
-  const ParcelDetailScreen({super.key, required this.task, this.fetchedJob});
+  const ParcelDetailScreen({super.key, required this.task, this.fetchedJob, this.relatedRounds = const []});
 
   @override
   State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
@@ -38,6 +41,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   Future<void>? _draftLoad;
 
   Future<void> _loadDraft() async {
+    if (task.lifecycleCategory == TaskLifecycleCategory.completed) return;
     final provider = context.read<InspectionProvider>();
     if (provider.activeTask?.id != task.id) {
       await provider.startInspection(task);
@@ -47,6 +51,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   @override
   void initState() {
     super.initState();
+    if (task.lifecycleCategory == TaskLifecycleCategory.completed) return;
     progress.ensureActiveInspection(
       task.id,
       label: task.location,
@@ -132,6 +137,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   }
 
   Future<void> _goToStep(BuildContext context, int step, WidgetBuilder builder) async {
+    if (task.lifecycleCategory == TaskLifecycleCategory.completed) return;
     if (_enteringStep) return;
     if (progress.isLocked(step)) {
       HapticFeedback.selectionClick();
@@ -179,6 +185,9 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (task.lifecycleCategory == TaskLifecycleCategory.completed) {
+      return CompletedInspectionDetailScreen(task: task, historicalReadOnly: true);
+    }
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final currentStep = progress.currentStep;
 
@@ -260,6 +269,15 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                     padding: const EdgeInsets.fromLTRB(12, 4, 12, 40),
                     physics: const BouncingScrollPhysics(),
                     children: [
+                      if (task.roundLabel != null) ...[
+                        Text(task.roundLabel!, style: InsightTheme.poppins(16, w: FontWeight.w700)),
+                        Text('${task.inspectionNo} · ${task.category}', style: InsightTheme.inter(12)),
+                        const SizedBox(height: 12),
+                      ],
+                      if (task.isReinspection) ...[
+                        ReinspectionContextCard(task: task, rounds: widget.relatedRounds),
+                        const SizedBox(height: 12),
+                      ],
                       
                       _GlassCard(
                         child: Padding(

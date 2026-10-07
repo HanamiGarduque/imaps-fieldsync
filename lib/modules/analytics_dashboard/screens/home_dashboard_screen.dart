@@ -216,21 +216,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       } else {
         _entryJobs = {};
         final localJobs = await DBHelper.getCachedJobs();
-        tasks = localJobs.map((j) => TaskItem.fromJob({
-              'id': j['id'],
-              'supabase_parcel_id': j['supabase_parcel_id'],
-              'status': j['status'],
-              'local_inspection_id': j['local_inspection_id'],
-              'scheduled_date': j['scheduled_date'],
-              'deadline_date': j['deadline_date'],
-              'is_self_scheduled': j['is_self_scheduled'] == 1,
-              'supabase_zoning_applications': {
-                'applicant_name': j['applicant_name'],
-                'barangay': j['barangay'],
-                'reference_number': j['reference_number'],
-                'application_type': j['application_type'],
-              }
-            })).toList();
+        tasks = localJobs.map(TaskItem.fromCachedJob).toList();
       }
     } catch (e) {
       debugPrint('Error loading tasks: $e');
@@ -860,6 +846,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                           MaterialPageRoute(builder: (_) => ParcelDetailScreen(
                                             task: _upcomingTasks[index],
                                             fetchedJob: _entryJobs[_upcomingTasks[index].id],
+                                            relatedRounds: _allTasks.where(_upcomingTasks[index].sameApplicationAs).toList(),
                                           ))),
                                     ),
                                   ),

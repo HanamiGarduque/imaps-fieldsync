@@ -580,6 +580,10 @@ class SupabaseService {
         .select('''
       id,
       local_inspection_id,
+      inspection_round_number,
+      previous_site_inspection_id,
+      reinspection_reason,
+      reinspection_reviewed_at,
       status,
       scheduled_date,
       deadline_date,
@@ -618,6 +622,7 @@ class SupabaseService {
         technical_review_id,
         reviewed_site_inspection_id,
         decision,
+        decision_reason,
         reviewed_by,
         reviewed_by_name,
         reviewed_at
@@ -1189,6 +1194,7 @@ class SupabaseService {
               technical_review_id,
               reviewed_site_inspection_id,
               decision,
+              decision_reason,
               reviewed_by,
               reviewed_by_name,
               reviewed_at
@@ -1328,6 +1334,10 @@ class SupabaseService {
         .select('''
           id,
           local_inspection_id,
+          inspection_round_number,
+          previous_site_inspection_id,
+          reinspection_reason,
+          reinspection_reviewed_at,
           status,
           scheduled_date,
           submitted_at,

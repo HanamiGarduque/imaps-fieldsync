@@ -48,12 +48,19 @@ void main() {
     db = await databaseFactoryFfi.openDatabase(
       '${dir.path}/tasks.db',
       options: OpenDatabaseOptions(
-        version: 15,
+        // The current schema version and its round/reinspection context columns:
+        // cacheJobs() writes them, so a stale fixture column list would fail the
+        // write and empty the very cache path under test.
+        version: 18,
         onCreate: (database, _) async {
           await database.execute('''
           CREATE TABLE local_jobs(
             id TEXT PRIMARY KEY,
             local_inspection_id INTEGER,
+            inspection_round_number INTEGER,
+            previous_site_inspection_id INTEGER,
+            reinspection_reason TEXT,
+            reinspection_reviewed_at TEXT,
             status TEXT,
             scheduled_date TEXT,
             deadline_date TEXT,
