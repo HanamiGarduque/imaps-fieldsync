@@ -269,11 +269,8 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                     padding: const EdgeInsets.fromLTRB(12, 4, 12, 40),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      if (task.roundLabel != null) ...[
-                        Text(task.roundLabel!, style: InsightTheme.poppins(16, w: FontWeight.w700)),
-                        Text('${task.inspectionNo} · ${task.category}', style: InsightTheme.inter(12)),
-                        const SizedBox(height: 12),
-                      ],
+                      RoundContextCard(task: task),
+                      const SizedBox(height: 12),
                       if (task.isReinspection) ...[
                         ReinspectionContextCard(task: task, rounds: widget.relatedRounds),
                         const SizedBox(height: 12),

@@ -100,7 +100,12 @@ void main() {
     final r2=TaskItem.fromJob(issueDRound(2,'assigned'));
     await tester.pumpWidget(wrap(ParcelDetailScreen(task:r2,relatedRounds:[r2,r1])));
     await settleIssueD(tester);
-    expect(find.text('Reinspection — Round 2'),findsOneWidget);
+    expect(find.text('Task Overview'), findsOneWidget);
+    // The compact round context container replaced the old loose round text.
+    expect(find.text('INSPECTION ROUND'), findsOneWidget);
+    expect(find.text('Round 2'), findsOneWidget);
+    expect(find.text('Reinspection'), findsOneWidget);
+    expect(find.text('Pending'), findsOneWidget);
     await tester.dragUntilVisible(find.text('Planning Review'),find.byType(ListView),const Offset(0,-250));
     expect(find.text('Requires Reinspection'),findsOneWidget);
     expect(find.text(issueDReason),findsOneWidget);

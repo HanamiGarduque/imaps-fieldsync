@@ -10,6 +10,96 @@ String formatPlanningReviewDate(String raw) {
   return '${months[date.month-1]} ${date.day}, ${date.year} · $hour:${date.minute.toString().padLeft(2,'0')} ${date.hour>=12?'PM':'AM'}';
 }
 
+/// Compact round context container for Task Overview.
+///
+/// Contextual information only: it renders the round the server already
+/// authored and nothing else. It is NOT a control - no tap, no mutation, no
+/// decision. Planning Review reason/date stay in [ReinspectionContextCard].
+class RoundContextCard extends StatelessWidget {
+  final TaskItem task;
+  final bool readOnly;
+
+  const RoundContextCard({super.key, required this.task, this.readOnly = false});
+
+  Color get _statusColor => switch (task.category) {
+        'Completed' => InsightTheme.green,
+        'Ongoing' => InsightTheme.blue1,
+        _ => InsightTheme.amber,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    // The round number on its own line; "Reinspection" is the kind line below
+    // it. Never compose them into one label here.
+    final round = task.inspectionRoundNumber;
+    return Container(
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: kCardShadow,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('INSPECTION ROUND',
+                    style: InsightTheme.jetBrains(10,
+                        w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: _statusColor.withValues(alpha: 0.3)),
+                ),
+                child: Text(task.category,
+                    style: InsightTheme.inter(11,
+                        w: FontWeight.w700, c: _statusColor)),
+              ),
+              if (readOnly) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface2,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: InsightTheme.line),
+                  ),
+                  child: Text('Read only',
+                      style: InsightTheme.inter(11,
+                          w: FontWeight.w600, c: InsightTheme.ink3)),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          // The round number on its own line; "Reinspection" is the kind line
+          // below it. Never compose them into one label here.
+          Text(round != null && round > 0 ? 'Round $round' : 'Inspection',
+              style: InsightTheme.poppins(15, w: FontWeight.w700)),
+          const SizedBox(height: 2),
+          // Authoritative kind: a first round is never presented as a
+          // reinspection, and a reinspection never hides that it is one.
+          Text(task.isReinspection ? 'Reinspection' : 'Original Inspection',
+              style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
+          const SizedBox(height: 2),
+          Text(task.inspectionNo,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: InsightTheme.jetBrains(11, c: InsightTheme.ink3)),
+        ],
+      ),
+    );
+  }
+}
+
 class ReinspectionContextCard extends StatelessWidget {
   final TaskItem task;
   final List<TaskItem> rounds;
