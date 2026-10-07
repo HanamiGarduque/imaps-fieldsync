@@ -119,8 +119,10 @@ void main() {
     transportOffline = false;
     rejectWithServerError = false;
     patchCount = 0;
+    SyncOutboxService.hasConnectionOverride = () async => !transportOffline;
   });
   tearDown(() async {
+    SyncOutboxService.hasConnectionOverride = null;
     DBHelper.useDatabaseForTesting(null);
     await db.close();
   });
@@ -148,13 +150,13 @@ void main() {
     expect(patchCount, 1, reason: 'no duplicate remote mutation after acknowledgement');
   });
 
-  test('2. true offline keeps the row retryable and writes nothing', () async {
+  test('2. true offline makes no attempt and counts no failure', () async {
     await SyncOutboxService.enqueueMarkOngoing(jobId: job);
     transportOffline = true;
     await SyncOutboxService.drain(trigger: 'test');
     final r = await row();
-    expect(r['status'], 'failed');
-    expect(r['retry_count'], 1);
+    expect(r['status'], 'pending', reason: 'waiting for connection');
+    expect(r['retry_count'], 0, reason: 'no remote attempt means no failed attempt');
     expect(remote['status'], 'pending');
   });
 
@@ -214,14 +216,14 @@ void main() {
     expect(patchCount, 1);
   });
 
-  test('11. retry metadata clears after a later success', () async {
+  test('11. a paused/failed row still acknowledges on a later successful drain', () async {
     await SyncOutboxService.enqueueMarkOngoing(jobId: job);
-    transportOffline = true;
+    rejectWithServerError = true;
     await SyncOutboxService.drain(trigger: 'test');
     expect((await row())['status'], 'failed');
     expect((await row())['retry_count'], 1);
-    transportOffline = false;
-    await SyncOutboxService.drain(trigger: 'test');
+    rejectWithServerError = false;
+    await SyncOutboxService.drain(trigger: 'manual');
     expect((await row())['status'], 'synced');
   });
 

@@ -251,7 +251,9 @@ void main() {
           where: 'id = ?',
           whereArgs: [actionId],
         );
-        await SyncOutboxService.drain();
+        // Explicit retry: an automatic drain would respect the backoff that
+        // failure #1 just started.
+        await SyncOutboxService.drain(trigger: 'manual');
         expect((await db.query('pending_actions')).single['status'], 'synced');
         expect(uploads, expectedUploads);
         expect(inserts, expectedInserts + 1);
@@ -1120,11 +1122,13 @@ void main() {
       expect(inserts, expectedPass1Inserts);
       expect(patches, expectedPass1Patches);
 
-      // Pass 2: Clear failures and recover
+      // Pass 2: Clear failures and recover. An automatic drain would correctly
+      // respect the 1 minute backoff after failure #1, so recovery here is the
+      // explicit user retry the Issue E policy allows.
       failStorage = false;
       failMetadata = false;
       failPatch = false;
-      await SyncOutboxService.drain();
+      await SyncOutboxService.drain(trigger: 'manual');
       final p2 = (await db.query('pending_actions')).single;
       expect(p2['status'], 'synced');
       expect(uploads, expectedPass2Uploads);

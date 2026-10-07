@@ -198,6 +198,56 @@ class SyncOutboxService {
     });
   }
 
+  // --- AUTOMATIC RETRY POLICY ---
+  //
+  // A queued action that fails for a transient reason is retried, but never
+  // forever and never immediately: [kMaxAutomaticRemoteAttempts] failed remote
+  // attempts, spaced by [kAutomaticBackoff]. After the last one the row is
+  // paused — preserved, visible, and retryable only by an explicit user sync.
+  // No timer or background worker is involved: eligibility is derived from the
+  // existing `retry_count` and `updated_at` columns, so app restarts and
+  // connectivity events re-evaluate the same schedule for free.
+  static const int kMaxAutomaticRemoteAttempts = 5;
+  static const List<Duration> kAutomaticBackoff = [
+    Duration(minutes: 1),
+    Duration(minutes: 5),
+    Duration(minutes: 15),
+    Duration(minutes: 30),
+  ];
+
+  /// True when an automatic (non-manual) attempt is allowed right now.
+  static bool isEligibleForAutomaticAttempt(Map<String, dynamic> action) {
+    final attempts = action['retry_count'] as int? ?? 0;
+    if (attempts >= kMaxAutomaticRemoteAttempts) return false;
+    if (attempts <= 0) return true;
+    final last = DateTime.tryParse('${action['updated_at']}');
+    if (last == null) return true;
+    final wait =
+        kAutomaticBackoff[(attempts - 1).clamp(0, kAutomaticBackoff.length - 1)];
+    return DateTime.now().difference(last) >= wait;
+  }
+
+  @visibleForTesting
+  static Future<bool> Function()? hasConnectionOverride;
+
+  /// Same signal the Sync Center's Online badge uses: a network interface is
+  /// present. A link that cannot reach the server is a transient remote
+  /// failure and is counted as such.
+  ///
+  /// If the platform check itself is unavailable, this returns true rather
+  /// than freezing the queue: the actual request then decides, and a genuine
+  /// offline device still fails with a transport error on the first attempt.
+  static Future<bool> hasConnection() async {
+    final override = hasConnectionOverride;
+    if (override != null) return override();
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return results.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      return true;
+    }
+  }
+
   // --- ENQUEUE HELPERS (one per action type) ---
 
   /// Queues a GPS confirmation. Deterministic id per job (same dedup
@@ -469,10 +519,21 @@ class SyncOutboxService {
       // preserved, not changed or acknowledged by this drain.
       await DBHelper.recoverAbandonedClaims();
       if (DBHelper.currentInspectorId != uid) return;
-      final allActions = await DBHelper.getActionableActions();
-      final actions = onlyJobId == null
+      final manual = trigger == 'manual';
+      // True offline: nothing is attempted, so no failed attempt is counted.
+      // The row stays `pending` — "waiting for connection" — and no backoff
+      // clock starts, because no remote call was ever made.
+      if (!manual && !await hasConnection()) return;
+      final allActions =
+          await DBHelper.getActionableActions(includePaused: manual);
+      final scoped = onlyJobId == null
           ? allActions
           : allActions.where((a) => a['job_id'] == onlyJobId).toList();
+      // Automatic drains honour the ceiling and the backoff; only an explicit
+      // user sync may bypass them, and only for one attempt per action.
+      final actions = manual
+          ? scoped
+          : scoped.where(isEligibleForAutomaticAttempt).toList();
       final total = actions.length;
       if (total == 0) return;
 
@@ -492,6 +553,7 @@ class SyncOutboxService {
       var successCount = 0;
       var failCount = 0;
       var conflictCount = 0;
+      var pausedCount = 0;
 
       for (var i = 0; i < actions.length; i++) {
         final action = actions[i];
@@ -550,6 +612,12 @@ class SyncOutboxService {
           if (e.result == InspectionAuthorityResult.notAssignedOrUnavailable) {
             await DBHelper.markActionConflict(id, e.result.message);
             conflictCount++;
+          } else if (e.result == InspectionAuthorityResult.authRequired) {
+            // Permanent: a session that no longer authorises this action will
+            // not start authorising it on a retry. Paused, not retried, and
+            // never described as a connection problem.
+            await DBHelper.markActionPaused(id, e.result.message);
+            pausedCount++;
           } else {
             await DBHelper.markActionFailed(id, e.result.message);
             failCount++;
@@ -561,6 +629,15 @@ class SyncOutboxService {
           );
           final retryCount = (action['retry_count'] as int? ?? 0) + 1;
           await DBHelper.markActionFailed(id, e.toString());
+          if (retryCount >= kMaxAutomaticRemoteAttempts) {
+            // Ceiling reached: count the attempt, stop automatic retries, and
+            // keep the row with its evidence. Only an explicit user sync may
+            // try it again.
+            await DBHelper.markActionPaused(id,
+              'Sync paused after $retryCount failed attempts. Your data is '
+              'preserved — use Sync to try once more.');
+            pausedCount++;
+          }
           failCount++;
           await DBHelper.logSyncEvent(
             eventType: 'upload_failed',
@@ -594,11 +671,13 @@ class SyncOutboxService {
         message:
             'Synchronization finished — $successCount succeeded'
             '${failCount > 0 ? ', $failCount failed' : ''}'
-            '${conflictCount > 0 ? ', $conflictCount need review' : ''}.',
+            '${conflictCount > 0 ? ', $conflictCount need review' : ''}'
+            '${pausedCount > 0 ? ', $pausedCount need attention' : ''}.',
         technicalDetails: {
           'successCount': successCount,
           'failCount': failCount,
           'conflictCount': conflictCount,
+          'pausedCount': pausedCount,
         },
       );
 

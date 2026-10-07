@@ -327,21 +327,25 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     unawaited(_loadCacheStats());
     if (!mounted) return;
     final stillPending = _pendingRows.length;
+    final pausedCount =
+        _pendingRows.where((r) => r['status'] == 'paused').length;
     final conflictCount = _pendingRows
         .where((r) => r['status'] == 'conflict')
         .length;
     _showToast(
       stillPending == 0
           ? 'All caught up — nothing left to sync.'
-          : conflictCount > 0
-              ? '$conflictCount item(s) need conflict review.'
-              // Only claim a connection problem when the device really has no
-              // link. A queued row can also fail on the server or on task
-              // state, and blaming the connection for that sent inspectors
-              // chasing a signal that was already fine.
-              : _isOnline
-                  ? '$stillPending item(s) could not sync — see the reason below.'
-                  : '$stillPending item(s) still waiting (check connection).',
+          : pausedCount > 0
+              ? '$pausedCount item(s) need attention — your data is preserved.'
+              : conflictCount > 0
+                  ? '$conflictCount item(s) need conflict review.'
+                  // Only claim a connection problem when the device really has
+                  // no link. A queued row can also fail on the server or on
+                  // task state, and blaming the connection for that sent
+                  // inspectors chasing a signal that was already fine.
+                  : _isOnline
+                      ? '$stillPending item(s) could not sync — see the reason below.'
+                      : '$stillPending item(s) still waiting (check connection).',
       color: stillPending == 0 ? InsightTheme.greenInk : InsightTheme.amberInk,
     );
     unawaited(SupabaseService.logActivity(
@@ -726,12 +730,14 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     switch (status) {
       case 'syncing':
         return 'Uploading...';
+      case 'paused':
+        return 'Needs attention';
       case 'failed':
-        return retries > 0 ? 'Failed — retry #$retries' : 'Failed — will retry';
+        return retries > 0 ? 'Sync failed — will retry' : 'Sync failed — will retry';
       case 'conflict':
         return 'Conflict detected — review required';
       default:
-        return 'Waiting for signal';
+        return 'Waiting for connection';
     }
   }
 

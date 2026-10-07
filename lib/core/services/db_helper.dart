@@ -1254,11 +1254,14 @@ class DBHelper {
 
   /// Rows ready to (re)try — pending or previously-failed, oldest first so
   /// actions sync in the order they happened.
-  static Future<List<Map<String, dynamic>>> getActionableActions() async {
+  static Future<List<Map<String, dynamic>>> getActionableActions({
+    bool includePaused = false,
+  }) async {
     final db = await database;
     return await db.query(
       'pending_actions',
-      where: "status IN ('pending', 'failed') AND inspector_id = ?",
+      where: "status IN ('pending', 'failed'${includePaused ? ", 'paused'" : ''}) "
+          'AND inspector_id = ?',
       whereArgs: [currentInspectorId],
       orderBy: 'created_at ASC',
     );
@@ -1268,7 +1271,7 @@ class DBHelper {
     final db = await database;
     return await db.query(
       'pending_actions',
-      where: "status IN ('pending', 'failed', 'syncing', 'conflict') AND inspector_id = ?",
+      where: "status IN ('pending', 'failed', 'syncing', 'conflict', 'paused') AND inspector_id = ?",
       whereArgs: [currentInspectorId],
       orderBy: 'created_at ASC',
     );
@@ -1277,7 +1280,7 @@ class DBHelper {
   static Future<int> getPendingActionsCount() async {
     final db = await database;
     final result = await db.rawQuery(
-      "SELECT COUNT(*) AS c FROM pending_actions WHERE status IN ('pending', 'failed', 'syncing', 'conflict') AND inspector_id = ?",
+      "SELECT COUNT(*) AS c FROM pending_actions WHERE status IN ('pending', 'failed', 'syncing', 'conflict', 'paused') AND inspector_id = ?",
       [currentInspectorId],
     );
     return Sqflite.firstIntValue(result) ?? 0;
@@ -1334,6 +1337,20 @@ class DBHelper {
     await db.rawUpdate(
       "UPDATE pending_actions SET status = 'failed', retry_count = retry_count + 1, "
       "last_error = ?, updated_at = ? WHERE id = ? AND status = 'syncing' AND inspector_id = ?",
+      [error, DateTime.now().toIso8601String(), id, currentInspectorId],
+    );
+  }
+
+  /// Terminal "needs attention" state: automatic retries have stopped or the
+  /// failure is permanent, but the row and its evidence are preserved for the
+  /// inspector. Never a silent delete, never a fake success. Only an explicit
+  /// user-triggered sync may attempt it again. Not selected by
+  /// [getActionableActions], so no automatic drain can revive it.
+  static Future<void> markActionPaused(String id, String error) async {
+    final db = await database;
+    await db.rawUpdate(
+      "UPDATE pending_actions SET status = 'paused', last_error = ?, updated_at = ? "
+      "WHERE id = ? AND inspector_id = ? AND status IN ('pending', 'failed', 'syncing')",
       [error, DateTime.now().toIso8601String(), id, currentInspectorId],
     );
   }
