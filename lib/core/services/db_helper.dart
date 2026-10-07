@@ -11,6 +11,8 @@ import 'report_queue_schema.dart';
 import 'inspection_ownership_schema.dart';
 import 'supabase_service.dart';
 
+enum LocalOwnershipResult { current, foreign, legacyUnknown, mixed }
+
 class DBHelper {
   /// Local-only fixtures explicitly supply an authenticated identity. Production
   /// never falls back to a preference, assignment, name, or legacy NULL owner.
@@ -45,13 +47,31 @@ class DBHelper {
   /// All job-keyed evidence participates: a replacement assignee cannot create
   /// a new draft over a retained legacy/foreign round on this device.
   static Future<void> requireOwnedJob(DatabaseExecutor db, String jobId, String uid) async {
+    if (await classifyJobOwnership(db, jobId, uid) != LocalOwnershipResult.current) {
+      throw StateError('Local evidence belongs to another or unknown inspector');
+    }
+    requireSameInspector(uid);
+  }
+
+  /// Read-only local classification, never remote authority or legacy adoption.
+  /// An empty graph permits the existing fresh-write flow; it proves no history.
+  static Future<LocalOwnershipResult> classifyJobOwnership(
+      DatabaseExecutor db, String jobId, String uid) async {
+    requireSameInspector(uid);
+    final owners = <String?>{};
     for (final entry in {
       'local_jobs': 'id', 'local_inspections': 'id', 'local_photos': 'job_id',
       'inspection_job_retention': 'job_id', 'pending_actions': 'job_id',
     }.entries) {
-      await _requireOwnedRow(db, entry.key, entry.value, jobId, uid);
+      final rows = await db.query(entry.key, columns: ['inspector_id'],
+        where: '${entry.value} = ?', whereArgs: [jobId]);
+      requireSameInspector(uid);
+      owners.addAll(rows.map((row) => row['inspector_id'] as String?));
     }
-    requireSameInspector(uid);
+    if (owners.any((owner) => owner != null && owner != uid)) {
+      return owners.length == 1 ? LocalOwnershipResult.foreign : LocalOwnershipResult.mixed;
+    }
+    return owners.contains(null) ? LocalOwnershipResult.legacyUnknown : LocalOwnershipResult.current;
   }
   static Database? _database;
 

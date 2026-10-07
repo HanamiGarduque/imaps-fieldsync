@@ -85,4 +85,59 @@ void main() {
     await expectLater(DBHelper.requireOwnedJob(db, 'legacy', ownerA), throwsStateError);
     await expectLater(DBHelper.requireOwnedJob(db, 'foreign', ownerA), throwsStateError);
   });
+
+  test('typed classification reads the entire graph without changing evidence', () async {
+    for (final (owners, expected) in <(List<String?>, LocalOwnershipResult)>[
+      ([], LocalOwnershipResult.current),
+      ([ownerA], LocalOwnershipResult.current),
+      ([null], LocalOwnershipResult.legacyUnknown),
+      ([ownerA, null], LocalOwnershipResult.legacyUnknown),
+      ([ownerB], LocalOwnershipResult.foreign),
+      ([ownerB, ownerB], LocalOwnershipResult.foreign),
+      ([ownerA, ownerB], LocalOwnershipResult.mixed),
+      ([ownerB, null], LocalOwnershipResult.mixed),
+      ([ownerB, 'cccccccc-3333-4333-8333-cccccccccccc'], LocalOwnershipResult.mixed),
+    ]) {
+      await db.delete('local_jobs');
+      await db.delete('local_photos');
+      for (var i = 0; i < owners.length; i++) {
+        await db.insert(i == 0 ? 'local_jobs' : 'local_photos',
+          i == 0 ? {'id': 'job', 'inspector_id': owners[i]}
+          : {'id': 'photo-$i', 'job_id': 'job', 'inspector_id': owners[i]});
+      }
+      final snapshots = [await db.query('local_jobs'), await db.query('local_photos')];
+      expect(await DBHelper.classifyJobOwnership(db, 'job', ownerA), expected);
+      if (expected == LocalOwnershipResult.current) {
+        await DBHelper.requireOwnedJob(db, 'job', ownerA);
+      } else {
+        await expectLater(DBHelper.requireOwnedJob(db, 'job', ownerA), throwsStateError);
+      }
+      expect([await db.query('local_jobs'), await db.query('local_photos')], snapshots);
+    }
+  });
+
+  test('each protected table independently contributes unknown ownership', () async {
+    for (final entry in {'local_jobs': 'id', 'local_inspections': 'id',
+      'local_photos': 'job_id', 'inspection_job_retention': 'job_id', 'pending_actions': 'job_id'}.entries) {
+      final row = <String, Object?>{entry.value: 'job'};
+      if (entry.value != 'id' && entry.key != 'inspection_job_retention') row['id'] = 'row';
+      if (entry.key == 'local_photos') row['photo_path'] = '/fixture';
+      if (entry.key == 'inspection_job_retention') row['retained_at'] = 'fixture';
+      if (entry.key == 'pending_actions') {
+        row.addAll({'type': 'fixture', 'payload': '{}',
+          'status': 'pending', 'created_at': 'fixture', 'updated_at': 'fixture'});
+      }
+      await db.insert(entry.key, row);
+      expect(await DBHelper.classifyJobOwnership(db, 'job', ownerA), LocalOwnershipResult.legacyUnknown,
+        reason: entry.key);
+      await expectLater(DBHelper.requireOwnedJob(db, 'job', ownerA), throwsStateError);
+      await db.delete(entry.key);
+    }
+  });
+
+  test('typed classification denies a changed authenticated identity', () async {
+    final classify = DBHelper.classifyJobOwnership(db, 'job', ownerA);
+    DBHelper.inspectorIdForTesting = ownerB;
+    await expectLater(classify, throwsStateError);
+  });
 }
