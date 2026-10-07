@@ -165,8 +165,13 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
   }
 
   Widget _buildCategoryChips() {
+    // The chips are content-sized, and a horizontal viewport needs a BOUNDED
+    // height, so the track scales with the text scale rather than wrapping the
+    // ListView in an unbounded box (which throws during layout). Each chip also
+    // drops its fixed vertical padding in favour of a minHeight.
+    final chipHeight = MediaQuery.textScalerOf(context).scale(26).clamp(26, double.infinity);
     return SizedBox(
-      height: 38,
+      height: chipHeight + 12,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -195,7 +200,8 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
               },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                constraints: BoxConstraints(minHeight: chipHeight.toDouble()),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: isSelected ? InsightTheme.blue1 : InsightTheme.surface,

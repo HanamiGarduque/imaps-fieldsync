@@ -184,10 +184,15 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           child: SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+              // `subtitle` comes from activity_log at runtime and is unbounded,
+              // so this sheet scrolls: mainAxisSize.min alone let a long body
+              // push the Close button past the bottom edge with no way to reach
+              // it. min still hugs the content whenever the body is short.
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                   Center(
                     child: Container(
                       width: 48,
@@ -234,7 +239,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                       child: const Text('Close'),
                     ),
                   ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

@@ -1121,7 +1121,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 20),
 
                 Container(
-                  height: 52,
+                  // minHeight, not height: "Try again in Ns" grows its line box
+                  // at a larger text scale and a fixed 52 clipped the label.
+                  constraints: const BoxConstraints(minHeight: 52),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       colors: [AppColors.blue1, AppColors.blue2],
@@ -1141,6 +1143,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     onPressed: (_isLoading || _cooldownSecondsRemaining > 0) ? null : _handleLogin,
@@ -1150,6 +1153,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             _cooldownSecondsRemaining > 0
                                 ? 'Try again in ${_cooldownSecondsRemaining}s'
                                 : 'Sign in',
+                            textAlign: TextAlign.center,
                             style: AppText.inter(15, w: FontWeight.w700, c: Colors.white),
                           ),
                   ),

@@ -143,25 +143,32 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
                     const SizedBox(height: 28),
                     SizedBox(
                       width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: InsightTheme.blue1,
-                          foregroundColor: Colors.white,
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      // minHeight, not height: `_bioLabel` is a runtime string
+                      // ("fingerprint", "face recognition") that wraps to two
+                      // lines on a narrow screen, and a fixed 52 cut the second.
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 52),
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: InsightTheme.blue1,
+                            foregroundColor: Colors.white,
+                            elevation: 2,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          onPressed: _checking ? null : _attempt,
+                          child: _checking
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : Text(
+                                  'Unlock with $_bioLabel',
+                                  textAlign: TextAlign.center,
+                                  style: InsightTheme.inter(15, w: FontWeight.w600, c: Colors.white),
+                                ),
                         ),
-                        onPressed: _checking ? null : _attempt,
-                        child: _checking
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                              )
-                            : Text(
-                                'Unlock with $_bioLabel',
-                                style: InsightTheme.inter(15, w: FontWeight.w600, c: Colors.white),
-                              ),
                       ),
                     ),
                     const SizedBox(height: 12),

@@ -1443,8 +1443,10 @@ class _DatePickerChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        // minHeight, not height: the date label wraps at a larger text scale or
+        // with a long value, and a fixed 42px silently cut the second line.
+        constraints: const BoxConstraints(minHeight: 42),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: InsightTheme.bg,
           borderRadius: BorderRadius.circular(10),
@@ -1453,7 +1455,10 @@ class _DatePickerChip extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+            Flexible(
+              child: Text(label, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+            ),
+            const SizedBox(width: 8),
             const Icon(Icons.calendar_today_outlined, size: 15, color: InsightTheme.ink3),
           ],
         ),

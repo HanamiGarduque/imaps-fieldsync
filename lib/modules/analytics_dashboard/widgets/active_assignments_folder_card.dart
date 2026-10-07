@@ -367,8 +367,11 @@ class _GlossyPocket extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipPath(
       clipper: _PocketClipper(),
+      // Keep the existing pocket height at normal text size; give wrapped
+      // brand text room at large accessibility sizes without changing styling.
+      child: IntrinsicHeight(
       child: Container(
-        height: 154,
+        constraints: BoxConstraints(minHeight: MediaQuery.textScalerOf(context).scale(154)),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -454,7 +457,7 @@ class _GlossyPocket extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      Text(
+                      Expanded(child: Text(
                         'iMAPS FieldSync',
                         style: InsightTheme.urbanist(
                           12,
@@ -462,8 +465,7 @@ class _GlossyPocket extends StatelessWidget {
                           c: Colors.white.withValues(alpha: 0.70),
                           ls: 0.4,
                         ),
-                      ),
-                      const Spacer(),
+                      )),
                       // Date pill
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -591,6 +593,7 @@ class _GlossyPocket extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

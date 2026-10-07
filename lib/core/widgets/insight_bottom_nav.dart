@@ -173,13 +173,21 @@ class InsightBottomNav extends StatelessWidget {
   double get _itemHeight => _railAndTriggerSize - _railInnerPad * 2; // 48, matches reference w-12/h-12
   double get _itemRadius => _itemHeight / 2; // rounded-full
 
-  double _labelWidth(String label) {
+  /// Width of the longest label at the CURRENT text scale.
+  ///
+  /// The label is painted with the ambient `textScaler`, so measuring it
+  /// without one under-reports the width: at 1.3x the active pill stayed sized
+  /// for the unscaled text and its ClipRect cut the label's tail off.
+  double _labelWidth(String label, TextScaler textScaler) {
     final painter = TextPainter(
       text: TextSpan(text: label, style: _labelStyle),
       textDirection: TextDirection.ltr,
       maxLines: 1,
+      textScaler: textScaler,
     )..layout();
-    return painter.width;
+    final width = painter.width;
+    painter.dispose();
+    return width;
   }
 
   double _compactWidth() => _itemHeight; // perfect circle, width == height
@@ -187,7 +195,7 @@ class InsightBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxLabelWidth = items
-        .map((it) => _labelWidth(it.label))
+        .map((it) => _labelWidth(it.label, MediaQuery.textScalerOf(context)))
         .fold<double>(0, (a, b) => a > b ? a : b);
     final activeWidth = _iconSize + _labelGap + maxLabelWidth + _activePadH * 2;
     final compactWidth = _compactWidth();

@@ -102,20 +102,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // batch (see _kRecentActivityLimit below) rather than re-querying per tap.
   String _activityFilter = 'all';
 
-  // Calendar strip / modal — visual day selector only (no filtering wired
-  // to it beyond the subtitle + dots, matching the reference). `_now` is
-  // captured once (not a ticking value) — only used to seed today's
-  // month/day and the greeting; the actual live clock in the header is
-  // its own small widget (_LiveClock) so its per-minute tick doesn't
-  // rebuild this whole screen (see PERFORMANCE NOTE below).
-  final DateTime _now = DateTime.now();
+   // The calendar selection is independent of the live Today/Note card.
+   final DateTime _now = DateTime.now();
   late DateTime _calendarMonth = DateTime(_now.year, _now.month);
   late int _selectedDay = _now.day;
-  final ScrollController _dayStripController = ScrollController();
-
-  // Drawer toggle: false = slideable day strip showing, true = full month
-  // grid showing in its place. See _toggleFullCalendar / build().
-  bool _showFullCalendar = false;
+   bool _showFullCalendar = false;
 
   bool _isOnline = true;
   late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
@@ -171,10 +162,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       }
     });
 
-    // Auto-scroll the day strip to today the moment it first lays out —
-    // it used to always start at day 1, forcing a manual swipe every time.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollDayStripToSelected());
-
     _loadUpcomingTasks();
     _loadRecentActivity();
   }
@@ -186,21 +173,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     }
   }
 
-  // Centers the selected day chip in the horizontal strip. Called after
-  // first layout, whenever the picked day/month changes from the full
-  // calendar, and (animated) on a direct tap in the strip itself.
-  void _scrollDayStripToSelected({bool animate = false}) {
-    if (!_dayStripController.hasClients) return;
-    const chipWidth = 60.0; // 52 chip + 8 margin, see the day-strip builder
-    final viewport = _dayStripController.position.viewportDimension;
-    final target = ((_selectedDay - 1) * chipWidth - (viewport / 2) + (chipWidth / 2))
-        .clamp(0.0, _dayStripController.position.maxScrollExtent);
-    if (animate) {
-      _dayStripController.animateTo(target, duration: const Duration(milliseconds: 220), curve: Curves.easeOutCubic);
-    } else {
-      _dayStripController.jumpTo(target);
-    }
-  }
 
   @override
   void didUpdateWidget(HomeDashboardScreen oldWidget) {
@@ -217,7 +189,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   void dispose() {
     _pageController.dispose();
     _connectivitySubscription.cancel();
-    _dayStripController.dispose();
     disposeSpringEntrance();
     super.dispose();
   }
@@ -498,15 +469,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     return 2;
   }
 
-  List<Color> _calendarDotColorsForDay(DateTime month, int day) {
-    final tasks = _tasksByDayInMonth(month)[day] ?? const <TaskItem>[];
-    final colors = <Color>{};
-    for (final task in tasks) {
-      colors.add(_calendarDotColor(task));
-    }
-    return colors.toList();
-  }
-
   Color _calendarDotColor(TaskItem task) {
     switch (_calendarVisitPriority(task)) {
       case 0:
@@ -536,21 +498,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     return fullId.toUpperCase();
   }
 
-  // Inline drawer toggle (UDAS §3.4 — secondary picker, not a full page
-  // nav) — replaces the old showModalBottomSheet approach. Toggling swaps
-  // the slideable day-strip out for the full month grid in place, via the
-  // AnimatedSwitcher in build() (fade + slight vertical drawer motion).
-  // No second route, no modal — same screen, same scroll position.
-  void _toggleFullCalendar() {
-    final closing = _showFullCalendar;
-    setState(() => _showFullCalendar = !_showFullCalendar);
-    if (closing) {
-      // AnimatedSwitcher tears down the strip's Scrollable while the full
-      // calendar is showing, so its ScrollController loses its offset —
-      // the new Scrollable that attaches on the way back always starts
-      // at 0 (day 1) unless explicitly re-centered here.
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollDayStripToSelected());
-    }
+   void _toggleFullCalendar() {
+     setState(() => _showFullCalendar = !_showFullCalendar);
   }
 
   void _onFullCalendarPick(DateTime month, int day) {
@@ -565,10 +514,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final initials = _getInitials(widget.profile.fullName);
     final firstName = UserProfile.displayFullName(widget.profile.fullName);
     final greeting = _greeting(_now);
-    final taskDays = _taskDaysInMonth(_calendarMonth);
-    final tasksByDay = _tasksByDayInMonth(_calendarMonth);
-    final daysInMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1, 0).day;
-    const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+     final tasksByDay = _tasksByDayInMonth(_calendarMonth);
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -577,28 +523,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
         bottom: false,
         child: SingleChildScrollView(
           padding: EdgeInsets.only(bottom: kInsightBottomNavReserve),
-          child: Column(
+          child: ConstrainedContent.wide(
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ----------------------------------------------------
-              // HEADER + CALENDAR CARD — one continuous white surface
-              // from the avatar/top-bar all the way down through the
-              // "View full calendar" toggle, closed off with a rounded
-              // bottom edge + shadow instead of a flat cut + divider.
-              // Everything below (Active Assignments onward) sits back
-              // on the plain scaffold background.
+              // Separate white surfaces follow the v3 section grouping.
               // ----------------------------------------------------
               Container(
+                key: const ValueKey('inspector_section'),
                 width: double.infinity,
+                padding: const EdgeInsets.only(top: 12),
                 decoration: BoxDecoration(
                   color: InsightTheme.surface,
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(28),
-                    bottomRight: Radius.circular(28),
-                  ),
-                  boxShadow: kCardShadow,
+                  borderRadius: BorderRadius.circular(24),
                 ),
-                padding: const EdgeInsets.only(top: 12, bottom: 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -625,13 +564,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               }
                             },
                             child: Container(
-                              width: 44,
-                              height: 44,
+                              width: 48,
+                              height: 48,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: InsightTheme.blue1,
-                                border: Border.all(color: InsightTheme.surface, width: 2),
-                                boxShadow: kCardShadow,
+                                border: Border.all(color: InsightTheme.blue1, width: 2),
                               ),
                               child: ClipOval(
                                 child: widget.profile.avatarUrl != null && widget.profile.avatarUrl!.isNotEmpty
@@ -650,13 +588,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               ),
                             ),
                           ),
-                          const Spacer(),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text('FieldSync',
+                            style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink))),
+                          const SizedBox(width: 8),
                           Container(
                             margin: const EdgeInsets.only(right: 12),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: _isOnline ? InsightTheme.green.withValues(alpha: 0.12) : InsightTheme.red.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(10),
+                              color: _isOnline ? InsightTheme.greenTint : InsightTheme.redTint,
+                              borderRadius: BorderRadius.circular(999),
                             ),
                             child: Row(
                               children: [
@@ -668,8 +609,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                Text(_isOnline ? 'ONLINE' : 'OFFLINE', 
-                                     style: InsightTheme.mono(12, w: FontWeight.w700, c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk)),
+                                Text(_isOnline ? 'Online' : 'Offline',
+                                     style: InsightTheme.inter(12, w: FontWeight.w600, c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk)),
                               ],
                             ),
                           ),
@@ -687,7 +628,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       ),
                     ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
 
                     // ----------------------------------------------------
                     // GREETING
@@ -697,42 +638,67 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       child: SpringSlide(
                         animation: springFor(0),
                         beginOffset: const Offset(0, -20),
-                        child: Text.rich(
-                          TextSpan(children: [
-                            TextSpan(text: '$greeting, $firstName ', style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4)),
-                            const TextSpan(text: '👋', style: TextStyle(fontSize: 19)),
-                          ]),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // ----------------------------------------------------
-                    // SCHEDULE / CALENDAR
-                    // ----------------------------------------------------
-                    // Month header is now display-only — the toggle to open the
-                    // full calendar moved below the strip (see toggle button).
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: SpringSlide(
-                        animation: springFor(1),
-                        beginOffset: const Offset(0, 18),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(_fullMonthNames[_calendarMonth.month - 1],
-                                style: InsightTheme.urbanist(19, w: FontWeight.w800, c: InsightTheme.ink)),
-                            const _LiveClock(),
+                            Text(greeting, style: InsightTheme.inter(13,
+                              w: FontWeight.w500, c: InsightTheme.ink3)),
+                            const SizedBox(height: 4),
+                            Text(firstName, style: InsightTheme.urbanist(24,
+                              w: FontWeight.w700, c: InsightTheme.ink, ls: -0.5)),
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                key: const ValueKey('calendar_section'),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Column(
+                  children: [
 
-                    // Drawer swap: slideable day strip <-> full month grid.
-                    // Same screen, no modal, no second route — just a fade +
-                    // slight vertical motion between the two, per Master's spec.
-                    SpringSlide(
+                    // ----------------------------------------------------
+                    // SCHEDULE / CALENDAR
+                    // ----------------------------------------------------
+                     Padding(
+                       padding: const EdgeInsets.symmetric(horizontal: 16),
+                       child: SpringSlide(
+                         animation: springFor(1),
+                         beginOffset: const Offset(0, 18),
+                         child: _TodayScheduleCard(
+                           tasksForDate: (date) => _tasksByDayInMonth(date)[date.day] ?? const <TaskItem>[],
+                           dotColorForTask: _calendarDotColor,
+                           isLoading: _isLoadingTasks,
+                         ),
+                       ),
+                     ),
+                     Center(
+                       child: TextButton(
+                         onPressed: _toggleFullCalendar,
+                         child: Tooltip(
+                           message: _showFullCalendar ? 'Hide full calendar' : 'Show full calendar',
+                           child: Row(
+                             mainAxisSize: MainAxisSize.min,
+                             children: [
+                               Text('Calendar', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                               AnimatedRotation(
+                                 turns: _showFullCalendar ? 0.5 : 0,
+                                 duration: const Duration(milliseconds: 220),
+                                 child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: InsightTheme.blue1),
+                               ),
+                             ],
+                           ),
+                         ),
+                       ),
+                     ),
+                     SpringSlide(
                       animation: springFor(1),
                       beginOffset: const Offset(0, 18),
                       child: AnimatedSwitcher(
@@ -765,133 +731,27 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   onPick: _onFullCalendarPick,
                                 ),
                               )
-                            : SizedBox(
-                                key: const ValueKey('day_strip'),
-                                height: 78,
-                                child: ListView.builder(
-                                  controller: _dayStripController,
-                                  scrollDirection: Axis.horizontal,
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                  itemCount: daysInMonth,
-                                  itemBuilder: (context, i) {
-                                    final day = i + 1;
-                                    final weekday = DateTime(_calendarMonth.year, _calendarMonth.month, day).weekday; // 1=Mon..7=Sun
-                                    final isSelected = day == _selectedDay;
-                                    final hasTask = taskDays.contains(day);
-                                    final dotColors = _calendarDotColorsForDay(_calendarMonth, day);
-                                    return GestureDetector(
-                                      onTap: () {
-                                        setState(() => _selectedDay = day);
-                                        _scrollDayStripToSelected(animate: true);
-                                      },
-                                      // Each day now sits in its own card — slight
-                                      // curve, subtle lift — rather than a bare
-                                      // transparent tap zone (Master's spec). Now
-                                      // that the card behind it is also white,
-                                      // the border + shadow (not color contrast)
-                                      // is what keeps each chip readable as its
-                                      // own card — a light "tint" background on
-                                      // the unselected chip would fight the
-                                      // theme-lock rule against inventing a new
-                                      // token, so border+shadow do the work here.
-                                      child: Container(
-                                        width: 52,
-                                        margin: const EdgeInsets.only(right: 8, top: 2, bottom: 2),
-                                        padding: const EdgeInsets.symmetric(vertical: 10),
-                                        decoration: BoxDecoration(
-                                          color: isSelected ? InsightTheme.blue1 : InsightTheme.surface,
-                                          borderRadius: BorderRadius.circular(20),
-                                          border: Border.all(
-                                            color: isSelected ? Colors.transparent : InsightTheme.line,
-                                            width: 1.4,
-                                          ),
-                                          boxShadow: kCardShadow,
-                                        ),
-                                        child: Column(
-                                          mainAxisAlignment: MainAxisAlignment.center,
-                                          children: [
-                                            Text('$day', style: InsightTheme.urbanist(14, w: FontWeight.w800, c: isSelected ? Colors.white : InsightTheme.ink)),
-                                            Text(weekdayAbbr[weekday - 1], style: InsightTheme.openSans(12, w: FontWeight.w600, c: isSelected ? Colors.white.withValues(alpha: 0.9) : InsightTheme.ink3)),
-                                            const SizedBox(height: 4),
-                                            if (hasTask)
-                                              Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: dotColors.take(3).map((dotColor) {
-                                                  return Container(
-                                                    width: 5,
-                                                    height: 5,
-                                                    margin: const EdgeInsets.symmetric(horizontal: 1.2),
-                                                    decoration: BoxDecoration(
-                                                      shape: BoxShape.circle,
-                                                      color: isSelected ? Colors.white : dotColor,
-                                                    ),
-                                                  );
-                                                }).toList(),
-                                              )
-                                            else
-                                              Container(
-                                                width: 5,
-                                                height: 5,
-                                                decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.transparent),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Toggle button — always visible below the strip/grid so the
-                    // same control opens AND closes the drawer. Lives outside the
-                    // AnimatedSwitcher on purpose (per Master: click again to
-                    // come back up).
-                    Center(
-                      child: GestureDetector(
-                        onTap: _toggleFullCalendar,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeOutCubic,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                          decoration: BoxDecoration(
-                            color: _showFullCalendar ? InsightTheme.blueTint : InsightTheme.surface,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _showFullCalendar ? Colors.transparent : InsightTheme.line,
-                              width: 1.4,
-                            ),
-                            boxShadow: kCardShadow,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _showFullCalendar ? 'Hide full calendar' : 'View full calendar',
-                                style: InsightTheme.openSans(12, w: FontWeight.w700, c: _showFullCalendar ? InsightTheme.blueInk : InsightTheme.ink2),
-                              ),
-                              const SizedBox(width: 4),
-                              AnimatedRotation(
-                                turns: _showFullCalendar ? 0.5 : 0,
-                                duration: const Duration(milliseconds: 220),
-                                curve: Curves.easeOutCubic,
-                                child: Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: _showFullCalendar ? InsightTheme.blue2 : InsightTheme.blue1),
-                              ),
-                            ],
-                          ),
-                        ),
+                             : const SizedBox.shrink(),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 8),
 
               // ----------------------------------------------------
               // 2. ACTIVE ASSIGNMENTS
               // ----------------------------------------------------
+              Container(
+                key: const ValueKey('assignments_section'),
+                padding: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: SpringSlide(
@@ -916,7 +776,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   beginOffset: const Offset(0, 16),
                   child: Text(
                     "Here's what's on your schedule today.",
-                    style: InsightTheme.openSans(13.5, w: FontWeight.w600, c: InsightTheme.ink),
+                    style: InsightTheme.inter(13, c: InsightTheme.ink3),
                   ),
                 ),
               ),
@@ -926,7 +786,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 animation: springFor(2),
                 beginOffset: const Offset(70, 0),
                 child: SizedBox(
-                height: 260,
+                height: MediaQuery.textScalerOf(context).scale(244).clamp(244, double.infinity),
                 child: _isLoadingTasks
                     ? const Center(child: ImapsLoadingIndicator(size: 50))
                     : _upcomingTasks.isEmpty
@@ -964,7 +824,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   }
                                   return Center(
                                     child: SizedBox(
-                                      height: Curves.easeOut.transform(value) * 220,
+                                      height: Curves.easeOut.transform(value) * MediaQuery.textScalerOf(context).scale(220).clamp(220, double.infinity),
                                       width: double.infinity,
                                       child: child,
                                     ),
@@ -1009,7 +869,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                           ),
               ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
 
               if (_upcomingTasks.length > 1)
                 Row(
@@ -1027,7 +887,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                     );
                   }),
                 ),
-              const SizedBox(height: 36),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
 
               // ----------------------------------------------------
               // 3. TASK COMPLETION FLOW
@@ -1038,12 +901,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   animation: springFor(3),
                   beginOffset: const Offset(0, 20),
                   child: _SectionLabel(
-                    title: "TASK COMPLETION FLOW",
+                    title: "Task completion flow",
                     trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: SpringSlide(
@@ -1054,12 +917,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   // card lets the shape actually register as a unit.
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: InsightTheme.surface,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: InsightTheme.line, width: 1.2),
-                      boxShadow: kCardShadow,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: InsightTheme.line),
                     ),
                     child: _isLoadingTasks
                         ? const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: ImapsLoadingIndicator(size: 40)))
@@ -1070,7 +932,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 final total = counts.values.fold<int>(0, (a, b) => a + b);
                                 const labels = ['Scheduled', 'Pending', 'Ongoing', 'Completed'];
                                 const colors = [InsightTheme.orange, InsightTheme.blue1, InsightTheme.blue1, InsightTheme.green];
-                                const icons = [Icons.event_rounded, Icons.pending_actions_rounded, Icons.autorenew_rounded, Icons.check_circle_rounded];
                                 final fractions = List.generate(labels.length, (i) {
                                   final count = counts[labels[i]] ?? 0;
                                   return total == 0 ? 0.0 : count / total;
@@ -1079,33 +940,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   if (task.category == 'Completed') return false;
                                   return task.scheduleUrgency == 'Overdue';
                                 }).length;
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _CompletionRingChart(
+                                return _CompletionRingChart(
                                       total: total,
                                       labels: labels,
                                       colors: colors,
-                                      icons: icons,
                                       counts: List.generate(labels.length, (i) => counts[labels[i]] ?? 0),
                                       fractions: fractions,
-                                    ),
-                                    if (overdueCount > 0)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 14),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                          decoration: BoxDecoration(
-                                            color: InsightTheme.redTint,
-                                            borderRadius: BorderRadius.circular(999),
-                                          ),
-                                          child: Text(
-                                            '⚠️ $overdueCount overdue',
-                                            style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.redInk),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
+                                      overdueCount: overdueCount,
                                 );
                               }),
                   ),
@@ -1116,25 +957,39 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               // ----------------------------------------------------
               // 4. RECENT ACTIVITY
               // ----------------------------------------------------
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: SpringSlide(
                   animation: springFor(8),
                   beginOffset: const Offset(0, 20),
-                  child: const _SectionLabel(title: "RECENT ACTIVITY"),
+                  child: const _SectionLabel(title: "Recent activity"),
                 ),
               ),
               const SizedBox(height: 12),
 
-              // Category filter — All / Tasks / Sync / Profile. Evenly
-              // divided across the row (segmented-control style) so all
-              // four fit without needing a horizontal scroll.
+              // Text-only activity categories share one segmented surface.
               SpringSlide(
                 animation: springFor(8),
                 beginOffset: const Offset(0, 20),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
+                  child: Container(
+                    key: const ValueKey('activity_filters'),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.surface2,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
                     children: [
                       Expanded(
                         child: _ActivityFilterChip(
@@ -1181,6 +1036,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                         ),
                       ),
                     ],
+                    ),
                   ),
                 ),
               ),
@@ -1251,7 +1107,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               ),
                       ),
               ),
+                ],
+                ),
+              ),
             ],
+            ),
           ),
         ),
       ),
@@ -1267,23 +1127,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 /// COMPONENT WIDGETS
 /// ==================================================================
 
-/// PERFORMANCE NOTE: this used to be a plain Text fed by a `_now` field
-/// on the main screen State, ticked every 30s via a Timer that called
-/// setState on the WHOLE HomeDashboardScreen — meaning the entire
-/// dashboard (assignments carousel, task list, activity feed) rebuilt
-/// every 30 seconds just to update a clock, which is what was showing up
-/// as scroll jank. Isolating the tick into this tiny widget means only
-/// this Text rebuilds each minute; everything else is untouched.
-class _LiveClock extends StatefulWidget {
-  const _LiveClock();
+/// Keeps clock ticks local and uses the full calendar's date mapping for Today.
+class _TodayScheduleCard extends StatefulWidget {
+  final List<TaskItem> Function(DateTime date) tasksForDate;
+  final Color Function(TaskItem task) dotColorForTask;
+  final bool isLoading;
+
+  const _TodayScheduleCard({
+    required this.tasksForDate,
+    required this.dotColorForTask,
+    required this.isLoading,
+  });
 
   @override
-  State<_LiveClock> createState() => _LiveClockState();
+  State<_TodayScheduleCard> createState() => _TodayScheduleCardState();
 }
 
-class _LiveClockState extends State<_LiveClock> {
+class _TodayScheduleCardState extends State<_TodayScheduleCard> {
   late DateTime _now = DateTime.now();
   Timer? _timer;
+  bool _showTasks = false;
 
   @override
   void initState() {
@@ -1303,7 +1166,139 @@ class _LiveClockState extends State<_LiveClock> {
   Widget build(BuildContext context) {
     final hour12 = _now.hour % 12 == 0 ? 12 : _now.hour % 12;
     final text = '${hour12.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')} ${_now.hour < 12 ? 'AM' : 'PM'}';
-    return Text(text, style: InsightTheme.urbanist(19, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.3));
+    final scaler = MediaQuery.textScalerOf(context);
+    final tasks = widget.tasksForDate(_now);
+    return Container(
+      key: const ValueKey('clock_date_card'),
+      height: scaler.scale(92),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: InsightTheme.line),
+      ),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final tileWidth = constraints.maxWidth * 0.4;
+        return Stack(children: [
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeInOutCubic,
+            top: 0,
+            bottom: 0,
+            left: _showTasks ? tileWidth : 0,
+            width: constraints.maxWidth - tileWidth,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: _showTasks
+                    ? Column(
+                        key: const ValueKey('today_note'),
+                        children: [
+                          Text('Note', style: InsightTheme.urbanist(14, w: FontWeight.w700, c: InsightTheme.ink)),
+                          const SizedBox(height: 4),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              key: const ValueKey('today_tasks'),
+                              child: widget.isLoading
+                                  ? Text('Loading today’s tasks…', style: InsightTheme.inter(12, c: InsightTheme.ink2))
+                                  : tasks.isEmpty
+                                      ? Text('No tasks or PO due dates today.', textAlign: TextAlign.center, style: InsightTheme.inter(12, c: InsightTheme.ink2))
+                                      : Column(
+                                          children: tasks.map((task) => _CalendarTaskRow(task: task, color: widget.dotColorForTask(task))).toList(),
+                                        ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Center(
+                        key: const ValueKey('live_clock'),
+                        child: Text(text, textAlign: TextAlign.center, style: InsightTheme.urbanist(24, w: FontWeight.w800, c: InsightTheme.ink)),
+                      ),
+              ),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeInOutCubic,
+            top: 0,
+            bottom: 0,
+            left: _showTasks ? 0 : constraints.maxWidth - tileWidth,
+            width: tileWidth,
+            child: Semantics(
+              button: true,
+              label: _showTasks ? 'Show clock and date' : "Show today's tasks",
+              value: _showTasks ? 'Today' : '${_HomeDashboardScreenState._fullMonthNames[_now.month - 1]} ${_now.day}, ${_now.year}',
+              onTap: () => setState(() => _showTasks = !_showTasks),
+              excludeSemantics: true,
+              child: Material(
+                color: InsightTheme.blue1,
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () => setState(() => _showTasks = !_showTasks),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Center(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        child: _showTasks
+                            ? Text('Today', key: const ValueKey('today_label'), style: InsightTheme.urbanist(24, w: FontWeight.w800, c: Colors.white))
+                            : Column(
+                                key: const ValueKey('date_label'),
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('${_now.day}', style: InsightTheme.urbanist(30, w: FontWeight.w800, c: Colors.white)),
+                                  Text(_HomeDashboardScreenState._fullMonthNames[_now.month - 1], textAlign: TextAlign.center, style: InsightTheme.inter(12, w: FontWeight.w600, c: Colors.white)),
+                                  Text(const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][_now.weekday - 1], style: InsightTheme.inter(12, w: FontWeight.w600, c: Colors.white)),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]);
+      }),
+    );
+  }
+}
+
+/// Shared by Today's notes and the selected date in the full calendar.
+class _CalendarTaskRow extends StatelessWidget {
+  final TaskItem task;
+  final Color color;
+  const _CalendarTaskRow({required this.task, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final isVisit = task.lifecycleCategory == TaskLifecycleCategory.pending &&
+        task.pendingSection == PendingTaskSection.scheduled;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 6, height: 6,
+            margin: const EdgeInsets.only(top: 6, right: 6),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(task.inspectionNo, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
+                Text(task.name, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                Text(isVisit ? 'Scheduled visit' : 'PO due date', style: InsightTheme.inter(12, w: FontWeight.w600, c: color)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -1317,12 +1312,11 @@ class _NotificationBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 44, height: 44,
+        width: 48, height: 48,
         decoration: BoxDecoration(
           color: InsightTheme.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: InsightTheme.line, width: 1.5),
-          boxShadow: kCardShadow,
+          border: Border.all(color: InsightTheme.line),
         ),
         child: Stack(
           alignment: Alignment.center,
@@ -1354,19 +1348,25 @@ class _SectionLabel extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // icon: ink3 (muted) -> ink (full contrast) so the text reads as the
-        // actual heading it is.
-        Text(title, style: InsightTheme.urbanist(12.5, w: FontWeight.w800, ls: 0.8, c: InsightTheme.ink)),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(999)),
+              child: Text(title, style: InsightTheme.urbanist(16,
+                w: FontWeight.w700, c: InsightTheme.ink)),
+            ),
+          ),
+        ),
+        if (trailing != null) const SizedBox(width: 12),
         ?trailing,
       ],
     );
   }
 }
 
-/// Turns a "See All" / "More details" link into an actual small pill
-/// button — a bare text link easily gets missed and reads as inert on a
-/// page background; a tinted, tappable-looking pill signals affordance
-/// the way the rest of the app's buttons already do.
+/// Section navigation keeps a full-height touch target.
 class _SectionActionButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
@@ -1378,9 +1378,10 @@ class _SectionActionButton extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
         decoration: BoxDecoration(
-          color: InsightTheme.blueTint,
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(999),
         ),
         child: Row(
@@ -1396,14 +1397,7 @@ class _SectionActionButton extends StatelessWidget {
   }
 }
 
-/// Recent Activity category filter pill (All / Tasks / Sync / Profile).
-/// Selected state uses the app's real brand color (InsightTheme.blue1)
-/// so it reads clearly against the dark theme; unselected pills sit on the
-/// existing panel/line tokens rather than a second, invented surface color.
-/// Height is fixed at 44px — UDAS §5.1 touch-target floor — even though the
-/// visible pill reads slightly smaller, so the tap area itself never shrinks
-/// below the minimum. Width now comes from its Expanded parent (segmented-
-/// control layout), so content is centered rather than left-packed.
+/// Text-only category tab, with content-driven height for enlarged text.
 class _ActivityFilterChip extends StatelessWidget {
   final String label;
   final bool selected;
@@ -1417,49 +1411,26 @@ class _ActivityFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
+    return Semantics(
+      button: true,
+      selected: selected,
       child: Material(
-        color: selected ? InsightTheme.blue1 : InsightTheme.surface,
-        borderRadius: BorderRadius.circular(18),
+        color: selected ? InsightTheme.ink : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(12),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: selected ? Colors.transparent : InsightTheme.line,
-                width: 1.2,
-              ),
-            ),
-            // Five chips share one row, so at ~390 logical pixels each gets ~67px.
-            // FittedBox scales the whole label down to the available width instead
-            // of letting the Row overflow, which keeps the visual language
-            // and the 44px tap target intact at any width or text scale. scaleDown
-            // only shrinks - a chip with room for its label renders identically to
-            // before, so nothing changes on a wide screen.
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    label,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: InsightTheme.inter(
-                      12,
-                      w: FontWeight.w700,
-                      c: selected ? Colors.white : InsightTheme.ink2,
-                    ),
-                  ),
-                ],
-              ),
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 10),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: InsightTheme.inter(12, w: FontWeight.w600,
+                c: selected ? Colors.white : InsightTheme.ink2),
             ),
           ),
         ),
@@ -1469,26 +1440,25 @@ class _ActivityFilterChip extends StatelessWidget {
 }
 
 /// Concentric ring chart for Task Completion Flow (replaces the old
-/// stacked progress-bar rows). One ring per category — Urgent (outer)
+/// stacked progress-bar rows). One ring per category — Scheduled (outer)
 /// through Completed (inner) — each ring's filled arc is that category's
-/// share of the total task count. Center shows the running total once,
-/// so "tasks" never has to repeat per row. Legend below: label on top,
-/// bold count under it, icon-in-circle at the bottom — per Master's spec.
+/// share of the total task count. Categories stay in a compact two-by-two
+/// layout, beside the rings when they fit and below on narrow layouts.
 class _CompletionRingChart extends StatefulWidget {
   final int total;
   final List<String> labels;
   final List<Color> colors;
-  final List<IconData> icons;
   final List<int> counts;
   final List<double> fractions; // 0..1 each, share of total
+  final int overdueCount;
 
   const _CompletionRingChart({
     required this.total,
     required this.labels,
     required this.colors,
-    required this.icons,
     required this.counts,
     required this.fractions,
+    required this.overdueCount,
   });
 
   @override
@@ -1506,94 +1476,118 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
     });
   }
 
-  static const double _outerSize = 176;
-  static const double _ringStep = 38; // diameter decrement per ring, outer -> inner
-  static const double _strokeWidth = 13;
+  static const double _outerSize = 100;
+  static const double _ringStep = 16;
+  static const double _strokeWidth = 8;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Center(
-          child: SizedBox(
-            width: _outerSize,
-            height: _outerSize,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                for (int i = 0; i < widget.labels.length; i++)
-                  SizedBox(
-                    width: _outerSize - (_ringStep * i),
-                    height: _outerSize - (_ringStep * i),
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0.0, end: _filled ? widget.fractions[i].clamp(0.0, 1.0) : 0.0),
-                      duration: const Duration(milliseconds: 750),
-                      curve: Curves.easeOutCubic,
-                      builder: (context, value, _) => CircularProgressIndicator(
-                        value: value <= 0 ? 0.001 : value,
-                        strokeWidth: _strokeWidth,
-                        strokeCap: StrokeCap.round,
-                        backgroundColor: widget.colors[i].withValues(alpha: 0.12),
-                        valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
-                      ),
-                    ),
-                  ),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 54),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('${widget.total}', style: InsightTheme.urbanist(26, w: FontWeight.w800, c: InsightTheme.ink)),
-                      ),
-                      const SizedBox(height: 2),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('Tasks', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3)),
-                      ),
-                    ],
-                  ),
+    final scaler = MediaQuery.textScalerOf(context);
+    final ringSize = scaler.scale(_outerSize);
+    final rings = SizedBox(
+      width: ringSize,
+      height: ringSize,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          for (int i = 0; i < widget.labels.length; i++)
+            SizedBox(
+              width: ringSize - (scaler.scale(_ringStep) * i),
+              height: ringSize - (scaler.scale(_ringStep) * i),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: _filled ? widget.fractions[i].clamp(0.0, 1.0) : 0.0),
+                duration: const Duration(milliseconds: 750),
+                curve: Curves.easeOutCubic,
+                builder: (context, value, _) => CircularProgressIndicator(
+                  value: value <= 0 ? 0.001 : value,
+                  strokeWidth: scaler.scale(_strokeWidth),
+                  strokeCap: StrokeCap.round,
+                  backgroundColor: widget.colors[i].withValues(alpha: 0.12),
+                  valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
                 ),
+              ),
+            ),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: scaler.scale(44)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${widget.total}', style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink)),
+                const SizedBox(height: 2),
+                Text('Tasks', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3)),
               ],
             ),
           ),
-        ),
-        const SizedBox(height: 24),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: List.generate(widget.labels.length, (i) {
-            return Expanded(
-              child: Column(
-                children: [
-                  Text(
-                    widget.labels[i],
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: InsightTheme.openSans(12, w: FontWeight.w700, c: InsightTheme.ink3),
-                  ),
-                  const SizedBox(height: 4),
-                  Text('${widget.counts[i]}', style: InsightTheme.urbanist(17, w: FontWeight.w800, c: InsightTheme.ink)),
-                  const SizedBox(height: 8),
-                  // Same icon-in-circle treatment already used for Recent
-                  // Activity tiles — reusing that pattern here too.
-                  Container(
-                    width: 30, height: 30,
-                    decoration: BoxDecoration(
-                      color: widget.colors[i].withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: widget.colors[i].withValues(alpha: 0.3), width: 1.5),
+        ],
+      ),
+    );
+    final labelStyle = InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2);
+    var labelWidth = 0.0;
+    for (final label in widget.labels) {
+      final painter = TextPainter(
+        text: TextSpan(text: label, style: labelStyle),
+        textDirection: Directionality.of(context),
+        textScaler: scaler,
+      )..layout();
+      if (painter.width > labelWidth) labelWidth = painter.width;
+      painter.dispose();
+    }
+    final legend = Stack(
+      alignment: Alignment.center,
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int row = 0; row < widget.labels.length; row += 2) ...[
+              if (row == 2) SizedBox(height: scaler.scale(widget.overdueCount > 0 ? 12 : 4)),
+              Table(
+                children: [TableRow(children: [
+                  for (int i = row; i < row + 2; i++)
+                    Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: Container(
+                        key: ValueKey('completion_${widget.labels[i]}'),
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: scaler.scale(6)),
+                        decoration: BoxDecoration(
+                          color: i == 0 ? InsightTheme.surface2 : widget.colors[i].withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: InsightTheme.line),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (i < 2) Text(widget.labels[i], softWrap: false, style: labelStyle),
+                            Text('${widget.counts[i]}', style: InsightTheme.urbanist(22, w: FontWeight.w700, c: InsightTheme.ink)),
+                            if (i >= 2) Text(widget.labels[i], softWrap: false, style: labelStyle),
+                          ],
+                        ),
+                      ),
                     ),
-                    child: Icon(widget.icons[i], size: 15, color: widget.colors[i]),
-                  ),
-                ],
+                ])],
               ),
-            );
-          }),
+            ],
+          ],
         ),
+        if (widget.overdueCount > 0)
+          Container(
+            key: const ValueKey('completion_overdue'),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: InsightTheme.redTint, borderRadius: BorderRadius.circular(999)),
+            child: Text('${widget.overdueCount} Overdue', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.redInk)),
+          ),
       ],
     );
+    return LayoutBuilder(key: const ValueKey('completion_chart'), builder: (context, constraints) {
+      // Keep category words intact with the actual font and accessibility size.
+      if (constraints.maxWidth < ringSize + 8 + (labelWidth + 18) * 2) {
+        return Column(children: [rings, const SizedBox(height: 12), legend]);
+      }
+      return Row(children: [
+        rings,
+        const SizedBox(width: 8),
+        Expanded(child: legend),
+      ]);
+    });
   }
 }
 
@@ -1658,24 +1652,16 @@ class _InlineFullCalendarCard extends StatelessWidget {
               Expanded(
                 child: Text(headerLabel, style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
               ),
-              GestureDetector(
-                onTap: onPrevMonth,
-                child: Container(
-                  width: 30, height: 30,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(9)),
-                  child: Icon(Icons.chevron_left_rounded, size: 18, color: InsightTheme.ink2),
-                ),
+              IconButton(
+                tooltip: 'Previous month',
+                onPressed: onPrevMonth,
+                icon: Icon(Icons.chevron_left_rounded, color: InsightTheme.ink2),
               ),
               const SizedBox(width: 6),
-              GestureDetector(
-                onTap: onNextMonth,
-                child: Container(
-                  width: 30, height: 30,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(9)),
-                  child: Icon(Icons.chevron_right_rounded, size: 18, color: InsightTheme.ink2),
-                ),
+              IconButton(
+                tooltip: 'Next month',
+                onPressed: onNextMonth,
+                icon: Icon(Icons.chevron_right_rounded, color: InsightTheme.ink2),
               ),
             ],
           ),
@@ -1694,11 +1680,11 @@ class _InlineFullCalendarCard extends StatelessWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             padding: const EdgeInsets.only(bottom: 4),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
               mainAxisSpacing: 4,
               crossAxisSpacing: 4,
-              childAspectRatio: 1,
+              mainAxisExtent: MediaQuery.textScalerOf(context).scale(24) + 24,
             ),
             itemCount: daysInMonth + leadingBlanks,
             itemBuilder: (context, i) {
@@ -1712,11 +1698,12 @@ class _InlineFullCalendarCard extends StatelessWidget {
                   .toSet()
                   .toList();
               return GestureDetector(
+                key: ValueKey('calendar_day_$day'),
                 onTap: () => onPick(month, day),
                 behavior: HitTestBehavior.opaque,
                 child: Center(
                   child: Container(
-                    width: 34, height: 34,
+                    constraints: const BoxConstraints(minHeight: 48),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: isSelected ? InsightTheme.blue1 : Colors.transparent,
@@ -1765,40 +1752,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
                     style: InsightTheme.urbanist(12, w: FontWeight.w700, c: InsightTheme.ink),
                   ),
                   const SizedBox(height: 8),
-                  ...selectedTasks.take(4).map((task) {
-                    final color = dotColorForTask(task);
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            margin: const EdgeInsets.only(top: 6, right: 8),
-                            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  task.inspectionNo,
-                                  style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink),
-                                ),
-                                Text(
-                                  task.name,
-                                  style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink2),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
+                  ...selectedTasks.map((task) => _CalendarTaskRow(task: task, color: dotColorForTask(task))),
                 ],
               ),
             ),

@@ -699,9 +699,11 @@ class ZoningTypeBreakdownCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          Expanded(
+          // Scrolls rather than clipping. Inside the card's fixed 250px slot a
+          // longer legend (5 rows at a larger text scale) used to be silently cut
+          // with NeverScrollableScrollPhysics and no way to reach the last row.
+          Flexible(
             child: ListView.separated(
-              physics: const NeverScrollableScrollPhysics(),
               itemCount: visible.length,
               separatorBuilder: (_, _) => const SizedBox(height: 12),
               itemBuilder: (context, i) {

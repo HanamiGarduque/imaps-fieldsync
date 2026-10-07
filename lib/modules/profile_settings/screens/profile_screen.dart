@@ -727,11 +727,10 @@ class _ProfileScreenState extends State<ProfileScreen>
           const SizedBox(height: 14),
 
           // ── Chart body ───────────────────────────────────────────────
-          // IMPORTANT: the Activity calendar must size to its own content.
-          // A fixed parent height clips the grid when the month spans more
-          // rows than the assumed 340px placeholder. Only the non-calendar
-          // charts use the compact fixed height; the activity heatmap should
-          // grow naturally with the real number of calendar weeks.
+          // IMPORTANT: the Activity calendar must size to its own content. A fixed
+          // parent height clips the grid when the month spans more rows than the
+          // assumed 340px placeholder. The other charts DO need a bounded height:
+          // their chart area is an Expanded, which throws in an unbounded Column.
           AnimatedContainer(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,

@@ -246,7 +246,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         insetPadding: const EdgeInsets.symmetric(horizontal: 32),
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Column(
+          // Dialog does not make its child scrollable. min still hugs a short
+          // body, but a long one (large file counts, bigger text) now scrolls
+          // instead of pushing the action buttons out of the dialog.
+          child: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -294,6 +298,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 ],
               ),
             ],
+            ),
           ),
         ),
       ),
@@ -747,7 +752,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         insetPadding: const EdgeInsets.symmetric(horizontal: 32),
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Column(
+          // Scrollable for the same reason as the clear-cache dialog above.
+          child: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -806,6 +813,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 ),
               ),
             ],
+            ),
           ),
         ),
       ),

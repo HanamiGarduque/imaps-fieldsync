@@ -136,13 +136,6 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
               // the metrics beside it, so the dial stays large instead of being
               // squeezed to fit a portrait-shaped card.
               child: HeaderSplitBody(
-                landscapeBackButton: SizedBox.square(
-                  dimension: InsightBreakpoints.minTouchTarget,
-                  child: _GlassIconButton(
-                    icon: Icons.arrow_back_ios_new_rounded,
-                    onTap: () => Navigator.pop(context),
-                  ),
-                ),
                 header: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: Row(
@@ -293,6 +286,15 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                           accuracy: _accuracy,
                         ),
                       ),
+                // Landscape reclaims the header's space for the dial and keeps
+                // only this floating back control; portrait retains the header.
+                landscapeBackButton: SizedBox.square(
+                  dimension: InsightBreakpoints.minTouchTarget,
+                  child: _GlassIconButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                ),
               ),
             ),
           ],
@@ -317,7 +319,29 @@ class _StandaloneCompassDial extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hubSize = size * 0.47;
+    // Grow the hub when the ambient text scale makes the centred readout taller
+    // than the circle, the same way the GPS dial does. Without this the
+    // cardinal, the heading number and the LIVE chip are vertically clipped.
+    var hubSize = size * 0.47;
+    final scaler = MediaQuery.textScalerOf(context);
+    double lineHeight(double fontSize) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: '0',
+          style: InsightTheme.jetBrains(fontSize, w: FontWeight.w800),
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+      )..layout();
+      final measured = painter.height;
+      painter.dispose();
+      return measured;
+    }
+    final needed = lineHeight(hubSize * 0.085) +
+        lineHeight(hubSize * 0.19) +
+        lineHeight(hubSize * 0.066) +
+        hubSize * 0.066;
+    hubSize = math.min(size * 0.62, math.max(hubSize, needed / 0.78));
 
     return SizedBox(
       width: size,

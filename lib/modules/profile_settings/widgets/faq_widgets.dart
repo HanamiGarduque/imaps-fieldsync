@@ -142,7 +142,10 @@ class FaqLanguageSegmentControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 44,
+      // minHeight, not height: the sliding thumb is sized off this box, but a
+      // fixed 44 left the labels only 36px of usable height and centre-clipped
+      // them at a larger text scale.
+      constraints: const BoxConstraints(minHeight: 44),
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.7),

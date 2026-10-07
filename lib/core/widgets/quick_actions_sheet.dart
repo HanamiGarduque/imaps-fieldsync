@@ -209,7 +209,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
           mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
           children: [
             Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
+            padding: const EdgeInsets.fromLTRB(14, 6, 6, 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -295,12 +295,16 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
     // answer even on a wide-but-short viewport.
     final twoColumns = context.responsive.canSplitTwoPane &&
         MediaQuery.sizeOf(context).width >= kTwoColumnMinWidth;
+    // Height is the scarce dimension on any wide-but-short viewport, not only
+    // where two columns happen to fit: without this a landscape panel cuts its
+    // last row in half instead of showing every action whole.
+    final compactRows = twoColumns || MediaQuery.sizeOf(context).height < 400;
     if (!twoColumns) {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           for (int i = 0; i < actions.length; i++)
-            entry(i, _QuickActionRow(action: actions[i], onClose: widget.onClose)),
+            entry(i, _QuickActionRow(action: actions[i], onClose: widget.onClose, compact: compactRows)),
         ],
       );
     }
@@ -314,7 +318,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
           children: [
             for (int i = 0; i < items.length; i++)
               entry(offset + i,
-                  _QuickActionRow(action: items[i], onClose: widget.onClose)),
+                  _QuickActionRow(action: items[i], onClose: widget.onClose, compact: true)),
           ],
         );
 
@@ -384,7 +388,15 @@ class _StaggeredEntryState extends State<_StaggeredEntry> with SingleTickerProvi
 class _QuickActionRow extends StatefulWidget {
   final QuickAction action;
   final VoidCallback onClose;
-  const _QuickActionRow({required this.action, required this.onClose});
+
+  /// Tighter metrics where height is the scarce dimension, so a landscape
+  /// panel never cuts its last row in half.
+  final bool compact;
+  const _QuickActionRow({
+    required this.action,
+    required this.onClose,
+    this.compact = false,
+  });
 
   @override
   State<_QuickActionRow> createState() => _QuickActionRowState();
@@ -396,6 +408,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
   @override
   Widget build(BuildContext context) {
     final subtitle = widget.action.subtitle;
+    final iconSize = widget.compact ? 44.0 : 48.0;
     return GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
@@ -408,7 +421,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.compact ? 8 : 12),
         decoration: BoxDecoration(
           // Matches the reference: no per-row card/border — a flat list,
           // whitespace-separated, with only a soft highlight on press.
@@ -426,18 +439,18 @@ class _QuickActionRowState extends State<_QuickActionRow> {
               duration: const Duration(milliseconds: 120),
               scale: _pressed ? 0.95 : 1.0,
               child: Container(
-                width: 48,
-                height: 48,
+                width: iconSize,
+                height: iconSize,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: QuickActionsSheet.blueTint,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(widget.compact ? 12 : 14),
                   border: Border.all(color: QuickActionsSheet.blue1.withValues(alpha: 0.12)),
                 ),
-                child: Icon(widget.action.icon, size: 22, color: QuickActionsSheet.blue1),
+                child: Icon(widget.action.icon, size: widget.compact ? 20 : 22, color: QuickActionsSheet.blue1),
               ),
             ),
-            const SizedBox(width: 16),
+            SizedBox(width: widget.compact ? 12 : 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

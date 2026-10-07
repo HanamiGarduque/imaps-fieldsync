@@ -689,6 +689,33 @@ class _Compass extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     var hubSize = size * 0.47;
+    // The vertical readout also has to fit: measuring only the bearing's WIDTH
+    // left the cardinal + heading number + target chip taller than the circle
+    // at a larger text scale, which clipped them.
+    double lineHeight(double fontSize) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: '0',
+          style: InsightTheme.mono(fontSize, w: FontWeight.w600),
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      final measured = painter.height;
+      painter.dispose();
+      return measured;
+    }
+    hubSize = math.min(
+      size * 0.62,
+      math.max(
+        hubSize,
+        (lineHeight(hubSize * 0.085) +
+                lineHeight(hubSize * 0.19) +
+                lineHeight(hubSize * 0.066) * 2 +
+                hubSize * 0.07) /
+            0.78,
+      ),
+    );
     if (bearingToParcel != null) {
       final target = TextPainter(
         text: TextSpan(
