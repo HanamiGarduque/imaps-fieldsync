@@ -11,6 +11,14 @@ export 'inspection_authority.dart';
 
 enum PhotoObjectState { exists, missing, unknown }
 
+/// Remote lifecycle values an inspector may start a task from. `pending` is a
+/// pre-start state too — self-reschedule writes it — so matching only
+/// `assigned` left every rescheduled task unable to start, and its queued
+/// `mark_ongoing` retrying forever. Already-started rows are deliberately NOT
+/// here: they must reconcile through the existing satisfied-state read so the
+/// original `started_at` is never rewritten.
+const List<String> kStartableTaskStatuses = ['assigned', 'Pending', 'pending'];
+
 class PhotoRecoveryUnknownException implements Exception {
   final String message;
   const PhotoRecoveryUnknownException(this.message);
@@ -720,7 +728,7 @@ class SupabaseService {
           .update({'status': 'in_progress', 'started_at': DateTime.now().toUtc().toIso8601String()})
           .eq('id', jobId)
           .eq('assigned_inspector_id', uid)
-          .eq('status', 'assigned').select().retry(enabled: false),
+          .inFilter('status', kStartableTaskStatuses).select().retry(enabled: false),
       satisfied: (row) => (row['status'] == 'in_progress' && row['started_at'] != null)
         || (row['status'] == 'completed' && row['current_step'] == 6 && row['submitted_at'] != null));
 

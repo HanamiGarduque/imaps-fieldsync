@@ -29,7 +29,16 @@ void main() {
         final owner = remote['assigned_inspector_id'] == inspectorA && q['assigned_inspector_id'] == 'eq.$inspectorA';
         if (r.method == 'PATCH') {
           var matched = owner && !zeroRows;
-          if (q['status'] == 'eq.assigned') matched &= remote['status'] == 'assigned';
+          final statusFilter = q['status'];
+          if (statusFilter != null && statusFilter.startsWith('in.(')) {
+            matched &= statusFilter
+                .replaceFirst('in.(', '')
+                .replaceFirst(RegExp(r'\)$'), '')
+                .split(',')
+                .map((v) => v.trim().replaceAll('"', ''))
+                .contains(remote['status']);
+          }
+          if (statusFilter == 'eq.assigned') matched &= remote['status'] == 'assigned';
           if (q['status'] == 'neq.completed') matched &= remote['status'] != 'completed';
           if (q['current_step'] != null) matched &= (remote['current_step'] as int) < int.parse(q['current_step']!.substring(3));
           if (matched) remote.addAll(jsonDecode(r.body) as Map<String, dynamic>);
@@ -69,6 +78,32 @@ void main() {
     expect(await SupabaseService.markJobOngoing(jobX), InspectionStartResult.authorized);
     expect(remote['started_at'], '2026-01-01');
   });
+  test('self-scheduled pending task starts instead of failing forever', () async {
+    remote.addAll({'status': 'pending', 'is_self_scheduled': true, 'started_at': null});
+    expect(await SupabaseService.markJobOngoing(jobX), InspectionAuthorityResult.authorized);
+    expect(remote['status'], 'in_progress');
+    expect(remote['started_at'], isNotNull);
+  });
+
+  test('legacy pending spelling is also startable', () async {
+    remote['status'] = 'Pending';
+    expect(await SupabaseService.markJobOngoing(jobX), InspectionAuthorityResult.authorized);
+    expect(remote['status'], 'in_progress');
+  });
+
+  test('completed task is never restarted from the startable set', () async {
+    remote.addAll({'status': 'completed', 'current_step': 6, 'submitted_at': '2026-01-01'});
+    expect(await SupabaseService.markJobOngoing(jobX), InspectionAuthorityResult.authorized);
+    expect(remote['status'], 'completed');
+    expect(remote['started_at'], isNull, reason: 'a finished round keeps its original start');
+  });
+
+  test('wrong-inspector pending task is still denied', () async {
+    remote.addAll({'status': 'pending', 'assigned_inspector_id': inspectorB});
+    expect(await SupabaseService.markJobOngoing(jobX), InspectionAuthorityResult.notAssignedOrUnavailable);
+    expect(remote['status'], 'pending');
+  });
+
   test('progress update proves authorized row', () async {
     final Future<dynamic> result = SupabaseService.advanceJobInspectionProgress(jobId: jobX, currentStep: 2);
     expect(await result, InspectionStartResult.authorized);

@@ -114,7 +114,16 @@ void main() {
           visible = visible && query['assigned_inspector_id'] == 'eq.${remote['assigned_inspector_id']}';
         }
         if (request.method == 'PATCH') {
-          if (query['status'] == 'eq.assigned') visible = visible && remote['status'] == 'assigned';
+          final statusFilter = query['status'];
+          if (statusFilter != null && statusFilter.startsWith('in.(')) {
+            visible = visible && statusFilter
+                .replaceFirst('in.(', '')
+                .replaceFirst(RegExp(r'\)$'), '')
+                .split(',')
+                .map((v) => v.trim().replaceAll('"', ''))
+                .contains(remote['status']);
+          }
+          if (statusFilter == 'eq.assigned') visible = visible && remote['status'] == 'assigned';
           if (query['status'] == 'neq.completed') visible = visible && remote['status'] != 'completed';
           if (query['updated_at'] != null) visible = visible && query['updated_at'] == 'eq.${remote['updated_at']}';
           if (visible) remote.addAll(jsonDecode(request.body) as Map<String, dynamic>);

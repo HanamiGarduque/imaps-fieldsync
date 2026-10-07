@@ -335,7 +335,13 @@ class _UpdatesScreenState extends State<UpdatesScreen>
           ? 'All caught up — nothing left to sync.'
           : conflictCount > 0
               ? '$conflictCount item(s) need conflict review.'
-              : '$stillPending item(s) still waiting (check connection).',
+              // Only claim a connection problem when the device really has no
+              // link. A queued row can also fail on the server or on task
+              // state, and blaming the connection for that sent inspectors
+              // chasing a signal that was already fine.
+              : _isOnline
+                  ? '$stillPending item(s) could not sync — see the reason below.'
+                  : '$stillPending item(s) still waiting (check connection).',
       color: stillPending == 0 ? InsightTheme.greenInk : InsightTheme.amberInk,
     );
     unawaited(SupabaseService.logActivity(
