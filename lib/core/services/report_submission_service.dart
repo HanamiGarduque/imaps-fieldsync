@@ -132,7 +132,15 @@ class ReportQueueService {
       final db = await DBHelper.database;
       // The row is written with its owner in the same statement. There is no
       // insert-then-claim window.
-      await db.insert('local_report_queue', row.toRow());
+      await db.transaction((txn) async {
+        if (_requireInspectorId() != inspectorId) {
+          throw ReportSubmissionException('Your session changed. Nothing was sent.');
+        }
+        await txn.insert('local_report_queue', row.toRow());
+        if (_requireInspectorId() != inspectorId) {
+          throw ReportSubmissionException('Your session changed. Nothing was sent.');
+        }
+      });
       // Keep the submit guard through dispatch, including slow online sends.
       // The row is durable before the existing processor touches the network.
       await processPending();

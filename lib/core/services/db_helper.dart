@@ -551,7 +551,7 @@ class DBHelper {
         ], await _pendingCompletionJobIds(txn)).single;
         await txn.insert(
           'local_jobs',
-          _cachedJobRow(effective),
+          {..._cachedJobRow(effective), 'inspector_id': uid},
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
@@ -581,6 +581,7 @@ class DBHelper {
         'retained_at': DateTime.now().toUtc().toIso8601String(),
         'inspector_id': uid,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      requireSameInspector(uid);
     });
   }
 
@@ -777,7 +778,7 @@ class DBHelper {
 
   static Future<void> cacheJobs(List<Map<String, dynamic>> jobs) async {
     final uid = currentInspectorId;
-    if (uid == null) return;
+    if (uid == null || uid.isEmpty) return;
     final db = await database;
     await db.transaction((txn) async {
       requireSameInspector(uid);
@@ -838,11 +839,12 @@ class DBHelper {
         }
         batch.insert(
           'local_jobs',
-          _cachedJobRow(incoming),
+          {..._cachedJobRow(incoming), 'inspector_id': uid},
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
       await batch.commit(noResult: true);
+      requireSameInspector(uid);
     });
   }
 
@@ -944,6 +946,7 @@ class DBHelper {
       'is_synced': 0,
       'updated_at': DateTime.now().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    requireSameInspector(uid);
     });
   }
 
@@ -974,6 +977,7 @@ class DBHelper {
         requireSameInspector(inspectorId);
         await txn.insert('local_inspections', {'id':jobId, 'inspector_id':inspectorId, ...values});
       }
+      requireSameInspector(inspectorId);
     });
   }
 
@@ -1019,6 +1023,7 @@ class DBHelper {
       'captured_at': DateTime.now().toIso8601String(),
       'is_synced': 0,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    requireSameInspector(uid);
     });
   }
 
@@ -1178,6 +1183,7 @@ class DBHelper {
       }
       // A queued submission is preserved intent, not proof of completion.
       // Keep lifecycle and retention until a verified remote acceptance.
+      requireSameInspector(uid);
     });
   }
 
@@ -1379,9 +1385,11 @@ class DBHelper {
     Map<String, dynamic>? technicalDetails,
   }) async {
     final uid = currentInspectorId;
-    if (uid == null) return;
+    if (uid == null || uid.isEmpty) return;
     final db = await database;
-    await db.insert('sync_log_entries', {
+    await db.transaction((txn) async {
+    requireSameInspector(uid);
+    await txn.insert('sync_log_entries', {
       'id': const Uuid().v4(),
       'inspector_id': uid,
       'pending_action_id': pendingActionId,
@@ -1393,6 +1401,8 @@ class DBHelper {
           ? jsonEncode(technicalDetails)
           : null,
       'created_at': DateTime.now().toIso8601String(),
+    });
+    requireSameInspector(uid);
     });
   }
 
@@ -1406,7 +1416,10 @@ class DBHelper {
     int offset = 0,
     String? jobId,
   }) async {
+    final uid = currentInspectorId;
+    if (uid == null || uid.isEmpty) return [];
     final db = await database;
+    requireSameInspector(uid);
     try {
       // Ensure sync_log_entries table exists
       await db.execute(_syncLogEntriesSchema);
@@ -1420,10 +1433,12 @@ class DBHelper {
           0;
 
       if (totalLogs == 0) {
+        await db.transaction((txn) async {
+        requireSameInspector(uid);
         // Backfill from pending_actions so past sync history is visible
-        final pastActions = await db.query(
+        final pastActions = await txn.query(
           'pending_actions',
-          where: 'inspector_id = ?', whereArgs: [currentInspectorId],
+          where: 'inspector_id = ?', whereArgs: [uid],
           orderBy: 'updated_at DESC',
           limit: 50,
         );
@@ -1457,9 +1472,9 @@ class DBHelper {
                           ? '$actionTitle conflict detected.'
                           : '$actionTitle queued for sync.'));
 
-          await db.insert('sync_log_entries', {
+          await txn.insert('sync_log_entries', {
             'id': a['id'] ?? const Uuid().v4(),
-            'inspector_id': currentInspectorId,
+            'inspector_id': uid,
             'pending_action_id': a['id'],
             'job_id': a['job_id'],
             'event_type': 'sync_$status',
@@ -1477,18 +1492,27 @@ class DBHelper {
             'created_at': updatedAt,
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
+        requireSameInspector(uid);
+        });
       }
+    } on StateError {
+      rethrow;
     } catch (_) {}
 
     try {
-      return await db.query(
+      requireSameInspector(uid);
+      final rows = await db.query(
         'sync_log_entries',
         where: 'inspector_id = ?${jobId != null ? ' AND job_id = ?' : ''}',
-        whereArgs: [currentInspectorId, ?jobId],
+        whereArgs: [uid, ?jobId],
         orderBy: 'created_at DESC',
         limit: limit,
         offset: offset,
       );
+      requireSameInspector(uid);
+      return rows;
+    } on StateError {
+      rethrow;
     } catch (_) {
       return [];
     }
