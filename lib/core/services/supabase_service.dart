@@ -445,23 +445,40 @@ class SupabaseService {
   //   Fire-and-forget: a logging failure should never block the action
   //   that triggered it (GPS confirm, submit, rework, sync).
   // ─────────────────────────────────────────────────────────────────────────
+  /// A durable outbox event supplies [activityId]: duplicate delivery is a
+  /// no-op on the existing primary key, and other failures must stay
+  /// retryable so the drain can hold the action open.
   static Future<void> logActivity({
     required String eventType,
     required String title,
     String? subtitle,
     String? fieldJobId,
+    String? activityId,
   }) async {
     final userId = client.auth.currentUser?.id;
     if (userId == null) return;
     try {
-      await client.from('activity_log').insert({
+      final row = {
+        'id': ?activityId,
         'inspector_id': userId,
         'field_job_id': fieldJobId,
         'event_type': eventType,
         'title': title,
         'subtitle': subtitle,
-      });
+      };
+      if (activityId == null) {
+        await client.from('activity_log').insert(row);
+      } else {
+        // A durable action's event: repeat delivery is a no-op, any other
+        // failure must propagate so the caller can retry it.
+        await client.from('activity_log').upsert(
+          row,
+          onConflict: 'id',
+          ignoreDuplicates: true,
+        );
+      }
     } catch (e) {
+      if (activityId != null) rethrow;
       debugPrint('Error logging activity ($eventType): $e');
     }
   }
@@ -1227,29 +1244,100 @@ class SupabaseService {
       // lazily, on the first actual edit (see
       // InspectionProvider._markReworkModifiedIfNeeded), not on entry.
       // Still worth confirming the job is actually completed before
-      // allowing entry, and logging that a rework session was opened —
-      // just no longer a data-changing action by itself.
-      final rows = await client
+      // allowing entry. Opening a step is read-only: the marker transition
+      // owns the meaningful rework event, so revisits cannot spam it.
+      final uid = _sessionUid;
+      _requireSession(uid);
+      final row = await client
           .from('field_jobs')
           .select('status')
           .eq('id', jobId)
-          .limit(1);
-      final status = (rows as List).isNotEmpty
-          ? rows.first['status'] as String?
-          : null;
+          .eq('assigned_inspector_id', uid!)
+          .maybeSingle();
+      _requireSession(uid);
+      final status = row?['status'] as String?;
       if (status?.toLowerCase() != 'completed') {
         throw Exception('Job is not completed — cannot reopen for rework.');
       }
+    } catch (e) {
+      debugPrint('Error reopening job for rework: $e');
+      rethrow;
+    }
+  }
+
+  /// Preserve the first modification marker. Only its NULL → timestamp
+  /// transition emits rework activity, never opening or refreshing a summary.
+  /// Never touches `status`, `current_step` or `submitted_at`.
+  /// Returns this mutation's accepted revision, or null when the marker is
+  /// authoritatively already satisfied. Every unsuccessful mutation throws.
+  static Future<String?> markReworkModified({
+    required String jobId,
+    String? locationLabel,
+    String? expectedUpdatedAt,
+  }) async {
+    final uid = _sessionUid;
+    _requireSession(uid);
+    final marker = DateTime.now().toUtc().toIso8601String();
+    var transitioned = false;
+    Map<String, dynamic>? accepted;
+    final result = await _writeWithAuthority(
+      jobId,
+      (uid) async {
+        var update = client
+            .from('field_jobs')
+            .update({'rework_started_at': marker})
+            .eq('id', jobId)
+            .eq('assigned_inspector_id', uid)
+            .eq('status', 'completed')
+            .isFilter('rework_started_at', null);
+        if (expectedUpdatedAt != null) update = update.eq('updated_at', expectedUpdatedAt);
+        final rows = await update
+            .select()
+            .retry(enabled: false)
+            .timeout(const Duration(seconds: 10));
+        transitioned = rows.length == 1;
+        return rows;
+      },
+      satisfied: (row) {
+        final satisfied = row['status'] == 'completed' && row['rework_started_at'] != null;
+        if (satisfied) accepted = row;
+        return satisfied;
+      },
+    );
+    if (result != InspectionAuthorityResult.authorized) {
+      // A lost response is not success by itself. A fresh owned-job read can
+      // prove the marker landed; otherwise preserve the explicit failure.
+      final row = await readOutboxRecoveryJob(jobId);
+      _requireSession(uid);
+      if (row == null || row['assigned_inspector_id'] != uid ||
+          row['status'] != 'completed' || row['rework_started_at'] == null) {
+        result.requireAuthorized();
+      }
+      accepted = row;
+      final landedMarker = row!['rework_started_at'];
+      transitioned = landedMarker is String &&
+          DateTime.tryParse(landedMarker)?.isAtSameMomentAs(DateTime.parse(marker)) == true;
+    }
+    if (!transitioned) return null;
+    final revision = accepted?['updated_at'];
+    if (revision is! String || DateTime.tryParse(revision) == null) {
+      throw const InspectionAuthorityException(InspectionAuthorityResult.offlineOrUnverifiable);
+    }
+    try {
       await logActivity(
         eventType: 'rework_started',
         title: 'Reopened for rework',
         subtitle: locationLabel,
         fieldJobId: jobId,
+        activityId: const Uuid().v5(
+          '6ba7b811-9dad-11d1-80b4-00c04fd430c8',
+          'rework_started:$jobId:$marker',
+        ),
       );
     } catch (e) {
-      debugPrint('Error reopening job for rework: $e');
-      rethrow;
+      debugPrint('Error logging rework activity: $e');
     }
+    return revision;
   }
 
   // ─────────────────────────────────────────────────────────────────────────

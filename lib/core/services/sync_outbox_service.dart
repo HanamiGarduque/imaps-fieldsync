@@ -142,6 +142,7 @@ class SyncOutboxService {
   // (that case is still caught below, since an external change advances
   // the server past what's in this map too).
   static final Map<String, String> _knownGoodUpdatedAt = {};
+
   static const Set<String> _conflictSensitiveTypes = {
     'gps_confirm',
     'submit_inspection',
@@ -379,12 +380,18 @@ class SyncOutboxService {
   /// Queues a findings push. Same rationale as enqueuePhotosUpdate —
   /// findings had no outbox fallback and wasn't called on normal
   /// step-continue either, only on exit/rework-save/final-submit.
+  ///
+  /// An explicit Save supplies its own durable action/event UUID
+  /// ([activityId]); step-autosaves coalesce per job as before and carry no
+  /// event, so they can never invent a "saved" activity.
   static Future<void> enqueueFindingsUpdate({
     required String jobId,
     required String observations,
     required String? discrepancies,
     required String? recommendations,
     required String inspectorNotes,
+    String? activityId,
+    String? activitySubtitle,
   }) async {
     final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
@@ -394,10 +401,12 @@ class SyncOutboxService {
         'discrepancies': discrepancies,
         'recommendations': recommendations,
         'inspectorNotes': inspectorNotes,
+        'activityId': activityId,
+        'activitySubtitle': activitySubtitle,
       },
     );
     return DBHelper.enqueueAction(
-      id: 'findings_update_$jobId',
+      id: activityId ?? 'findings_update_$jobId',
       expectedInspectorId: uid,
       type: 'findings_update',
       jobId: jobId,
@@ -754,6 +763,10 @@ class SyncOutboxService {
     final payload = Map<String, dynamic>.from(
       jsonDecode(action['payload'] as String) as Map,
     );
+    if (type == 'findings_update' && payload['activityId'] is String) {
+      await _executeFindingsSave(action, payload);
+      return;
+    }
     if (payload['r4RecoveryRequired'] == true) {
       await _reconcileInterruptedAction(action, payload);
       return;
@@ -932,12 +945,7 @@ class SyncOutboxService {
       case 'findings_update':
         await SupabaseService.updateJobInspectionProgress(
           jobId: jobId,
-          updateData: {
-            'observations': payload['observations'],
-            'discrepancies': payload['discrepancies'],
-            'recommendations': payload['recommendations'],
-            'inspector_notes': payload['inspectorNotes'],
-          },
+          updateData: _findingsEvidence(payload),
         );
         break;
       default:
@@ -982,6 +990,121 @@ class SyncOutboxService {
           ).every((i) => _sameEvidence(a[i], b[i]));
     }
     return a == b;
+  }
+
+  /// The four evidence fields a findings action writes and reconciles.
+  static Map<String, dynamic> _findingsEvidence(
+    Map<String, dynamic> payload,
+  ) => {
+    'observations': payload['observations'],
+    'discrepancies': payload['discrepancies'],
+    'recommendations': payload['recommendations'],
+    'inspector_notes': payload['inspectorNotes'],
+  };
+
+  /// Explicit rework Saves have durable per-action component receipts. An
+  /// accepted A can finish its activity even after B changed the evidence;
+  /// it must never replay A over B or compare A's original stale snapshot.
+  static Future<void> _executeFindingsSave(
+    Map<String, dynamic> action,
+    Map<String, dynamic> payload,
+  ) async {
+    final jobId = action['job_id'] as String;
+    final owner = action['inspector_id'] as String;
+    var remote = await SupabaseService.readOutboxRecoveryJob(jobId);
+    DBHelper.requireSameInspector(owner);
+    if (remote == null || remote['status'] != 'completed') {
+      throw _OutboxConflictException('Missing, reassigned or non-completed rework job');
+    }
+    final desired = _findingsEvidence(payload);
+    bool matches() => desired.entries.every((e) =>
+        remote!.containsKey(e.key) && _sameEvidence(remote[e.key], e.value));
+    String revision(Map<String, dynamic> row) {
+      final value = row['updated_at'];
+      if (value is! String || DateTime.tryParse(value) == null) {
+        throw const InspectionAuthorityException(InspectionAuthorityResult.offlineOrUnverifiable);
+      }
+      return value;
+    }
+    if (payload['findingsEvidenceAccepted'] != true) {
+      final before = revision(remote);
+      final alreadySatisfied = matches();
+      if (!alreadySatisfied) {
+        // Retain conservative interrupted-completed evidence recovery.
+        if (payload['r4RecoveryRequired'] == true) {
+          throw _OutboxConflictException('No defensible unchanged durable base for recovery');
+        }
+        final base = _knownGoodUpdatedAt[jobId] ?? payload[_conflictSnapshotKey] as String?;
+        if (payload[_forceSyncAnywayKey] != true && base != null &&
+            base.isNotEmpty && !_sameInstant(base, before)) {
+          throw _OutboxConflictException('Conflict detected: job changed on server before findings Save');
+        }
+        remote = await SupabaseService.conditionalOutboxUpdate(jobId, before, 'completed', desired);
+        DBHelper.requireSameInspector(owner);
+        if (remote == null || remote['id'] != jobId ||
+            remote['assigned_inspector_id'] != owner || !matches()) {
+          throw _OutboxConflictException('Conditional findings Save was not accepted');
+        }
+      }
+      await _checkpointFindings(action, payload,
+        components: {'findingsEvidenceAccepted': true},
+        previousUpdatedAt: alreadySatisfied ? payload[_conflictSnapshotKey] as String? : before,
+        acceptedUpdatedAt: revision(remote));
+    }
+    // An authoritative read can satisfy a marker whose response/checkpoint
+    // was lost. Adopt that revision only while reconciling matching evidence,
+    // never by treating a later distinct Save's evidence as this action's.
+    String? markerRevision;
+    if (remote['rework_started_at'] == null) {
+      markerRevision = await SupabaseService.markReworkModified(
+        jobId: jobId, locationLabel: payload['activitySubtitle'] as String?,
+        expectedUpdatedAt: payload['findingsAcceptedUpdatedAt'] as String?);
+    } else if (payload['findingsMarkerAccepted'] != true && matches()) {
+      markerRevision = revision(remote);
+    }
+    DBHelper.requireSameInspector(owner);
+    await _checkpointFindings(action, payload,
+      components: {'findingsMarkerAccepted': true},
+      previousUpdatedAt: payload['findingsAcceptedUpdatedAt'] as String?,
+      acceptedUpdatedAt: markerRevision);
+    await _recordFindingsActivity(jobId, payload, owner);
+  }
+
+  static Future<void> _checkpointFindings(
+    Map<String, dynamic> action,
+    Map<String, dynamic> payload, {
+    required Map<String, dynamic> components,
+    String? previousUpdatedAt,
+    String? acceptedUpdatedAt,
+  }) async {
+    final jobId = action['job_id'] as String;
+    // Capture the accepted revision before any marker/activity side effect.
+    if (acceptedUpdatedAt != null) _knownGoodUpdatedAt[jobId] = acceptedUpdatedAt;
+    final updated = await DBHelper.recordFindingsAcceptance(
+      actionId: action['id'] as String, jobId: jobId,
+      inspectorId: action['inspector_id'] as String, components: components,
+      previousUpdatedAt: previousUpdatedAt, acceptedUpdatedAt: acceptedUpdatedAt);
+    payload..clear()..addAll(updated);
+  }
+
+  /// Records one Save event after its evidence and marker are satisfied.
+  /// A duplicate delivery is a no-op on the activity primary key.
+  static Future<void> _recordFindingsActivity(
+    String jobId,
+    Map<String, dynamic> payload,
+    String owner,
+  ) async {
+    final id = payload['activityId'] as String?;
+    if (id == null || id.isEmpty) return;
+    final subtitle = payload['activitySubtitle'] as String?;
+    DBHelper.requireSameInspector(owner);
+    await SupabaseService.logActivity(
+      eventType: 'field_findings_updated',
+      title: 'Field Findings updated',
+      subtitle: subtitle,
+      fieldJobId: jobId,
+      activityId: id,
+    );
   }
 
   static Future<void> _reconcileInterruptedAction(
@@ -1189,6 +1312,9 @@ class SyncOutboxService {
         );
     }
     if (matches()) {
+      if (type == 'findings_update') {
+        await _recordFindingsActivity(jobId, payload, owner);
+      }
       await _recoveryDiagnostic(
         action,
         'Business evidence satisfied; no remote replay',
@@ -1217,6 +1343,9 @@ class SyncOutboxService {
         );
     if (result == null) {
       throw _OutboxConflictException('Conditional recovery affected zero rows');
+    }
+    if (type == 'findings_update') {
+      await _recordFindingsActivity(jobId, payload, owner);
     }
     await _recoveryDiagnostic(
       action,

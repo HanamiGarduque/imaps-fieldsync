@@ -43,6 +43,7 @@ class ActivityEventCategory {
       case 'rework_started':
       case 'step_completed':
       case 'gps_confirmed':
+      case 'field_findings_updated':
         return 'tasks';
       case 'photos_synced':
       case 'sync_manual':

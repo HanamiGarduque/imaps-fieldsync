@@ -71,6 +71,22 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
   void _handleContinue() {
     HapticFeedback.selectionClick();
 
+    _collectControllersIntoProvider();
+    InspectionProgress.instance.markStepComplete(5);
+    // Issue 4 fix — same rationale as capture_photo_screen.dart's
+    // _finishAndContinue: findings never auto-saved on normal forward
+    // progress before, only on exit/rework-save/final-submit. Now has
+    // its own outbox fallback too (enqueueFindingsUpdate).
+    context.read<InspectionProvider>().saveStepFindings();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)),
+    );
+  }
+
+  /// Moves the controller text into provider state. Memory only — this is what
+  /// an in-session draft is, and the input every persist path below reads.
+  void _collectControllersIntoProvider() {
     final discrepancyTitle = _discrepancyTitleController.text.trim();
     final discrepancyDetail = _discrepancyDetailController.text.trim();
     // Don't save a bare " — " when the inspector legitimately found nothing.
@@ -81,7 +97,6 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
             discrepancyTitle,
             discrepancyDetail,
           ].where((s) => s.isNotEmpty).join(' — ');
-
     final provider = context.read<InspectionProvider>();
     provider.updateFindings(
       actualLandUse: widget.task.landUseClass,
@@ -93,37 +108,33 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
       // instead of hardcoding a status that may not reflect reality.
       boundaryStatus: provider.boundaryStatus,
     );
-    InspectionProgress.instance.markStepComplete(5);
-    // Issue 4 fix — same rationale as capture_photo_screen.dart's
-    // _finishAndContinue: findings never auto-saved on normal forward
-    // progress before, only on exit/rework-save/final-submit. Now has
-    // its own outbox fallback too (enqueueFindingsUpdate).
-    provider.saveStepFindings();
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)),
-    );
   }
 
   Future<bool> _syncControllersAndSave() async {
-    final provider = context.read<InspectionProvider>();
-    final discrepancyTitle = _discrepancyTitleController.text.trim();
-    final discrepancyDetail = _discrepancyDetailController.text.trim();
-    final discrepancies =
-        (discrepancyTitle.isEmpty && discrepancyDetail.isEmpty)
-        ? ''
-        : [
-            discrepancyTitle,
-            discrepancyDetail,
-          ].where((s) => s.isNotEmpty).join(' — ');
-    provider.updateFindings(
-      actualLandUse: widget.task.landUseClass,
-      notes: _notesController.text.trim(),
-      discrepancies: discrepancies,
-      recommendations: _recommendationsController.text.trim(),
-      boundaryStatus: provider.boundaryStatus,
+    _collectControllersIntoProvider();
+    return context.read<InspectionProvider>().saveStepFindings();
+  }
+
+  /// The Field Findings Save button — the only path allowed to report a
+  /// "Field Findings updated" activity.
+  Future<bool> _syncControllersAndSaveExplicitly() async {
+    _collectControllersIntoProvider();
+    return context.read<InspectionProvider>().saveStepFindings(
+      isExplicitSave: true,
     );
-    return provider.saveStepFindings();
+  }
+
+  /// Leaving a completed task's Field Findings without pressing Save keeps the
+  /// text as an in-session draft and nothing more: no evidence write, no queued
+  /// write, and above all no "saved/updated" activity claiming a save that was
+  /// never made. An unfinished inspection is a different contract — Back there
+  /// means "my progress is saved", so it keeps autosaving.
+  Future<bool> _onExit() async {
+    if (context.read<InspectionProvider>().isReworkMode) {
+      _collectControllersIntoProvider();
+      return true;
+    }
+    return _syncControllersAndSave();
   }
 
   @override
@@ -136,12 +147,12 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
             InspectionProgress.instance.currentStep > 1,
         onPopInvokedWithResult: (didPop, _) {
           if (didPop) {
-            _syncControllersAndSave();
+            _onExit();
             return;
           }
           handleInspectionExit(
             context,
-            onSaveProgress: _syncControllersAndSave,
+            onSaveProgress: _onExit,
             isReworkMode: context.read<InspectionProvider>().isReworkMode,
           );
         },
@@ -156,7 +167,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
               stepSubtitle: 'LOG OBSERVATIONS',
               onBack: () => handleInspectionExit(
                 context,
-                onSaveProgress: _syncControllersAndSave,
+                onSaveProgress: _onExit,
                 isReworkMode: context.read<InspectionProvider>().isReworkMode,
               ),
             ),
@@ -171,7 +182,8 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                           ? null
                           : () async {
                               setState(() => _isSaving = true);
-                              final ok = await _syncControllersAndSave();
+                              final ok =
+                                  await _syncControllersAndSaveExplicitly();
                               if (!context.mounted) return;
                               setState(() => _isSaving = false);
                               // Issue 2 fix (Completed Category enhancement):

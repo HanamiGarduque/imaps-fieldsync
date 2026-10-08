@@ -1278,6 +1278,83 @@ class DBHelper {
     });
   }
 
+  /// The latest explicit Save is the local findings baseline until all of its
+  /// components sync. Autosaves have no activity identity and are not rework
+  /// Save intent. Reads remain scoped to the exact inspector and field job.
+  static Future<Map<String, dynamic>?> getPendingFindingsSave(String jobId) async {
+    final uid = requireInspector();
+    final db = await database;
+    final rows = await db.query('pending_actions',
+      where: "type = 'findings_update' AND job_id = ? AND inspector_id = ?",
+      whereArgs: [jobId, uid], orderBy: 'created_at DESC, rowid DESC');
+    requireSameInspector(uid);
+    for (final row in rows) {
+      final payload = Map<String, dynamic>.from(jsonDecode(row['payload'] as String) as Map);
+      // A newer fully accepted Save supersedes older activity-only retries
+      // for presentation, without deleting or acknowledging those retries.
+      if (payload['activityId'] is String) return row['status'] == 'synced' ? null : payload;
+    }
+    return null;
+  }
+
+  /// Commit a component receipt and this device's accepted revision together.
+  /// Rebase only explicit sibling Saves/cache snapshots still at the exact
+  /// prior revision; a genuinely newer snapshot is never overwritten. This
+  /// lets a later queued Save survive a restart after its predecessor synced.
+  static Future<Map<String, dynamic>> recordFindingsAcceptance({
+    required String actionId,
+    required String jobId,
+    required String inspectorId,
+    required Map<String, dynamic> components,
+    String? previousUpdatedAt,
+    String? acceptedUpdatedAt,
+  }) async {
+    requireSameInspector(inspectorId);
+    final db = await database;
+    return db.transaction((txn) async {
+      final rows = await txn.query('pending_actions',
+        where: "id = ? AND job_id = ? AND inspector_id = ? "
+            "AND type = 'findings_update' AND status = 'syncing'",
+        whereArgs: [actionId, jobId, inspectorId]);
+      if (rows.length != 1) throw StateError('Findings action is no longer claimed');
+      final raw = rows.single['payload'] as String;
+      final payload = Map<String, dynamic>.from(jsonDecode(raw) as Map)..addAll(components);
+      if (acceptedUpdatedAt != null) payload['findingsAcceptedUpdatedAt'] = acceptedUpdatedAt;
+      final changed = await txn.update('pending_actions', {'payload': jsonEncode(payload)},
+        where: "id = ? AND inspector_id = ? AND status = 'syncing' AND payload = ?",
+        whereArgs: [actionId, inspectorId, raw]);
+      if (changed != 1) throw StateError('Findings receipt was not persisted');
+      if (acceptedUpdatedAt != null && previousUpdatedAt != null) {
+        final previous = DateTime.tryParse(previousUpdatedAt);
+        bool sameRevision(dynamic value) => value == previousUpdatedAt ||
+            (previous != null && value is String &&
+                DateTime.tryParse(value)?.isAtSameMomentAs(previous) == true);
+        final cached = await txn.query('local_jobs', columns: ['cached_updated_at'],
+          where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, inspectorId]);
+        if (cached.length == 1 && sameRevision(cached.single['cached_updated_at'])) {
+          await txn.update('local_jobs', {'cached_updated_at': acceptedUpdatedAt},
+            where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, inspectorId]);
+        }
+        final siblings = await txn.query('pending_actions',
+          where: "job_id = ? AND inspector_id = ? AND id != ? "
+              "AND type = 'findings_update' AND status IN ('pending', 'failed', 'paused')",
+          whereArgs: [jobId, inspectorId, actionId]);
+        for (final sibling in siblings) {
+          final next = Map<String, dynamic>.from(jsonDecode(sibling['payload'] as String) as Map);
+          if (next['activityId'] is! String || next['findingsEvidenceAccepted'] == true ||
+              !sameRevision(next['cachedUpdatedAtSnapshot'])) {
+            continue;
+          }
+          next['cachedUpdatedAtSnapshot'] = acceptedUpdatedAt;
+          await txn.update('pending_actions', {'payload': jsonEncode(next)},
+            where: 'id = ? AND inspector_id = ?', whereArgs: [sibling['id'], inspectorId]);
+        }
+      }
+      requireSameInspector(inspectorId);
+      return payload;
+    });
+  }
+
   /// Rows ready to (re)try — pending or previously-failed, oldest first so
   /// actions sync in the order they happened.
   static Future<List<Map<String, dynamic>>> getActionableActions({

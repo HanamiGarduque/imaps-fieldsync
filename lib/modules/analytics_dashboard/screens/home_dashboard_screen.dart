@@ -303,6 +303,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
         return {'icon': Icons.check_circle_rounded, 'color': InsightTheme.green};
       case 'rework_started':
         return {'icon': Icons.refresh_rounded, 'color': InsightTheme.orange};
+      case 'field_findings_updated':
+        return {'icon': Icons.edit_note_rounded, 'color': InsightTheme.blueInk};
       case 'photos_synced':
       case 'sync_manual':
       case 'sync_inspection':

@@ -186,6 +186,8 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
       if (!mounted) return;
       
       context.read<InspectionProvider>().hydrateForRework(task);
+      await context.read<InspectionProvider>().restorePendingFindings();
+      if (!mounted) return;
       InspectionProgress.instance.unlockAllForReview(task.id, label: task.location);
 
       _navigateToStep(step, task);
@@ -228,10 +230,11 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     // Enhancement (Inspection Summary, 2026-07): re-fetch when control
     // returns from the step screen, so an edit saved during rework shows
     // up in the summary immediately without the inspector having to back
-    // out of this screen and reopen it. The step screens already save
-    // immediately on their own (per updateFindings/setSiteCondition/etc in
-    // InspectionProvider), so by the time Navigator pops back here the
-    // edit is already persisted — this call just reflects it on screen.
+    // out of this screen and reopen it. A Field Findings Save is already
+    // persisted by the time Navigator pops back here — this call just
+    // reflects it. Leaving that step WITHOUT pressing Save persists nothing;
+    // that text is shown from _draftFindings instead, so the summary never
+    // claims unsaved evidence is on file.
     Navigator.push(context, MaterialPageRoute(builder: (_) => target))
         .then((_) {
       if (mounted) _loadFullDetail();
@@ -400,6 +403,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
             'Discrepancies': task.discrepancies?.isNotEmpty == true ? task.discrepancies! : 'None recorded',
             'Recommendations': task.recommendations?.isNotEmpty == true ? task.recommendations! : 'None recorded',
             'Inspector notes': task.inspectorNotes?.isNotEmpty == true ? task.inspectorNotes! : 'None recorded',
+            // Leaving a rework step with unsaved text used to persist it on the
+            // way out. It is now a draft only, so the summary shows it while
+            // the rework session is open instead of claiming it is on file.
+            ..._draftFindings(task),
           }),
         ),
         _CollapsibleStepCard(
@@ -621,6 +628,35 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     final minute = dt.minute.toString().padLeft(2, '0');
     final ampm = dt.hour >= 12 ? 'PM' : 'AM';
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year} · $hour12:$minute $ampm';
+  }
+
+  /// Field Findings text left in memory by leaving a completed task's rework
+  /// screen without pressing Save. It exists only while that rework session is
+  /// open for this exact job; at any other time the summary shows what is
+  /// actually persisted. The task-level Modified badge is what tells the
+  /// inspector this text is not on file yet.
+  Map<String, String> _draftFindings(TaskItem task) {
+    // Read defensively: this screen is also rendered in read-only/historical
+    // contexts, where no live InspectionProvider exists and there is no draft
+    // by definition — the persisted row is the only truth to show.
+    InspectionProvider? provider;
+    try {
+      provider = context.read<InspectionProvider?>();
+    } on ProviderNotFoundException {
+      return const {};
+    }
+    if (provider == null ||
+        !provider.hasReworkFindings ||
+        provider.activeTask?.id != task.id) {
+      return const {};
+    }
+    String shown(String value) => value.isEmpty ? 'None recorded' : value;
+    return {
+      'Observations': shown(provider.observations),
+      'Discrepancies': shown(provider.discrepancies),
+      'Recommendations': shown(provider.recommendations),
+      'Inspector notes': shown(provider.notes),
+    };
   }
 
   Widget _buildDetailRows(Map<String, String> rows) {

@@ -51,6 +51,25 @@ class InspectionProvider extends ChangeNotifier {
   // subsequent edit (only the first real edit needs to set it).
   bool _reworkModifiedMarked = false;
 
+  // Last persistently-accepted findings text (the three fields the Field
+  // Findings screen actually owns), separate from the in-memory draft.
+  //
+  // This is the no-op baseline for the Save action. `observations` is
+  // deliberately not part of it: that column is composed from land use and
+  // boundary status rather than round-tripped (see hydrateForRework), so it
+  // could never tell a real edit from a re-save of the same evidence.
+  String? _persistedFindingsSignature;
+  // An explicit local Save is durable pending intent, not remote acceptance.
+  // Its payload remains in pending_actions; this is only the active UI baseline.
+  String? _pendingFindingsSignature;
+  String? _findingsObservations;
+
+  String get _findingsSignature => jsonEncode([
+    _notes.trim(),
+    _discrepancies.trim(),
+    _recommendations.trim(),
+  ]);
+
   // Getters
   bool get _visible => _inspectorId != null && _inspectorId == DBHelper.currentInspectorId;
   TaskItem? get activeTask => _visible ? _activeTask : null;
@@ -64,6 +83,19 @@ class InspectionProvider extends ChangeNotifier {
   String get recommendations => _visible ? _recommendations : '';
   String get boundaryStatus => _visible ? _boundaryStatus : '';
   String get inspectionResult => _visible ? _inspectionResult : 'Compliant';
+  /// The `observations` text actually on file for this rework session, so a
+  /// summary can show the same value instead of re-composing it. Land use and
+  /// boundary status are folded into one freeform column and cannot be parsed
+  /// back apart, so the stored sentence wins until its inputs change.
+  String get observations => _visible
+      ? _findingsObservations ??
+          'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.'
+      : '';
+  /// Draft or saved-pending findings must overlay a stale remote summary.
+  bool get hasReworkFindings => _visible &&
+      _isReworkMode &&
+      (_pendingFindingsSignature != null ||
+          _findingsSignature != _persistedFindingsSignature);
   bool get isSyncing => _isSyncing;
   bool get isReworkMode => _visible && _isReworkMode;
 
@@ -89,6 +121,9 @@ class InspectionProvider extends ChangeNotifier {
     _recommendations = '';
     _boundaryStatus = 'Compliant';
     _inspectionResult = 'Compliant';
+    _persistedFindingsSignature = null;
+    _pendingFindingsSignature = null;
+    _findingsObservations = null;
   }
 
   // --- INITIALIZATION & NAVIGATION ---
@@ -141,10 +176,14 @@ class InspectionProvider extends ChangeNotifier {
   void _markReworkModifiedIfNeeded() {
     if (!_isReworkMode || _reworkModifiedMarked || _activeTask == null) return;
     _reworkModifiedMarked = true;
-    SupabaseService.updateJobInspectionProgress(
+    SupabaseService.markReworkModified(
       jobId: _activeTask!.id,
-      updateData: {'rework_started_at': DateTime.now().toIso8601String()},
-    ).catchError((e) {
+      locationLabel: _activeTask!.location,
+    ).then<void>((_) {}).catchError((e) {
+      // Best-effort: if this particular write fails the marker may be seen as
+      // unset again on a later attempt, but the edit itself is unaffected and
+      // still saved through its own offline-safe path.
+      _reworkModifiedMarked = false;
       debugPrint('markReworkModified failed (non-critical): $e');
     });
   }
@@ -277,25 +316,27 @@ class InspectionProvider extends ChangeNotifier {
     required String boundaryStatus,
   }) {
     _requireOwner();
-    // Unlike the checklist toggles above, this is called from the step's
-    // exit-save regardless of whether the inspector actually changed
-    // anything — so mark-modified only if something genuinely differs,
-    // otherwise merely visiting and leaving Findings during rework would
-    // trip the same false "Modified" badge Issue 2 was about.
-    final changed =
-        actualLandUse != _actualLandUse ||
-        notes != _notes ||
-        discrepancies != _discrepancies ||
-        recommendations != _recommendations ||
-        boundaryStatus != _boundaryStatus;
+    final before = _findingsSignature;
+    if (actualLandUse != _actualLandUse || boundaryStatus != _boundaryStatus) {
+      _findingsObservations = null;
+    }
     _actualLandUse = actualLandUse;
     _notes = notes;
     _discrepancies = discrepancies;
     _recommendations = recommendations;
     _boundaryStatus = boundaryStatus;
-    if (changed) _markReworkModifiedIfNeeded();
+    // Findings are a draft until the accepted Save path persists them; the
+    // marker is written only once that save lands.
+    if (before != _findingsSignature && _shouldMarkModified) {
+      _markReworkModifiedIfNeeded();
+    }
     notifyListeners();
   }
+
+  /// False while a completed job's findings edit is still a draft. Reopening
+  /// or leaving the step without pressing Save must not write the marker just
+  /// to show a "Modified" badge.
+  bool get _shouldMarkModified => !_isReworkMode;
 
   // Called by GpsVerificationScreen right after a successful on-site
   // confirmation, so Step 5 (Findings) reflects the real GPS result
@@ -318,16 +359,27 @@ class InspectionProvider extends ChangeNotifier {
   /// step" — unlike startInspection, this does NOT reset anything, so the
   /// inspector doesn't lose the other steps' answers.
   void hydrateForRework(TaskItem task) {
+    // Keep this owner's same-job draft across a revisit: entering rework
+    // again after leaving without Save must not wipe unsaved text. Anything
+    // else hydrates normally; another job or session starts fresh.
+    final keepFindings = _visible &&
+        _activeTask?.id == task.id &&
+        (_pendingFindingsSignature != null ||
+            _findingsSignature != _persistedFindingsSignature);
+    final findings = (
+      notes: _notes,
+      discrepancies: _discrepancies,
+      recommendations: _recommendations,
+      observations: _findingsObservations,
+      pending: _pendingFindingsSignature,
+    );
     _inspectorId = DBHelper.requireInspector();
     _activeTask = task;
     _isReworkMode = true;
-    _currentStep = 1;
-    // Issue 2 fix (device-test finding — "Modified" badge appeared just
-    // from opening Rework and backing out, with zero edits): this flag
-    // gates the first actual write of rework_started_at to the first real
-    // edit in THIS session, not to entering rework mode itself. Reset
-    // here so a fresh rework session starts clean.
-    _reworkModifiedMarked = false;
+    _currentStep = 6;
+    // A revisit of a job that was already marked keeps that marker and shows
+    // the existing Modified badge without writing or logging anything new.
+    _reworkModifiedMarked = task.reworkStartedAt != null;
     _photosWithRemoteWork.clear();
     // A previous session's in-memory field observations must never survive
     // into this one. The rework payload below re-populates what it actually
@@ -405,6 +457,15 @@ class InspectionProvider extends ChangeNotifier {
     _notes = task.inspectorNotes ?? '';
     _discrepancies = task.discrepancies ?? '';
     _recommendations = task.recommendations ?? '';
+    _findingsObservations = task.observations;
+    _persistedFindingsSignature = _findingsSignature;
+    if (keepFindings) {
+      _notes = findings.notes;
+      _discrepancies = findings.discrepancies;
+      _recommendations = findings.recommendations;
+      _findingsObservations = findings.observations;
+      _pendingFindingsSignature = findings.pending;
+    }
     _inspectionResult =
         task.inspectionResult ??
         (task.isCompliant == true ? 'Compliant' : 'With Discrepancy');
@@ -416,6 +477,50 @@ class InspectionProvider extends ChangeNotifier {
     // upstream: store actualLandUse as its own column instead of folding
     // it into `observations`.
 
+    notifyListeners();
+  }
+
+  /// Load this owner's latest explicit local Save before opening rework. A
+  /// fresh provider restores its durable text; an in-session unsaved draft
+  /// remains in memory above that pending baseline.
+  Future<void> restorePendingFindings({bool afterSave = false}) async {
+    _requireOwner();
+    final jobId = _activeTask?.id;
+    if (!_isReworkMode || jobId == null) return;
+    final signature = _findingsSignature;
+    final draft = signature != (_pendingFindingsSignature ?? _persistedFindingsSignature);
+    final pending = await DBHelper.getPendingFindingsSave(jobId);
+    _requireOwner();
+    if (_activeTask?.id != jobId || !_isReworkMode || _findingsSignature != signature) return;
+    if (pending == null) {
+      if (_pendingFindingsSignature != null) {
+        if (afterSave) {
+          _persistedFindingsSignature = _pendingFindingsSignature;
+        } else if (!draft) {
+          // Re-entry supplied fresh remote evidence. Once the latest Save
+          // synced, its old UI pending state must not cover that fresh row.
+          _notes = _activeTask!.inspectorNotes ?? '';
+          _discrepancies = _activeTask!.discrepancies ?? '';
+          _recommendations = _activeTask!.recommendations ?? '';
+          _findingsObservations = _activeTask!.observations;
+          _persistedFindingsSignature = _findingsSignature;
+        }
+      }
+      _pendingFindingsSignature = null;
+    } else {
+      final notes = pending['inspectorNotes'] as String;
+      final discrepancies = pending['discrepancies'] as String? ?? '';
+      final recommendations = pending['recommendations'] as String? ?? '';
+      _pendingFindingsSignature = jsonEncode([
+        notes.trim(), discrepancies.trim(), recommendations.trim(),
+      ]);
+      if (!draft) {
+        _notes = notes;
+        _discrepancies = discrepancies;
+        _recommendations = recommendations;
+        _findingsObservations = pending['observations'] as String;
+      }
+    }
     notifyListeners();
   }
   // --- LOCAL SQLite DRAFT RECOVERY ---
@@ -619,25 +724,74 @@ class InspectionProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> saveStepFindings() async {
+  /// Persists this step's evidence and, only when [isExplicitSave] is set
+  /// (the Field Findings Save button), records one Save event.
+  ///
+  /// The event is never emitted by the caller: it travels inside the same
+  /// durable outbox action as the evidence and is written only after that
+  /// action's findings mutation is accepted. So an offline save can never
+  /// claim a remote success before it happened, and a retry cannot add a
+  /// second row — no new schema or table is involved.
+  ///
+  /// Returns true when the evidence is durable: written remotely, queued for
+  /// guaranteed delivery, or a genuine no-op.
+  Future<bool> saveStepFindings({bool isExplicitSave = false}) async {
     _requireOwner();
     if (_activeTask == null) return false;
-    final observations =
-        'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.';
+    final observations = this.observations;
     final discrepancies = _discrepancies.isNotEmpty ? _discrepancies : null;
     final recommendations = _recommendations.isNotEmpty
         ? _recommendations
         : null;
+    final jobId = _activeTask!.id;
+    final notes = _notes;
+    final signature = _findingsSignature;
+
+    if (isExplicitSave) {
+      // A Save of byte-identical text changes nothing: it must not be queued
+      // and must not produce an activity row.
+      if (signature == (_pendingFindingsSignature ?? _persistedFindingsSignature)) return true;
+      try {
+        // Durable first, remote second: the action (and its event id) exists
+        // before any write, so a lost response is recoverable rather than
+        // unrecoverable work.
+        await SyncOutboxService.enqueueFindingsUpdate(
+          jobId: jobId,
+          observations: observations,
+          discrepancies: discrepancies,
+          recommendations: recommendations,
+          inspectorNotes: notes,
+          activityId: const Uuid().v4(),
+          activitySubtitle: _activeTask!.location,
+        );
+        _requireOwner();
+        _pendingFindingsSignature = signature;
+      } catch (e) {
+        debugPrint('saveStepFindings: failed to queue findings save — $e');
+        return false;
+      }
+      try {
+        // Online this delivers immediately; offline the row stays pending and
+        // the activity is written only once it succeeds.
+        await SyncOutboxService.drain(onlyJobId: jobId);
+        await restorePendingFindings(afterSave: true);
+      } catch (e) {
+        debugPrint('saveStepFindings: saved locally; sync remains pending — $e');
+      }
+      return true;
+    }
+
     try {
       await SupabaseService.updateJobInspectionProgress(
-        jobId: _activeTask!.id,
+        jobId: jobId,
         updateData: {
           'observations': observations,
           'discrepancies': discrepancies,
           'recommendations': recommendations,
-          'inspector_notes': _notes,
+          'inspector_notes': notes,
         },
       );
+      _persistedFindingsSignature = signature;
       return true;
     } catch (e) {
       // Issue 4 fix — same rationale as saveStepPhotos above: no offline
@@ -649,12 +803,13 @@ class InspectionProvider extends ChangeNotifier {
       try {
         _requireOwner();
         await SyncOutboxService.enqueueFindingsUpdate(
-          jobId: _activeTask!.id,
+          jobId: jobId,
           observations: observations,
           discrepancies: discrepancies,
           recommendations: recommendations,
-          inspectorNotes: _notes,
+          inspectorNotes: notes,
         );
+        _persistedFindingsSignature = signature;
         return true;
       } catch (e2) {
         debugPrint('saveStepFindings: failed to queue findings update — $e2');
