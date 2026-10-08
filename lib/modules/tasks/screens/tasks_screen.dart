@@ -33,7 +33,7 @@ import '../../../core/theme/insight_theme.dart';
 /// bottom gap and the 1px divider. A regression test asserts the bar still fits
 /// (no overflow) at several widths and text scales, so if the tab metrics ever
 /// change this constant fails loudly instead of silently clipping.
-const double kCategoryBarHeight = 56;
+const double kCategoryBarHeight = 68;
 
 const List<String> rosarioBarangays = [
   'All Barangays', 'Alupay', 'Antipolo', 'Bagong Tubig', 'Bayawang', 'Bulihan', 
@@ -472,6 +472,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   void initState() {
     super.initState();
     _currentTabIndex = widget.scrollToScheduled ? TasksScreen.tabPending : widget.initialTabIndex;
+    PaintingBinding.instance.systemFonts.addListener(_onFontsChanged);
     _pendingScrollToScheduled = widget.scrollToScheduled;
     _loadTasks();
     _searchController.addListener(() {
@@ -484,9 +485,12 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   @override
   void dispose() {
     _searchController.dispose();
+    PaintingBinding.instance.systemFonts.removeListener(_onFontsChanged);
     disposeSpringEntrance();
     super.dispose();
   }
+
+  void _onFontsChanged() { if (mounted) setState(() {}); }
 
   /// Runs once after the first frame where the Scheduled section actually
   /// has content to scroll to — skips silently (and un-arms itself) if the
@@ -824,9 +828,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                         ),
                         const SizedBox(height: 12),
                         
-                        // Local Search Bar inside Sheet
-                        Container(
-                          height: 44,
+                         // Local Search Bar inside Sheet
+                         Container(
+                           constraints: const BoxConstraints(minHeight: 48),
                           decoration: BoxDecoration(
                             color: InsightTheme.bg,
                             borderRadius: BorderRadius.circular(10),
@@ -1036,7 +1040,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     return Container(
       color: InsightTheme.surface,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
         child: SpringSlide(
           animation: springFor(2),
           beginOffset: const Offset(0, 22),
@@ -1046,13 +1050,12 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
               color: InsightTheme.surface2,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Row(
+            child: LayoutBuilder(builder: (context, constraints) {
+              return SingleChildScrollView(scrollDirection: Axis.horizontal, child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: IntrinsicWidth(child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Wrapped in Expanded — without it, a 2-digit count (e.g.
-                // "Completed 21") pushes this tab's intrinsic width past the
-                // row's available space and the row overflows on the right,
-                // since a plain spaceBetween Row doesn't constrain child widths.
                 Expanded(
                   child: _SegmentTab(
                     text: "Pending",
@@ -1078,7 +1081,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                   ),
                 ),
               ],
-            ),
+            ))));
+            }),
           ),
         ),
       ),
@@ -1088,6 +1092,33 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final categorized = _categorizeAndFilter();
+    final scaler = MediaQuery.textScalerOf(context);
+    Size measureHeader(String text, TextStyle style, {double width = double.infinity}) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: DefaultTextStyle.of(context).style.merge(style)),
+        textDirection: Directionality.of(context), textScaler: scaler,
+      )..layout(maxWidth: width);
+      final size = painter.size;
+      painter.dispose();
+      return size;
+    }
+    final monitoringStyle = InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk, ls: 0.4);
+    final titleStyle = InsightTheme.urbanist(26, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4);
+    final assignedStyle = InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3);
+    final countSize = measureHeader('${_allTasks.length}', InsightTheme.urbanist(22, w: FontWeight.w800, h: 1));
+    final assignedSize = measureHeader('ASSIGNED', assignedStyle);
+    final counterWidth = countSize.width.clamp(assignedSize.width, double.infinity) + 32;
+    final availableWidth = MediaQuery.sizeOf(context).width - MediaQuery.paddingOf(context).horizontal - 40;
+    final naturalTitleWidth = measureHeader('My Tasks', titleStyle).width
+        .clamp(measureHeader('ACTIVE MONITORING', monitoringStyle).width + 32, double.infinity);
+    final stackedHeader = naturalTitleWidth + counterWidth + 12 > availableWidth;
+    final titleWidth = stackedHeader ? availableWidth : availableWidth - counterWidth - 12;
+    final titleHeight = measureHeader('ACTIVE MONITORING', monitoringStyle, width: (titleWidth - 32).clamp(1, double.infinity)).height
+        + 16 + measureHeader('My Tasks', titleStyle, width: titleWidth).height;
+    final counterHeight = countSize.height + assignedSize.height + 22;
+    final headerHeight = (12 + (stackedHeader ? titleHeight + counterHeight + 8
+        : titleHeight.clamp(counterHeight, double.infinity))).ceilToDouble().clamp(85.0, double.infinity);
+    final categoryHeight = (scaler.scale(12) * 1.4 + 44).ceilToDouble().clamp(kCategoryBarHeight, double.infinity);
     final ongoing = categorized['Ongoing'] ?? [];
     final pendingTasks = categorized['Pending'] ?? [];
     final scheduled = pendingTasks
@@ -1113,6 +1144,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
       backgroundColor: InsightTheme.bg,
       extendBody: true,
       appBar: AppBar(
+        titleSpacing: 20,
         backgroundColor: InsightTheme.surface,
         elevation: 0,
         automaticallyImplyLeading: false,
@@ -1122,17 +1154,20 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         // and the whole group is pinned because it is Scaffold app-bar chrome.
         // Only Search / Filter scroll away; the category switcher below is a
         // pinned sliver that parks directly under this complete header.
-        toolbarHeight: 85,
+        toolbarHeight: headerHeight,
         title: SpringSlide(
           animation: springFor(0),
           beginOffset: const Offset(0, -24),
           child: Padding(
           padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-          child: Row(
+          child: Flex(
+            direction: stackedHeader ? Axis.vertical : Axis.horizontal,
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: stackedHeader ? CrossAxisAlignment.start : CrossAxisAlignment.center,
             children: [
-              Column(
+              SizedBox(width: titleWidth, child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Restyled to a pill badge w/ status dot — visual only,
@@ -1151,31 +1186,31 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                           decoration: const BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1),
                         ),
                         const SizedBox(width: 6),
-                        Text('ACTIVE MONITORING', style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.8)),
+                        Flexible(child: Text('ACTIVE MONITORING', style: monitoringStyle)),
                       ],
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text('My Tasks', style: InsightTheme.poppins(26, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4)),
+                  Text('My Tasks', style: titleStyle),
                 ],
-              ),
+              )),
+              SizedBox(width: stackedHeader ? 0 : 12, height: stackedHeader ? 8 : 0),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
-                  color: InsightTheme.blue1,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.10), blurRadius: 16, offset: const Offset(0, 6))],
+                  color: InsightTheme.blueTint,
+                  borderRadius: InsightTheme.roundedSm,
                 ),
                 child: Column(
                   children: [
                     CountUpText(
                       value: _allTasks.length,
-                      style: InsightTheme.poppins(18, w: FontWeight.w800, c: Colors.white, h: 1.0),
+                      style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.blueInk, h: 1.0),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       'ASSIGNED',
-                      style: InsightTheme.inter(9, w: FontWeight.w700, c: Colors.white.withValues(alpha: 0.85), ls: 0.6),
+                      style: assignedStyle,
                     ),
                   ],
                 ),
@@ -1210,7 +1245,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                         SliverToBoxAdapter(
                           child: Container(
                             color: InsightTheme.surface,
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1218,56 +1253,55 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                 SpringSlide(
                                   animation: springFor(1),
                                   beginOffset: const Offset(0, 22),
-                                  child: Row(
+                                  child: LayoutBuilder(builder: (context, constraints) {
+                                    final searchWidth = measureHeader('Search tasks', InsightTheme.inter(16)).width + 96;
+                                    final stacked = searchWidth + 68 > constraints.maxWidth;
+                                    return Wrap(alignment: WrapAlignment.end, spacing: 12, runSpacing: 12,
                                   children: [
-                                    Expanded(
-                                      child: Container(
-                                        height: 44,
-                                        decoration: BoxDecoration(
-                                          color: InsightTheme.bg,
-                                          borderRadius: BorderRadius.circular(10),
-                                          border: Border.all(color: InsightTheme.line),
-                                        ),
+                                    SizedBox(width: stacked ? constraints.maxWidth : constraints.maxWidth - 68,
+                                        child: Container(
+                                          constraints: const BoxConstraints(minHeight: 56),
                                         child: TextField(
                                           controller: _searchController,
-                                          style: InsightTheme.inter(14, w: FontWeight.w400, c: InsightTheme.ink),
-                                          decoration: InputDecoration(
-                                            hintText: 'Search fields or inspection IDs...',
-                                            hintStyle: InsightTheme.inter(14, c: InsightTheme.ink3),
-                                            prefixIcon: const Icon(Icons.search_rounded, color: InsightTheme.ink2, size: 18),
+                                          style: InsightTheme.inter(16, c: InsightTheme.ink),
+                                          decoration: InsightTheme.formInput.copyWith(
+                                            fillColor: InsightTheme.bg,
+                                            labelText: 'Search tasks',
+                                            hintText: 'Name, site or inspection ID',
+                                            prefixIcon: const Icon(Icons.search_rounded, color: InsightTheme.ink2, size: 20),
                                             suffixIcon: _searchQuery.isNotEmpty 
-                                                ? GestureDetector(
-                                                    onTap: () {
+                                                ? IconButton(
+                                                    tooltip: 'Clear task search',
+                                                    onPressed: () {
                                                       _searchController.clear();
                                                       FocusScope.of(context).unfocus();
                                                     },
-                                                    child: const Icon(Icons.cancel, color: InsightTheme.ink3, size: 18),
+                                                    icon: const Icon(Icons.close_rounded, color: InsightTheme.ink3, size: 20),
                                                   )
                                                 : null,
-                                            border: InputBorder.none,
-                                            contentPadding: const EdgeInsets.symmetric(vertical: 11),
                                           ),
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(width: 12),
-                                    GestureDetector(
-                                      onTap: _showFilterBottomSheet,
-                                      child: Stack(
+                                    IconButton(
+                                      tooltip: hasActiveFilters ? 'Filter and sort tasks (active)' : 'Filter and sort tasks',
+                                      onPressed: _showFilterBottomSheet,
+                                      padding: EdgeInsets.zero,
+                                      icon: Stack(
                                         clipBehavior: Clip.none,
                                         children: [
                                           Container(
-                                            height: 44, width: 44,
+                                            height: 56, width: 56,
                                             decoration: BoxDecoration(
-                                              color: InsightTheme.surface,
-                                              border: Border.all(color: InsightTheme.line),
-                                              borderRadius: BorderRadius.circular(10),
+                                              color: hasActiveFilters ? InsightTheme.blueTint : InsightTheme.surface,
+                                              border: Border.all(color: hasActiveFilters ? InsightTheme.blue1 : InsightTheme.lineStrong),
+                                              borderRadius: InsightTheme.roundedSm,
                                             ),
-                                            child: const Icon(Icons.tune_rounded, color: InsightTheme.ink, size: 20),
+                                            child: Icon(Icons.tune_rounded, color: hasActiveFilters ? InsightTheme.blueInk : InsightTheme.ink, size: 22),
                                           ),
                                           if (hasActiveFilters)
                                             Positioned(
-                                              top: -3, right: -3,
+                                              top: 7, right: 7,
                                               child: Container(
                                                 width: 10, height: 10,
                                                 decoration: BoxDecoration(
@@ -1281,7 +1315,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                       ),
                                     ),
                                   ],
-                                  ),
+                                  );
+                                  }),
                                 ),
                                 const SizedBox(height: 14),
                               ],
@@ -1298,7 +1333,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                         // showing through.
                         SliverPersistentHeader(
                           pinned: true,
-                          delegate: _CategoryBarHeaderDelegate(
+                           delegate: _CategoryBarHeaderDelegate(
+                             extent: categoryHeight,
                             child: _buildCategoryBar(
                               pending.length + scheduled.length,
                               ongoing.length,
@@ -1342,7 +1378,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                           )
                         else
                           SliverPadding(
-                            padding: const EdgeInsets.only(left: 16, right: 16, top: 12, bottom: 140),
+                            padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 140),
                             sliver: SliverList(
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
@@ -1508,30 +1544,29 @@ class _PendingSectionHeader extends StatelessWidget {
 
 /// Pins the Pending/Ongoing/Completed switcher to the top of the scroll view.
 ///
-/// Fixed extent (min == max) because the bar is a constant-height control, so
-/// there is nothing to collapse or expand — the whole band just parks under the
-/// pinned "My Tasks" app bar. The rebuild/shrink paths are implemented for
-/// completeness but are never exercised at a fixed extent.
+/// One extent (min == max) for the chosen text size, so the whole band parks
+/// under the pinned "My Tasks" app bar without scaling the labels.
 class _CategoryBarHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _CategoryBarHeaderDelegate({required this.child});
+  _CategoryBarHeaderDelegate({required this.child, required this.extent});
 
   final Widget child;
+  final double extent;
 
   @override
-  double get minExtent => kCategoryBarHeight;
+  double get minExtent => extent;
 
   @override
-  double get maxExtent => kCategoryBarHeight;
+  double get maxExtent => extent;
 
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return SizedBox(height: kCategoryBarHeight, child: child);
+    return SizedBox(height: extent, child: child);
   }
 
   @override
   bool shouldRebuild(covariant _CategoryBarHeaderDelegate oldDelegate) =>
-      oldDelegate.child != child;
+      oldDelegate.child != child || oldDelegate.extent != extent;
 }
 
 class _SegmentTab extends StatelessWidget {
@@ -1548,19 +1583,13 @@ class _SegmentTab extends StatelessWidget {
     // tab (white pill + shadow when active) — same tap target/state,
     // matches the reference's segmented-tab look while staying on
     // this screen's own InsightTheme tokens.
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+      borderRadius: BorderRadius.circular(11),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeInOut,
-        // Horizontal padding tightened (14 -> 8) — combined with the
-        // smaller font/gap/badge below, this is what actually keeps
-        // "Completed 21" fitting at 100% scale so the FittedBox safety
-        // net never has to engage for it. Before this, "Completed" was
-        // the one tab that needed scaling down while "Pending"/"Ongoing"
-        // didn't, so despite sharing the same font-size value in code,
-        // they rendered at visibly different sizes — inconsistent look.
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         // Centers the Row now that this tab is wrapped in Expanded (see the
         // call site) — without this, the tab's fixed-size content would
@@ -1571,13 +1600,7 @@ class _SegmentTab extends StatelessWidget {
           borderRadius: BorderRadius.circular(11),
           boxShadow: isActive ? const [BoxShadow(color: Color(0x0F000000), blurRadius: 8, offset: Offset(0, 2))] : null,
         ),
-        // FittedBox stays only as a defensive fallback for extremely
-        // narrow devices — under normal widths every tab now fits at its
-        // true 100% size, so all three render at the exact same text
-        // size instead of "Completed" alone shrinking to fit.
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
@@ -1606,7 +1629,6 @@ class _SegmentTab extends StatelessWidget {
               ),
             ),
           ],
-          ),
         ),
       ),
     );
@@ -1876,6 +1898,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
           builder: (sheetContext, setSheetState) {
             return Padding(
               padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+              child: SingleChildScrollView(
               child: Container(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
                 decoration: const BoxDecoration(
@@ -1926,12 +1949,12 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           children: [
                             const Icon(Icons.calendar_today_rounded, size: 16, color: InsightTheme.blueInk),
                             const SizedBox(width: 10),
-                            Text(
+                            Expanded(child: Text(
                               pickedDate == null
                                   ? 'Select a date'
                                   : '${pickedDate!.year}-${pickedDate!.month.toString().padLeft(2, '0')}-${pickedDate!.day.toString().padLeft(2, '0')}',
                               style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
-                            ),
+                            )),
                           ],
                         ),
                       ),
@@ -1978,6 +2001,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: InsightTheme.blue1,
+                          minimumSize: const Size(48, 48),
                           padding: const EdgeInsets.symmetric(vertical: 15),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
@@ -1989,6 +2013,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                     ),
                   ],
                 ),
+              ),
               ),
             );
           },

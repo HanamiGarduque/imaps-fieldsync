@@ -780,8 +780,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     switch (_analyticsTabIndex) {
       case 0:
-        // Weekly Performance: one bar per day of the selected range — 7 for a
-        // week, one per calendar day for a month. Real counts only.
+        // Week: daily counts. Month: weekly totals within the same exact range.
         return WeeklyTrendCard(
           points: _stats.submissionTrendFor(range.days),
           barColor: InsightTheme.blue1,

@@ -14,6 +14,7 @@ import 'capture_photo_screen.dart';
 import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import '../widgets/exit_confirm_dialog.dart';
+import '../widgets/inspection_step_header.dart';
 import '../../../core/layout/responsive_layout.dart';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -479,7 +480,6 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
                       ? null
                       : _GpsHeader(
                           location: widget.task.location,
-                          verified: _verified,
                           onBack: () => handleInspectionExit(
                             context,
                             onSaveProgress: () =>
@@ -518,117 +518,27 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
 
 /// ── Header block: back + title card + fullscreen toggle, step progress ──
 ///
-/// Redesigned per the approved dual-state mockup: the fullscreen toggle
-/// lives INSIDE the header row (right of the title card), which removes
-/// the old floating-button z-order problem entirely. Accent colors follow
-/// the verification state (amber far from site, blue in zone).
+/// Shared inspection identity/progress, retaining the GPS fullscreen control.
 class _GpsHeader extends StatelessWidget {
   final String location;
-  final bool verified;
   final VoidCallback onBack;
   final VoidCallback onToggleFullscreen;
 
   const _GpsHeader({
     required this.location,
-    required this.verified,
     required this.onBack,
     required this.onToggleFullscreen,
   });
 
   @override
   Widget build(BuildContext context) {
-    final accent = verified ? InsightTheme.blue1 : InsightTheme.amber;
-    final accentInk = verified ? InsightTheme.blueInk : InsightTheme.amberInk;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              _HeaderButton(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack),
-              Expanded(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 10),
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: InsightTheme.surface,
-                    borderRadius: BorderRadius.circular(InsightTheme.radiusMd),
-                    border: Border.all(color: InsightTheme.line),
-                    boxShadow: InsightTheme.cardShadow,
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        'GPS Verification',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: InsightTheme.urbanist(13, w: FontWeight.w800, c: InsightTheme.ink),
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.location_on_rounded, size: 10, color: accent),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              location,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: InsightTheme.inter(10, w: FontWeight.w600, c: InsightTheme.ink2),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              _HeaderButton(icon: Icons.fullscreen_rounded, onTap: onToggleFullscreen),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: InsightTheme.surface,
-              borderRadius: BorderRadius.circular(InsightTheme.radiusMd),
-              border: Border.all(color: InsightTheme.line),
-              boxShadow: InsightTheme.cardShadow,
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Text('STEP 2 OF 6', style: InsightTheme.mono(10, w: FontWeight.w800, ls: 0.5, c: accentInk)),
-                    Expanded(
-                      child: Text(
-                        'VERIFY COORDINATES',
-                        textAlign: TextAlign.right,
-                        style: InsightTheme.mono(10, c: InsightTheme.ink3, ls: 0.5),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: Container(
-                    height: 5,
-                    color: InsightTheme.surface2,
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: 2 / 6.0,
-                      child: Container(color: accent),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return InspectionStepHeader(
+      title: 'GPS Verification',
+      subtitle: location,
+      stepNumber: 2,
+      stepSubtitle: 'VERIFY COORDINATES',
+      onBack: onBack,
+      trailing: _HeaderButton(icon: Icons.fullscreen_rounded, onTap: onToggleFullscreen),
     );
   }
 }
@@ -643,18 +553,21 @@ class _HeaderButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
+    return SizedBox.square(
+      dimension: InsightBreakpoints.minTouchTarget,
       child: Container(
-        width: 40,
-        height: 40,
         decoration: BoxDecoration(
           color: InsightTheme.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: InsightTheme.line),
           boxShadow: InsightTheme.cardShadow,
         ),
-        child: Icon(icon, size: 16, color: InsightTheme.ink),
+        child: IconButton(
+          tooltip: icon == Icons.arrow_back_ios_new_rounded ? 'Exit inspection'
+              : icon == Icons.fullscreen_rounded ? 'Enter fullscreen' : 'Exit fullscreen',
+          onPressed: onTap,
+          icon: Icon(icon, size: 20, color: InsightTheme.ink),
+        ),
       ),
     );
   }

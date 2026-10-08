@@ -357,6 +357,7 @@ class WeeklyTrendCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMonth = periodLabel == 'Month';
     final counts = points.map((p) => p.count).toList();
     final maxCount = counts.isEmpty ? 1 : counts.reduce(math.max);
     final chartMax = (maxCount < 4 ? 4 : maxCount).toDouble();
@@ -372,7 +373,8 @@ class WeeklyTrendCard extends StatelessWidget {
           style: InsightTextStyles.sectionHeaderPill(color: mutedTextColor),
         ),
         const SizedBox(height: 4),
-        Text('Inspections submitted per day', style: InsightTextStyles.caption(color: mutedTextColor)),
+        Text('Inspections submitted per ${isMonth ? 'week' : 'day'}',
+            style: InsightTextStyles.caption(color: mutedTextColor)),
         const SizedBox(height: 14),
         Expanded(
           child: BarChart(
@@ -392,14 +394,15 @@ class WeeklyTrendCard extends StatelessWidget {
                 bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
                     showTitles: true,
-                    reservedSize: 26,
+                    reservedSize: isMonth ? 42 : 26,
                     getTitlesWidget: (value, meta) {
                       final i = value.toInt();
                       if (i < 0 || i >= points.length) return const SizedBox.shrink();
                       final isPeak = i == highestIdx;
                       return Padding(
                         padding: const EdgeInsets.only(top: 8),
-                        child: Text(points[i].label,
+                        child: Text(isMonth ? points[i].label.replaceFirst(' ', '\n') : points[i].label,
+                            textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 12,
                               color: isPeak ? textColor : mutedTextColor,
@@ -410,15 +413,26 @@ class WeeklyTrendCard extends StatelessWidget {
                   ),
                 ),
               ),
-              barTouchData: BarTouchData(enabled: false),
+              barTouchData: BarTouchData(
+                touchTooltipData: BarTouchTooltipData(
+                  getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                    final point = points[group.x];
+                    final lastDay = math.min(point.date.day + 6,
+                        DateTime(point.date.year, point.date.month + 1, 0).day);
+                    return BarTooltipItem(
+                      '${point.label}${isMonth ? ' · days ${point.date.day}–$lastDay' : ''}\n'
+                      '${point.count} inspections',
+                      InsightTheme.inter(12, w: FontWeight.w600, c: Colors.white),
+                    );
+                  },
+                ),
+              ),
               barGroups: [
                 for (int i = 0; i < points.length; i++)
                   BarChartGroupData(x: i, barRods: [
                     BarChartRodData(
                       toY: points[i].count.toDouble(),
-                      // Peak day stands out at full color; the rest sit a
-                      // shade lighter so the eye lands on the highest bar
-                      // first, matching the "Highest Day" footer stat.
+                      // The peak period matches the Highest Day/Week stat.
                       color: i == highestIdx ? barColor : barColor.withValues(alpha: 0.45),
                       width: 22,
                       borderRadius: BorderRadius.circular(6),
@@ -438,9 +452,9 @@ class WeeklyTrendCard extends StatelessWidget {
         const SizedBox(height: 12),
         _StatRow(
           items: [
-            ('Highest Day', highestIdx >= 0 ? '${points[highestIdx].label} · ${points[highestIdx].count}' : '—'),
-            ('Average', avg.toStringAsFixed(1)),
-            ('Lowest Day', lowestIdx >= 0 ? '${points[lowestIdx].label} · ${points[lowestIdx].count}' : '—'),
+            (isMonth ? 'Highest Week' : 'Highest Day', highestIdx >= 0 ? '${points[highestIdx].label.split(' ').first} · ${points[highestIdx].count}' : '—'),
+            (isMonth ? 'Average / week' : 'Average', avg.toStringAsFixed(1)),
+            (isMonth ? 'Lowest Week' : 'Lowest Day', lowestIdx >= 0 ? '${points[lowestIdx].label.split(' ').first} · ${points[lowestIdx].count}' : '—'),
           ],
           textColor: textColor,
           mutedTextColor: mutedTextColor,
@@ -514,37 +528,38 @@ class ActivityHeatmapCard extends StatelessWidget {
         const SizedBox(height: 2),
         Text(periodLabel, style: InsightTheme.inter(11.5, c: mutedTextColor)),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            for (final d in _weekdayLabels)
-              Expanded(
-                child: Center(
-                  child: Text(d, style: InsightTheme.inter(12, w: FontWeight.w700, c: mutedTextColor)),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 6),
         // Square cells sized from the REAL available width. The previous fixed
         // 24px assumption made this wrapper shorter than the grid the
         // aspect-ratio delegate actually renders, clipping the final row.
         LayoutBuilder(
           builder: (context, constraints) {
             const spacing = 6.0;
-            // Seven square columns fill the width, which on a wide viewport
-            // produced ~165px cells and a ~1000px-tall card. The cells stay
-            // square (that is what the gridHeight maths relies on) but stop
-            // growing past a readable size; the grid itself stays full width.
+            const dayStyle = TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
+            final painter = TextPainter(
+              text: TextSpan(text: '31', style: DefaultTextStyle.of(context).style.merge(dayStyle)),
+              textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
+            )..layout();
+            final minCell = math.max(painter.width, painter.height) + 8;
+            painter.dispose();
             final fullCell = (constraints.maxWidth - (spacing * 6)) / 7;
-            final cell = fullCell.clamp(0.0, kAnalyticsHeatmapMaxCell);
+            final cell = fullCell.clamp(minCell, math.max(minCell, kAnalyticsHeatmapMaxCell)).toDouble();
             final rows = range.calendarWeeks;
             final gridHeight = rows * cell + (rows - 1) * spacing;
-            return SizedBox(
-              height: gridHeight,
-              child: Center(
-                child: SizedBox(
-                  width: cell * 7 + spacing * 6,
-                  child: GridView.builder(
+            // Weekday headings and dates share the same columns. Enlarged text
+            // can browse a wider calendar instead of being clipped or scaled.
+            final gridWidth = cell * 7 + spacing * 6;
+            final calendar = SizedBox(
+                  width: gridWidth,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Row(children: [
+                      for (var index = 0; index < _weekdayLabels.length; index++) ...[
+                        if (index > 0) const SizedBox(width: spacing),
+                        SizedBox(width: cell, child: Center(child: Text(_weekdayLabels[index],
+                            style: InsightTheme.inter(12, w: FontWeight.w700, c: mutedTextColor)))),
+                      ],
+                    ]),
+                    const SizedBox(height: 6),
+                    SizedBox(height: gridHeight, child: GridView.builder(
                     physics: const NeverScrollableScrollPhysics(),
                     shrinkWrap: true,
                     padding: EdgeInsets.zero,
@@ -574,18 +589,15 @@ class ActivityHeatmapCard extends StatelessWidget {
                     alignment: Alignment.center,
                     child: Text(
                       '${date.day}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: isActive ? Colors.white : mutedTextColor,
-                      ),
+                      style: dayStyle.copyWith(color: isActive ? Colors.white : mutedTextColor),
                     ),
                   );
                 },
-              ),
-            ),
-          ),
-        );
+               )),
+                  ]),
+             );
+            return Center(child: gridWidth > constraints.maxWidth
+                ? SingleChildScrollView(scrollDirection: Axis.horizontal, child: calendar) : calendar);
       },
     ),
         const SizedBox(height: 12),

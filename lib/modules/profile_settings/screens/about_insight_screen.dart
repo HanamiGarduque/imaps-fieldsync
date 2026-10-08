@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/services/app_info_service.dart';
 
@@ -9,114 +11,99 @@ class AboutInsightScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-
     return Scaffold(
-      backgroundColor: InsightTheme.bg,
-      body: Stack(
-        children: [
-          // Background Glow
-
-          SafeArea(
+      backgroundColor: InsightTheme.surface,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: ConstrainedContent(
             child: Column(
               children: [
-                // App Bar
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Row(
                     children: [
-                      GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white),
-                            boxShadow: kCardShadow,
-                          ),
-                          child: const Center(
-                            child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink),
+                      const BackButton(color: InsightTheme.ink),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Semantics(
+                          header: true,
+                          child: Text(
+                            'About iMAPS',
+                            style: InsightTheme.urbanist(20),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Text('About', style: InsightTheme.poppins(18, w: FontWeight.w700)),
                       ),
                     ],
                   ),
                 ),
-
-                // Content
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: InsightTheme.primaryGradient,
-                            boxShadow: [
-                              BoxShadow(
-                                color: InsightTheme.blue1.withValues(alpha: 0.3),
-                                blurRadius: 20,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
-                          ),
-                          child: const Center(
-                            child: Icon(Icons.location_on_rounded, color: Colors.white, size: 36),
-                          ),
+                  child: ListView(
+                    padding: const EdgeInsets.only(top: 16, bottom: 32),
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Image.asset(
+                          'assets/icon/app_icon.png',
+                          width: 64,
+                          height: 64,
+                          excludeFromSemantics: true,
                         ),
-                        const SizedBox(height: 20),
-                        Text('iMAPS:FieldSync', style: InsightTheme.poppins(22, w: FontWeight.w700)),
-                        const SizedBox(height: 4),
-                        Text(AppInfoService.fullVersionString, style: InsightTheme.jetBrains(12, c: InsightTheme.ink2, ls: 0.5)),
-
-                        const SizedBox(height: 32),
-
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: InsightTheme.surface,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: InsightTheme.line),
-                            boxShadow: kCardShadow,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'ABOUT THE SYSTEM',
-                                style: InsightTheme.jetBrains(10, w: FontWeight.w700, ls: 0.8, c: InsightTheme.blue1),
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'iMAPS:FieldSync is the official municipal field application used by authorized MPDO and Zoning personnel of Rosario, Batangas for field inspection, site verification, GPS location verification, photographs, zoning checklists, findings, recommendations, offline work, and later synchronization.',
-                                style: InsightTheme.inter(13.5, h: 1.6),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Municipal Planning and Development Office (MPDO)\nRosario, Batangas',
-                                style: InsightTheme.inter(12.5, w: FontWeight.w600, c: InsightTheme.ink2, h: 1.5),
-                              ),
-                            ],
-                          ),
+                      ),
+                      const SizedBox(height: 16),
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          'iMAPS:FieldSync',
+                          style: InsightTheme.urbanist(26),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        AppInfoService.fullVersionString,
+                        style: InsightTheme.inter(14, c: InsightTheme.ink3),
+                      ),
+                      const SizedBox(height: 24),
+                      const Divider(height: 1, color: InsightTheme.line),
+                      const SizedBox(height: 24),
+                      Text(
+                        'The field inspection app for authorized MPDO and Zoning personnel in Rosario, Batangas.',
+                        style: InsightTheme.inter(
+                          16,
+                          c: InsightTheme.ink,
+                          h: 1.6,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Use FieldSync for site and GPS verification, inspection photos, zoning checklists, findings, and recommendations. Work offline in the field and synchronize records when a connection is available.',
+                        style: InsightTheme.inter(
+                          14,
+                          c: InsightTheme.ink2,
+                          h: 1.7,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Text(
+                        'Municipal Planning and Development Office (MPDO)',
+                        style: InsightTheme.inter(
+                          14,
+                          w: FontWeight.w600,
+                          c: InsightTheme.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Rosario, Batangas',
+                        style: InsightTheme.inter(14, c: InsightTheme.ink3),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

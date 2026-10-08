@@ -27,6 +27,10 @@ class InspectionStepHeader extends StatelessWidget {
   /// site keeps the accepted portrait appearance with no changes.
   final bool? compact;
 
+  /// Form steps use roomier text/gutters and retain context on short screens.
+  final bool formStyle;
+  final Widget? trailing;
+
   const InspectionStepHeader({
     super.key,
     required this.title,
@@ -35,14 +39,22 @@ class InspectionStepHeader extends StatelessWidget {
     required this.stepSubtitle,
     required this.onBack,
     this.compact,
+    this.formStyle = false,
+    this.trailing,
   });
 
   @override
   Widget build(BuildContext context) {
     // Vertical space is the scarce resource in landscape; spend it on content.
     final isCompact = compact ?? context.responsive.isShortHeight;
+    final showContext = !isCompact || formStyle;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: EdgeInsets.fromLTRB(
+        formStyle ? 20 : 16,
+        12,
+        formStyle ? 20 : 16,
+        16,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -55,8 +67,9 @@ class InspectionStepHeader extends StatelessWidget {
               _StepGlassIconButton(
                 icon: Icons.arrow_back_ios_new_rounded,
                 onTap: onBack,
+                tooltip: formStyle ? 'Exit inspection' : 'Back',
               ),
-              if (!isCompact) ...[
+              if (showContext) ...[
                 const SizedBox(width: 12),
                 Expanded(
                   child: _StepGlassPill(
@@ -64,90 +77,93 @@ class InspectionStepHeader extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          title,
-                          style: InsightTheme.poppins(
-                            15,
-                            w: FontWeight.w700,
-                            c: InsightTheme.ink,
+                        Semantics(
+                          header: true,
+                          child: Text(
+                            title,
+                            // Same title size on every step so Steps 1–6 read as
+                            // one system.
+                            style: InsightTheme.urbanist(
+                              16,
+                              w: FontWeight.w700,
+                              c: InsightTheme.ink,
+                            ),
+                            maxLines: formStyle ? null : 2,
+                            overflow: formStyle ? null : TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 1),
-                        Text(
-                          subtitle,
-                          style: InsightTheme.inter(11, c: InsightTheme.ink2),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        if (!isCompact) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                            maxLines: formStyle ? null : 1,
+                            overflow: formStyle ? null : TextOverflow.ellipsis,
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ),
               ],
+              if (trailing != null) ...[const SizedBox(width: 12), trailing!],
             ],
           ),
 
-          if (!isCompact) const SizedBox(height: 10),
+          if (showContext) const SizedBox(height: 10),
 
           // ── Row 2: Floating Step Progress bar container ──────────────
           // Hidden in compact mode: the step number is already known from the
           // workflow, and this pill costs ~48px of scarce landscape height.
-          if (!isCompact)
-          _StepGlassPill(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: Container(
-                    height: 5,
-                    color: InsightTheme.surface2,
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: (stepNumber / 6.0).clamp(0.0, 1.0),
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [InsightTheme.blue1, InsightTheme.blue2],
+          if (showContext)
+            _StepGlassPill(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ExcludeSemantics(
+                    child: Row(
+                      children: [
+                        for (var index = 0; index < 6; index++)
+                          Expanded(
+                            child: Container(
+                              height: 4,
+                              margin: EdgeInsets.only(
+                                right: index == 5 ? 0 : 4,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(2),
+                                color: index == stepNumber - 1
+                                    ? InsightTheme.blue1
+                                    : index < stepNumber - 1
+                                    ? InsightTheme.blue1.withValues(alpha: 0.25)
+                                    : InsightTheme.line,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Text(
-                      'STEP $stepNumber OF 6',
-                      style: InsightTheme.jetBrains(
-                        10,
-                        w: FontWeight.w700,
-                        c: InsightTheme.blueInk,
-                        ls: 0.5,
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        ' — ${stepSubtitle.toUpperCase()}',
-                        style: InsightTheme.jetBrains(
-                          10,
-                          c: InsightTheme.ink3,
-                          ls: 0.5,
+                  const SizedBox(height: 8),
+                  Text.rich(
+                    TextSpan(
+                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                      children: [
+                        TextSpan(
+                          text: 'STEP $stepNumber OF 6',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: InsightTheme.blueInk,
+                          ),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                        TextSpan(text: ' — ${stepSubtitle.toUpperCase()}'),
+                      ],
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -193,24 +209,30 @@ class _StepGlassPill extends StatelessWidget {
 class _StepGlassIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
+  final String tooltip;
 
-  const _StepGlassIconButton({required this.icon, required this.onTap});
+  const _StepGlassIconButton({
+    required this.icon,
+    required this.onTap,
+    required this.tooltip,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: InsightTheme.glassIconButtonDecoration(
-              fill: Colors.white.withValues(alpha: 0.88),
-            ),
-            child: Icon(icon, size: 18, color: InsightTheme.ink),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: InsightTheme.glassIconButtonDecoration(
+            fill: Colors.white.withValues(alpha: 0.88),
+          ),
+          child: IconButton(
+            tooltip: tooltip,
+            onPressed: onTap,
+            icon: Icon(icon, size: 20, color: InsightTheme.ink),
           ),
         ),
       ),

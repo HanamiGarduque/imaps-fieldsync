@@ -14,6 +14,7 @@ import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/layout/responsive_layout.dart';
 import '../../profile_settings/screens/notifications_screen.dart';
 
 import '../../../core/theme/insight_theme.dart';
@@ -84,19 +85,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   }
 
   Widget _sectionHelpButton({required String title, required String message}) {
-    return InkWell(
-      onTap: () => _showSectionHelp(title: title, message: message),
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        width: 22,
-        height: 22,
-        alignment: Alignment.center,
-        decoration: const BoxDecoration(
-          color: InsightTheme.blue1,
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(Icons.info_outline_rounded, size: 15, color: Colors.white),
-      ),
+    return IconButton(
+      tooltip: 'About $title',
+      onPressed: () => _showSectionHelp(title: title, message: message),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+      icon: const Icon(Icons.info_outline_rounded, size: 20, color: InsightTheme.blueInk),
     );
   }
 
@@ -105,6 +98,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        scrollable: true,
         title: Text(title, style: InsightTheme.urbanist(18, w: FontWeight.w700, c: InsightTheme.ink)),
         content: Text(message, style: InsightTheme.openSans(13, c: InsightTheme.ink2)),
         actions: [
@@ -550,10 +544,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                         title: _typeLabel(row),
                         dataType: _shortTypeTag(row),
                         dataSize: _dataSizeFor(row),
-                        statusText: (isSyncingThisJob && row['status'] != 'conflict')
-                            ? 'Syncing…'
-                            : _statusTextFor(row),
+                        statusText: _statusTextFor(row),
                         isPending: true,
+                        isSyncing: row['status'] == 'syncing',
                         isFailed: row['status'] == 'failed',
                         isConflict: row['status'] == 'conflict',
                       ),
@@ -566,14 +559,16 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                     decoration: const BoxDecoration(
                       border: Border(top: BorderSide(color: InsightTheme.line)),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
                         TextButton(
                           style: TextButton.styleFrom(
                             backgroundColor: InsightTheme.blueTint,
                             foregroundColor: InsightTheme.blueInk,
-                            minimumSize: const Size(0, 44),
+                            minimumSize: const Size(48, 48),
                             padding: const EdgeInsets.symmetric(horizontal: 14),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
@@ -582,12 +577,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           ),
                           child: Text('Review conflict', style: InsightTheme.openSans(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
                         ),
-                        const SizedBox(width: 8),
                         TextButton(
                           style: TextButton.styleFrom(
                             backgroundColor: InsightTheme.amberTint,
                             foregroundColor: InsightTheme.amberInk,
-                            minimumSize: const Size(0, 44),
+                            minimumSize: const Size(48, 48),
                             padding: const EdgeInsets.symmetric(horizontal: 14),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
@@ -605,13 +599,13 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                     decoration: const BoxDecoration(
                       border: Border(top: BorderSide(color: InsightTheme.line)),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
                       children: [
                         TextButton.icon(
                           style: TextButton.styleFrom(
                             foregroundColor: InsightTheme.blue1,
-                            minimumSize: const Size(0, 44),
+                            minimumSize: const Size(48, 48),
                             padding: const EdgeInsets.symmetric(horizontal: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
@@ -917,7 +911,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
               ),
             ],
           ),
-          const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Container(
@@ -925,32 +918,33 @@ class _UpdatesScreenState extends State<UpdatesScreen>
               decoration: const BoxDecoration(
                 border: Border(top: BorderSide(color: InsightTheme.line)),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _PerfMetric(label: 'SYNCED ITEMS', value: '$syncedCount', color: InsightTheme.ink),
-                  ),
-                  Container(width: 1, height: 26, color: InsightTheme.line),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: _PerfMetric(label: 'PENDING QUEUE', value: '${_pendingRows.length}', color: InsightTheme.blue1),
-                    ),
-                  ),
-                  Container(width: 1, height: 26, color: InsightTheme.line),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: _PerfMetric(label: 'PENDING SIZE', value: _formatBytes(_pendingBytes), color: InsightTheme.ink),
-                    ),
-                  ),
-                ],
-              ),
+              child: LayoutBuilder(builder: (context, constraints) {
+                final values = ['$syncedCount', '${_pendingRows.length}', _formatBytes(_pendingBytes)];
+                var minWidth = 64.0;
+                for (final value in values) {
+                  final painter = TextPainter(
+                    text: TextSpan(text: value, style: DefaultTextStyle.of(context).style.merge(
+                        InsightTheme.urbanist(22, w: FontWeight.w800))),
+                    textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
+                  )..layout();
+                  if (painter.width + 12 > minWidth) minWidth = painter.width + 12;
+                  painter.dispose();
+                }
+                final columns = ((constraints.maxWidth + 12) / (minWidth + 12)).floor().clamp(1, 3);
+                final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
+                return Wrap(spacing: 12, runSpacing: 16, children: [
+                  SizedBox(width: width, child: _PerfMetric(label: 'Synced items', value: values[0], color: InsightTheme.ink)),
+                  SizedBox(width: width, child: _PerfMetric(label: 'Pending queue', value: values[1], color: InsightTheme.blue1)),
+                  SizedBox(width: width, child: _PerfMetric(label: 'Pending size', value: values[2], color: InsightTheme.ink)),
+                ]);
+              }),
             ),
           ),
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            spacing: 12,
+            runSpacing: 6,
             children: [
               Text('Queue Record Distribution', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink2)),
               Text('$totalItems total', style: InsightTheme.jetBrains(12, c: InsightTheme.ink3)),
@@ -966,21 +960,16 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 : Row(children: segments),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(child: _PerfLegendItem(color: InsightTheme.green, label: 'Synced Data', value: syncedCount)),
-              const SizedBox(width: 8),
-              Expanded(child: _PerfLegendItem(color: InsightTheme.blue1, label: 'Photos', value: _photosWaiting)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: _PerfLegendItem(color: InsightTheme.blueInk, label: 'Checklists', value: _checklistWaiting)),
-              const SizedBox(width: 8),
-              Expanded(child: _PerfLegendItem(color: InsightTheme.amber, label: 'GPS Coordinates', value: _gpsWaiting)),
-            ],
-          ),
+          LayoutBuilder(builder: (context, constraints) {
+            final twoColumns = constraints.maxWidth >= MediaQuery.textScalerOf(context).scale(160) * 2 + 8;
+            final width = twoColumns ? (constraints.maxWidth - 8) / 2 : constraints.maxWidth;
+            return Wrap(spacing: 8, runSpacing: 8, children: [
+              SizedBox(width: width, child: _PerfLegendItem(color: InsightTheme.green, label: 'Synced Data', value: syncedCount)),
+              SizedBox(width: width, child: _PerfLegendItem(color: InsightTheme.blue1, label: 'Photos', value: _photosWaiting)),
+              SizedBox(width: width, child: _PerfLegendItem(color: InsightTheme.blueInk, label: 'Checklists', value: _checklistWaiting)),
+              SizedBox(width: width, child: _PerfLegendItem(color: InsightTheme.amber, label: 'GPS Coordinates', value: _gpsWaiting)),
+            ]);
+          }),
         ],
       ),
     );
@@ -1014,194 +1003,125 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                         // the page background/decorative blur show through.
                         Container(
                           width: double.infinity,
+                          key: const ValueKey('sync_header'),
+                          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.48),
                           decoration: const BoxDecoration(
                             color: InsightTheme.surface,
                             border: Border(bottom: BorderSide(color: InsightTheme.line, width: 1)),
                           ),
+                          child: SingleChildScrollView(
+                          primary: false,
+                          child: ConstrainedContent.wide(
                           child: SpringSlide(
                           animation: springFor(0),
                           beginOffset: const Offset(0, -28),
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                // Overflow fix (#3): let the text column take
-                                // only the space left of the Sync button so a
-                                // long count ("Sync 10 Queued") can never push
-                                // the button past the header container edge.
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          'Sync Center',
-                                          style: InsightTheme.urbanist(
-                                            24,
-                                            w: FontWeight.w700,
-                                            c: InsightTheme.ink,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
+                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                            child: ValueListenableBuilder<SyncProgress?>(
+                              valueListenable: SyncOutboxService.progress,
+                              builder: (context, progress, _) {
+                                final busy = _syncingNow || progress != null;
+                                final label = busy ? 'Syncing...' : _pendingRows.isEmpty
+                                    ? 'All Synced' : 'Sync ${_pendingRows.length} Queued';
+                                final actionStyle = InsightTheme.inter(13, w: FontWeight.w700);
+                                final action = FilledButton(
+                                  onPressed: busy || _pendingRows.isEmpty ? null : _handleSyncNow,
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(48, 48),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                    backgroundColor: InsightTheme.blue1,
+                                    foregroundColor: Colors.white,
+                                    disabledBackgroundColor: busy ? InsightTheme.blueTint : InsightTheme.greenTint,
+                                    disabledForegroundColor: busy ? InsightTheme.blueInk : InsightTheme.greenInk,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    textStyle: actionStyle,
+                                  ),
+                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                    if (busy) const SizedBox(width: 18, height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: InsightTheme.blueInk))
+                                    else Icon(_pendingRows.isEmpty ? Icons.check_circle_outline_rounded : Icons.sync_rounded, size: 18),
+                                    const SizedBox(width: 8),
+                                    Flexible(child: Text(label)),
+                                  ]),
+                                );
+                                final metadata = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: _isOnline ? InsightTheme.greenTint : InsightTheme.redTint,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                      Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle,
+                                          color: _isOnline ? InsightTheme.green : InsightTheme.red)),
+                                      const SizedBox(width: 6),
+                                      Text(_isOnline ? 'Online' : 'Offline', style: InsightTheme.inter(12,
+                                          w: FontWeight.w600, c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk)),
+                                    ]),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text('Last sync: ${_relativeTime(_lastSync)}', style: InsightTheme.inter(12, c: InsightTheme.ink3)),
+                                ]);
+                                return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                                  Row(children: [
+                                    Container(width: 40, height: 40,
+                                        decoration: BoxDecoration(color: InsightTheme.blueTint, borderRadius: BorderRadius.circular(12)),
+                                        child: const Icon(Icons.cloud_sync_outlined, color: InsightTheme.blueInk, size: 22)),
+                                    const SizedBox(width: 12),
+                                    Expanded(child: Semantics(header: true, child: Text(
+                                           'Sync Center',
+                                           style: InsightTheme.urbanist(
+                                             24,
+                                             w: FontWeight.w800,
+                                             c: InsightTheme.ink,
+                                           ),
+                                         ))),
+                                         const SizedBox(width: 8),
                                         _sectionHelpButton(
                                           title: 'Sync Center',
                                           message: 'The Sync Center helps you manage your inspection information when working with or without an internet connection. When you are offline, the app keeps the information you need on your phone so you can continue working. When your internet connection returns, the app sends the information that is waiting to the system and updates the sync status.\n\nOffline to Online: If you complete or update an inspection while offline, the information stays safely on your phone while it is waiting to be sent. Once you are back online, the app can send the waiting information to the system. The Sync Center lets you check whether those updates have already been sent or are still waiting.',
                                         ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Row(
-                                      children: [
-                                        Container(
-                                          width: 6,
-                                          height: 6,
-                                          decoration: BoxDecoration(
-                                            color: _isOnline
-                                                ? InsightTheme.green
-                                                : InsightTheme.red,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          _isOnline ? 'Online' : 'Offline',
-                                          style: InsightTheme.openSans(
-                                            12,
-                                            w: FontWeight.w600,
-                                            c: InsightTheme.ink2,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Last sync: ${_relativeTime(_lastSync)}',
-                                      style: InsightTheme.openSans(
-                                        12,
-                                        w: FontWeight.w500,
-                                        c: InsightTheme.ink3,
-                                      ),
-                                    ),
-                                    // Phase 5: live drain progress, e.g.
-                                    // "Submitting inspection (2 of 5) —
-                                    // Uploading photo 3 of 12". Only visible
-                                    // while SyncOutboxService is actually
-                                    // draining; collapses to nothing (not
-                                    // even a SizedBox) the rest of the time
-                                    // so it doesn't reserve dead space.
-                                    ValueListenableBuilder<SyncProgress?>(
-                                      valueListenable: SyncOutboxService.progress,
-                                      builder: (context, syncProgress, _) {
-                                        if (syncProgress == null) {
-                                          return const SizedBox.shrink();
-                                        }
-                                        return Padding(
-                                          padding: const EdgeInsets.only(top: 4),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              const SizedBox(
-                                                width: 9,
-                                                height: 9,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 1.3,
-                                                  color: InsightTheme.blue1,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Flexible(
-                                                child: Text(
-                                                  syncProgress.displayText,
-                                                  style: InsightTheme.openSans(
-                                                    12,
-                                                    w: FontWeight.w600,
-                                                    c: InsightTheme.blueInk,
-                                                  ),
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ),
-                                ),
-                                const SizedBox(width: 12),
-                                GestureDetector(
-                                  onTap: (_syncingNow || _pendingRows.isEmpty) ? null : _handleSyncNow,
-                                  child: Container(
-                                    constraints: const BoxConstraints(minHeight: 44),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 10,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: (_syncingNow || _pendingRows.isEmpty)
-                                          ? InsightTheme.blue1.withValues(alpha: 0.5)
-                                          : InsightTheme.blue1,
-                                      borderRadius: BorderRadius.circular(12),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: InsightTheme.blue1.withValues(alpha: 0.25),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 4),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (_syncingNow) ...[
-                                          const SizedBox(
-                                            width: 14,
-                                            height: 14,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                        ] else ...[
-                                          Icon(
-                                            _pendingRows.isEmpty ? Icons.check_rounded : Icons.sync_rounded,
-                                            size: 15,
-                                            color: Colors.white,
-                                          ),
-                                          const SizedBox(width: 8),
-                                        ],
-                                        Text(
-                                          _syncingNow
-                                              ? 'Syncing...'
-                                              : _pendingRows.isEmpty
-                                                  ? 'All Synced'
-                                                  : 'Sync ${_pendingRows.length} Queued',
-                                          style: InsightTheme.openSans(
-                                            13,
-                                            w: FontWeight.w700,
-                                            c: Colors.white,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                  ]),
+                                  const SizedBox(height: 12),
+                                  LayoutBuilder(builder: (context, constraints) {
+                                    double textWidth(String text, TextStyle style) {
+                                      final painter = TextPainter(
+                                        text: TextSpan(text: text, style: DefaultTextStyle.of(context).style.merge(style)),
+                                        textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
+                                      )..layout();
+                                      final width = painter.width;
+                                      painter.dispose();
+                                      return width;
+                                    }
+                                    final actionWidth = textWidth(label, actionStyle) + 62;
+                                    final metadataWidth = textWidth('Last sync: ${_relativeTime(_lastSync)}', InsightTheme.inter(12))
+                                        .clamp(120.0, double.infinity);
+                                    if (constraints.maxWidth >= actionWidth + metadataWidth + 16) {
+                                      return Row(children: [Expanded(child: metadata), const SizedBox(width: 16), action]);
+                                    }
+                                    return Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        children: [metadata, const SizedBox(height: 10), action]);
+                                  }),
+                                  if (progress != null) Padding(
+                                    padding: const EdgeInsets.only(top: 12),
+                                    child: Semantics(liveRegion: true, child: Text(progress.displayText,
+                                        style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk))),
                                   ),
-                                ),
-                              ],
+                                ]);
+                              },
                             ),
                           ),
+                        ),
+                        ),
                         ),
                         ),
 
                     Expanded(
                       child: RefreshIndicator(
                         onRefresh: () => _refresh(replay: true),
+                        child: ConstrainedContent.wide(
                         child: ListView(
+                          key: const ValueKey('sync_body'),
                           physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.only(bottom: kInsightBottomNavReserve),
                           children: [
@@ -1292,22 +1212,15 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                               children: [
                                 Row(
                                   children: [
-                                    const Icon(Icons.sd_storage_rounded, size: 16, color: InsightTheme.ink2),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        'OFFLINE STORAGE CACHE',
-                                        style: InsightTheme.jetBrains(12, w: FontWeight.w700, ls: 0.6, c: InsightTheme.ink2),
-                                      ),
-                                    ),
+                                    const Icon(Icons.sd_storage_rounded, size: 20, color: InsightTheme.blueInk),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Text('Offline Storage Cache', style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink)),
+                                      Text('SQLite Active', style: InsightTheme.inter(12, c: InsightTheme.ink3)),
+                                    ])),
                                     _sectionHelpButton(
                                       title: 'Offline Storage Cache',
                                       message: 'This shows the inspection information currently saved on your phone for offline work. This allows you to continue accessing and working on available tasks even without an internet connection.',
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      'SQLite Active',
-                                      style: InsightTheme.openSans(12, w: FontWeight.w500, c: InsightTheme.ink3),
                                     ),
                                   ],
                                 ),
@@ -1319,29 +1232,29 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(color: InsightTheme.line),
                                   ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: _StorageStatItem(
+                                  child: LayoutBuilder(builder: (context, constraints) {
+                                    final columns = ((constraints.maxWidth + 12) /
+                                        (MediaQuery.textScalerOf(context).scale(80) + 12)).floor().clamp(1, 3);
+                                    final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
+                                    return Wrap(spacing: 12, runSpacing: 16, children: [
+                                      SizedBox(width: width, child: _StorageStatItem(
                                           label: 'Cached Jobs',
                                           value: '$_cachedJobsCount',
                                         ),
                                       ),
-                                      Expanded(
-                                        child: _StorageStatItem(
+                                      SizedBox(width: width, child: _StorageStatItem(
                                           label: 'Unsynced Files',
                                           value: '$_unsyncedPhotoFileCount',
                                         ),
                                       ),
-                                      Expanded(
-                                        child: _StorageStatItem(
+                                      SizedBox(width: width, child: _StorageStatItem(
                                           label: 'Reclaimable',
                                           value: _formatBytes(_clearableBytes.toDouble()),
                                           valueColor: _clearableBytes > 0 ? InsightTheme.amberInk : null,
                                         ),
                                       ),
-                                    ],
-                                  ),
+                                    ]);
+                                  }),
                                 ),
                                 const SizedBox(height: 12),
                                 SizedBox(
@@ -1351,7 +1264,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     style: OutlinedButton.styleFrom(
                                       side: const BorderSide(color: InsightTheme.lineStrong),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                      minimumSize: const Size(0, 44),
+                                      minimumSize: const Size(48, 48),
                                     ),
                                     child: _clearingCache
                                         ? const SizedBox(
@@ -1363,12 +1276,12 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                             children: [
                                               Icon(Icons.delete_outline_rounded, size: 15, color: InsightTheme.ink3),
                                               const SizedBox(width: 8),
-                                              Text(
+                                              Flexible(child: Text(
                                                 _clearableBytes > 0
                                                     ? 'Clear ${_formatBytes(_clearableBytes.toDouble())} Photo Cache'
                                                     : 'Photo Cache Clear',
                                                 style: InsightTheme.openSans(13, w: FontWeight.w600, c: InsightTheme.ink2),
-                                              ),
+                                              )),
                                             ],
                                           ),
                                   ),
@@ -1408,7 +1321,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    Text(
+                                    Expanded(child: Text(
                                       'WAITING TO SYNC',
                                       style: InsightTheme.jetBrains(
                                         12,
@@ -1416,7 +1329,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                         ls: 1.2,
                                         c: InsightTheme.ink2,
                                       ),
-                                    ),
+                                    )),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
@@ -1435,7 +1348,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Text(
+                                  Expanded(child: Text(
                                     'COMPLETED AUDIT LOG',
                                     style: InsightTheme.jetBrains(
                                       12,
@@ -1443,8 +1356,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                       ls: 1.2,
                                       c: InsightTheme.ink3,
                                     ),
-                                  ),
-                                  const Spacer(),
+                                  )),
                                   _sectionHelpButton(
                                     title: 'Completed Audit Log',
                                     message: 'This shows inspection updates that have already been successfully sent to the system. It helps you confirm that your completed work has been received.',
@@ -1545,9 +1457,10 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                             ],
                           ),
                         ),
-                          ],
+                           ],
+                         ),
                         ),
-                      )
+                       )
                     ),
                   ],
                 ),
@@ -1637,7 +1550,7 @@ class _StorageStatItem extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           value,
-          style: InsightTheme.urbanist(14, w: FontWeight.w700, c: valueColor ?? InsightTheme.ink),
+          style: InsightTheme.urbanist(18, w: FontWeight.w700, c: valueColor ?? InsightTheme.ink),
         ),
       ],
     );
@@ -1656,9 +1569,9 @@ class _PerfMetric extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3, ls: 0.3)),
-        const SizedBox(height: 3),
-        Text(value, style: InsightTheme.urbanist(15, w: FontWeight.w800, c: color)),
+        Text(value, style: InsightTheme.urbanist(22, w: FontWeight.w800, c: color)),
+        const SizedBox(height: 4),
+        Text(label, style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink3)),
       ],
     );
   }
@@ -1688,7 +1601,6 @@ class _PerfLegendItem extends StatelessWidget {
             child: Text(
               label,
               style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink2),
-              overflow: TextOverflow.ellipsis,
             ),
           ),
           Text('$value', style: InsightTheme.jetBrains(12, w: FontWeight.w700, c: InsightTheme.ink)),
@@ -1705,6 +1617,7 @@ class _LogDataRow extends StatelessWidget {
   final String dataSize;
   final String statusText;
   final bool isPending;
+  final bool isSyncing;
   final bool isFailed;
   final bool isConflict;
 
@@ -1715,6 +1628,7 @@ class _LogDataRow extends StatelessWidget {
     required this.dataSize,
     required this.statusText,
     required this.isPending,
+    this.isSyncing = false,
     this.isFailed = false,
     this.isConflict = false,
   });
@@ -1760,93 +1674,29 @@ class _LogDataRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(dataType, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                const SizedBox(height: 4),
+                Text(title, style: InsightTheme.inter(13.5, w: FontWeight.w700, c: InsightTheme.ink)),
+                const SizedBox(height: 8),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        dataType,
-                        style: InsightTheme.openSans(12, c: InsightTheme.ink2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    if (isSyncing && !isConflict && !isFailed)
+                      const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(
+                          strokeWidth: 1.5, color: InsightTheme.blueInk))
+                    else Icon(
+                      !isPending ? Icons.check_circle_rounded : isConflict ? Icons.warning_rounded
+                          : isFailed ? Icons.error_rounded : Icons.schedule_rounded,
+                      size: 14, color: !isPending ? InsightTheme.greenInk : accentInk,
                     ),
-                    const SizedBox(width: 8),
-                    Row(
-                      children: [
-                        if (isPending) ...[
-                          if (isConflict) ...[
-                            Icon(
-                              Icons.warning_rounded,
-                              size: 11,
-                              color: InsightTheme.amberInk,
-                            ),
-                          ] else if (!isFailed) ...[
-                            const SizedBox(
-                              width: 9,
-                              height: 9,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
-                                color: InsightTheme.amberInk,
-                              ),
-                            ),
-                          ] else ...[
-                            Icon(
-                              Icons.error_rounded,
-                              size: 11,
-                              color: InsightTheme.redInk,
-                            ),
-                          ],
-                          const SizedBox(width: 6),
-                        ] else ...[
-                          const Icon(
-                            Icons.check_circle_rounded,
-                            size: 11,
-                            color: InsightTheme.greenInk,
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Text(
-                          statusText,
-                          style: InsightTheme.openSans(
-                            12,
-                            w: FontWeight.w600,
-                            c: isPending ? accentInk : InsightTheme.ink3,
-                          ),
-                        ),
-                      ],
-                    ),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(statusText, style: InsightTheme.inter(12, w: FontWeight.w600,
+                        c: isPending ? accentInk : InsightTheme.ink3))),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: InsightTheme.openSans(
-                          13.5,
-                          w: FontWeight.w700,
-                          c: InsightTheme.ink,
-                        ),
-                        maxLines: 2,
-                        softWrap: true,
-                        overflow: TextOverflow.visible,
-                      ),
-                    ),
-                    if (dataSize != '—' && dataSize.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        dataSize,
-                        style: InsightTheme.jetBrains(
-                          12,
-                          w: FontWeight.w600,
-                          c: InsightTheme.ink2,
-                        ),
-                      ),
-                    ],
-                  ],
+                if (dataSize != '—' && dataSize.isNotEmpty) Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(dataSize, style: InsightTheme.jetBrains(12, w: FontWeight.w600, c: InsightTheme.ink2)),
                 ),
               ],
             ),

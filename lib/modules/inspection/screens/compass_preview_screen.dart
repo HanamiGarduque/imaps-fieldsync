@@ -138,62 +138,69 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
               child: HeaderSplitBody(
                 header: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: Row(
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                        _GlassIconButton(
-                          icon: Icons.arrow_back_ios_new_rounded,
-                          onTap: () => Navigator.pop(context),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Compass',
-                                style: InsightTheme.poppins(
-                                  18,
-                                  w: FontWeight.w700,
-                                  c: InsightTheme.ink,
-                                ),
-                              ),
-                              Text(
-                                'Live orientation',
-                                style: InsightTheme.inter(
-                                  12,
-                                  c: InsightTheme.ink2,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _GlassIconButton(
+                            icon: Icons.arrow_back_ios_new_rounded,
+                            onTap: () => Navigator.pop(context),
                           ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: InsightTheme.blueTint,
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: InsightTheme.blue1.withValues(alpha: 0.25),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Compass',
+                                  style: InsightTheme.poppins(
+                                    18,
+                                    w: FontWeight.w700,
+                                    c: InsightTheme.ink,
+                                  ),
+                                ),
+                                Text(
+                                  'Live orientation',
+                                  style: InsightTheme.inter(
+                                    12,
+                                    c: InsightTheme.ink2,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          child: Text(
-                            'STANDALONE',
-                            style: InsightTheme.jetBrains(
-                              9,
-                              w: FontWeight.w800,
-                              c: InsightTheme.blueInk,
-                              ls: 0.5,
-                            ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: InsightTheme.blueTint,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: InsightTheme.blue1.withValues(alpha: 0.25),
                           ),
                         ),
-                      ],
-                    ),
+                        child: Text(
+                          'STANDALONE',
+                          style: InsightTheme.jetBrains(
+                            9,
+                            w: FontWeight.w800,
+                            c: InsightTheme.blueInk,
+                            ls: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 // Center Compass Dial Area
                 primary: _compassUnavailable
@@ -319,10 +326,9 @@ class _StandaloneCompassDial extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Grow the hub when the ambient text scale makes the centred readout taller
-    // than the circle, the same way the GPS dial does. Without this the
-    // cardinal, the heading number and the LIVE chip are vertically clipped.
+    // Grow the hub for enlarged text without enlarging the readout again.
     var hubSize = size * 0.47;
+    final readoutSize = hubSize;
     final scaler = MediaQuery.textScalerOf(context);
     double lineHeight(double fontSize) {
       final painter = TextPainter(
@@ -337,11 +343,13 @@ class _StandaloneCompassDial extends StatelessWidget {
       painter.dispose();
       return measured;
     }
-    final needed = lineHeight(hubSize * 0.085) +
+
+    final needed =
+        lineHeight(hubSize * 0.085) +
         lineHeight(hubSize * 0.19) +
         lineHeight(hubSize * 0.066) +
         hubSize * 0.066;
-    hubSize = math.min(size * 0.62, math.max(hubSize, needed / 0.78));
+    hubSize = math.min(size - 8, math.max(hubSize, needed / 0.78));
 
     return SizedBox(
       width: size,
@@ -424,7 +432,7 @@ class _StandaloneCompassDial extends StatelessWidget {
                 Text(
                   headingCardinal,
                   style: InsightTheme.jetBrains(
-                    hubSize * 0.085,
+                    readoutSize * 0.085,
                     w: FontWeight.w800,
                     ls: 1.5,
                     c: Colors.white.withValues(alpha: 0.8),
@@ -438,7 +446,7 @@ class _StandaloneCompassDial extends StatelessWidget {
                     Text(
                       heading != null ? '${heading!.round()}' : '--',
                       style: InsightTheme.jetBrains(
-                        hubSize * 0.19,
+                        readoutSize * 0.19,
                         w: FontWeight.w800,
                         c: Colors.white,
                       ),
@@ -446,7 +454,7 @@ class _StandaloneCompassDial extends StatelessWidget {
                     Text(
                       '°',
                       style: InsightTheme.jetBrains(
-                        hubSize * 0.115,
+                        readoutSize * 0.115,
                         w: FontWeight.w700,
                         c: Colors.white.withValues(alpha: 0.75),
                       ),
@@ -469,7 +477,7 @@ class _StandaloneCompassDial extends StatelessWidget {
                   child: Text(
                     'LIVE',
                     style: InsightTheme.jetBrains(
-                      hubSize * 0.066,
+                      readoutSize * 0.066,
                       w: FontWeight.w700,
                       ls: 1,
                       c: Colors.white.withValues(alpha: 0.9),
@@ -644,51 +652,60 @@ class _StandaloneOrientationCard extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: InsightTheme.blueTint,
-                  borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
-                  border: Border.all(
-                    color: InsightTheme.blueInk.withValues(alpha: 0.15),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: InsightTheme.blueTint,
+                      borderRadius: BorderRadius.circular(
+                        InsightTheme.radiusSm,
+                      ),
+                      border: Border.all(
+                        color: InsightTheme.blueInk.withValues(alpha: 0.15),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.explore_rounded,
+                      size: 16,
+                      color: InsightTheme.blueInk,
+                    ),
                   ),
-                ),
-                child: const Icon(
-                  Icons.explore_rounded,
-                  size: 16,
-                  color: InsightTheme.blueInk,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'ORIENTATION DATA',
-                      style: InsightTheme.jetBrains(
-                        8.5,
-                        w: FontWeight.w800,
-                        ls: 1,
-                        c: InsightTheme.ink3,
-                      ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'ORIENTATION DATA',
+                          style: InsightTheme.jetBrains(
+                            8.5,
+                            w: FontWeight.w800,
+                            ls: 1,
+                            c: InsightTheme.ink3,
+                          ),
+                        ),
+                        Text(
+                          'Live Device Magnetometer',
+                          style: InsightTheme.poppins(
+                            13.5,
+                            w: FontWeight.w700,
+                            c: InsightTheme.ink,
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      'Live Device Magnetometer',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: InsightTheme.poppins(
-                        13.5,
-                        w: FontWeight.w700,
-                        c: InsightTheme.ink,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -727,24 +744,18 @@ class _StandaloneOrientationCard extends StatelessWidget {
           const SizedBox(height: 12),
           Container(height: 1, color: InsightTheme.line),
           const SizedBox(height: 12),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              Expanded(
-                child: _MetricTile(
-                  label: 'HEADING',
-                  value: heading != null ? '${heading!.round()}°' : '--',
-                ),
+              _MetricTile(
+                label: 'HEADING',
+                value: heading != null ? '${heading!.round()}°' : '--',
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _MetricTile(label: 'CARDINAL', value: headingCardinal),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _MetricTile(
-                  label: 'ACCURACY',
-                  value: accuracy != null ? '±${accuracy!.round()}°' : 'High',
-                ),
+              _MetricTile(label: 'CARDINAL', value: headingCardinal),
+              _MetricTile(
+                label: 'ACCURACY',
+                value: accuracy != null ? '±${accuracy!.round()}°' : 'High',
               ),
             ],
           ),

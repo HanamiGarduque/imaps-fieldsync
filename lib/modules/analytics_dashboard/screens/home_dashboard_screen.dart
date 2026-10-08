@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/models/user_profile.dart';
 import '../models/activity_event_category.dart';
@@ -101,6 +102,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // without a widget tree; filtering happens client-side over the already-fetched
   // batch (see _kRecentActivityLimit below) rather than re-querying per tap.
   String _activityFilter = 'all';
+  bool _showAllActivity = false;
+  final ScrollController _activityFilterController = ScrollController();
 
    // The calendar selection is independent of the live Today/Note card.
    final DateTime _now = DateTime.now();
@@ -149,6 +152,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   void initState() {
     super.initState();
     _pageController = PageController(viewportFraction: 0.88);
+    PaintingBinding.instance.systemFonts.addListener(_onFontsChanged);
     _checkInitialConnectivity();
 
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
@@ -165,6 +169,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     _loadUpcomingTasks();
     _loadRecentActivity();
   }
+
+  // TextPainter-based layout must be measured again when runtime fonts load.
+  void _onFontsChanged() { if (mounted) setState(() {}); }
 
   Future<void> _checkInitialConnectivity() async {
     final online = await AuthService.hasConnectivity();
@@ -188,6 +195,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   @override
   void dispose() {
     _pageController.dispose();
+    PaintingBinding.instance.systemFonts.removeListener(_onFontsChanged);
+    _activityFilterController.dispose();
     _connectivitySubscription.cancel();
     disposeSpringEntrance();
     super.dispose();
@@ -238,9 +247,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     }
   }
 
-  // Recent Activity shows at most 15 items — filtered client-side into
-  // All / Tasks / Sync / Profile once fetched.
+  // Fetch once; each category initially reveals seven of this recent batch.
   static const int _kRecentActivityLimit = 15;
+  static const int _kVisibleActivityLimit = 7;
 
   Future<void> _loadRecentActivity() async {
     setState(() => _isLoadingActivity = true);
@@ -335,6 +344,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     return _recentActivity
         .where((a) => _eventCategory(a['event_type'] as String? ?? '') == _activityFilter)
         .toList();
+  }
+
+  void _selectActivityFilter(String filter) {
+    if (_activityFilter == filter) return;
+    setState(() {
+      _activityFilter = filter;
+      _showAllActivity = false;
+    });
   }
 
   String _getInitials(String name) {
@@ -501,6 +518,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final firstName = UserProfile.displayFullName(widget.profile.fullName);
     final greeting = _greeting(_now);
      final tasksByDay = _tasksByDayInMonth(_calendarMonth);
+    final filteredActivity = _filteredActivity;
+    final visibleActivity = _showAllActivity
+        ? filteredActivity
+        : filteredActivity.take(_kVisibleActivityLimit).toList();
+    final activityMotion = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero : const Duration(milliseconds: 220);
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -516,7 +539,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               // ----------------------------------------------------
               // Separate white surfaces follow the v3 section grouping.
               // ----------------------------------------------------
-              Container(
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
                 key: const ValueKey('inspector_section'),
                 width: double.infinity,
                 padding: const EdgeInsets.only(top: 12),
@@ -535,9 +560,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       beginOffset: const Offset(0, -32),
                       child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          GestureDetector(
+                      child: LayoutBuilder(builder: (context, constraints) {
+                        final titleStyle = InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink);
+                        final titleSize = TextPainter(
+                          text: TextSpan(text: 'FieldSync', style: titleStyle),
+                          textScaler: MediaQuery.textScalerOf(context),
+                          textDirection: Directionality.of(context),
+                        )..layout();
+                        final fitsOneRow = constraints.maxWidth >= 60 + titleSize.width + 24 + 48;
+                        titleSize.dispose();
+                        final identity = Row(mainAxisSize: MainAxisSize.min, children: [
+                          Semantics(
+                            button: true,
+                            label: 'Edit profile',
+                            child: GestureDetector(
                             onTap: () async {
                               final result = await Navigator.push<UserProfile?>(
                                 context,
@@ -574,19 +610,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               ),
                             ),
                           ),
+                          ),
                           const SizedBox(width: 12),
-                          Expanded(child: Text('FieldSync',
-                            style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink))),
-                          const SizedBox(width: 8),
-                          Container(
-                            margin: const EdgeInsets.only(right: 12),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _isOnline ? InsightTheme.greenTint : InsightTheme.redTint,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Row(
-                              children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('FieldSync', style: titleStyle),
+                              const SizedBox(height: 4),
+                              Row(mainAxisSize: MainAxisSize.min, children: [
                                 Container(
                                   width: 6, height: 6,
                                   decoration: BoxDecoration(
@@ -597,10 +628,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 const SizedBox(width: 6),
                                 Text(_isOnline ? 'Online' : 'Offline',
                                      style: InsightTheme.inter(12, w: FontWeight.w600, c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk)),
-                              ],
-                            ),
+                              ]),
+                            ],
                           ),
-                          _NotificationBtn(
+                        ]);
+                        final notification = _NotificationBtn(
                             hasUnread: _unreadCount > 0,
                             onTap: () async {
                               await Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
@@ -609,9 +641,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               // backs out of it instead of leaving it stale.
                               _loadRecentActivity();
                             },
-                          ),
-                        ],
-                      ),
+                          );
+                        if (fitsOneRow) {
+                          return Row(children: [identity, const Spacer(), notification]);
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            identity,
+                            const SizedBox(height: 8),
+                            Align(alignment: Alignment.centerRight, child: notification),
+                          ],
+                        );
+                      }),
                     ),
                     ),
                     const SizedBox(height: 8),
@@ -640,9 +682,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   ],
                 ),
               ),
+              ),
               const SizedBox(height: 8),
-              Container(
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
                 key: const ValueKey('calendar_section'),
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
                 decoration: BoxDecoration(
                   color: InsightTheme.surface,
                   borderRadius: BorderRadius.circular(24),
@@ -658,33 +704,44 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                        child: SpringSlide(
                          animation: springFor(1),
                          beginOffset: const Offset(0, 18),
-                         child: _TodayScheduleCard(
-                           tasksForDate: (date) => _tasksByDayInMonth(date)[date.day] ?? const <TaskItem>[],
-                           dotColorForTask: _calendarDotColor,
-                           isLoading: _isLoadingTasks,
+                          child: _HomeCalendarPager(
+                            key: ValueKey('home_calendar_${widget.profile.id}'),
+                            userId: widget.profile.id,
+                            month: _calendarMonth,
+                            selectedDay: _selectedDay,
+                            tasksByDay: tasksByDay,
+                            dotColorForTask: _calendarDotColor,
+                            onPick: _onFullCalendarPick,
+                            onPreviousMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
+                            onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
+                            timeDateView: _TodayScheduleCard(
+                              tasksForDate: (date) => _tasksByDayInMonth(date)[date.day] ?? const <TaskItem>[],
+                              dotColorForTask: _calendarDotColor,
+                              isLoading: _isLoadingTasks,
+                            ),
                          ),
                        ),
-                     ),
-                     Center(
-                       child: TextButton(
-                         onPressed: _toggleFullCalendar,
-                         child: Tooltip(
-                           message: _showFullCalendar ? 'Hide full calendar' : 'Show full calendar',
-                           child: Row(
-                             mainAxisSize: MainAxisSize.min,
-                             children: [
-                               Text('Calendar', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
-                               AnimatedRotation(
-                                 turns: _showFullCalendar ? 0.5 : 0,
-                                 duration: const Duration(milliseconds: 220),
-                                 child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: InsightTheme.blue1),
-                               ),
-                             ],
-                           ),
-                         ),
-                       ),
-                     ),
-                     SpringSlide(
+                      ),
+                      Center(
+                        child: TextButton(
+                          onPressed: _toggleFullCalendar,
+                          child: Tooltip(
+                            message: _showFullCalendar ? 'Hide full calendar' : 'Show full calendar',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('Calendar', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                                AnimatedRotation(
+                                  turns: _showFullCalendar ? 0.5 : 0,
+                                  duration: const Duration(milliseconds: 220),
+                                  child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: InsightTheme.blue1),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      SpringSlide(
                       animation: springFor(1),
                       beginOffset: const Offset(0, 18),
                       child: AnimatedSwitcher(
@@ -723,23 +780,32 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   ],
                 ),
               ),
+              ),
               const SizedBox(height: 8),
 
               // ----------------------------------------------------
               // 2. ACTIVE ASSIGNMENTS
               // ----------------------------------------------------
-              Container(
-                key: const ValueKey('assignments_section'),
-                padding: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: InsightTheme.surface,
-                  borderRadius: BorderRadius.circular(24),
+              // The section surface follows the gutters; the interactive
+              // carousel uses the full width, including its next-card peek.
+              Stack(
+                children: [
+                Positioned.fill(
+                  left: 20,
+                  right: 20,
+                  child: Container(
+                    key: const ValueKey('assignments_section'),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.surface,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                  ),
                 ),
-                child: Column(
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 36),
                 child: SpringSlide(
 
                   animation: springFor(1),
@@ -750,24 +816,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
-              // Relocated here (was floating alone between the calendar and
-              // this section, easy to miss). Now reads as the subtitle for
-              // what it's actually describing, with more weight so it
-              // doesn't get lost.
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: SpringSlide(
-                  animation: springFor(1),
-                  beginOffset: const Offset(0, 16),
-                  child: Text(
-                    "Here's what's on your schedule today.",
-                    style: InsightTheme.inter(13, c: InsightTheme.ink3),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              
+
               SpringSlide(
                 animation: springFor(2),
                 beginOffset: const Offset(70, 0),
@@ -873,9 +922,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       ),
                     );
                   }),
-                ),
-                  ],
-                ),
+                 ),
+                 const SizedBox(height: 8),
+                   ],
+                 ),
+                ],
               ),
               const SizedBox(height: 16),
 
@@ -883,7 +934,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               // 3. TASK COMPLETION FLOW
               // ----------------------------------------------------
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: SpringSlide(
                   animation: springFor(3),
                   beginOffset: const Offset(0, 20),
@@ -891,11 +942,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                     title: "Task completion flow",
                     trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab),
                   ),
-                ),
+              ),
               ),
               const SizedBox(height: 12),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: SpringSlide(
                   animation: springFor(4),
                   beginOffset: const Offset(0, 24),
@@ -918,7 +969,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 final counts = _completionCounts;
                                 final total = counts.values.fold<int>(0, (a, b) => a + b);
                                 const labels = ['Scheduled', 'Pending', 'Ongoing', 'Completed'];
-                                const colors = [InsightTheme.orange, InsightTheme.blue1, InsightTheme.blue1, InsightTheme.green];
+                                const colors = [InsightTheme.orange, Color(0xFF60A5FA), InsightTheme.blue1, InsightTheme.green];
                                 final fractions = List.generate(labels.length, (i) {
                                   final count = counts[labels[i]] ?? 0;
                                   return total == 0 ? 0.0 : count / total;
@@ -937,14 +988,16 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 );
                               }),
                   ),
-                ),
               ),
-              const SizedBox(height: 32),
+              ),
+              const SizedBox(height: 12),
 
               // ----------------------------------------------------
               // 4. RECENT ACTIVITY
               // ----------------------------------------------------
-              Container(
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
                   color: InsightTheme.surface,
@@ -958,71 +1011,68 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 child: SpringSlide(
                   animation: springFor(8),
                   beginOffset: const Offset(0, 20),
-                  child: const _SectionLabel(title: "Recent activity"),
-                ),
-              ),
-              const SizedBox(height: 12),
+                   child: const _SectionLabel(title: "Recent activity"),
+                 ),
+               ),
+               const SizedBox(height: 12),
 
-              // Text-only activity categories share one segmented surface.
+              // Content-sized tabs keep their full touch targets. The native
+              // scroll track and next-tab peek make narrow-screen scrolling clear.
               SpringSlide(
                 animation: springFor(8),
                 beginOffset: const Offset(0, 20),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Container(
+                  child: RawScrollbar(
+                    // The shell's bottom-nav inset must not displace this
+                    // small local track upward into the preceding section.
+                    padding: EdgeInsets.zero,
+                    controller: _activityFilterController,
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    thickness: 3,
+                    radius: const Radius.circular(3),
+                    scrollbarOrientation: ScrollbarOrientation.bottom,
+                    child: SingleChildScrollView(
                     key: const ValueKey('activity_filters'),
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: InsightTheme.surface2,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
+                    controller: _activityFilterController,
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: Row(
                     children: [
-                      Expanded(
-                        child: _ActivityFilterChip(
-                          label: 'All',
-                          selected: _activityFilter == 'all',
-                          onTap: () => setState(() => _activityFilter = 'all'),
-                        ),
+                      _ActivityFilterChip(
+                        label: 'All',
+                        selected: _activityFilter == 'all',
+                        onTap: () => _selectActivityFilter('all'),
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: _ActivityFilterChip(
-                          label: 'Tasks',
-                          selected: _activityFilter == 'tasks',
-                          onTap: () => setState(() => _activityFilter = 'tasks'),
-                        ),
+                      const SizedBox(width: 8),
+                      _ActivityFilterChip(
+                        label: 'Tasks',
+                        selected: _activityFilter == 'tasks',
+                        onTap: () => _selectActivityFilter('tasks'),
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: _ActivityFilterChip(
-                          label: 'Sync',
-                          selected: _activityFilter == 'sync',
-                          onTap: () => setState(() => _activityFilter = 'sync'),
-                        ),
+                      const SizedBox(width: 8),
+                      _ActivityFilterChip(
+                        label: 'Sync',
+                        selected: _activityFilter == 'sync',
+                        onTap: () => _selectActivityFilter('sync'),
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: _ActivityFilterChip(
-                          label: ActivityEventCategory.labelFor(
-                            ActivityEventCategory.reports,
-                          ),
-                          selected:
-                              _activityFilter == ActivityEventCategory.reports,
-                          onTap: () => setState(
-                            () => _activityFilter = ActivityEventCategory.reports,
-                          ),
+                      const SizedBox(width: 8),
+                      _ActivityFilterChip(
+                        label: ActivityEventCategory.labelFor(
+                          ActivityEventCategory.reports,
                         ),
+                        selected: _activityFilter == ActivityEventCategory.reports,
+                        onTap: () => _selectActivityFilter(ActivityEventCategory.reports),
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: _ActivityFilterChip(
-                          label: 'Profile',
-                          selected: _activityFilter == 'profile',
-                          onTap: () => setState(() => _activityFilter = 'profile'),
-                        ),
+                      const SizedBox(width: 8),
+                      _ActivityFilterChip(
+                        label: 'Profile',
+                        selected: _activityFilter == 'profile',
+                        onTap: () => _selectActivityFilter('profile'),
                       ),
                     ],
+                    ),
                     ),
                   ),
                 ),
@@ -1037,11 +1087,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                     // same easeOutCubic/220ms language _TimelineActivityTile
                     // already uses for its own expand/collapse, so the motion
                     // reads as one consistent feel rather than a second style.
-                    : AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 220),
+                    : AnimatedSize(
+                        duration: activityMotion,
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: AnimatedSwitcher(
+                        duration: activityMotion,
                         switchInCurve: Curves.easeOutCubic,
                         switchOutCurve: Curves.easeOutCubic,
-                        child: _filteredActivity.isEmpty
+                        child: filteredActivity.isEmpty
                             ? Padding(
                                 key: ValueKey('empty_$_activityFilter'),
                                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1056,35 +1110,35 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 key: ValueKey('list_$_activityFilter'),
                                 children: [
                                   Positioned(
-                                    left: 19, top: 12, bottom: 16,
+                                    left: 16, top: 16, bottom: 16,
                                     child: Container(width: 2, color: InsightTheme.ink3.withValues(alpha: 0.15)),
                                   ),
                                   Column(
-                                    children: List.generate(_filteredActivity.length, (i) {
-                                      final themeInfo = _eventTheme(_filteredActivity[i]['event_type'] as String? ?? '');
-                                      final activityId = _filteredActivity[i]['id'] ?? i;
+                                    children: List.generate(visibleActivity.length, (i) {
+                                      final activity = visibleActivity[i];
+                                      final themeInfo = _eventTheme(activity['event_type'] as String? ?? '');
+                                      final activityId = activity['id'] ?? i;
                                       return SpringSlide(
-                                        // Cached by index — already settled after first load, so on
-                                        // a later filter switch this simply renders at rest (opacity
-                                        // 1, no offset) and the AnimatedSwitcher crossfade above does
-                                        // the work. On first load it still plays the original stagger.
-                                        animation: springFor(9 + i),
+                                        key: ValueKey(activityId),
+                                        // Existing rows retain their state; newly revealed rows
+                                        // enter immediately rather than waiting another second.
+                                        animation: springForKey('activity_$activityId', i < _kVisibleActivityLimit ? 9 + i : 0),
                                         beginOffset: const Offset(0, 28),
                                         child: UpdatingTile(
                                           itemKey: activityId,
                                           signature: Object.hash(
-                                            _filteredActivity[i]['title'],
-                                            _filteredActivity[i]['subtitle'],
-                                            _filteredActivity[i]['occurred_at'],
+                                            activity['title'],
+                                            activity['subtitle'],
+                                            activity['occurred_at'],
                                           ),
                                           child: _TimelineActivityTile(
                                             icon: themeInfo['icon'],
                                             color: themeInfo['color'],
-                                            categoryLabel: _eventCategoryLabel(_filteredActivity[i]['event_type'] as String? ?? ''),
-                                            title: _filteredActivity[i]['title'] as String? ?? 'Update',
-                                            subtitle: _filteredActivity[i]['subtitle'] as String? ?? '',
-                                            time: _timeAgo(_filteredActivity[i]['occurred_at'] as String?),
-                                            occurredAtIso: _filteredActivity[i]['occurred_at'] as String?,
+                                            categoryLabel: _eventCategoryLabel(activity['event_type'] as String? ?? ''),
+                                            title: activity['title'] as String? ?? 'Update',
+                                            subtitle: activity['subtitle'] as String? ?? '',
+                                            time: _timeAgo(activity['occurred_at'] as String?),
+                                            occurredAtIso: activity['occurred_at'] as String?,
                                           ),
                                         ),
                                       );
@@ -1092,10 +1146,35 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   ),
                                 ],
                               ),
+                        ),
                       ),
               ),
-                ],
+              if (filteredActivity.length > _kVisibleActivityLimit)
+                Center(
+                  child: Semantics(
+                    expanded: _showAllActivity,
+                    child: TextButton(
+                      onPressed: () => setState(() => _showAllActivity = !_showAllActivity),
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_showAllActivity ? 'See less' : 'See more (${filteredActivity.length - _kVisibleActivityLimit})',
+                              style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                          const SizedBox(width: 6),
+                          AnimatedRotation(
+                            turns: _showAllActivity ? 0.5 : 0,
+                            duration: activityMotion,
+                            child: const Icon(Icons.keyboard_arrow_down_rounded, color: InsightTheme.blueInk, size: 20),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
+                 ],
+                 ),
+               ),
               ),
             ],
             ),
@@ -1115,6 +1194,287 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 /// ==================================================================
 
 /// Keeps clock ticks local and uses the full calendar's date mapping for Today.
+/// The day row owns its drag; the surrounding PageView handles header/card
+/// swipes. Its controller is restored once, never reset by data refreshes.
+class _HomeCalendarPager extends StatefulWidget {
+  final String userId;
+  final DateTime month;
+  final int selectedDay;
+  final Map<int, List<TaskItem>> tasksByDay;
+  final Color Function(TaskItem) dotColorForTask;
+  final void Function(DateTime, int) onPick;
+  final VoidCallback onPreviousMonth;
+  final VoidCallback onNextMonth;
+  final Widget timeDateView;
+
+  const _HomeCalendarPager({
+    super.key,
+    required this.userId,
+    required this.month,
+    required this.selectedDay,
+    required this.tasksByDay,
+    required this.dotColorForTask,
+    required this.onPick,
+    required this.onPreviousMonth,
+    required this.onNextMonth,
+    required this.timeDateView,
+  });
+
+  @override
+  State<_HomeCalendarPager> createState() => _HomeCalendarPagerState();
+}
+
+class _HomeCalendarPagerState extends State<_HomeCalendarPager> {
+  PageController? _views;
+  ScrollController? _dates;
+  SharedPreferences? _preferences;
+  int _view = 0;
+  double _dayExtent = 0;
+  double _rowWidth = 0;
+  bool _alignDates = false;
+  String get _preferenceKey => 'home_calendar_view_${widget.userId}';
+  Duration get _motion => MediaQuery.disableAnimationsOf(context)
+      ? Duration.zero : const Duration(milliseconds: 280);
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreView();
+  }
+
+  Future<void> _restoreView() async {
+    SharedPreferences? preferences;
+    var view = 0;
+    try {
+      preferences = await SharedPreferences.getInstance();
+      view = preferences.getInt(_preferenceKey) == 1 ? 1 : 0;
+    } catch (error) {
+      debugPrint('Unable to restore Home calendar view: $error');
+    }
+    if (!mounted) return;
+    setState(() {
+      _preferences = preferences;
+      _view = view;
+      _views = PageController(initialPage: view);
+    });
+  }
+
+  Future<void> _rememberView(int view) async {
+    try {
+      await _preferences?.setInt(_preferenceKey, view);
+    } catch (error) {
+      debugPrint('Unable to save Home calendar view: $error');
+    }
+  }
+
+  void _switchView() {
+    if (_views?.hasClients != true) return;
+    final next = 1 - _view;
+    if (_motion == Duration.zero) {
+      _views!.jumpToPage(next);
+    } else {
+      _views!.animateToPage(next, duration: _motion, curve: Curves.easeOutCubic);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_HomeCalendarPager oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.month != widget.month || oldWidget.selectedDay != widget.selectedDay) {
+      _alignDates = true;
+    }
+  }
+
+  @override
+  void dispose() {
+    _views?.dispose();
+    _dates?.dispose();
+    super.dispose();
+  }
+
+  double _selectedOffset(int days) =>
+      ((widget.selectedDay.clamp(1, days) - 1) * _dayExtent - (_rowWidth - _dayExtent) / 2)
+          .clamp(0.0, (days * _dayExtent - _rowWidth).clamp(0.0, double.infinity));
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final scaler = MediaQuery.textScalerOf(context);
+      Size measure(String text, TextStyle style, {double width = double.infinity}) {
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: DefaultTextStyle.of(context).style.merge(style)),
+          textDirection: Directionality.of(context),
+          textScaler: scaler,
+        )..layout(maxWidth: width);
+        final size = painter.size;
+        painter.dispose();
+        return size;
+      }
+
+      final now = DateTime.now();
+      final date = TextPainter(
+        text: TextSpan(style: DefaultTextStyle.of(context).style, children: [
+          TextSpan(text: '${now.day}\n', style: InsightTheme.urbanist(30, w: FontWeight.w800)),
+          TextSpan(text: '${_HomeDashboardScreenState._fullMonthNames[now.month - 1]}\nThu',
+              style: InsightTheme.inter(12, w: FontWeight.w600)),
+        ]),
+        textDirection: Directionality.of(context),
+        textScaler: scaler,
+        textAlign: TextAlign.center,
+      )..layout(maxWidth: ((constraints.maxWidth - 18) * 0.4 - 24).clamp(1, double.infinity));
+      final clockHeight = (scaler.scale(92) + 16).clamp(date.height + 34, double.infinity);
+      date.dispose();
+      final weekdayStyle = InsightTheme.inter(12, w: FontWeight.w500, h: 1.2);
+      final numberStyle = InsightTheme.urbanist(20, w: FontWeight.w700, h: 1.2);
+      final monthLabel = '${_HomeDashboardScreenState._fullMonthNames[widget.month.month - 1]} ${widget.month.year}';
+      final monthStyle = InsightTheme.urbanist(14, w: FontWeight.w700, h: 1.2);
+      final headerHeight = (measure(monthLabel, monthStyle,
+          width: (constraints.maxWidth - 114).clamp(1, double.infinity)).height + 20)
+          .clamp(48.0, double.infinity);
+      final dayHeight = (measure('Wed', weekdayStyle).height + measure('31', numberStyle).height + 10)
+          .clamp(48.0, double.infinity);
+      final height = clockHeight.clamp(headerHeight + dayHeight + 10, double.infinity);
+      final tileWidth = [
+        48.0, measure('Wed', weekdayStyle).width + 12, measure('31', numberStyle).width + 12,
+      ].reduce((a, b) => a > b ? a : b);
+      final days = DateTime(widget.month.year, widget.month.month + 1, 0).day;
+      final rowWidth = constraints.maxWidth - 18;
+      if (_rowWidth != 0 && (_rowWidth != rowWidth || _dayExtent != tileWidth + 6)) {
+        _alignDates = true;
+      }
+      _rowWidth = rowWidth;
+      _dayExtent = tileWidth + 6;
+      _dates ??= ScrollController(initialScrollOffset: _selectedOffset(days));
+      if (_alignDates) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_dates!.hasClients) return;
+          _alignDates = false;
+          final offset = _selectedOffset(days).clamp(0.0, _dates!.position.maxScrollExtent);
+          if (_motion == Duration.zero) {
+            _dates!.jumpTo(offset);
+          } else {
+            _dates!.animateTo(offset, duration: _motion, curve: Curves.easeOutCubic);
+          }
+        });
+      }
+
+      Widget withViewCue(Widget child, int page) => Stack(children: [
+        Positioned.fill(child: child),
+        // Keep the cue inside its page: header drags still reach PageView's
+        // recognizer, while the date row retains its own horizontal drag.
+        if (page == _view) Positioned(
+          top: 0, left: (constraints.maxWidth - 48) / 2,
+          child: IconButton(
+            tooltip: _view == 0 ? 'Show Time and Date' : 'Show Calendar preview',
+            onPressed: _switchView,
+            alignment: Alignment.topCenter,
+            padding: const EdgeInsets.only(top: 4),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            icon: Row(mainAxisSize: MainAxisSize.min, children: [
+              for (var index = 0; index < 2; index++)
+                AnimatedContainer(
+                  duration: _motion,
+                  width: 6, height: 6,
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  decoration: BoxDecoration(shape: BoxShape.circle,
+                      color: _view == index ? InsightTheme.blue1 : InsightTheme.line),
+                ),
+            ]),
+          ),
+        ),
+      ]);
+
+      return SizedBox(
+        key: const ValueKey('home_calendar_pager'),
+        height: height,
+        child: _views == null ? const SizedBox.shrink() : Material(
+          color: Colors.transparent,
+          child: PageView(
+              controller: _views,
+              allowImplicitScrolling: true,
+              onPageChanged: (view) {
+                if (_view == view) return;
+                setState(() => _view = view);
+                unawaited(_rememberView(view));
+              },
+              children: [
+                withViewCue(Container(
+                  key: const ValueKey('calendar_preview'),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: InsightTheme.line),
+                  ),
+                  child: Column(children: [
+                    SizedBox(
+                      key: const ValueKey('calendar_preview_header'),
+                      height: headerHeight,
+                      child: Row(children: [
+                        IconButton(tooltip: 'Previous preview month', onPressed: widget.onPreviousMonth,
+                            icon: const Icon(Icons.chevron_left_rounded, color: InsightTheme.ink2)),
+                        Expanded(child: Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Text(monthLabel, textAlign: TextAlign.center, style: monthStyle),
+                        )),
+                        IconButton(tooltip: 'Next preview month', onPressed: widget.onNextMonth,
+                            icon: const Icon(Icons.chevron_right_rounded, color: InsightTheme.ink2)),
+                      ]),
+                    ),
+                    Expanded(child: ListView.builder(
+                      key: const ValueKey('calendar_preview_days'),
+                      controller: _dates,
+                      scrollDirection: Axis.horizontal,
+                      itemExtent: _dayExtent,
+                      itemCount: days,
+                      itemBuilder: (context, index) {
+                        final day = index + 1;
+                        final selected = widget.selectedDay.clamp(1, days) == day;
+                        final dayDate = DateTime(widget.month.year, widget.month.month, day);
+                        final colors = (widget.tasksByDay[day] ?? const <TaskItem>[])
+                            .map(widget.dotColorForTask).toSet().take(3).toList();
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Semantics(
+                            container: true,
+                            button: true,
+                            selected: selected,
+                            label: '$monthLabel, $day',
+                            child: Material(
+                              color: selected ? InsightTheme.blue1 : InsightTheme.surface2,
+                              borderRadius: BorderRadius.circular(14),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () => widget.onPick(widget.month, day),
+                                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                  Text(const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dayDate.weekday - 1],
+                                      style: weekdayStyle.copyWith(color: selected ? Colors.white : InsightTheme.ink2)),
+                                  Text('$day', style: numberStyle.copyWith(color: selected ? Colors.white : InsightTheme.ink)),
+                                  const SizedBox(height: 2),
+                                  SizedBox(height: 4, child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                    for (final color in colors)
+                                      Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 1),
+                                          decoration: BoxDecoration(shape: BoxShape.circle,
+                                              color: selected ? Colors.white : color)),
+                                  ])),
+                                ]),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    )),
+                  ]),
+                ), 0),
+                withViewCue(widget.timeDateView, 1),
+              ],
+            ),
+        ),
+      );
+    });
+  }
+}
+
 class _TodayScheduleCard extends StatefulWidget {
   final List<TaskItem> Function(DateTime date) tasksForDate;
   final Color Function(TaskItem task) dotColorForTask;
@@ -1153,11 +1513,12 @@ class _TodayScheduleCardState extends State<_TodayScheduleCard> {
   Widget build(BuildContext context) {
     final hour12 = _now.hour % 12 == 0 ? 12 : _now.hour % 12;
     final text = '${hour12.toString().padLeft(2, '0')}:${_now.minute.toString().padLeft(2, '0')} ${_now.hour < 12 ? 'AM' : 'PM'}';
-    final scaler = MediaQuery.textScalerOf(context);
     final tasks = widget.tasksForDate(_now);
+    final month = _HomeDashboardScreenState._fullMonthNames[_now.month - 1];
+    final weekday = const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][_now.weekday - 1];
     return Container(
       key: const ValueKey('clock_date_card'),
-      height: scaler.scale(92),
+      padding: const EdgeInsets.all(8),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: InsightTheme.surface,
@@ -1213,6 +1574,7 @@ class _TodayScheduleCardState extends State<_TodayScheduleCard> {
             left: _showTasks ? 0 : constraints.maxWidth - tileWidth,
             width: tileWidth,
             child: Semantics(
+              container: true,
               button: true,
               label: _showTasks ? 'Show clock and date' : "Show today's tasks",
               value: _showTasks ? 'Today' : '${_HomeDashboardScreenState._fullMonthNames[_now.month - 1]} ${_now.day}, ${_now.year}',
@@ -1236,8 +1598,8 @@ class _TodayScheduleCardState extends State<_TodayScheduleCard> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text('${_now.day}', style: InsightTheme.urbanist(30, w: FontWeight.w800, c: Colors.white)),
-                                  Text(_HomeDashboardScreenState._fullMonthNames[_now.month - 1], textAlign: TextAlign.center, style: InsightTheme.inter(12, w: FontWeight.w600, c: Colors.white)),
-                                  Text(const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][_now.weekday - 1], style: InsightTheme.inter(12, w: FontWeight.w600, c: Colors.white)),
+                                  Text(month, textAlign: TextAlign.center, style: InsightTheme.inter(12, w: FontWeight.w600, c: Colors.white)),
+                                  Text(weekday, style: InsightTheme.inter(12, w: FontWeight.w600, c: Colors.white)),
                                 ],
                               ),
                       ),
@@ -1296,15 +1658,18 @@ class _NotificationBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
+    return IconButton(
+      tooltip: 'Notifications',
+      onPressed: onTap,
+      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        backgroundColor: InsightTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        side: const BorderSide(color: InsightTheme.line),
+      ),
+      icon: SizedBox(
         width: 48, height: 48,
-        decoration: BoxDecoration(
-          color: InsightTheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: InsightTheme.line),
-        ),
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -1338,9 +1703,8 @@ class _SectionLabel extends StatelessWidget {
         Expanded(
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(999)),
+            child: Semantics(
+              header: true,
               child: Text(title, style: InsightTheme.urbanist(16,
                 w: FontWeight.w700, c: InsightTheme.ink)),
             ),
@@ -1402,7 +1766,7 @@ class _ActivityFilterChip extends StatelessWidget {
       button: true,
       selected: selected,
       child: Material(
-        color: selected ? InsightTheme.ink : Colors.transparent,
+        color: selected ? InsightTheme.ink : InsightTheme.surface2,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
@@ -1411,8 +1775,8 @@ class _ActivityFilterChip extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             alignment: Alignment.center,
-            constraints: const BoxConstraints(minHeight: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 10),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Text(
               label,
               textAlign: TextAlign.center,
@@ -1508,7 +1872,12 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
         ],
       ),
     );
-    final labelStyle = InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2);
+    final labelStyle = DefaultTextStyle.of(context).style.merge(
+      InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2),
+    );
+    // White meets AA on the dark blue; lighter status fills use dark ink.
+    final foregroundColors = widget.colors.map((color) =>
+        color.computeLuminance() < 0.18 ? Colors.white : InsightTheme.ink).toList();
     var labelWidth = 0.0;
     for (final label in widget.labels) {
       final painter = TextPainter(
@@ -1534,18 +1903,18 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
                       padding: const EdgeInsets.all(2),
                       child: Container(
                         key: ValueKey('completion_${widget.labels[i]}'),
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: scaler.scale(6)),
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: scaler.scale(4)),
                         decoration: BoxDecoration(
-                          color: i == 0 ? InsightTheme.surface2 : widget.colors[i].withValues(alpha: 0.08),
+                          color: widget.colors[i],
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: InsightTheme.line),
+                          border: Border.all(color: widget.colors[i]),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (i < 2) Text(widget.labels[i], softWrap: false, style: labelStyle),
-                            Text('${widget.counts[i]}', style: InsightTheme.urbanist(22, w: FontWeight.w700, c: InsightTheme.ink)),
-                            if (i >= 2) Text(widget.labels[i], softWrap: false, style: labelStyle),
+                            if (i < 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
+                            Text('${widget.counts[i]}', style: InsightTheme.urbanist(22, w: FontWeight.w700, c: foregroundColors[i])),
+                            if (i >= 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
                           ],
                         ),
                       ),
@@ -1566,8 +1935,19 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
     );
     return LayoutBuilder(key: const ValueKey('completion_chart'), builder: (context, constraints) {
       // Keep category words intact with the actual font and accessibility size.
-      if (constraints.maxWidth < ringSize + 8 + (labelWidth + 18) * 2) {
-        return Column(children: [rings, const SizedBox(height: 12), legend]);
+      final legendWidth = (labelWidth + 18) * 2;
+      if (constraints.maxWidth < ringSize + 8 + legendWidth) {
+        return Column(children: [
+          rings,
+          const SizedBox(height: 4),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: constraints.maxWidth.clamp(legendWidth, double.infinity),
+              child: legend,
+            ),
+          ),
+        ]);
       }
       return Row(children: [
         rings,
@@ -1653,17 +2033,30 @@ class _InlineFullCalendarCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Row(
-            children: _weekdayAbbrSunStart.map((d) {
-              return Expanded(
-                child: Center(
-                  child: Text(d.substring(0, 3), style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 6),
-          GridView.builder(
+          LayoutBuilder(builder: (context, constraints) {
+            final dayStyle = InsightTheme.inter(12.5, w: FontWeight.w700);
+            var columnWidth = 48.0;
+            var rowHeight = 48.0;
+            for (final label in [..._weekdayAbbrSunStart, '88']) {
+              final painter = TextPainter(
+                text: TextSpan(text: label, style: DefaultTextStyle.of(context).style.merge(dayStyle)),
+                textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
+              )..layout();
+              if (painter.width + 12 > columnWidth) columnWidth = painter.width + 12;
+              if (painter.height + 24 > rowHeight) rowHeight = painter.height + 24;
+              painter.dispose();
+            }
+            final gridWidth = constraints.maxWidth.clamp(columnWidth * 7 + 24, double.infinity).toDouble();
+            final calendar = SizedBox(width: gridWidth, child: Column(children: [
+              Row(children: [
+                for (var index = 0; index < _weekdayAbbrSunStart.length; index++) ...[
+                  if (index > 0) const SizedBox(width: 4),
+                  Expanded(child: Center(child: Text(_weekdayAbbrSunStart[index],
+                      style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)))),
+                ],
+              ]),
+              const SizedBox(height: 6),
+              GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             padding: const EdgeInsets.only(bottom: 4),
@@ -1671,23 +2064,23 @@ class _InlineFullCalendarCard extends StatelessWidget {
               crossAxisCount: 7,
               mainAxisSpacing: 4,
               crossAxisSpacing: 4,
-              mainAxisExtent: MediaQuery.textScalerOf(context).scale(24) + 24,
+              mainAxisExtent: rowHeight,
             ),
             itemCount: daysInMonth + leadingBlanks,
             itemBuilder: (context, i) {
               if (i < leadingBlanks) return const SizedBox.shrink();
               final day = i - leadingBlanks + 1;
-              final isSelected = day == selectedDay;
+              final isSelected = day == clampedDay;
               final hasTask = taskDays.contains(day);
               final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
               final dotColors = dayTasks
                   .map(dotColorForTask)
                   .toSet()
                   .toList();
-              return GestureDetector(
+              return InkWell(
                 key: ValueKey('calendar_day_$day'),
                 onTap: () => onPick(month, day),
-                behavior: HitTestBehavior.opaque,
+                borderRadius: BorderRadius.circular(24),
                 child: Center(
                   child: Container(
                     constraints: const BoxConstraints(minHeight: 48),
@@ -1722,7 +2115,11 @@ class _InlineFullCalendarCard extends StatelessWidget {
                 ),
               );
             },
-          ),
+              ),
+            ]));
+            return gridWidth > constraints.maxWidth
+                ? SingleChildScrollView(scrollDirection: Axis.horizontal, child: calendar) : calendar;
+          }),
           if (selectedTasks.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
@@ -1805,7 +2202,6 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
             width: 34,
             alignment: Alignment.topCenter,
             padding: const EdgeInsets.only(top: 12),
-            decoration: const BoxDecoration(color: InsightTheme.bg),
             child: Container(
               width: 8, height: 8,
               decoration: BoxDecoration(
@@ -1820,7 +2216,10 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
           // Activity card — tappable, animates open/closed for the exact
           // timestamp. Tinted fill instead of a white card + border.
           Expanded(
-            child: GestureDetector(
+            child: Semantics(
+              button: true,
+              expanded: _expanded,
+              child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => setState(() => _expanded = !_expanded),
               child: AnimatedContainer(
@@ -1843,8 +2242,11 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                     children: [
                       // Top row — category chip (icon + label) left,
                       // timestamp right.
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 6,
                         children: [
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
@@ -1866,7 +2268,7 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                       ),
                       const SizedBox(height: 9),
                       // Title + accent underline, per the reference shape.
-                      Text(widget.title, style: InsightTheme.urbanist(13, w: FontWeight.w700, c: InsightTheme.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(widget.title, style: InsightTheme.urbanist(14, w: FontWeight.w700, c: InsightTheme.ink)),
                       const SizedBox(height: 5),
                       Container(width: 32, height: 2, decoration: BoxDecoration(color: widget.color.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(2))),
                       if (widget.subtitle.isNotEmpty) ...[
@@ -1876,10 +2278,11 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                       if (_expanded && _exactTimestamp.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Icon(Icons.schedule_rounded, size: 13, color: InsightTheme.ink2),
                             const SizedBox(width: 6),
-                            Text(_exactTimestamp, style: InsightTheme.mono(12, w: FontWeight.w500, c: InsightTheme.ink2)),
+                            Expanded(child: Text(_exactTimestamp, style: InsightTheme.mono(12, w: FontWeight.w500, c: InsightTheme.ink2))),
                           ],
                         ),
                       ],
@@ -1888,6 +2291,7 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                 ),
               ),
             ),
+          ),
           ),
         ],
       ),

@@ -1,11 +1,11 @@
 import 'package:flutter/foundation.dart';
 import '../../tasks/screens/tasks_screen.dart' show TaskItem;
 
-/// One point on the weekly trend bar chart.
+/// One daily (Week) or weekly (Month) submission bar.
 @immutable
 class TrendPoint {
   final DateTime date;
-  final String label; // e.g. "Mon"
+  final String label; // e.g. "Mon" or "1st week"
   final int count;
   const TrendPoint({required this.date, required this.label, required this.count});
 }
@@ -84,11 +84,6 @@ class InspectorDashboardStats {
   final int currentYear;
   final List<TypeBreakdownEntry> typeBreakdown;
 
-  /// The per-day submission counts behind the Bars chart, one point for every
-  /// day of the selected range. Bars consumes this so Week shows 7 points and
-  /// Month shows one per calendar day — real counts, never padded or invented.
-  /// See [submissionTrendFor].
-  ///
   /// Every task that has a scheduled date, with that date and whether it is
   /// Completed. The Gauge builds its scheduled cohort from this: a task with no
   /// `scheduled_date` is excluded entirely rather than assumed.
@@ -258,10 +253,6 @@ class InspectorDashboardStats {
     );
   }
 
-  /// Builds the per-day submission series for the selected [days] — one point
-  /// per calendar day, so Bars shows 7 for a week and one per day for a month.
-  /// Counts come straight from [activeSubmissionDates]; no day is padded,
-  /// duplicated or invented.
   /// SECTORS — zoning/application-type distribution restricted to inspections
   /// actually COMPLETED inside [days].
   ///
@@ -288,17 +279,26 @@ class InspectorDashboardStats {
       ..sort((a, b) => b.count.compareTo(a.count));
   }
 
+  /// Selected calendar Week: seven daily bars. Selected calendar Month: totals
+  /// for days 1–7, 8–14, 15–21, 22–28 and, when present, 29–month end.
+  /// Membership uses the exact range dates, counting every submission once.
   List<TrendPoint> submissionTrendFor(List<DateTime> days) {
     const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return [
-      for (final day in days)
-        TrendPoint(
-          date: day,
-          label: dayLabels[day.weekday - 1],
-          // Counts SUBMISSIONS, not distinct active days: three inspections
-          // finished on one Monday must read as a bar of 3.
-          count: submissionDates.where((d) => d == day).length,
-        ),
-    ];
+    const weekLabels = ['1st week', '2nd week', '3rd week', '4th week', '5th week'];
+    // ponytail: callers supply a 7-day week or a full 28–31-day month;
+    // use an explicit range if custom periods are introduced.
+    final daysPerBar = days.length > 7 ? 7 : 1;
+    final points = <TrendPoint>[];
+    for (var index = 0; index < days.length; index += daysPerBar) {
+      final bucket = days.skip(index).take(daysPerBar).toSet();
+      points.add(TrendPoint(
+        date: days[index],
+        label: daysPerBar == 1
+            ? dayLabels[days[index].weekday - 1]
+            : weekLabels[index ~/ 7],
+        count: submissionDates.where(bucket.contains).length,
+      ));
+    }
+    return points;
   }
 }

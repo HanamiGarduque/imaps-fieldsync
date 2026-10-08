@@ -118,7 +118,7 @@ void main() {
         tester.view.physicalSize = const Size(390, 844);
         await tester.pump(const Duration(milliseconds: 300));
         expect(find.text(title), findsOneWidget);
-        expect(find.text(gps ? 'STEP 2 OF 6' : 'STANDALONE'), findsOneWidget);
+        expect(find.text(gps ? 'STEP 2 OF 6 — VERIFY COORDINATES' : 'STANDALONE', findRichText: true), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         await tester.pump();

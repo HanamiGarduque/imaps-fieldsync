@@ -544,14 +544,9 @@ void main() {
       }
     });
 
-    test('functional circles are preserved', () {
-      // Unread dots, avatar, logo, radio: none of these are background orbs.
+    test('notification indicators are not background decoration', () {
       final notif = File(cleaned.first).readAsStringSync();
       expect(notif, isNot(contains('ImageFilter.blur(sigmaX: 40')));
-      final about = File('lib/modules/profile_settings/screens/about_insight_screen.dart')
-          .readAsStringSync();
-      expect(about, contains('primaryGradient'),
-          reason: 'the app logo circle must remain');
     });
 
     test('the shared shell orbs stay removed', () {

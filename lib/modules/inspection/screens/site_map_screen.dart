@@ -28,6 +28,19 @@ import '../widgets/inspection_step_header.dart';
 import '../widgets/rosario_boundary_overlay.dart';
 import '../widgets/map_connectivity_recovery.dart';
 
+/// Fit both pins after flutter_map knows its viewport, before loading tiles for
+/// the final camera. Manual first-frame moves can race its initial size event.
+MapOptions siteMapOptions({required ll.LatLng parcel, ll.LatLng? device}) =>
+    MapOptions(
+      initialCenter: parcel,
+      initialZoom: 17,
+      initialCameraFit: device == null ? null : CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints([parcel, device]),
+        maxZoom: 17,
+        padding: const EdgeInsets.fromLTRB(50, 160, 50, 220),
+      ),
+    );
+
 /// Site Verification (Step 1). Full-bleed map (matches Master's reference
 /// picture 1 — edge-to-edge, floating glass controls) with a bent,
 /// route-style line between device and target (matches Master's reference
@@ -278,7 +291,6 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
       if (!mounted) return;
       setState(() => _loading = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
       _startLiveTracking();
 
       // Route Guidance: fetch the road route AFTER the map is usable -
@@ -295,22 +307,13 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   }
 
   void _fitBounds() {
-    if (_parcelLatLng == null) return;
-    if (_deviceLatLng == null) {
+    if (!mounted || _parcelLatLng == null) return;
+    final fit = siteMapOptions(parcel: _parcelLatLng!, device: _deviceLatLng).initialCameraFit;
+    if (fit == null) {
       _mapController.move(_parcelLatLng!, 17);
       return;
     }
-    final bounds = LatLngBounds.fromPoints([_parcelLatLng!, _deviceLatLng!]);
-    _mapController.fitCamera(
-      // Extra top/bottom padding vs the old card layout — the floating
-      // header and bottom card now sit ON TOP of the full-bleed map
-      // instead of squeezing it into a smaller container, so bounds
-      // fitting needs more clearance to keep both pins clear of them.
-      CameraFit.bounds(
-        bounds: bounds,
-        padding: const EdgeInsets.fromLTRB(50, 160, 50, 220),
-      ),
-    );
+    _mapController.fitCamera(fit);
   }
 
   /// Starts live GPS tracking for this screen using the SAME shared
@@ -525,10 +528,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
             else
               FlutterMap(
                 mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: _parcelLatLng!,
-                  initialZoom: 17,
-                ),
+                options: siteMapOptions(parcel: _parcelLatLng!, device: _deviceLatLng),
                 children: [
                   TileLayer(
                     urlTemplate:

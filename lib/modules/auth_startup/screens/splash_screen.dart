@@ -16,6 +16,7 @@ import '../../../core/services/supabase_service.dart';
 import '../services/local_data_guard_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import 'app_resume_lock_screen.dart';
 import '../../../core/navigation/main_shell_screen.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -848,96 +849,54 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedContent(
-          // The outer scroll view already absorbs short heights; this only stops
-          // the form stretching to ~1228px wide on a tablet. Phone portrait
-          // stays exactly as accepted, because 390 < the cap.
+          // Keep the form readable on tablets and scrollable above the keyboard.
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
             physics: const BouncingScrollPhysics(),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Column(
+                Wrap(alignment: WrapAlignment.center, spacing: 12, runSpacing: 12, crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(20),
                       child: SizedBox(
-                        width: 68,
-                        height: 68,
-                        child: Transform.scale(
-                          scale: 1.45,
+                        width: 64,
+                        height: 64,
                           child: Image.asset(
                             'assets/icon/app_icon.png',
+                            excludeFromSemantics: true,
                             fit: BoxFit.contain,
                             filterQuality: FilterQuality.high,
-                          ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
                     Column(
                       mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('iMAPS', style: AppText.poppins(28, w: FontWeight.w800, ls: -0.5)),
-                        Text('FieldSync', style: AppText.poppins(14, w: FontWeight.w600, c: AppColors.blueInk, ls: 0.2)),
+                        Text('iMAPS', style: AppText.inter(14, w: FontWeight.w600, c: AppColors.ink3)),
+                        const SizedBox(height: 4),
+                        Semantics(header: true, child: Text('FieldSync', style: AppText.poppins(28, w: FontWeight.w800, c: AppColors.blueInk))),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.blue1.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.blue1.withValues(alpha: 0.15)),
-                      ),
-                      child: Text(
-                        'VERIFICATION',
-                        style: AppText.inter(12, ls: 0.5, w: FontWeight.w700, c: AppColors.blue2),
-                      ),
-                    ),
                   ],
                 ),
-                
-                const SizedBox(height: 20),
-                
-                Row(
-                  children: [
-                    Container(
-                      width: 10, 
-                      height: 3, 
-                      decoration: BoxDecoration(
-                        color: AppColors.blue1, 
-                        borderRadius: BorderRadius.circular(1.5),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text('LOG IN', style: AppText.inter(12.5, w: FontWeight.w700, ls: 0.8, c: AppColors.ink2)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
                 Container(
-                  padding: const EdgeInsets.all(18),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                   decoration: BoxDecoration(
                     color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: InsightTheme.roundedMd,
                     border: Border.all(color: AppColors.line),
-                    boxShadow: const [
-                      BoxShadow(color: Color(0x0A141628), blurRadius: 2, offset: Offset(0, 1)),
-                      BoxShadow(color: Color(0x0F141628), blurRadius: 30, offset: Offset(0, 14)),
-                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ── EMAIL Label + Connectivity Badge (Upper Right) ──────
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          _buildFieldLabel('EMAIL'),
+                          Expanded(child: _buildFieldLabel('Email')),
+                          const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                             decoration: BoxDecoration(
@@ -990,10 +949,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 8),
                       _buildTextField(
                         controller: _emailController,
-                        hintText: 'inspector@test.com',
+                        hintText: 'Your inspector email',
                         icon: Icons.badge_outlined,
                         obscureText: false,
                         keyboardType: TextInputType.emailAddress,
@@ -1010,8 +969,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       
                       const SizedBox(height: 16),
                       
-                      _buildFieldLabel('PASSCODE'),
-                      const SizedBox(height: 6),
+                      _buildFieldLabel('Passcode'),
+                      const SizedBox(height: 8),
                       _buildTextField(
                         controller: _passwordController,
                         hintText: '••••••••',
@@ -1030,66 +989,21 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                       ),
 
-                      // Offer biometric whenever it's enrolled + confirmed
-                      // AND the real underlying Supabase session is still
-                      // alive on this device (AuthService.
-                      // hasLiveUnderlyingSession) — regardless of whether
-                      // it's currently "soft-logged-out" (AuthService.
-                      // isLoggedIn false, see AuthService.signOut). A
-                      // normal logout never actually destroys the session
-                      // — Supabase's own signOut() would revoke the
-                      // refresh token server-side no matter what scope is
-                      // passed, so instead of trying to restore a killed
-                      // token afterward, the session is just hidden and
-                      // left alone. Tapping this button un-hides it
-                      // (AuthService.clearSoftLogout()) — no network call,
-                      // nothing that can be rejected.
-                      //
-                      // _bioConfirmed: newly-enrolled biometric isn't
-                      // trusted for sign-in until one real password login
-                      // has succeeded after enrolling — see
-                      // BiometricService.isConfirmed().
-                      if (_biometricEnrolled && _bioConfirmed &&
-                          AuthService.hasLiveUnderlyingSession) ...[
-                        const SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: _isLoading ? null : _handleBiometricLogin,
-                          icon: const Icon(Icons.fingerprint_rounded, size: 22),
-                          label: Text(
-                            'Sign in with $_biometricLabel',
-                            style: AppText.inter(14, w: FontWeight.w600, c: AppColors.blue1),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            side: const BorderSide(color: AppColors.blue1, width: 1.2),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            minimumSize: const Size(double.infinity, 50),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      GestureDetector(
-                        onTap: _isLoading ? null : _handleForgotPasscode,
+                Align(alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _isLoading ? null : _handleForgotPasscode,
+                        style: TextButton.styleFrom(minimumSize: const Size(48, 48),
+                          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4)),
                         child: Text(
                           'Forgot passcode?',
                           style: AppText.inter(13.5, w: FontWeight.w600, c: AppColors.blueInk),
                         ),
                       ),
+                ),
                     ],
                   ),
                 ),
 
-                
                 if (_errorMessage != null) ...[
                   const SizedBox(height: 16),
                   Container(
@@ -1111,53 +1025,33 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
 
-                const SizedBox(height: 16),
-
-                // F3: the acceptance checkbox was removed — signing in is the
-                // acknowledgment. The Terms/Privacy notice and links stay.
-                Center(
-                  child: _buildLegalNoticeRichText(isCentered: true),
-                ),
-                const SizedBox(height: 20),
-
-                Container(
-                  // minHeight, not height: "Try again in Ns" grows its line box
-                  // at a larger text scale and a fixed 52 clipped the label.
-                  constraints: const BoxConstraints(minHeight: 52),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [AppColors.blue1, AppColors.blue2],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.blue1.withValues(alpha: 0.32),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      )
-                    ],
-                  ),
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
+                const SizedBox(height: 12),
+                FieldPrimaryButton(
+                    busy: _isLoading, busyLabel: 'Signing in…',
                     onPressed: (_isLoading || _cooldownSecondsRemaining > 0) ? null : _handleLogin,
-                    child: _isLoading 
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
-                        : Text(
-                            _cooldownSecondsRemaining > 0
-                                ? 'Try again in ${_cooldownSecondsRemaining}s'
-                                : 'Sign in',
-                            textAlign: TextAlign.center,
-                            style: AppText.inter(15, w: FontWeight.w700, c: Colors.white),
-                          ),
-                  ),
+                    label: _cooldownSecondsRemaining > 0
+                                 ? 'Try again in ${_cooldownSecondsRemaining}s'
+                                 : 'Sign in',
                 ),
+                // Eligibility and callbacks are the existing biometric policy.
+                if (_biometricEnrolled && _bioConfirmed &&
+                    AuthService.hasLiveUnderlyingSession) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _isLoading ? null : _handleBiometricLogin,
+                    icon: const Icon(Icons.fingerprint_rounded, size: 22),
+                    label: Text('Sign in with $_biometricLabel', textAlign: TextAlign.center,
+                      style: AppText.inter(16, w: FontWeight.w600, c: AppColors.blueInk)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      side: const BorderSide(color: AppColors.lineStrong),
+                      shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
+                      minimumSize: const Size(double.infinity, 52)),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                // Signing in is the acknowledgment; retain both legal links.
+                Center(child: _buildLegalNoticeRichText(isCentered: true)),
               ],
             ),
             ),
@@ -1168,56 +1062,40 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildLegalNoticeRichText({bool isCentered = false}) {
-    return Text.rich(
-      TextSpan(
-        style: AppText.inter(11.5, c: AppColors.ink3, lh: 1.35),
-        children: [
-          const TextSpan(
-            text: 'By signing in, you agree to the ',
-          ),
-          WidgetSpan(
-            alignment: PlaceholderAlignment.baseline,
-            baseline: TextBaseline.alphabetic,
-            child: GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const TermsPrivacyScreen(initialShowTerms: true),
-                  ),
-                );
-              },
-              child: Text(
-                'Terms of Use',
-                style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
-              ),
-            ),
-          ),
-          const TextSpan(text: ' and '),
-          WidgetSpan(
-            alignment: PlaceholderAlignment.baseline,
-            baseline: TextBaseline.alphabetic,
-            child: GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const TermsPrivacyScreen(initialShowTerms: false),
-                  ),
-                );
-              },
-              child: Text(
-                'Privacy Policy',
-                style: AppText.inter(11.5, w: FontWeight.w700, c: AppColors.blue1),
-              ),
-            ),
-          ),
-          const TextSpan(
-            text: '.\nAuthorized MPDO personnel only.',
-          ),
-        ],
-      ),
-      textAlign: isCentered ? TextAlign.center : TextAlign.start,
+    final linkStyle = AppText.inter(12, w: FontWeight.w600, c: AppColors.blue1)
+        .copyWith(decoration: TextDecoration.underline, decorationColor: AppColors.blue1);
+    // Native inline links keep keyboard focus without the old full-height row.
+    final linkButtonStyle = TextButton.styleFrom(
+      minimumSize: const Size(48, 24),
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+    return Column(
+      crossAxisAlignment: isCentered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      children: [
+        Text.rich(TextSpan(
+          style: AppText.inter(12, c: AppColors.ink3, lh: 1.4),
+          children: [
+            const TextSpan(text: 'By signing in, you agree to the '),
+            WidgetSpan(alignment: PlaceholderAlignment.middle, child: Semantics(link: true,
+              child: TextButton(style: linkButtonStyle,
+                onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const TermsPrivacyScreen(initialShowTerms: true))),
+                child: Text('Terms of Use', style: linkStyle)))),
+            const TextSpan(text: ' and '),
+            WidgetSpan(alignment: PlaceholderAlignment.middle, child: Semantics(link: true,
+              child: TextButton(style: linkButtonStyle,
+                onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const TermsPrivacyScreen(initialShowTerms: false))),
+                child: Text('Privacy Policy', style: linkStyle)))),
+            const TextSpan(text: '.'),
+          ],
+        ), textAlign: isCentered ? TextAlign.center : TextAlign.start),
+        const SizedBox(height: 4),
+        Text('Authorized MPDO personnel only.',
+          textAlign: isCentered ? TextAlign.center : TextAlign.start,
+          style: AppText.inter(12, c: AppColors.ink3)),
+      ],
     );
   }
 
@@ -1247,21 +1125,18 @@ class _LoginScreenState extends State<LoginScreen> {
       autocorrect: autocorrect,
       maxLength: maxLength,
       onChanged: onChanged,
-      style: AppText.inter(14, w: FontWeight.w600, c: AppColors.ink),
+      style: AppText.inter(16, w: FontWeight.w500, c: AppColors.ink),
       cursorColor: AppColors.blue1,
-      decoration: InputDecoration(
+      decoration: InsightTheme.formInput.copyWith(
         hintText: hintText,
-        hintStyle: AppText.inter(14, w: FontWeight.w400, c: AppColors.ink3),
         filled: true,
         fillColor: AppColors.bg.withValues(alpha: 0.6),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         prefixIcon: Icon(icon, color: AppColors.ink3, size: 20),
         counterText: '',
         errorText: errorText,
-        errorStyle: AppText.inter(12, w: FontWeight.w500, c: InsightTheme.redInk),
-        errorMaxLines: 2,
         suffixIcon: isPassword
             ? IconButton(
+                tooltip: obscureText ? 'Show passcode' : 'Hide passcode',
                 icon: Icon(
                   obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                   color: AppColors.ink3,
@@ -1270,26 +1145,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
               )
             : null,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.lineStrong, width: 1.2),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.lineStrong, width: 1.2),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.blue1, width: 1.2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: InsightTheme.red, width: 1.2),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: InsightTheme.red, width: 1.4),
-        ),
       ),
     );
   }

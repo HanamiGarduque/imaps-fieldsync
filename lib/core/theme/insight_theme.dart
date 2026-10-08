@@ -154,6 +154,42 @@ class InsightTheme {
   static const double radiusMd = 16.0; // Standard cards, action buttons
   static const double radiusLg = 24.0; // Hero folders, big modal sheets
 
+  static InputDecoration get formInput => InputDecoration(
+    filled: true,
+    fillColor: surface,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    labelStyle: inter(14, w: FontWeight.w500, c: ink2),
+    hintStyle: inter(14, c: inkMuted),
+    helperStyle: inter(12, c: ink3),
+    helperMaxLines: 4,
+    errorStyle: inter(12, c: redInk),
+    errorMaxLines: 4,
+    border: OutlineInputBorder(
+      borderRadius: roundedSm,
+      borderSide: const BorderSide(color: lineStrong),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: roundedSm,
+      borderSide: const BorderSide(color: lineStrong),
+    ),
+    disabledBorder: OutlineInputBorder(
+      borderRadius: roundedSm,
+      borderSide: const BorderSide(color: line),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: roundedSm,
+      borderSide: const BorderSide(color: blue1, width: 2),
+    ),
+    errorBorder: OutlineInputBorder(
+      borderRadius: roundedSm,
+      borderSide: const BorderSide(color: red),
+    ),
+    focusedErrorBorder: OutlineInputBorder(
+      borderRadius: roundedSm,
+      borderSide: const BorderSide(color: red, width: 2),
+    ),
+  );
+
   static final BorderRadius roundedSm = BorderRadius.circular(radiusSm);
   static final BorderRadius roundedMd = BorderRadius.circular(radiusMd);
   static final BorderRadius roundedLg = BorderRadius.circular(radiusLg);

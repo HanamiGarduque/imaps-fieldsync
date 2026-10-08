@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,6 +9,7 @@ import '../../../core/services/supabase_service.dart';
 import '../../auth_startup/services/secure_prefs_service.dart';
 
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 
 /// Preserve internal spaces and the existing supported name characters.
 String normalizeProfileFullName(String value) => value.trim();
@@ -296,232 +296,186 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
-      body: Stack(
-        children: [
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  child: Row(
-                    children: [
-                      _GlassBackButton(
-                        onTap: () => Navigator.pop(context, null),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Edit profile',
-                          style: InsightTheme.poppins(17, w: FontWeight.w700),
-                        ),
-                      ),
-                    ],
+      body: FieldFormBody(
+        header: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                onPressed: () => Navigator.pop(context, null),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                style: IconButton.styleFrom(
+                  backgroundColor: InsightTheme.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: InsightTheme.roundedSm,
                   ),
                 ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-                    physics: const BouncingScrollPhysics(),
-                    children: [
-                      Center(
-                        child: GestureDetector(
-                          onTap: _isUploadingAvatar ? null : _pickAvatarSource,
-                          child: Container(
-                            margin: const EdgeInsets.only(top: 6, bottom: 28),
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              alignment: Alignment.bottomRight,
-                              children: [
-                                Container(
-                                  width: 76,
-                                  height: 76,
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        InsightTheme.blue1,
-                                        InsightTheme.blue2,
-                                      ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                  ),
-                                  child: ClipOval(
-                                    child: _pickedAvatarFile != null
-                                        ? Image.file(
-                                            _pickedAvatarFile!,
-                                            fit: BoxFit.cover,
-                                            width: 76,
-                                            height: 76,
-                                          )
-                                        : (_currentAvatarUrl != null &&
-                                                  _currentAvatarUrl!.isNotEmpty
-                                              ? Image.network(
-                                                  _currentAvatarUrl!,
-                                                  fit: BoxFit.cover,
-                                                  width: 76,
-                                                  height: 76,
-                                                  errorBuilder:
-                                                      (
-                                                        context,
-                                                        error,
-                                                        stackTrace,
-                                                      ) => Center(
-                                                        child: Text(
-                                                          initials,
-                                                          style:
-                                                              InsightTheme.poppins(
-                                                                22,
-                                                                w: FontWeight
-                                                                    .w700,
-                                                                c: Colors.white,
-                                                              ),
-                                                        ),
-                                                      ),
-                                                )
-                                              : Center(
-                                                  child: Text(
-                                                    initials,
-                                                    style: InsightTheme.poppins(
-                                                      22,
-                                                      w: FontWeight.w700,
-                                                      c: Colors.white,
+                icon: const Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 20,
+                  color: InsightTheme.ink,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Edit profile',
+                  style: InsightTheme.urbanist(22, w: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+        action: FieldPrimaryButton(
+          label: 'Save changes',
+          busy: _isLoading,
+          busyLabel: 'Saving changes…',
+          onPressed: _isLoading
+              ? null
+              : () {
+                  HapticFeedback.lightImpact();
+                  _updateProfile();
+                },
+        ),
+        children: [
+          const FieldSectionHeading(
+            title: 'Profile photo',
+            hint:
+                'Tap to change your photo. Photo changes are saved immediately.',
+          ),
+          Center(
+            child: Semantics(
+              button: true,
+              enabled: !_isUploadingAvatar,
+              label: 'Change profile photo',
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(48),
+                  onTap: _isUploadingAvatar ? null : _pickAvatarSource,
+                  child: Container(
+                    margin: const EdgeInsets.only(top: 6, bottom: 28),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.bottomRight,
+                      children: [
+                        Container(
+                          width: 88,
+                          height: 88,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: InsightTheme.blue1,
+                          ),
+                          child: ClipOval(
+                            child: _pickedAvatarFile != null
+                                ? Image.file(
+                                    _pickedAvatarFile!,
+                                    fit: BoxFit.cover,
+                                    width: 88,
+                                    height: 88,
+                                  )
+                                : (_currentAvatarUrl != null &&
+                                          _currentAvatarUrl!.isNotEmpty
+                                      ? Image.network(
+                                          _currentAvatarUrl!,
+                                          fit: BoxFit.cover,
+                                          width: 88,
+                                          height: 88,
+                                          errorBuilder:
+                                              (context, error, stackTrace) =>
+                                                  Center(
+                                                    child: Text(
+                                                      initials,
+                                                      style:
+                                                          InsightTheme.poppins(
+                                                            22,
+                                                            w: FontWeight.w700,
+                                                            c: Colors.white,
+                                                          ),
                                                     ),
                                                   ),
-                                                )),
-                                  ),
+                                        )
+                                      : Center(
+                                          child: Text(
+                                            initials,
+                                            style: InsightTheme.poppins(
+                                              22,
+                                              w: FontWeight.w700,
+                                              c: Colors.white,
+                                            ),
+                                          ),
+                                        )),
+                          ),
+                        ),
+                        if (_isUploadingAvatar)
+                          const Positioned.fill(
+                            child: CircleAvatar(
+                              backgroundColor: Colors.black38,
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
                                 ),
-                                if (_isUploadingAvatar)
-                                  const Positioned.fill(
-                                    child: CircleAvatar(
-                                      backgroundColor: Colors.black38,
-                                      child: SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                Positioned(
-                                  bottom: -4,
-                                  right: -4,
-                                  child: Container(
-                                    width: 28,
-                                    height: 28,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: InsightTheme.bg,
-                                        width: 2.5,
-                                      ),
-                                      gradient: const LinearGradient(
-                                        colors: [
-                                          InsightTheme.blue1,
-                                          InsightTheme.blue2,
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.edit_outlined,
-                                      color: Colors.white,
-                                      size: 14,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
+                            ),
+                          ),
+                        Positioned(
+                          bottom: -4,
+                          right: -4,
+                          child: Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: InsightTheme.bg,
+                                width: 2.5,
+                              ),
+                              color: InsightTheme.blue1,
+                            ),
+                            child: const Icon(
+                              Icons.edit_outlined,
+                              color: Colors.white,
+                              size: 14,
                             ),
                           ),
                         ),
-                      ),
-                      _ProfileField(
-                        label: 'FULL NAME',
-                        controller: _nameCtrl,
-                        maxLength: 64,
-                      ),
-                      _ProfileField(
-                        label: 'EMAIL',
-                        controller: _emailCtrl,
-                        isEnabled: false,
-                        maxLength: 254,
-                      ),
-                      _ProfileField(
-                        label: 'PHONE NUMBER',
-                        controller: _phoneCtrl,
-                        maxLength: 16,
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-                  child: ElevatedButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () {
-                            HapticFeedback.lightImpact();
-                            _updateProfile();
-                          },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ).copyWith(elevation: WidgetStateProperty.all(0)),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Ink(
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [InsightTheme.blue1, InsightTheme.blue2],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: InsightTheme.blue1.withValues(alpha: 0.32),
-                              blurRadius: 22,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: Container(
-                          alignment: Alignment.center,
-                          constraints: const BoxConstraints(minHeight: 50),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : Text(
-                                  'Save changes',
-                                  style: InsightTheme.poppins(
-                                    14.5,
-                                    w: FontWeight.w600,
-                                    c: Colors.white,
-                                  ),
-                                ),
-                        ),
-                      ),
+                      ],
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
+          ),
+          const FieldSectionHeading(
+            title: 'Personal details',
+            hint: 'Keep your inspector name and contact details up to date.',
+          ),
+          _ProfileField(
+            label: 'Full name',
+            controller: _nameCtrl,
+            maxLength: 64,
+          ),
+          _ProfileField(
+            label: 'Phone number',
+            controller: _phoneCtrl,
+            maxLength: 16,
+            helper: 'Optional · e.g. 09171234567',
+            keyboardType: TextInputType.phone,
+          ),
+          const SizedBox(height: 8),
+          const FieldSectionHeading(
+            title: 'Account',
+            hint: 'Your sign-in email is read-only.',
+          ),
+          _ProfileField(
+            label: 'Email',
+            controller: _emailCtrl,
+            isEnabled: false,
+            maxLength: 254,
           ),
         ],
       ),
@@ -538,118 +492,40 @@ class _ProfileField extends StatelessWidget {
   final TextEditingController controller;
   final bool isEnabled;
   final int? maxLength;
+  final String? helper;
+  final TextInputType? keyboardType;
 
   const _ProfileField({
     required this.label,
     required this.controller,
     this.isEnabled = true,
     this.maxLength,
+    this.helper,
+    this.keyboardType,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: InsightTheme.jetBrains(10, w: FontWeight.w500, ls: 0.6),
-          ),
-          const SizedBox(height: 6),
-          TextField(
-            controller: controller,
-            enabled: isEnabled,
-            maxLength: maxLength,
-            buildCounter:
-                (_, {required currentLength, required isFocused, maxLength}) =>
-                    null,
-            style: InsightTheme.inter(
-              13.5,
-              w: FontWeight.w500,
-              c: isEnabled ? InsightTheme.ink : InsightTheme.ink3,
-            ),
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: isEnabled
-                  ? InsightTheme.surface
-                  : InsightTheme.surface2,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(
-                  color: InsightTheme.lineStrong,
-                  width: 1.5,
-                ),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(
-                  color: InsightTheme.lineStrong,
-                  width: 1.5,
-                ),
-              ),
-              disabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(
-                  color: InsightTheme.lineStrong,
-                  width: 1.5,
-                ),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(
-                  color: InsightTheme.blue1,
-                  width: 1.5,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GlassBackButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _GlassBackButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x0F141628),
-              blurRadius: 14,
-              offset: Offset(0, 4),
-            ),
-          ],
+      child: TextField(
+        controller: controller,
+        enabled: isEnabled,
+        maxLength: maxLength,
+        keyboardType: keyboardType,
+        buildCounter:
+            (_, {required currentLength, required isFocused, maxLength}) =>
+                null,
+        style: InsightTheme.inter(
+          16,
+          w: FontWeight.w500,
+          c: isEnabled ? InsightTheme.ink : InsightTheme.ink3,
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(13),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: const Center(
-              child: Icon(
-                Icons.arrow_back_ios_new_rounded,
-                size: 16,
-                color: InsightTheme.ink,
-              ),
-            ),
-          ),
+        decoration: InsightTheme.formInput.copyWith(
+          labelText: label,
+          helperText: helper,
+          floatingLabelBehavior: FloatingLabelBehavior.always,
+          fillColor: isEnabled ? InsightTheme.surface : InsightTheme.surface2,
         ),
       ),
     );

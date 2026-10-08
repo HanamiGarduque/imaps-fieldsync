@@ -213,36 +213,26 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Flexible + ellipsis: at a 1.3x text scale the 20pt title is
-                // wider than the sheet, which painted a right overflow in every
-                // viewport including phone portrait.
                 Flexible(
                   child: Text(
                     'Quick actions',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                     style: InsightTheme.urbanist(20, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.3),
                   ),
                 ),
                 const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: widget.onClose,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    alignment: Alignment.center,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFF1F2F8),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.close_rounded, size: 20, color: QuickActionsSheet.ink2),
-                  ),
+                IconButton(
+                  tooltip: 'Close quick actions',
+                  onPressed: widget.onClose,
+                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                  style: IconButton.styleFrom(backgroundColor: const Color(0xFFF1F2F8)),
+                  icon: const Icon(Icons.close_rounded, size: 20, color: QuickActionsSheet.ink2),
                 ),
               ],
             ),
           ),
-          Flexible(child: SingleChildScrollView(child: _buildActions())),
+          Flexible(child: SingleChildScrollView(child: LayoutBuilder(
+            builder: (context, constraints) => _buildActions(constraints.maxWidth),
+          ))),
           ],
         ),
         ),
@@ -277,24 +267,23 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
 
   /// Width below which two columns would squeeze a row's icon, label and
   /// chevron into an overflow. Two columns need real room, not just width.
-  static const double kTwoColumnMinWidth = 520.0;
+  static const double kTwoColumnMinWidth = 400.0;
 
   /// Every action, always all of them and in the same order.
   ///
   /// Portrait keeps the accepted single-column list. Where the panel is wide
   /// enough the same actions flow into two columns, so a landscape viewport
   /// stops spending its height on a tall portrait-shaped sheet.
-  Widget _buildActions() {
+  Widget _buildActions(double availableWidth) {
     final actions = widget.actions;
 
     Widget entry(int i, Widget child) =>
         _StaggeredEntry(index: i, child: child);
 
-    // canSplitTwoPane alone is not enough: a half-width row still has to fit a
-    // 48px icon, a label and a chevron. Below that, one column is the correct
-    // answer even on a wide-but-short viewport.
+    // Use the panel's actual width and chosen text size, rather than assuming
+    // a wide screen also means wide columns inside this inset overlay.
     final twoColumns = context.responsive.canSplitTwoPane &&
-        MediaQuery.sizeOf(context).width >= kTwoColumnMinWidth;
+        availableWidth >= MediaQuery.textScalerOf(context).scale(kTwoColumnMinWidth);
     // Height is the scarce dimension on any wide-but-short viewport, not only
     // where two columns happen to fit: without this a landscape panel cuts its
     // last row in half instead of showing every action whole.
@@ -409,7 +398,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
   Widget build(BuildContext context) {
     final subtitle = widget.action.subtitle;
     final iconSize = widget.compact ? 44.0 : 48.0;
-    return GestureDetector(
+    return InkWell(
       onTap: () {
         HapticFeedback.selectionClick();
         widget.onClose();
@@ -418,7 +407,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
-      behavior: HitTestBehavior.opaque,
+      borderRadius: BorderRadius.circular(16),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.compact ? 8 : 12),
@@ -464,8 +453,6 @@ class _QuickActionRowState extends State<_QuickActionRow> {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: InsightTheme.inter(12, w: FontWeight.w400, c: InsightTheme.ink3, ls: 0.1),
                     ),
                   ],

@@ -215,10 +215,10 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    test('10c. the pinned band has a fixed, non-zero extent', () {
+    test('10c. the pinned band uses one non-zero extent for the chosen text size', () {
       expect(kCategoryBarHeight, greaterThan(0));
-      expect(src, contains('double get minExtent => kCategoryBarHeight'));
-      expect(src, contains('double get maxExtent => kCategoryBarHeight'));
+      expect(src, contains('double get minExtent => extent'));
+      expect(src, contains('double get maxExtent => extent'));
     });
 
     test('7 + 8. category state and handlers are unchanged', () {
@@ -430,19 +430,6 @@ void main() {
           .readAsStringSync();
     });
 
-    /// The AppBar block, with line comments stripped so the explanatory
-    /// notes inside the bar cannot satisfy a containment check.
-    String appBarBlock() {
-      final code = src
-          .split('\n')
-          .where((l) => !l.trimLeft().startsWith('//'))
-          .join('\n');
-      final start = code.indexOf('appBar: AppBar(');
-      expect(start, greaterThanOrEqualTo(0));
-      final end = code.indexOf('body: SafeArea(', start);
-      return end < 0 ? code.substring(start) : code.substring(start, end);
-    }
-
     testWidgets('TOP — the whole header group is pinned chrome',
         (tester) async {
       await pumpTasks(tester);
@@ -460,29 +447,19 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    test('TOP — the original header composition is intact, in the AppBar', () {
-      final bar = appBarBlock();
-      // All three parts are still together in the one AppBar group.
-      expect(bar, contains('ACTIVE MONITORING'));
-      expect(bar, contains('My Tasks'));
-      expect(bar, contains('ASSIGNED'));
-      expect(bar, contains('CountUpText'));
-      // The tall toolbar that accommodates both, as originally arranged.
-      expect(bar, contains('toolbarHeight: 85'));
-      // Original arrangement: pill above the title, counter beside it.
-      final pill = bar.indexOf('ACTIVE MONITORING');
-      final title = bar.indexOf("'My Tasks'");
-      final counter = bar.indexOf('CountUpText');
-      expect(pill, lessThan(title), reason: 'the pill sits above My Tasks');
-      expect(title, lessThan(counter),
-          reason: 'the ASSIGNED counter sits beside the title');
-      // Nothing was duplicated into the scrolling content.
-      expect("'My Tasks'".allMatches(src).length, 1,
-          reason: 'My Tasks must not be duplicated');
-      expect("'ASSIGNED'".allMatches(src).length, 1,
-          reason: 'the assigned counter must not be duplicated');
-      expect("Text('ACTIVE MONITORING'".allMatches(src).length, 1,
-          reason: 'the status pill must not be duplicated');
+    testWidgets('TOP — the original header composition is intact, in the AppBar', (tester) async {
+      await pumpTasks(tester, width: 800);
+      expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 85);
+      for (final label in ['ACTIVE MONITORING', 'My Tasks', 'ASSIGNED']) {
+        expect(find.text(label), findsOneWidget, reason: '$label is not duplicated in the scrolling content.');
+        expect(find.descendant(of: find.byType(AppBar), matching: find.text(label)), findsOneWidget);
+      }
+      final pill = tester.getRect(find.text('ACTIVE MONITORING'));
+      final title = tester.getRect(find.text('My Tasks'));
+      final counter = tester.getRect(find.text('ASSIGNED'));
+      expect(pill.bottom, lessThanOrEqualTo(title.top), reason: 'the pill sits above My Tasks');
+      expect(counter.left, greaterThan(title.right), reason: 'the counter sits beside the title when space permits.');
+      expect(tester.takeException(), isNull);
     });
 
     test('SCROLLED — Search / Filter scroll away behind the pinned bar', () {

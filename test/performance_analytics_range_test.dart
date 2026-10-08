@@ -10,8 +10,9 @@
 //     calendar row.
 //
 // Range semantics are locked to existing app evidence, not invented here:
-//   Week  = rolling 7 days ending today (same window as `weeklyTrend`).
+//   Week  = current Monday–Sunday calendar week, with daily Bars.
 //   Month = the current calendar month, Monday-first grid.
+//           Bars group days 1–7, 8–14, 15–21, 22–28 and 29–month end.
 
 import 'dart:io';
 
@@ -698,14 +699,76 @@ void main() {
   });
 
   group('BARS — Weekly Performance follows the range', () {
-    test('series has one point per day of the selected range', () {
+    test('week has daily bars and month has readable weekly bars', () {
       final stats = InspectorDashboardStats.fromTasks(const []);
       final now = DateTime(2026, 10, 3);
       final week = AnalyticsActivityRange.week(now, const {});
       final month = AnalyticsActivityRange.month(2026, 10, const {});
       expect(stats.submissionTrendFor(week.days), hasLength(7));
-      expect(stats.submissionTrendFor(month.days), hasLength(31));
+      expect(stats.submissionTrendFor(month.days), hasLength(5));
     });
+
+    test('monthly weeks preserve all submissions at every bucket boundary', () {
+      final stats = InspectorDashboardStats.fromTasks([
+        _task('outside-before', submittedAt: '2026-09-30T10:00:00'),
+        _task('first', submittedAt: '2026-10-01T10:00:00'),
+        _task('seventh', submittedAt: '2026-10-07T10:00:00'),
+        _task('same-day', submittedAt: '2026-10-07T11:00:00'),
+        _task('eighth', submittedAt: '2026-10-08T10:00:00'),
+        _task('fourteenth', submittedAt: '2026-10-14T10:00:00'),
+        _task('fifteenth', submittedAt: '2026-10-15T10:00:00'),
+        _task('twenty-first', submittedAt: '2026-10-21T10:00:00'),
+        _task('twenty-second', submittedAt: '2026-10-22T10:00:00'),
+        _task('twenty-eighth', submittedAt: '2026-10-28T10:00:00'),
+        _task('twenty-ninth', submittedAt: '2026-10-29T10:00:00'),
+        _task('last', submittedAt: '2026-10-31T23:59:59'),
+        _task('outside-after', submittedAt: '2026-11-01T00:00:00'),
+        _task('invalid', submittedAt: 'not-a-date'),
+      ]);
+      final points = stats.submissionTrendFor(
+        AnalyticsActivityRange.month(2026, 10, const {}).days,
+      );
+      expect(points.map((point) => point.label), [
+        '1st week',
+        '2nd week',
+        '3rd week',
+        '4th week',
+        '5th week',
+      ]);
+      expect(points.map((point) => point.date.day), [1, 8, 15, 22, 29]);
+      expect(points.map((point) => point.count), [3, 2, 2, 2, 2]);
+      expect(points.fold<int>(0, (sum, point) => sum + point.count), 11);
+    });
+
+    test(
+      'monthly bars include the short final week without a phantom fifth',
+      () {
+        for (final (range, expected) in [
+          (febNormal, [7, 7, 7, 7]),
+          (febLeap, [7, 7, 7, 7, 1]),
+          (april30, [7, 7, 7, 7, 2]),
+          (jan31, [7, 7, 7, 7, 3]),
+        ]) {
+          final stats = InspectorDashboardStats.fromTasks([
+            for (final day in range.days)
+              _task(
+                '${day.day}',
+                submittedAt:
+                    '${day.toIso8601String().substring(0, 10)}T12:00:00',
+              ),
+          ]);
+          expect(
+            stats.submissionTrendFor(range.days).map((point) => point.count),
+            expected,
+          );
+          final empty = InspectorDashboardStats.empty().submissionTrendFor(
+            range.days,
+          );
+          expect(empty.length, expected.length);
+          expect(empty.every((point) => point.count == 0), isTrue);
+        }
+      },
+    );
 
     test('labels run Mon..Sun and counts come from real submissions', () {
       final stats = InspectorDashboardStats.fromTasks([
