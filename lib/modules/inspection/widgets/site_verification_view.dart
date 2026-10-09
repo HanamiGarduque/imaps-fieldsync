@@ -1,0 +1,607 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../../core/layout/responsive_layout.dart';
+import '../../../core/theme/insight_theme.dart';
+import 'inspection_step_header.dart';
+
+/// Step 1 presentation only. GPS, road geometry, cache and progression remain
+/// owned by SiteMapScreen; Quick Action Map uses its existing shared panel.
+class SiteVerificationView extends StatefulWidget {
+  const SiteVerificationView({
+    super.key,
+    required this.mapBuilder,
+    required this.location,
+    required this.ready,
+    required this.hasDeviceLocation,
+    required this.retryingLocation,
+    required this.hasRoute,
+    required this.routeFromCache,
+    required this.nearSite,
+    required this.rework,
+    required this.onBack,
+    required this.onRetryLocation,
+    required this.onFit,
+    required this.onProceed,
+    this.distanceMeters,
+    this.routeDistanceMeters,
+    this.routeDurationSeconds,
+  });
+
+  final Widget Function(EdgeInsets padding) mapBuilder;
+  final String location;
+  final bool ready;
+  final bool hasDeviceLocation;
+  final bool retryingLocation;
+  final bool hasRoute;
+  final bool routeFromCache;
+  final bool nearSite;
+  final bool rework;
+  final double? distanceMeters;
+  final double? routeDistanceMeters;
+  final double? routeDurationSeconds;
+  final VoidCallback onBack;
+  final VoidCallback onRetryLocation;
+  final VoidCallback onFit;
+  final VoidCallback onProceed;
+
+  @override
+  State<SiteVerificationView> createState() => _SiteVerificationViewState();
+}
+
+class _SiteVerificationViewState extends State<SiteVerificationView> {
+  bool _fullscreen = false;
+  bool _collapsed = false;
+  final _headerKey = GlobalKey();
+  final _panelKey = GlobalKey();
+  final _attributionKey = GlobalKey();
+  double _headerHeight = 156;
+  double _panelHeight = 260;
+  double _attributionHeight = 42;
+  static const _motion = Duration(milliseconds: 220);
+
+  void _measureOverlays() {
+    if (!mounted) return;
+    final header = _headerKey.currentContext?.size?.height ?? _headerHeight;
+    final panel = _panelKey.currentContext?.size?.height ?? _panelHeight;
+    final attribution =
+        _attributionKey.currentContext?.size?.height ?? _attributionHeight;
+    if ((header - _headerHeight).abs() < 0.5 &&
+        (panel - _panelHeight).abs() < 0.5 &&
+        (attribution - _attributionHeight).abs() < 0.5)
+      return;
+    setState(() {
+      _headerHeight = header;
+      _panelHeight = panel;
+      _attributionHeight = attribution;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bp = context.responsive;
+    final safe = MediaQuery.paddingOf(context);
+    return LayoutBuilder(
+      builder: (context, box) {
+        final width = box.maxWidth - safe.horizontal;
+        final height = box.maxHeight - safe.vertical;
+        final landscape = bp.isLandscape && !bp.isCompactWidth;
+        final split = landscape && !_fullscreen && !_collapsed && widget.ready;
+        final sideWidth = (width * 0.34).clamp(260.0, 336.0);
+        final mapRight = split ? safe.right + sideWidth + 24 : 0.0;
+        // The established header is unchanged. Very large text on a short phone
+        // scrolls its two context containers rather than hiding either of them.
+      final headerMaxHeight = landscape
+          ? math.max(80.0, height - _attributionHeight - 144)
+          : math.max(80.0, math.min(height * 0.4,
+              height - _attributionHeight - 280));
+        final panelMaxHeight = landscape
+            ? height - 32
+            : math.max(
+                104.0,
+                math.min(
+                  height * 0.44,
+                  height - _headerHeight - _attributionHeight - 128,
+                ),
+              );
+        final panelBottom = safe.bottom + 16;
+        final panelSpace = !_fullscreen && widget.ready
+            ? (split ? 0.0 : _panelHeight + 8)
+            : 0.0;
+        final attributionBottom = panelBottom + panelSpace;
+        final controlsHeight = landscape ? 48.0 : 104.0;
+        final controlsTop = math.max(
+          safe.top + (_fullscreen ? 8 : _headerHeight + 8),
+          box.maxHeight -
+              attributionBottom -
+              _attributionHeight -
+              controlsHeight -
+              8,
+        );
+        final fitPadding = EdgeInsets.fromLTRB(
+          safe.left + 48,
+          safe.top + (_fullscreen ? 48 : _headerHeight + 24),
+          (split ? 0 : safe.right) + (landscape ? 48 : 72),
+          safe.bottom + panelSpace + _attributionHeight + 32,
+        );
+        WidgetsBinding.instance.addPostFrameCallback((_) => _measureOverlays());
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // The same element/controller survives disclosure, fullscreen and
+            // rotation. Expanding the side pane changes its viewport, not its data.
+            Positioned.fill(
+              right: mapRight,
+              child: widget.mapBuilder(fitPadding),
+            ),
+            if (!_fullscreen)
+              Positioned(
+                top: safe.top,
+                left: safe.left,
+                right: split ? mapRight : safe.right,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: headerMaxHeight),
+                  child: SingleChildScrollView(
+                    key: _headerKey,
+                    child: InspectionStepHeader(
+                      title: 'Site Verification',
+                      subtitle: widget.location,
+                      stepNumber: 1,
+                      stepSubtitle: 'LOCATE TARGET',
+                      compact: false,
+                      onBack: widget.onBack,
+                    ),
+                  ),
+                ),
+              ),
+            if (widget.ready) ...[
+              AnimatedPositioned(
+                duration: _motion,
+                curve: Curves.easeOutCubic,
+                top: controlsTop,
+                left: landscape ? safe.left + 16 : null,
+                right: landscape ? null : safe.right + 16,
+                child: Flex(
+                  direction: landscape ? Axis.horizontal : Axis.vertical,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _MapControl(
+                      label: _fullscreen ? 'Exit full map' : 'Full map',
+                      icon: _fullscreen
+                          ? Icons.fullscreen_exit_rounded
+                          : Icons.fullscreen_rounded,
+                      onPressed: () =>
+                          setState(() => _fullscreen = !_fullscreen),
+                    ),
+                    SizedBox(
+                      width: landscape ? 8 : 0,
+                      height: landscape ? 0 : 8,
+                    ),
+                    _MapControl(
+                      label: 'Fit both markers',
+                      icon: Icons.center_focus_strong_rounded,
+                      accented: true,
+                      onPressed: widget.onFit,
+                    ),
+                  ],
+                ),
+              ),
+              AnimatedPositioned(
+                duration: _motion,
+                curve: Curves.easeOutCubic,
+                left: safe.left + 16,
+                right: split ? mapRight + 16 : safe.right + 16,
+                bottom: attributionBottom,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    key: _attributionKey,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '– –  Rosario boundary · MPDO Rosario',
+                          style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                        ),
+                        Text(
+                          '© OpenStreetMap contributors',
+                          style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            if (widget.ready && !_fullscreen)
+              Positioned(
+                top: split ? safe.top + 16 : null,
+                bottom: panelBottom,
+                left: split ? null : safe.left + 16,
+                right: safe.right + 16,
+                width: split ? sideWidth : null,
+                child: Align(
+                  alignment: split
+                      ? Alignment.topRight
+                      : Alignment.bottomCenter,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: 520,
+                      maxHeight: panelMaxHeight,
+                    ),
+                    child: AnimatedSize(
+                      duration: _motion,
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.bottomCenter,
+                      child: _details(landscape),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _details(bool landscape) {
+    return Container(
+      key: _panelKey,
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1F0B1440),
+            blurRadius: 28,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 4, 16, _collapsed ? 4 : 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Site details',
+                      style: InsightTheme.urbanist(16),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() => _collapsed = !_collapsed),
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(48, 48),
+                      foregroundColor: InsightTheme.ink2,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    child: Tooltip(
+                      message: _collapsed
+                          ? 'Show site details'
+                          : 'Hide site details',
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _collapsed ? 'Show' : 'Hide',
+                            style: InsightTheme.inter(12),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            _collapsed
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            size: 18,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (!_collapsed) ...[
+                const SizedBox(height: 6),
+                LayoutBuilder(
+                  builder: (context, box) {
+                    final stacked =
+                        landscape ||
+                        box.maxWidth < 310 ||
+                        MediaQuery.textScalerOf(context).scale(12) > 17;
+                    final site = _siteMetric();
+                    final route = _routeMetric();
+                    return stacked
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [site, const SizedBox(height: 16), route],
+                          )
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: site),
+                              const SizedBox(width: 16),
+                              Expanded(child: route),
+                            ],
+                          );
+                  },
+                ),
+                if (widget.nearSite)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      'Near site · confirm GPS in Step 2.',
+                      style: InsightTheme.inter(
+                        12,
+                        w: FontWeight.w600,
+                        c: InsightTheme.greenInk,
+                      ),
+                    ),
+                  ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Divider(height: 1, color: InsightTheme.line),
+                ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2),
+                      child: Icon(
+                        Icons.info_outline_rounded,
+                        size: 14,
+                        color: InsightTheme.ink3,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'GPS confirmation happens in Step 2.',
+                        style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: InsightTheme.primaryGradient,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: ElevatedButton(
+                    onPressed: widget.onProceed,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      foregroundColor: Colors.white,
+                      shadowColor: Colors.transparent,
+                      elevation: 0,
+                      minimumSize: const Size(double.infinity, 52),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            widget.rework ? 'Save' : 'Proceed to Location',
+                            textAlign: TextAlign.center,
+                            style: InsightTheme.inter(
+                              14,
+                              w: FontWeight.w600,
+                              c: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          widget.rework
+                              ? Icons.check_rounded
+                              : Icons.arrow_forward_rounded,
+                          size: 18,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _siteMetric() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('Site distance', style: InsightTheme.inter(12)),
+      const SizedBox(height: 6),
+      if (widget.hasDeviceLocation) ...[
+        Text(
+          widget.distanceMeters == null
+              ? 'Unavailable'
+              : _distance(widget.distanceMeters!),
+          style: InsightTheme.urbanist(26),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Position to site',
+          style: InsightTheme.inter(12, c: InsightTheme.ink3),
+        ),
+      ] else ...[
+        Text(
+          'Location unavailable',
+          style: InsightTheme.inter(13, w: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        OutlinedButton.icon(
+          onPressed: widget.retryingLocation ? null : widget.onRetryLocation,
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(48, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
+          icon: widget.retryingLocation
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.my_location_rounded, size: 16),
+          label: Text(
+            widget.retryingLocation ? 'Retrying location' : 'Retry location',
+            style: InsightTheme.inter(12),
+          ),
+        ),
+      ],
+    ],
+  );
+
+  Widget _routeMetric() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(
+              Icons.route_rounded,
+              size: 14,
+              color: InsightTheme.blueInk,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              widget.hasRoute && widget.routeFromCache
+                  ? 'Saved road route'
+                  : 'Road route',
+              style: InsightTheme.inter(12),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      if (widget.hasRoute) ...[
+        Text(
+          [
+            if (widget.routeDistanceMeters != null)
+              _distance(widget.routeDistanceMeters!),
+            if (widget.routeDurationSeconds != null)
+              '~${_duration(widget.routeDurationSeconds!)}',
+          ].join(' · '),
+          style: InsightTheme.inter(
+            15,
+            w: FontWeight.w700,
+            c: InsightTheme.ink,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Driving estimate',
+          style: InsightTheme.inter(12, c: InsightTheme.ink3),
+        ),
+        if (widget.routeFromCache)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'Saved estimate. Connect to refresh; offline rerouting is not available.',
+              style: InsightTheme.inter(12, c: InsightTheme.ink3),
+            ),
+          ),
+      ] else ...[
+        Text(
+          'Road route unavailable',
+          style: InsightTheme.inter(13, w: FontWeight.w600),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'A connection is needed to request a road route. Street tiles may be unavailable offline.',
+          style: InsightTheme.inter(12, c: InsightTheme.ink3),
+        ),
+      ],
+    ],
+  );
+
+  static String _distance(double meters) => meters < 1000
+      ? '${meters.round()} m'
+      : '${(meters / 1000).toStringAsFixed(meters < 10000 ? 1 : 0)} km';
+
+  static String _duration(double seconds) {
+    final minutes = (seconds / 60).round();
+    if (minutes < 1) return 'less than a minute';
+    if (minutes < 60) return '$minutes min';
+    return '${minutes ~/ 60}h ${minutes % 60}m';
+  }
+}
+
+class _MapControl extends StatelessWidget {
+  const _MapControl({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.accented = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool accented;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    type: MaterialType.transparency,
+    child: IconButton(
+      tooltip: label,
+      onPressed: onPressed,
+      constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+      padding: const EdgeInsets.all(4),
+      icon: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: accented ? InsightTheme.blueTint : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: accented
+                ? InsightTheme.blue1.withValues(alpha: 0.25)
+                : InsightTheme.line,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x140B1440),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Icon(
+          icon,
+          size: 20,
+          color: accented ? InsightTheme.blueInk : InsightTheme.ink2,
+        ),
+      ),
+    ),
+  );
+}

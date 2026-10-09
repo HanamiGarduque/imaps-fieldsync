@@ -385,18 +385,14 @@ void main() {
       expect(find.byKey(const Key('panel')), findsNothing);
     });
 
-    test('map and quick-action-map use the shared panel', () {
-      for (final f in [
-        'lib/modules/inspection/screens/site_map_screen.dart',
-        'lib/modules/inspection/screens/site_map_preview_screen.dart',
-      ]) {
-        final src = File(f).readAsStringSync();
-        expect(src, contains('MapDetailPanel'), reason: f);
-      }
+    test('approved Step 1 is scoped; quick-action-map retains the shared panel', () {
+      expect(File('lib/modules/inspection/screens/site_map_screen.dart')
+          .readAsStringSync(), contains('SiteVerificationView'));
       // The guessed recenter offset is gone from the preview screen.
       final preview =
           File('lib/modules/inspection/screens/site_map_preview_screen.dart')
               .readAsStringSync();
+      expect(preview, contains('MapDetailPanel'));
       expect(preview, isNot(contains('bottom: 210')));
       expect(preview, contains('kInsightBottomNavReserve'));
     });
@@ -405,13 +401,14 @@ void main() {
       final src =
           File('lib/modules/inspection/screens/site_map_screen.dart')
               .readAsStringSync();
-      expect(src, contains('Proceed to Location'));
+      final view = File('lib/modules/inspection/widgets/site_verification_view.dart').readAsStringSync();
+      expect(view, contains('Proceed to Location'));
       expect(src, contains('PolylineLayer'));
       expect(src, contains('_routePoints'));
       expect(src, contains('_distanceMeters'));
       expect(src, contains('markStepComplete(1)'));
       // Content-sized, so no dead space below the CTA.
-      expect(src, contains('mainAxisSize: MainAxisSize.min'));
+      expect(view, contains('mainAxisSize: MainAxisSize.min'));
     });
   });
 

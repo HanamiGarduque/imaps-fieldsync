@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -20,45 +19,36 @@ import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
-import '../../../core/widgets/quick_actions_sheet.dart' show MapDetailPanel;
 import '../../../core/theme/insight_theme.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
-import '../widgets/inspection_step_header.dart';
+import '../widgets/site_verification_view.dart';
 import '../widgets/rosario_boundary_overlay.dart';
 import '../widgets/map_connectivity_recovery.dart';
 
 /// Fit both pins after flutter_map knows its viewport, before loading tiles for
 /// the final camera. Manual first-frame moves can race its initial size event.
-MapOptions siteMapOptions({required ll.LatLng parcel, ll.LatLng? device}) =>
-    MapOptions(
-      initialCenter: parcel,
-      initialZoom: 17,
-      initialCameraFit: device == null ? null : CameraFit.bounds(
-        bounds: LatLngBounds.fromPoints([parcel, device]),
-        maxZoom: 17,
-        padding: const EdgeInsets.fromLTRB(50, 160, 50, 220),
-      ),
-    );
+MapOptions siteMapOptions({
+  required ll.LatLng parcel,
+  ll.LatLng? device,
+  EdgeInsets padding = const EdgeInsets.fromLTRB(50, 160, 50, 220),
+}) => MapOptions(
+  initialCenter: parcel,
+  initialZoom: 17,
+  initialCameraFit: device == null
+      ? null
+      : CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints([parcel, device]),
+          maxZoom: 17,
+          padding: padding,
+        ),
+);
 
-/// Site Verification (Step 1). Full-bleed map (matches Master's reference
-/// picture 1 — edge-to-edge, floating glass controls) with a bent,
-/// route-style line between device and target (matches Master's reference
-/// picture 3), since — unlike the standalone Quick Actions map — this
-/// screen DOES have a real distance to compare (Step 2/GPS Verification
-/// uses the same number), so the route visual earns its place here.
-///
-/// NOTE on the route line (Route Guidance, Phase 1): the polyline is now a
-/// REAL road-network route fetched from the free OSRM service (see
-/// RouteService — no API key, no billing; demo server in dev, self-hosted
-/// for production). When routing is unavailable (offline, timeout, error),
-/// the screen falls back to the previous stylized bent line + haversine
-/// distance so the screen never hard-fails on routing. The route loads
-/// ASYNCHRONOUSLY after the map is already usable: it is an enhancement,
-/// never a prerequisite for opening Step 1. Road-route distance/ETA are
-/// navigation/orientation aids ONLY; the authoritative Site Verification
-/// distance remains the parcel-boundary RPC / haversine number shown above
-/// and must never be replaced by road-route distance.
+/// Site Verification (Step 1): task-bound GPS, cached/live real road geometry
+/// and the existing inspection callbacks, with orientation-aware presentation.
+/// Road distance and driving time are guidance only; the separate site distance
+/// remains the parcel-boundary RPC / offline Haversine measurement. Routing
+/// failure preserves the last real route, or draws none when none is available.
 ///
 ///   - Parcel coordinates: SupabaseService.fetchParcelDetails(parcelId)
 ///   - Device position: LocationService.getCurrentLocation()
@@ -82,13 +72,9 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   ll.LatLng? _deviceLatLng;
   double? _distanceMeters;
   bool _retryingDeviceLocation = false;
-  // Route Guidance (Phase 1): real road route from OSRM. Null when routing
-  // is unavailable (offline/timeout/error) — the UI then falls back to the
-  // stylized bent line and the existing straight-line/RPC distance.
+  // Real road route only. Routing failure never supplies fabricated geometry.
   List<ll.LatLng>? _routePoints;
-  // True when the displayed road route came from local cache rather than a
-  // live OSRM response. Drives the honest "Cached road route · Offline" label
-  // so a replayed route is never presented as freshly calculated.
+  // Cache provenance is independent of the current connectivity state.
   bool _routeFromCache = false;
   double? _routeDistanceMeters;
   double? _routeDurationSeconds;
@@ -107,10 +93,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   static const double _routeRefreshMovementMeters = 50.0;
   static const Duration _routeRefreshCooldown = Duration(seconds: 30);
   final MapController _mapController = MapController();
-  // Fullscreen map mode: hides the floating header/step bar and the bottom
-  // card so the map fills the whole screen (field visibility). The recenter
-  // control and the OSM attribution stay visible; the toggle flips icon.
-  bool _fullscreen = false;
+  EdgeInsets _mapPadding = const EdgeInsets.fromLTRB(50, 160, 50, 220);
 
   // Offline → ONLINE recovery: retries the OSM basemap and the OSRM road
   // route without the inspector leaving Step 1. Holds no map or business
@@ -148,7 +131,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
   /// Network is back: drop the grey OSM tiles so they refetch, and retry the
   /// road route once for the current device position + target. A failed retry
-  /// leaves the existing fallback polyline untouched.
+  /// leaves the existing real geometry untouched.
   Future<void> _onConnectivityRecovered() async {
     if (!mounted) return;
     _recovery.resetTiles();
@@ -295,7 +278,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
       // Route Guidance: fetch the road route AFTER the map is usable -
       // OSRM latency must never delay opening Step 1. Best-effort only:
-      // on any failure the bent line + straight-line/RPC distance remain.
+      // on any failure the last real route and separate site distance remain.
       unawaited(_fetchRouteAndUpdate(online: online));
     } catch (e) {
       if (!mounted) return;
@@ -308,7 +291,11 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
   void _fitBounds() {
     if (!mounted || _parcelLatLng == null) return;
-    final fit = siteMapOptions(parcel: _parcelLatLng!, device: _deviceLatLng).initialCameraFit;
+    final fit = siteMapOptions(
+      parcel: _parcelLatLng!,
+      device: _deviceLatLng,
+      padding: _mapPadding,
+    ).initialCameraFit;
     if (fit == null) {
       _mapController.move(_parcelLatLng!, 17);
       return;
@@ -339,9 +326,8 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   /// and refreshes the AUTHORITATIVE Site Verification distance (boundary
   /// RPC online / haversine offline) behind a reentrancy guard plus a
   /// minimum recalculation interval so rapid ticks cannot flood Supabase.
-  /// The road-route polyline is deliberately left untouched here - the
-  /// road route is orientation information fetched once per open; making
-  /// it follow the inspector (rerouting) is a separate later phase.
+  /// Online road requests have their own movement/cooldown guard below; GPS
+  /// ticks never fabricate geometry or directly change its cached copy.
   Future<void> _onPositionUpdate(Position pos) async {
     if (!mounted || _parcelLatLng == null) return;
     final newPos = ll.LatLng(pos.latitude, pos.longitude);
@@ -496,492 +482,134 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     }
   }
 
-  String _formatRouteDistance(double meters) {
-    if (meters < 1000) return '${meters.round()} m';
-    return '${(meters / 1000).toStringAsFixed(meters < 10000 ? 1 : 0)} km';
-  }
-
-  String _formatRouteDuration(double seconds) {
-    final minutes = (seconds / 60).round();
-    if (minutes < 1) return 'less than a minute';
-    if (minutes < 60) return '$minutes min';
-    return '${minutes ~/ 60}h ${minutes % 60}m';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final task = widget.task;
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
     return SensitiveScreen(
       child: Scaffold(
         backgroundColor: InsightTheme.bg,
-        extendBodyBehindAppBar: true,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            // ── Full-bleed map layer ─────────────────────────────────────
+        body: SiteVerificationView(
+          location: widget.task.location,
+          ready: !_loading && _error == null,
+          hasDeviceLocation: _deviceLatLng != null,
+          retryingLocation: _retryingDeviceLocation,
+          distanceMeters: _distanceMeters,
+          hasRoute: _routePoints != null,
+          routeFromCache: _routeFromCache,
+          routeDistanceMeters: _routeDistanceMeters,
+          routeDurationSeconds: _routeDurationSeconds,
+          nearSite: _arrived,
+          rework: context.watch<InspectionProvider>().isReworkMode,
+          onBack: () => Navigator.pop(context),
+          onRetryLocation: _retryDeviceLocation,
+          onFit: _fitBounds,
+          onProceed: _proceed,
+          mapBuilder: (padding) {
+            _mapPadding = padding;
             if (_loading)
-              const Center(child: ImapsLoadingIndicator(size: 60))
-            else if (_error != null)
-              _ErrorState(message: _error!, onRetry: _loadMapData)
-            else
-              FlutterMap(
-                mapController: _mapController,
-                options: siteMapOptions(parcel: _parcelLatLng!, device: _deviceLatLng),
-                children: [
-                  TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.imaps.fieldsync',
-                    // Lets a recovered network evict the tiles that failed
-                    // while offline and refetch them (see MapConnectivityRecovery).
-                    reset: _recovery.tileResetStream,
-                    evictErrorTileStrategy:
-                        EvictErrorTileStrategy.notVisibleRespectMargin,
-                  ),
-                  const RosarioBoundaryOverlay(),
-                  // Only ever real road geometry: a live OSRM route, or the
-                  // same route restored from local cache while offline. There
-                  // is deliberately NO synthetic fallback — a made-up line
-                  // must not be drawn as if it were a road.
-                  if (_routePoints != null)
-                    PolylineLayer(
-                      polylines: [
-                        Polyline(
-                          points: _routePoints!,
-                          strokeWidth: 4,
-                          color: InsightTheme.blue1.withValues(alpha: 0.75),
-                          borderStrokeWidth: 1,
-                          borderColor: Colors.white.withValues(alpha: 0.8),
-                        ),
-                      ],
-                    ),
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _parcelLatLng!,
-                        width: 32,
-                        height: 32,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: InsightTheme.red,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 3),
-                            boxShadow: [
-                              BoxShadow(
-                                color: InsightTheme.red.withValues(alpha: 0.4),
-                                blurRadius: 8,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      if (_deviceLatLng != null)
-                        Marker(
-                          point: _deviceLatLng!,
-                          width: 34,
-                          height: 34,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: InsightTheme.blue1,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 3),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: InsightTheme.blue1.withValues(
-                                    alpha: 0.4,
-                                  ),
-                                  blurRadius: 10,
-                                  spreadRadius: 2,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  // Required attribution (OSM tile usage policy) — keep visible.
-                  RichAttributionWidget(
-                    attributions: [
-                      TextSourceAttribution('© OpenStreetMap contributors'),
-                      TextSourceAttribution('Municipal boundary: MPDO Rosario'),
-                    ],
-                    popupBackgroundColor: Colors.white,
-                    showFlutterMapAttribution: false,
-                  ),
-                ],
-              ),
-
-            // ── Floating glass header — back button + title + step progress bar ───
-            if (!_fullscreen)
-              SafeArea(
-                bottom: false,
-                child: InspectionStepHeader(
-                  title: 'Site Verification',
-                  subtitle: task.location,
-                  stepNumber: 1,
-                  stepSubtitle: 'LOCATE TARGET',
-                  onBack: () => Navigator.pop(context),
-                ),
-              ),
-
-            // ── Floating recenter button. ────────────────────────────────
-            // ―― Floating map controls: fullscreen toggle + recenter. The
-            // controls slide up to the top corner in fullscreen mode since
-            // the header they used to sit below is hidden. ――
-            if (!_loading && _error == null) ...[
-              Positioned(
-                right: 16,
-                top: _fullscreen ? 16 : 190,
-                child: SafeArea(
-                  bottom: false,
-                  child: _GlassIconButton(
-                    icon: _fullscreen
-                        ? Icons.fullscreen_exit_rounded
-                        : Icons.fullscreen_rounded,
-                    onTap: () => setState(() => _fullscreen = !_fullscreen),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 16,
-                top: (_fullscreen ? 16 : 190) + 56,
-                child: SafeArea(
-                  bottom: false,
-                  child: _GlassIconButton(
-                    icon: Icons.center_focus_strong_rounded,
-                    onTap: _fitBounds,
-                  ),
-                ),
-              ),
-            ],
-
-            // ── Floating bottom card — status row + CTA combined into one
-            // modern card (matches reference picture 1's bottom-card
-            // style) instead of a separate status pill + button below it.
-            if (!_loading && _error == null && !_fullscreen)
-              // Map-first, and collapsible: a compact right-hand side pane in
-              // landscape/tablet, a content-sized floating card otherwise, with
-              // an explicit hide control so the map is never permanently
-              // covered. Sized to its content so there is no dead space below
-              // the CTA.
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                bottom: 0,
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: MapDetailPanel(
-                        child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x1F0B1440),
-                          blurRadius: 32,
-                          offset: Offset(0, 16),
-                        ),
-                      ],
-                    ),
-                    // Content-sized: the Column is mainAxisSize.min, so the
-                    // card ends at the CTA instead of stretching to fill the
-                    // pane. A side pane can be shorter than the card needs,
-                    // so it scrolls internally while the map stays visible.
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: _detailCardChildren(context),
-                      ),
-                    ),
-                  ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      );
-  }
-
-  /// The detail card's rows, unchanged in content and order.
-  ///
-  /// Portrait floats this at the bottom of the map; landscape and tablet use it
-  /// as the secondary pane. Target Site, distance, road route and the Proceed to
-  /// Location action are identical either way.
-  List<Widget> _detailCardChildren(BuildContext context) => <Widget>[
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.circle,
-                              size: 10,
-                              color: InsightTheme.red,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Target Site',
-                              style: InsightTheme.inter(12, w: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        GestureDetector(
-                          onTap:
-                              _deviceLatLng == null && !_retryingDeviceLocation
-                              ? _retryDeviceLocation
-                              : null,
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.circle,
-                                size: 10,
-                                color: InsightTheme.blue1,
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  _deviceLatLng == null
-                                      ? 'Location unavailable — tap to retry'
-                                      : _distanceMeters != null
-                                      ? 'You (${_distanceMeters!.round()}m)'
-                                      : 'You',
-                                  style: InsightTheme.inter(
-                                    12,
-                                    w: FontWeight.w600,
-                                    c: InsightTheme.ink2,
-                                  ),
-                                ),
-                              ),
-                              if (_retryingDeviceLocation)
-                                const SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        // Route Guidance (Phase 1): road-route distance and
-                        // ETA from OSRM, shown alongside (not replacing) the
-                        // straight-line/RPC distance that Step 2 reuses.
-                        if (_routePoints != null &&
-                            _routeDistanceMeters != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.route_rounded,
-                                  size: 14,
-                                  color: InsightTheme.blue1,
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    // Cached geometry is labelled as such so a
-                                    // replayed route is never mistaken for one
-                                    // just calculated from here.
-                                    '${_routeFromCache ? 'Cached road route · Offline' : 'Road route'}'
-                                    ': ${_formatRouteDistance(_routeDistanceMeters!)} · ~${_formatRouteDuration(_routeDurationSeconds ?? 0)}',
-                                    style: InsightTheme.inter(
-                                      12,
-                                      w: FontWeight.w600,
-                                      c: InsightTheme.ink2,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        // No real road geometry and none cached: say so plainly
-                        // instead of drawing a line that only looks like a road.
-                        // Purely informational — Step 1 stays fully usable.
-                        if (_routePoints == null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.route_rounded,
-                                  size: 14,
-                                  color: InsightTheme.ink3,
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    'Road route unavailable offline. Connect once to load route guidance.',
-                                    style: InsightTheme.inter(
-                                      12,
-                                      w: FontWeight.w600,
-                                      c: InsightTheme.ink2,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        // Phase C: Arrival detection indicator.
-                        // Shows when the inspector is sufficiently close to the target site.
-                        if (_arrived)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 12),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: InsightTheme.greenTint,
-                                borderRadius: BorderRadius.circular(
-                                  InsightTheme.radiusSm,
-                                ),
-                                border: Border.all(
-                                  color: InsightTheme.green.withValues(
-                                    alpha: 0.25,
-                                  ),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: const BoxDecoration(
-                                      color: InsightTheme.green,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Arrived at Site — You are close enough to begin verification.',
-                                      style: InsightTheme.inter(
-                                        12,
-                                        w: FontWeight.w600,
-                                        c: InsightTheme.green,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 14),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () {
-                              HapticFeedback.selectionClick();
-                              final isReworkMode = context
-                                  .read<InspectionProvider>()
-                                  .isReworkMode;
-                              if (isReworkMode) {
-                                // Issue 2 fix (Completed Category enhancement):
-                                // this screen has no editable data of its own
-                                // (pure map/location confirmation) — during rework
-                                // there's nothing to push forward to, "Continue"
-                                // would incorrectly advance the normal wizard
-                                // instead of returning to Inspection Summary.
-                                Navigator.pop(context);
-                                return;
-                              }
-                              InspectionProgress.instance.markStepComplete(1);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      GpsVerificationScreen(task: widget.task),
-                                ),
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              backgroundColor: Colors.transparent,
-                              shadowColor: Colors.transparent,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ).copyWith(elevation: WidgetStateProperty.all(0)),
-                            child: Ink(
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    InsightTheme.blue1,
-                                    InsightTheme.blue2,
-                                  ],
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                ),
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: InsightTheme.blue1.withValues(
-                                      alpha: 0.32,
-                                    ),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 8),
-                                  ),
-                                ],
-                              ),
-                              child: Container(
-                                alignment: Alignment.center,
-                                constraints: const BoxConstraints(
-                                  minHeight: 52,
-                                ),
-                                width: double.infinity,
-                                child: Text(
-                                  context
-                                          .watch<InspectionProvider>()
-                                          .isReworkMode
-                                      ? 'Save'
-                                      : 'Proceed to Location',
-                                  style: InsightTheme.poppins(
-                                    15,
-                                    w: FontWeight.w600,
-                                    c: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-      ];
-}
-
-class _GlassIconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _GlassIconButton({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: InsightTheme.glassIconButtonDecoration(),
-            child: Icon(icon, size: 18, color: InsightTheme.ink),
-          ),
+              return const Center(child: ImapsLoadingIndicator(size: 60));
+            if (_error != null)
+              return _ErrorState(message: _error!, onRetry: _loadMapData);
+            return _buildMap();
+          },
         ),
       ),
     );
   }
+
+  void _proceed() {
+    HapticFeedback.selectionClick();
+    if (context.read<InspectionProvider>().isReworkMode) {
+      Navigator.pop(context);
+      return;
+    }
+    InspectionProgress.instance.markStepComplete(1);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GpsVerificationScreen(task: widget.task),
+      ),
+    );
+  }
+
+  Widget _buildMap() => FlutterMap(
+    mapController: _mapController,
+    options: siteMapOptions(
+      parcel: _parcelLatLng!,
+      device: _deviceLatLng,
+      padding: _mapPadding,
+    ),
+    children: [
+      TileLayer(
+        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        userAgentPackageName: 'com.imaps.fieldsync',
+        // Lets a recovered network evict the tiles that failed
+        // while offline and refetch them (see MapConnectivityRecovery).
+        reset: _recovery.tileResetStream,
+        evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
+      ),
+      const RosarioBoundaryOverlay(),
+      // Only ever real road geometry: a live OSRM route, or the
+      // same route restored from local cache while offline. There
+      // is deliberately NO synthetic fallback — a made-up line
+      // must not be drawn as if it were a road.
+      if (_routePoints != null)
+        PolylineLayer(
+          polylines: [
+            Polyline(
+              points: _routePoints!,
+              strokeWidth: 4,
+              color: InsightTheme.blue1.withValues(alpha: 0.75),
+              borderStrokeWidth: 1,
+              borderColor: Colors.white.withValues(alpha: 0.8),
+            ),
+          ],
+        ),
+      MarkerLayer(
+        markers: [
+          Marker(
+            point: _parcelLatLng!,
+            width: 32,
+            height: 32,
+            child: Container(
+              decoration: BoxDecoration(
+                color: InsightTheme.red,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: InsightTheme.red.withValues(alpha: 0.4),
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_deviceLatLng != null)
+            Marker(
+              point: _deviceLatLng!,
+              width: 34,
+              height: 34,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: InsightTheme.blue1,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 3),
+                  boxShadow: [
+                    BoxShadow(
+                      color: InsightTheme.blue1.withValues(alpha: 0.4),
+                      blurRadius: 10,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    ],
+  );
 }
 
 class _ErrorState extends StatelessWidget {

@@ -248,13 +248,13 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    test('site map delegates its composition to the shared panel', () {
+    test('site map delegates its approved composition to its scoped view', () {
       final src =
           File('lib/modules/inspection/screens/site_map_screen.dart')
               .readAsStringSync();
-      // The map no longer decides its own side-panel geometry: it hands the
-      // detail card to MapDetailPanel, which owns the breakpoint logic.
-      expect(src, contains('MapDetailPanel'));
+      // Quick Action retains MapDetailPanel; Step 1 has an approved separate
+      // composition without moving its GPS/routing/progression ownership.
+      expect(src, contains('SiteVerificationView'));
       expect(src, isNot(contains('canSplitTwoPane')),
           reason: 'no screen-local breakpoint decision left behind');
       expect(src, isNot(contains('.orientation')));
@@ -280,17 +280,16 @@ void main() {
       // Step progression
       expect(src, contains('InspectionProgress.instance.markStepComplete(1)'));
       // The primary action and its copy
-      expect(src, contains('Proceed to Location'));
-      // Detail rows preserved verbatim
-      expect(src, contains('Target Site'));
-      expect(src, contains('Road route'));
+      final view = File('lib/modules/inspection/widgets/site_verification_view.dart').readAsStringSync();
+      expect(view, contains('Proceed to Location'));
+      expect(view, contains('Site distance'));
+      expect(view, contains('Road route'));
     });
 
-    test('the detail rows were extracted, not rewritten', () {
+    test('approved detail content remains content-sized and scrollable', () {
       final src =
-          File('lib/modules/inspection/screens/site_map_screen.dart')
+          File('lib/modules/inspection/widgets/site_verification_view.dart')
               .readAsStringSync();
-      expect(src, contains('_detailCardChildren'));
       // Content-sized so there is no dead space under the CTA.
       expect(src, contains('mainAxisSize: MainAxisSize.min'));
       expect(src, contains('SingleChildScrollView'),

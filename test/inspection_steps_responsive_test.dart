@@ -191,7 +191,7 @@ void main() {
       }
     });
 
-    test('steps 1 and 2 use the shared split primitive', () {
+    test('steps 1 and 2 delegate their responsive presentation', () {
       expect(
         File(
           'lib/modules/inspection/screens/gps_verification_screen.dart',
@@ -204,12 +204,11 @@ void main() {
         ).readAsStringSync(),
         contains('HeaderSplitBody'),
       );
-      // Step 1 is spatial-primary: the map fills the canvas and the detail card
-      // is handed to the shared map panel.
+      // The approved Step 1 presentation is scoped away from Quick Action Map.
       final map = File(
         'lib/modules/inspection/screens/site_map_screen.dart',
       ).readAsStringSync();
-      expect(map, contains('MapDetailPanel'));
+      expect(map, contains('SiteVerificationView'));
     });
 
     test('step semantics are untouched', () {
