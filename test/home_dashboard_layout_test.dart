@@ -466,22 +466,38 @@ void main() {
               BorderRadius.circular(16)),
     );
     expect(strap, findsOneWidget);
-    expect(find.byKey(const ValueKey('calendar_lanyard_clip')), findsOneWidget,
+    final clip = find.byKey(const ValueKey('calendar_lanyard_clip'));
+    expect(clip, findsOneWidget,
         reason: 'A lanyard needs a visible clip and slot, not floating lines.');
     final strapRect = tester.getRect(strap);
     final cardRect = tester.getRect(card);
-    expect(strapRect.bottom, closeTo(cardRect.top, 1.0),
-        reason: 'The strap must meet the card, with no decorative gap.');
+    final clipRect = tester.getRect(clip);
+    expect(clipRect.bottom, greaterThan(cardRect.top + 2),
+        reason: 'The clip must grip the card edge, not hover above it.');
+    expect(clipRect.width, lessThanOrEqualTo(16),
+        reason: 'A clip is hardware-sized, not a floating panel.');
+    expect(strapRect.width, greaterThanOrEqualTo(56),
+        reason: 'A strap wide enough to read as a strap, not two hairlines.');
     expect(strapRect.center.dx, closeTo(cardRect.center.dx, 1.0),
         reason: 'The strap hangs from the centre of the card it carries.');
-    final restStrap = tester.getRect(strap).topCenter;
-    final restCard = tester.getRect(card).bottomCenter;
+    // Measure real points, not rotated bounding boxes: a rotated box's AABB grows
+    // even when the widget itself has not moved.
+    Offset pivot(WidgetTester tester) =>
+        (tester.renderObject<RenderBox>(strap)).localToGlobal(
+          Offset(tester.getSize(strap).width / 2, 0),
+        );
+    Offset cardFoot(WidgetTester tester) =>
+        tester.renderObject<RenderBox>(card).localToGlobal(
+          Offset(tester.getSize(card).width / 2, tester.getSize(card).height),
+        );
+    final restStrap = pivot(tester);
+    final restCard = cardFoot(tester);
     await tester.ensureVisible(find.byTooltip('Hide full calendar'));
     await tester.tap(find.byTooltip('Hide full calendar'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 60));
-    final midStrap = tester.getRect(strap).topCenter;
-    final midCard = tester.getRect(card).bottomCenter;
+    final midStrap = pivot(tester);
+    final midCard = cardFoot(tester);
     expect(midStrap.dx, closeTo(restStrap.dx, 0.5),
         reason: 'The strap top is the single shared hanging pivot.');
     expect((midCard.dx - restCard.dx).abs(), greaterThan(0.5),
