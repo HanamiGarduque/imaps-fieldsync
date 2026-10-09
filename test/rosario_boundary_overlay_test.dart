@@ -158,6 +158,60 @@ void main() {
     expect(bundle.reads, 2);
   });
 
+  testWidgets(
+    'subdued inspection paint preserves geometry and default Quick Action style',
+    (tester) async {
+      final bundle = _Bundle(raw);
+      final loader = RosarioBoundaryLoader(bundle: bundle);
+      final original = (await tester.runAsync(loader.load))!;
+      for (final subdued in [false, true, false]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: FlutterMap(
+                options: const MapOptions(
+                  initialCenter: LatLng(13.84, 121.18),
+                  initialZoom: 11,
+                ),
+                children: [
+                  RosarioBoundaryOverlay(loader: loader, subdued: subdued),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final layer = tester.widget<PolygonLayer<Object>>(
+          find.byWidgetPredicate((w) => w is PolygonLayer<Object>),
+        );
+        expect(layer.simplificationTolerance, 0);
+        expect(layer.polygons.length, original.length);
+        for (var i = 0; i < original.length; i++) {
+          final polygon = layer.polygons[i];
+          expect(polygon.points, same(original[i].points));
+          expect(polygon.holePointsList, same(original[i].holePointsList));
+          expect(polygon.color, isNull);
+          if (subdued) {
+            expect(
+              polygon.borderStrokeWidth,
+              lessThan(original[i].borderStrokeWidth),
+            );
+            expect(polygon.borderColor, isNot(original[i].borderColor));
+            expect(polygon.pattern, isNot(original[i].pattern));
+          } else {
+            expect(
+              polygon,
+              same(original[i]),
+              reason: 'default shared map paint must survive',
+            );
+          }
+        }
+        expect(bundle.reads, 1);
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+
   for (final source in [
     raw,
     null,

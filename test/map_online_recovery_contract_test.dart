@@ -109,7 +109,7 @@ void main() {
   });
 
   test('the Rosario boundary is independent of route and connectivity', () {
-    expect(step1Source, contains('const RosarioBoundaryOverlay()'));
+    expect(step1Source, contains('const RosarioBoundaryOverlay(subdued: true)'));
     // The overlay never sees connectivity, route, or map-controller concerns.
     for (final forbidden in [
       'MapConnectivityRecovery',
@@ -132,16 +132,16 @@ void main() {
     for (final source in [step1Source, quickMapSource]) {
       expect(
         at(source, 'TileLayer('),
-        lessThan(at(source, 'const RosarioBoundaryOverlay()')),
+        lessThan(at(source, 'const RosarioBoundaryOverlay(')),
       );
       expect(
-        at(source, 'const RosarioBoundaryOverlay()'),
+        at(source, 'const RosarioBoundaryOverlay('),
         lessThan(at(source, 'MarkerLayer(')),
       );
     }
     // Step 1's route stays above the boundary and below the markers.
     expect(
-      at(step1Source, 'const RosarioBoundaryOverlay()'),
+      at(step1Source, 'const RosarioBoundaryOverlay('),
       lessThan(at(step1Source, 'PolylineLayer(')),
     );
     expect(

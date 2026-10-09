@@ -49,15 +49,15 @@
 
 **Interfaces:** `RosarioBoundaryOverlay(subdued: true)` changes styling only for Step 1; default `false` retains the existing shared-loader/default style. Geometry and `simplificationTolerance: 0` remain intact.
 
-- [ ] Add an executable boundary test proving subdued/default styles differ while point/hole lists remain exact and default rendering stays unchanged; watch it fail.
-- [ ] Use a solid prominent blue route with white casing; a thinner muted dashed municipal outline and matching attribution key. Keep real geometry and independent layers.
-- [ ] Run boundary, route cache, recovery and initial-tile tests; require no new failures.
+- [x] Add an executable boundary test proving subdued/default styles differ while point/hole lists remain exact and default rendering stays unchanged; watch it fail.
+- [x] Use a solid prominent blue route with white casing; a thinner muted dashed municipal outline and matching attribution key. Keep real geometry and independent layers.
+- [x] Run boundary, route cache, recovery and initial-tile tests; require no new failures.
 
 ### Task 3: Flutter visual acceptance and completion proof
 
 **Files:** Existing/new widget tests and scoped evidence under `C:/Users/Ralph Lauren/AppData/Local/Temp/opencode/fieldsync-site-verification-implementation-20261009/`.
 
-- [ ] Render the actual production Flutter screen with explicitly labeled demonstration task/GPS/route inputs and local OSM reference fixtures; save portrait, landscape and disclosure/offline screenshots.
+- [x] Render the actual production Flutter screen with explicitly labeled demonstration task/GPS/route inputs and local OSM reference fixtures; save portrait, landscape and disclosure/offline screenshots.
 - [ ] Run analyzer and the broad regression suite with the two required exclusions; compare any failures against the independently recorded canonical-main baseline.
 - [ ] Build Android arm64 debug APK; review the scoped diff and obtain one independent read-only review.
 - [ ] Present Flutter renders and accurate verification results for visual acceptance. Integration/push is a separate operation.

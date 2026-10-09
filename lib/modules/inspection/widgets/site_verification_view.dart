@@ -69,8 +69,9 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         _attributionKey.currentContext?.size?.height ?? _attributionHeight;
     if ((header - _headerHeight).abs() < 0.5 &&
         (panel - _panelHeight).abs() < 0.5 &&
-        (attribution - _attributionHeight).abs() < 0.5)
+        (attribution - _attributionHeight).abs() < 0.5) {
       return;
+    }
     setState(() {
       _headerHeight = header;
       _panelHeight = panel;
@@ -92,10 +93,12 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         final mapRight = split ? safe.right + sideWidth + 24 : 0.0;
         // The established header is unchanged. Very large text on a short phone
         // scrolls its two context containers rather than hiding either of them.
-      final headerMaxHeight = landscape
-          ? math.max(80.0, height - _attributionHeight - 144)
-          : math.max(80.0, math.min(height * 0.4,
-              height - _attributionHeight - 280));
+        final headerMaxHeight = landscape
+            ? math.max(80.0, height - _attributionHeight - 144)
+            : math.max(
+                80.0,
+                math.min(height * 0.4, height - _attributionHeight - 280),
+              );
         final panelMaxHeight = landscape
             ? height - 32
             : math.max(
@@ -122,7 +125,9 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         final fitPadding = EdgeInsets.fromLTRB(
           safe.left + 48,
           safe.top + (_fullscreen ? 48 : _headerHeight + 24),
-          (split ? 0 : safe.right) + (landscape ? 48 : 72),
+          (split ? 0 : safe.right) +
+              MediaQuery.textScalerOf(context).scale(12) * 6 +
+              76,
           safe.bottom + panelSpace + _attributionHeight + 32,
         );
         WidgetsBinding.instance.addPostFrameCallback((_) => _measureOverlays());
@@ -270,154 +275,40 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
           ),
         ],
       ),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(16, 4, 16, _collapsed ? 4 : 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Site details',
-                      style: InsightTheme.urbanist(16),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() => _collapsed = !_collapsed),
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(48, 48),
-                      foregroundColor: InsightTheme.ink2,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
-                    child: Tooltip(
-                      message: _collapsed
-                          ? 'Show site details'
-                          : 'Hide site details',
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _collapsed ? 'Show' : 'Hide',
-                            style: InsightTheme.inter(12),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            _collapsed
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            size: 18,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (!_collapsed) ...[
-                const SizedBox(height: 6),
-                LayoutBuilder(
-                  builder: (context, box) {
-                    final stacked =
-                        landscape ||
-                        box.maxWidth < 310 ||
-                        MediaQuery.textScalerOf(context).scale(12) > 17;
-                    final site = _siteMetric();
-                    final route = _routeMetric();
-                    return stacked
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [site, const SizedBox(height: 16), route],
-                          )
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(child: site),
-                              const SizedBox(width: 16),
-                              Expanded(child: route),
-                            ],
-                          );
-                  },
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 4, 16, _collapsed ? 4 : 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Site details', style: InsightTheme.urbanist(16)),
                 ),
-                if (widget.nearSite)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      'Near site · confirm GPS in Step 2.',
-                      style: InsightTheme.inter(
-                        12,
-                        w: FontWeight.w600,
-                        c: InsightTheme.greenInk,
-                      ),
-                    ),
+                TextButton(
+                  onPressed: () => setState(() => _collapsed = !_collapsed),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(48, 48),
+                    foregroundColor: InsightTheme.ink2,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Divider(height: 1, color: InsightTheme.line),
-                ),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 2),
-                      child: Icon(
-                        Icons.info_outline_rounded,
-                        size: 14,
-                        color: InsightTheme.ink3,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'GPS confirmation happens in Step 2.',
-                        style: InsightTheme.inter(12, c: InsightTheme.ink3),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: InsightTheme.primaryGradient,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: ElevatedButton(
-                    onPressed: widget.onProceed,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      foregroundColor: Colors.white,
-                      shadowColor: Colors.transparent,
-                      elevation: 0,
-                      minimumSize: const Size(double.infinity, 52),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
+                  child: Tooltip(
+                    message: _collapsed
+                        ? 'Show site details'
+                        : 'Hide site details',
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Flexible(
-                          child: Text(
-                            widget.rework ? 'Save' : 'Proceed to Location',
-                            textAlign: TextAlign.center,
-                            style: InsightTheme.inter(
-                              14,
-                              w: FontWeight.w600,
-                              c: Colors.white,
-                            ),
-                          ),
+                        Text(
+                          _collapsed ? 'Show' : 'Hide',
+                          style: InsightTheme.inter(12),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4),
                         Icon(
-                          widget.rework
-                              ? Icons.check_rounded
-                              : Icons.arrow_forward_rounded,
+                          _collapsed
+                              ? Icons.keyboard_arrow_up_rounded
+                              : Icons.keyboard_arrow_down_rounded,
                           size: 18,
                         ),
                       ],
@@ -425,8 +316,144 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                   ),
                 ),
               ],
-            ],
-          ),
+            ),
+            if (!_collapsed)
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 6),
+                      LayoutBuilder(
+                        builder: (context, box) {
+                          final stacked =
+                              landscape ||
+                              box.maxWidth < 310 ||
+                              MediaQuery.textScalerOf(context).scale(12) > 17;
+                          final site = _siteMetric();
+                          final route = _routeMetric();
+                          return stacked
+                              ? Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    site,
+                                    const SizedBox(height: 16),
+                                    route,
+                                  ],
+                                )
+                              : Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(child: site),
+                                    const SizedBox(width: 16),
+                                    Expanded(child: route),
+                                  ],
+                                );
+                        },
+                      ),
+                      if (widget.hasRoute && widget.routeFromCache)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(
+                            'Saved estimate. Offline rerouting is unavailable; street tiles may be missing. Connect to refresh.',
+                            style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                          ),
+                        ),
+                      if (widget.nearSite)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Text(
+                            'Near site · confirm GPS in Step 2.',
+                            style: InsightTheme.inter(
+                              12,
+                              w: FontWeight.w600,
+                              c: InsightTheme.greenInk,
+                            ),
+                          ),
+                        ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Divider(height: 1, color: InsightTheme.line),
+                      ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Icon(
+                              Icons.info_outline_rounded,
+                              size: 14,
+                              color: InsightTheme.ink3,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'GPS confirmation happens in Step 2.',
+                              style: InsightTheme.inter(
+                                12,
+                                c: InsightTheme.ink3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: InsightTheme.primaryGradient,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: ElevatedButton(
+                          onPressed: widget.onProceed,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            foregroundColor: Colors.white,
+                            shadowColor: Colors.transparent,
+                            elevation: 0,
+                            minimumSize: const Size(double.infinity, 52),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  widget.rework
+                                      ? 'Save'
+                                      : 'Proceed to Location',
+                                  textAlign: TextAlign.center,
+                                  style: InsightTheme.inter(
+                                    14,
+                                    w: FontWeight.w600,
+                                    c: Colors.white,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Icon(
+                                widget.rework
+                                    ? Icons.check_rounded
+                                    : Icons.arrow_forward_rounded,
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -505,12 +532,15 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
       const SizedBox(height: 6),
       if (widget.hasRoute) ...[
         Text(
-          [
-            if (widget.routeDistanceMeters != null)
-              _distance(widget.routeDistanceMeters!),
-            if (widget.routeDurationSeconds != null)
-              '~${_duration(widget.routeDurationSeconds!)}',
-          ].join(' · '),
+          widget.routeDistanceMeters == null &&
+                  widget.routeDurationSeconds == null
+              ? 'Estimate unavailable'
+              : [
+                  if (widget.routeDistanceMeters != null)
+                    _distance(widget.routeDistanceMeters!),
+                  if (widget.routeDurationSeconds != null)
+                    '~${_duration(widget.routeDurationSeconds!)}',
+                ].join(' · '),
           style: InsightTheme.inter(
             15,
             w: FontWeight.w700,
@@ -522,14 +552,6 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
           'Driving estimate',
           style: InsightTheme.inter(12, c: InsightTheme.ink3),
         ),
-        if (widget.routeFromCache)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              'Saved estimate. Connect to refresh; offline rerouting is not available.',
-              style: InsightTheme.inter(12, c: InsightTheme.ink3),
-            ),
-          ),
       ] else ...[
         Text(
           'Road route unavailable',

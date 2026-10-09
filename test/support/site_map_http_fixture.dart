@@ -10,7 +10,9 @@ class SiteMapHttpFixture extends HttpOverrides {
 
   final String? tileDirectory;
   String? routeJson;
+  bool streetTilesAvailable = true;
   final requestedTiles = <String>{};
+  final requestedRoutes = <Uri>[];
   static final _blankTile = image.encodePng(
     image.Image(width: 1, height: 1)..setPixelRgba(0, 0, 244, 246, 251, 255),
   );
@@ -18,6 +20,7 @@ class SiteMapHttpFixture extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) => _Client((uri) {
     if (uri.host == 'router.project-osrm.org') {
+      requestedRoutes.add(uri);
       return _Response(
         utf8.encode(routeJson ?? '{}'),
         routeJson == null ? 503 : 200,
@@ -29,7 +32,9 @@ class SiteMapHttpFixture extends HttpOverrides {
     }
     final tile = 'tile-${uri.pathSegments.join('-')}';
     requestedTiles.add(tile);
-    final file = tileDirectory == null ? null : File('$tileDirectory/$tile');
+    final file = tileDirectory == null || !streetTilesAvailable
+        ? null
+        : File('$tileDirectory/$tile');
     return _Response(
       file?.existsSync() == true ? file!.readAsBytesSync() : _blankTile,
       200,

@@ -31,17 +31,20 @@ import '../widgets/map_connectivity_recovery.dart';
 MapOptions siteMapOptions({
   required ll.LatLng parcel,
   ll.LatLng? device,
+  List<ll.LatLng> route = const [],
   EdgeInsets padding = const EdgeInsets.fromLTRB(50, 160, 50, 220),
 }) => MapOptions(
   initialCenter: parcel,
   initialZoom: 17,
-  initialCameraFit: device == null
-      ? null
-      : CameraFit.bounds(
-          bounds: LatLngBounds.fromPoints([parcel, device]),
-          maxZoom: 17,
-          padding: padding,
-        ),
+  initialCameraFit: CameraFit.bounds(
+    bounds: LatLngBounds.fromPoints([
+      parcel,
+      if (device != null) device,
+      ...route,
+    ]),
+    maxZoom: 17,
+    padding: padding,
+  ),
 );
 
 /// Site Verification (Step 1): task-bound GPS, cached/live real road geometry
@@ -294,6 +297,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     final fit = siteMapOptions(
       parcel: _parcelLatLng!,
       device: _deviceLatLng,
+      route: _routePoints ?? const [],
       padding: _mapPadding,
     ).initialCameraFit;
     if (fit == null) {
@@ -507,10 +511,12 @@ class _SiteMapScreenState extends State<SiteMapScreen>
           onProceed: _proceed,
           mapBuilder: (padding) {
             _mapPadding = padding;
-            if (_loading)
+            if (_loading) {
               return const Center(child: ImapsLoadingIndicator(size: 60));
-            if (_error != null)
+            }
+            if (_error != null) {
               return _ErrorState(message: _error!, onRetry: _loadMapData);
+            }
             return _buildMap();
           },
         ),
@@ -538,6 +544,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     options: siteMapOptions(
       parcel: _parcelLatLng!,
       device: _deviceLatLng,
+      route: _routePoints ?? const [],
       padding: _mapPadding,
     ),
     children: [
@@ -549,7 +556,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         reset: _recovery.tileResetStream,
         evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
       ),
-      const RosarioBoundaryOverlay(),
+      const RosarioBoundaryOverlay(subdued: true),
       // Only ever real road geometry: a live OSRM route, or the
       // same route restored from local cache while offline. There
       // is deliberately NO synthetic fallback — a made-up line
@@ -559,10 +566,10 @@ class _SiteMapScreenState extends State<SiteMapScreen>
           polylines: [
             Polyline(
               points: _routePoints!,
-              strokeWidth: 4,
-              color: InsightTheme.blue1.withValues(alpha: 0.75),
-              borderStrokeWidth: 1,
-              borderColor: Colors.white.withValues(alpha: 0.8),
+              strokeWidth: 5,
+              color: InsightTheme.blue1,
+              borderStrokeWidth: 2,
+              borderColor: Colors.white,
             ),
           ],
         ),
@@ -572,18 +579,28 @@ class _SiteMapScreenState extends State<SiteMapScreen>
             point: _parcelLatLng!,
             width: 32,
             height: 32,
-            child: Container(
-              decoration: BoxDecoration(
-                color: InsightTheme.red,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 3),
-                boxShadow: [
-                  BoxShadow(
-                    color: InsightTheme.red.withValues(alpha: 0.4),
-                    blurRadius: 8,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: InsightTheme.red,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: InsightTheme.red.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                const Positioned(
+                  left: 38,
+                  top: 0,
+                  child: _MapMarkerLabel('Target site'),
+                ),
+              ],
             ),
           ),
           if (_deviceLatLng != null)
@@ -591,24 +608,55 @@ class _SiteMapScreenState extends State<SiteMapScreen>
               point: _deviceLatLng!,
               width: 34,
               height: 34,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: InsightTheme.blue1,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 3),
-                  boxShadow: [
-                    BoxShadow(
-                      color: InsightTheme.blue1.withValues(alpha: 0.4),
-                      blurRadius: 10,
-                      spreadRadius: 2,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: InsightTheme.blue1,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: InsightTheme.blue1.withValues(alpha: 0.4),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  const Positioned(
+                    left: 40,
+                    top: 1,
+                    child: _MapMarkerLabel('You'),
+                  ),
+                ],
               ),
             ),
         ],
       ),
     ],
+  );
+}
+
+class _MapMarkerLabel extends StatelessWidget {
+  const _MapMarkerLabel(this.label);
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: InsightTheme.line),
+      ),
+      child: Text(
+        label,
+        style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink),
+      ),
+    ),
   );
 }
 
