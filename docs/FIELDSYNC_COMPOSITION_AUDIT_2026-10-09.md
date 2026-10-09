@@ -40,20 +40,23 @@ Reusable evidence: `C:/Users/Ralph Lauren/AppData/Local/Temp/opencode/fieldsync-
 
 The data owner, map controller, services, geometry, GPS threshold, route refresh/cache, normal progression and rework callbacks remain in the existing screen. The initial-fit/control-overlap Important findings were fixed with regression proof. Near-coincident marker-label collision remains a recorded Minor; the pre-existing late-cache/fresh-route race remains a separate functional finding.
 
-### Group 2 — Home Calendar/lanyard: approval sample ready
+### Group 2 — Home Calendar/lanyard: implemented after sample approval
 
 **PRE-EXISTING ISSUE — user screenshot and source.** The full-month card in `lib/modules/analytics_dashboard/screens/home_dashboard_screen.dart:2052` combines 12dp padding above and below, an extra header/grid gap, 4dp gaps between week rows and a selected circle that visually fills its 48dp cell. The 48dp date target itself is purposeful.
 
 **PRE-EXISTING ISSUE — attachment/motion.** The existing `AnimatedSwitcher` around lines 762–794 moves the calendar card while `_CalendarTetherPainter` at line 1989 remains a separate decorative element. The lines do not show a card slot/clip or a shared suspended pivot.
 
-The appearance sample proposes:
+The user approved the appearance sample, and the design is now implemented in the production Home screen with RED→GREEN regressions for compact composition, the attached reverse swing and reduced motion. The implemented composition:
 
 - A compact month/selected-date header; readable date values; 32px selected visual plates inside **48px date targets**.
 - Only the 4, 5 or 6 week rows required by the displayed month, with no added row gaps. Selected task information appears below when there is actual content, without another heavy nested card.
 - A short FieldSync-blue strap meeting a visible clip and card slot. Strap and card share one top pivot, settle once over 420ms and follow the same motion in reverse on close. No persistent sway or new drag interaction.
 - Reduced motion opens/closes immediately. A narrow grid scrolls instead of shrinking dates or touch targets.
 
-The HTML sample's five-week card measures **328px**. This is a browser-prototype measurement, **not a Flutter or handset claim**. The sample uses explicit demonstration dates/task content. Production Calendar changes await approval of the appearance and interaction; its real data and preference state remain in the existing Home owner.
+The HTML sample's five-week card measured **328px**; the implemented Flutter month block (header, weekday labels, five flush week rows and insets) measures **≤336dp**, with a selected-date task list excluded as real content. Preserved unchanged: Calendar button placement, the compact preview, the swipeable Time and Date views and their per-user preference, the seven-day grid, selection, task indicators, real data and month clamping. Verified by native Flutter renders. Physical handset verification is pending because the device disconnected before the new APK could be installed.
+
+- `_CalendarTetherPainter` is deleted; `_CalendarLanyard` and `_CalendarLanyardPainter` draw converging ribbons onto a visible clip, and `_SuspendedMonthCalendar` owns one 420ms swing about a single top pivot that replays in reverse on close. Reduced motion presents the card immediately.
+- Verification: three new regressions fail before and pass after the change; **137 focused checks passed / 9 failed**, all 9 the retained navigation-badge baseline; analyzer clean; arm64 debug APK built.
 
 ### Group 3 — Home assignments + Tasks: next density review
 
