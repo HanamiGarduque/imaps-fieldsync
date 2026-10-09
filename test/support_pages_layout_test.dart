@@ -118,7 +118,7 @@ void main() {
             expect(back, findsOneWidget);
             final backTarget = find.ancestor(
               of: back,
-              matching: find.byType(BackButton),
+              matching: find.byType(IconButton),
             );
             expect(
               tester.getSize(backTarget).shortestSide,
@@ -183,6 +183,9 @@ void main() {
     'FAQ preserves bilingual search, category filtering and clearing',
     (tester) async {
       await pump(tester, const HelpFaqScreen(), const Size(390, 844), 1);
+      final languageTarget = find.ancestor(of: find.text('English'),
+          matching: find.byWidgetPredicate((w) => w is Semantics && w.properties.button == true)).first;
+      expect(tester.getSize(languageTarget).height, greaterThanOrEqualTo(48));
       await tester.enterText(find.byType(TextField), 'red pin');
       await tester.pumpAndSettle();
       expect(find.text('What is the red pin?'), findsOneWidget);
@@ -226,6 +229,9 @@ void main() {
       1,
     );
     expect(find.text('1. Information We Collect & Process'), findsOneWidget);
+    final documentTarget = find.ancestor(of: find.text('Terms of Use'),
+        matching: find.byWidgetPredicate((w) => w is Semantics && w.properties.button == true)).first;
+    expect(tester.getSize(documentTarget).height, greaterThanOrEqualTo(48));
     expect(find.text('1. Authorized Use & Municipal Purpose'), findsNothing);
     await tester.tap(find.text('Terms of Use'));
     await tester.pumpAndSettle();

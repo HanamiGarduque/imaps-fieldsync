@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/models/report_models.dart';
 import '../../../core/services/report_submission_service.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../widgets/report_form_widgets.dart';
 import 'report_history_screen.dart';
 import 'technical_issue_screen.dart';
@@ -10,7 +11,6 @@ import 'application_support_screen.dart';
 
 // Mapped to standard canonical InsightTheme design tokens
 const _kBlue = InsightTheme.blue1;
-const _kInk = InsightTheme.ink;
 const _kInk2 = InsightTheme.ink2;
 const _kLine = InsightTheme.line;
 const _kSurface = InsightTheme.surface;
@@ -89,29 +89,24 @@ class _ReportsSupportScreenState extends State<ReportsSupportScreen> {
 
     return Scaffold(
       backgroundColor: _kBg,
-      appBar: AppBar(
-        backgroundColor: _kBg,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: _kInk,
-        title: Text(
-          'Reports & Support',
-          style: InsightTheme.urbanist(18, w: FontWeight.w700, c: _kInk),
-        ),
-      ),
       body: SafeArea(
-        child: RefreshIndicator(
+        child: Column(children: [
+          Padding(
+            padding: reportPagePadding(context).copyWith(top: 12, bottom: 12),
+            child: const FieldPageHeader(title: 'Reports & Support'),
+          ),
+          Expanded(child: RefreshIndicator(
           onRefresh: _loadUnsent,
           color: _kBlue,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: reportPagePadding(context),
+            padding: reportPagePadding(context).copyWith(top: 8),
             children: [
               Text(
                 'Tell us what needs attention. Reports go to the MPDO team through iMAPS.',
                 style: InsightTextStyles.bodySecondary(),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               Text(
                 'FILE A REPORT',
                 style: InsightTextStyles.sectionHeaderPill(),
@@ -134,7 +129,7 @@ class _ReportsSupportScreenState extends State<ReportsSupportScreen> {
                 tint: _kBlue,
                 onTap: () => _open(const ApplicationSupportScreen()),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               Text(
                 'HISTORY & STATUS',
                 style: InsightTextStyles.sectionHeaderPill(),
@@ -148,7 +143,7 @@ class _ReportsSupportScreenState extends State<ReportsSupportScreen> {
                 tint: _kGreen,
                 onTap: () => _open(const ReportHistoryScreen()),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               if (_loading) const Text('Loading device reports…'),
               if (_error != null) ReportNotice(_error!, error: true),
               if (!_loading && unsent.isNotEmpty) ...[
@@ -175,7 +170,8 @@ class _ReportsSupportScreenState extends State<ReportsSupportScreen> {
               ),
             ],
           ),
-        ),
+          )),
+        ]),
       ),
     );
   }
@@ -207,8 +203,8 @@ class _ActionCard extends StatelessWidget {
           onTap: onTap,
           borderRadius: InsightTheme.roundedMd,
           child: Container(
-            constraints: const BoxConstraints(minHeight: 72),
-            padding: const EdgeInsets.all(16),
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               borderRadius: InsightTheme.roundedMd,
               border: Border.all(color: _kLine),
@@ -225,14 +221,14 @@ class _ActionCard extends StatelessWidget {
                   ),
                   child: Icon(icon, color: tint, size: 22),
                 ),
-                const SizedBox(width: 14),
+                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         title,
-                        style: InsightTheme.urbanist(18, w: FontWeight.w700),
+                         style: InsightTheme.urbanist(16, w: FontWeight.w700),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -297,8 +293,6 @@ class _UnsentChip extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                   style: InsightTheme.inter(12, c: _kInk2),
                 ),
               ],

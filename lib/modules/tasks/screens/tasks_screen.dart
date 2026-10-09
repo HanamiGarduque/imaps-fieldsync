@@ -1026,7 +1026,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     return map;
   }
 
-  /// ACTIVE MONITORING pill + the ASSIGNED counter.
   /// The Pending / Ongoing / Completed segmented switcher.
   ///
   /// Extracted so the exact same widget can be mounted in AppBar.bottom (where
@@ -1102,22 +1101,19 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
       painter.dispose();
       return size;
     }
-    final monitoringStyle = InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk, ls: 0.4);
     final titleStyle = InsightTheme.urbanist(26, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4);
     final assignedStyle = InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3);
     final countSize = measureHeader('${_allTasks.length}', InsightTheme.urbanist(22, w: FontWeight.w800, h: 1));
     final assignedSize = measureHeader('ASSIGNED', assignedStyle);
     final counterWidth = countSize.width.clamp(assignedSize.width, double.infinity) + 32;
     final availableWidth = MediaQuery.sizeOf(context).width - MediaQuery.paddingOf(context).horizontal - 40;
-    final naturalTitleWidth = measureHeader('My Tasks', titleStyle).width
-        .clamp(measureHeader('ACTIVE MONITORING', monitoringStyle).width + 32, double.infinity);
+    final naturalTitleWidth = measureHeader('My Tasks', titleStyle).width;
     final stackedHeader = naturalTitleWidth + counterWidth + 12 > availableWidth;
     final titleWidth = stackedHeader ? availableWidth : availableWidth - counterWidth - 12;
-    final titleHeight = measureHeader('ACTIVE MONITORING', monitoringStyle, width: (titleWidth - 32).clamp(1, double.infinity)).height
-        + 16 + measureHeader('My Tasks', titleStyle, width: titleWidth).height;
+    final titleHeight = measureHeader('My Tasks', titleStyle, width: titleWidth).height;
     final counterHeight = countSize.height + assignedSize.height + 22;
     final headerHeight = (12 + (stackedHeader ? titleHeight + counterHeight + 8
-        : titleHeight.clamp(counterHeight, double.infinity))).ceilToDouble().clamp(85.0, double.infinity);
+        : titleHeight.clamp(counterHeight, double.infinity))).ceilToDouble().clamp(kToolbarHeight, double.infinity);
     final categoryHeight = (scaler.scale(12) * 1.4 + 44).ceilToDouble().clamp(kCategoryBarHeight, double.infinity);
     final ongoing = categorized['Ongoing'] ?? [];
     final pendingTasks = categorized['Pending'] ?? [];
@@ -1149,8 +1145,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         elevation: 0,
         automaticallyImplyLeading: false,
         surfaceTintColor: Colors.transparent,
-        // The My Tasks header GROUP — ACTIVE MONITORING, "My Tasks" and the
-        // ASSIGNED counter — stays together exactly as originally arranged,
+        // The My Tasks title and ASSIGNED counter stay together,
         // and the whole group is pinned because it is Scaffold app-bar chrome.
         // Only Search / Filter scroll away; the category switcher below is a
         // pinned sliver that parks directly under this complete header.
@@ -1166,34 +1161,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: stackedHeader ? CrossAxisAlignment.start : CrossAxisAlignment.center,
             children: [
-              SizedBox(width: titleWidth, child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Restyled to a pill badge w/ status dot — visual only,
-                  // same "Active Monitoring" copy, matches reference header.
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: InsightTheme.blueTint,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 6, height: 6,
-                          decoration: const BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1),
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(child: Text('ACTIVE MONITORING', style: monitoringStyle)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text('My Tasks', style: titleStyle),
-                ],
-              )),
+              SizedBox(width: titleWidth, child: Text('My Tasks', style: titleStyle)),
               SizedBox(width: stackedHeader ? 0 : 12, height: stackedHeader ? 8 : 0),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

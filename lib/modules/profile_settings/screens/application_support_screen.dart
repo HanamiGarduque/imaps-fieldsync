@@ -154,7 +154,7 @@ class _ApplicationSupportScreenState extends State<ApplicationSupportScreen> {
                   'iMAPS handles routing to the current Planning Officer.',
                   style: InsightTextStyles.bodySecondary(),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 Row(
                   children: [
                     const Expanded(
@@ -217,7 +217,7 @@ class _ApplicationSupportScreenState extends State<ApplicationSupportScreen> {
                   const SizedBox(height: 8),
                   ReportNotice(_notice!),
                 ],
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 const ReportFieldLabel('Support category'),
                 FormField<String>(
                   validator: ReportInput.categoryError,
@@ -287,7 +287,7 @@ class _ApplicationSupportScreenState extends State<ApplicationSupportScreen> {
                   const SizedBox(height: 16),
                   ReportNotice(_error!, error: true),
                 ],
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 ReportSubmitButton(submitting: _submitting, onPressed: _submit),
                 const SizedBox(height: 16),
                 const ReportOfflineNote(),
@@ -355,7 +355,7 @@ class _ChoiceTile extends StatelessWidget {
         borderRadius: InsightTheme.roundedSm,
         child: Container(
           constraints: const BoxConstraints(minHeight: 48),
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

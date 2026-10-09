@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show Tristate;
@@ -7,10 +8,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:image/image.dart' as image;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:imaps_fieldsync/core/widgets/field_form_widgets.dart';
+import 'package:imaps_fieldsync/core/widgets/insight_bottom_nav.dart';
+import 'package:imaps_fieldsync/core/navigation/parcel_detail_screen.dart';
+import 'package:imaps_fieldsync/core/services/db_helper.dart';
+import 'package:imaps_fieldsync/core/services/supabase_service.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/capture_photo_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/field_findings_screen.dart';
@@ -19,10 +28,15 @@ import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'package:imaps_fieldsync/core/models/user_profile.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/profile_edit_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/profile_screen.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/screens/splash_screen.dart';
+import 'package:imaps_fieldsync/modules/auth_startup/screens/security_settings_screen.dart';
+import 'package:imaps_fieldsync/modules/auth_startup/services/secure_prefs_service.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  late Database profileDb;
+  Completer<void>? analyticsGate;
   final task = TaskItem(
     id: 'ui-preview-job',
     name: 'Field inspection applicant',
@@ -41,6 +55,15 @@ void main() {
   );
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
+    sqfliteFfiInit();
+    profileDb = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
+    await profileDb.execute(
+      'CREATE TABLE local_jobs (id TEXT, status TEXT, inspector_id TEXT)',
+    );
+    await profileDb.execute(
+      'CREATE TABLE pending_actions (job_id TEXT, type TEXT, status TEXT)',
+    );
+    DBHelper.useDatabaseForTesting(profileDb);
     GoogleFonts.config.allowRuntimeFetching = false;
     final fonts = Directory(
       '${File(Platform.resolvedExecutable).parent.parent.parent.path}/material_fonts',
@@ -120,6 +143,26 @@ void main() {
     await Supabase.initialize(
       url: 'https://ui-layout.test',
       publishableKey: 'fixture-key',
+      httpClient: MockClient((request) async {
+        final gate = analyticsGate;
+        if (request.url.path.endsWith('/field_jobs') && gate != null) {
+          await gate.future;
+        }
+        return http.Response(
+          request.url.path.endsWith('/profiles')
+              ? jsonEncode({
+                  'id': 'ui-layout-inspector',
+                  'full_name':
+                      'Gemini Norawit Alexandria Maria Dela Cruz Example',
+                  'role': 'inspector',
+                  'avatar_url': null,
+                })
+              : '[]',
+          200,
+          request: request,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
       authOptions: FlutterAuthClientOptions(
         autoRefreshToken: false,
         detectSessionInUri: false,
@@ -134,6 +177,7 @@ void main() {
         'expires_in': 3600,
         'user': {
           'id': 'ui-layout-inspector',
+          'email': 'gemini.norawit@example.com',
           'app_metadata': {},
           'user_metadata': {},
           'aud': 'authenticated',
@@ -148,6 +192,8 @@ void main() {
       null,
     );
     await Supabase.instance.dispose();
+    DBHelper.useDatabaseForTesting(null);
+    await profileDb.close();
   });
 
   Future<void> mount(
@@ -177,6 +223,9 @@ void main() {
         ),
       ),
     );
+    if (screen is ProfileScreen) {
+      await tester.runAsync(SupabaseService.fetchMyJobs);
+    }
     await tester.pumpAndSettle();
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -184,11 +233,226 @@ void main() {
     });
   }
 
+  testWidgets(
+    'overview keeps numbered steps and independent assignment fields',
+    (tester) async {
+      for (final fields in [
+        (true, true),
+        (true, false),
+        (false, true),
+        (false, false),
+      ]) {
+        final assignedTask = TaskItem(
+          id: task.id,
+          name: task.name,
+          parcels: task.parcels,
+          location: task.location,
+          status: 'in_progress',
+          inspectionNo: task.inspectionNo,
+          assignmentInstructions: fields.$1
+              ? 'Verify the recorded residential use.'
+              : null,
+          assignedByName: fields.$2 ? 'Maria Santos' : null,
+        );
+        await mount(
+          tester,
+          ParcelDetailScreen(task: assignedTask),
+          const Size(375, 900),
+          scale: 1,
+        );
+        expect(find.text('01'), findsOneWidget);
+        expect(find.text('06'), findsOneWidget);
+        await tester.drag(find.byType(ListView).first, const Offset(0, -360));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Verify the recorded residential use.'),
+          fields.$1 ? findsOneWidget : findsNothing,
+        );
+        expect(
+          find.text('Maria Santos'),
+          fields.$2 ? findsOneWidget : findsNothing,
+        );
+        if (fields.$1 && fields.$2) {
+          final assignmentGroup = find
+              .ancestor(
+                of: find.text('Verify the recorded residential use.'),
+                matching: find.byType(Column),
+              )
+              .first;
+          expect(
+            find.descendant(
+              of: assignmentGroup,
+              matching: find.text('Maria Santos'),
+            ),
+            findsOneWidget,
+          );
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+  );
+
+  testWidgets(
+    'long enlarged pinned identity leaves Log Out reachable above shell navigation',
+    (tester) async {
+      const name = 'Gemini Norawit Alexandria Maria Dela Cruz Example';
+      final email =
+          '${'inspector' * 7}@${'barangay' * 7}.${'municipal' * 6}.example.com';
+      final auth = Supabase.instance.client.auth;
+      final session = auth.currentSession!.toJson();
+      final originalSession = jsonEncode(session);
+      await auth.setInitialSession(
+        jsonEncode({
+          ...session,
+          'user': {...auth.currentUser!.toJson(), 'email': email},
+        }),
+      );
+      final gate = analyticsGate = Completer<void>();
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        gate.complete();
+        analyticsGate = null;
+        await tester.runAsync(SupabaseService.fetchMyJobs);
+        await auth.setInitialSession(originalSession);
+      });
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: const TextScaler.linear(2),
+              disableAnimations: true,
+            ),
+            child: child!,
+          ),
+          home: Scaffold(
+            extendBody: true,
+            body: ProfileScreen(
+              profile: UserProfile(
+                id: 'ui-layout-inspector',
+                fullName: name,
+                role: 'inspector',
+              ),
+            ),
+            bottomNavigationBar: const SizedBox(
+              height: kInsightBottomNavReserve,
+              child: ColoredBox(color: Colors.white),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(seconds: 2));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
+      await tester.pump(const Duration(seconds: 1));
+      final identity = find.byType(ProfileIdentityCard);
+      expect(tester.widget<ProfileIdentityCard>(identity).compact, isTrue);
+      expect(
+        tester.getBottomLeft(identity).dy,
+        lessThan(640 - kInsightBottomNavReserve - 48),
+        reason: 'Identity must leave a usable menu viewport above navigation.',
+      );
+      await tester.scrollUntilVisible(
+        find.text('Log Out'),
+        160,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Log Out').hitTestable(), findsOneWidget);
+      expect(
+        find.byKey(const Key('profile-edit-button')).hitTestable(),
+        findsOneWidget,
+      );
+      expect(find.text(name), findsOneWidget);
+      expect(find.text('Zoning Officer I'), findsOneWidget);
+      expect(find.text(email), findsOneWidget);
+      final details = find.descendant(
+        of: identity,
+        matching: find.byType(Scrollable),
+      );
+      expect(details, findsOneWidget);
+      await tester.drag(details, const Offset(0, -1000));
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        tester.state<ScrollableState>(details).position.pixels,
+        greaterThan(0),
+      );
+      expect(
+        tester.getBottomLeft(find.text(email)).dy,
+        lessThanOrEqualTo(tester.getBottomLeft(identity).dy),
+      );
+      await tester.drag(details, const Offset(0, 80));
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        tester.widget<ProfileIdentityCard>(identity).compact,
+        isTrue,
+        reason:
+            'Scrolling identity details must not change the page scroll state.',
+      );
+      await tester.tap(find.text('Log Out'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final size in [
     const Size(320, 640),
     const Size(800, 360),
     const Size(768, 1024),
   ]) {
+    // The accepted Analytics chart has an existing 320px / 2x overflow;
+    // narrow 2x identity wrapping is covered in profile_header_name_layout_test.
+    final profileScale = size.width == 320 ? 1.0 : 2.0;
+    testWidgets(
+      'pinned identity and Log Out remain reachable at $size / $profileScale',
+      (tester) async {
+        const name = 'Gemini Norawit Alexandria Maria Dela Cruz Example';
+        await mount(
+          tester,
+          ProfileScreen(
+            profile: UserProfile(
+              id: 'ui-layout-inspector',
+              fullName: name,
+              role: 'inspector',
+            ),
+          ),
+          size,
+          scale: profileScale,
+        );
+        expect(tester.takeException(), isNull);
+        final identity = find.byType(ProfileIdentityCard);
+        await tester.drag(find.byType(CustomScrollView), const Offset(0, -240));
+        await tester.pumpAndSettle();
+        expect(tester.widget<ProfileIdentityCard>(identity).compact, isTrue);
+        await tester.scrollUntilVisible(
+          find.text('Log Out'),
+          160,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        for (final field in [
+          name,
+          'Zoning Officer I',
+          'gemini.norawit@example.com',
+          'Edit',
+          'Log Out',
+        ]) {
+          expect(find.text(field).hitTestable(), findsOneWidget);
+        }
+        final card = tester.getRect(identity);
+        expect(card.top, greaterThanOrEqualTo(0));
+        expect(card.bottom, lessThan(tester.getRect(find.text('Log Out')).top));
+        await tester.drag(find.byType(CustomScrollView), const Offset(0, 100));
+        await tester.pumpAndSettle();
+        expect(tester.widget<ProfileIdentityCard>(identity).compact, isFalse);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       'confirmed completion remains readable and action reachable at $size / 2x',
       (tester) async {
@@ -328,6 +592,130 @@ void main() {
       semantics.dispose();
     },
   );
+
+  testWidgets('camera capture gates notes and saving, retakes, and returns saved evidence to the grid', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final root = Platform.isWindows
+        ? Directory('${Platform.environment['LOCALAPPDATA']}/Temp/opencode')
+        : Directory.systemTemp;
+    final directory = root.createTempSync('fieldsync-camera-');
+    addTearDown(() => tester.runAsync(() => directory.delete(recursive: true)));
+    final raw = File('${directory.path}/raw.jpg')
+      ..writeAsBytesSync(image.encodeJpg(image.Image(width: 320, height: 480)));
+    const cameraChannel = MethodChannel('plugins.flutter.io/camera');
+    const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(cameraChannel, (call) async {
+      switch (call.method) {
+        case 'availableCameras':
+          return [{'name': 'back', 'lensFacing': 'back', 'sensorOrientation': 90}];
+        case 'create':
+          return {'cameraId': 1};
+        case 'initialize':
+          binding.channelBuffers.push('flutter.io/cameraPlugin/camera1',
+            const StandardMethodCodec().encodeMethodCall(const MethodCall('initialized', {
+              'previewWidth': 320.0, 'previewHeight': 480.0,
+              'exposureMode': 'auto', 'focusMode': 'auto',
+              'exposurePointSupported': false, 'focusPointSupported': false,
+            })), (_) {});
+          return null;
+        case 'takePicture':
+          return raw.path;
+        case 'dispose':
+          return null;
+        default:
+          throw MissingPluginException(call.method);
+      }
+    });
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(pathChannel,
+        (call) async => call.method == 'getApplicationDocumentsDirectory' ? directory.path : null);
+    addTearDown(() {
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(cameraChannel, null);
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(pathChannel, null);
+    });
+    await mount(tester, CapturePhotoScreen(task: task), const Size(360, 800), scale: 1);
+    await tester.tap(find.bySemanticsLabel('Add site photo'));
+    await tester.pumpAndSettle();
+    final shutter = find.bySemanticsLabel('Capture site photo');
+    expect(shutter, findsOneWidget);
+    expect(tester.getSize(shutter).shortestSide, greaterThanOrEqualTo(48));
+    expect(find.text('Photo notes'), findsNothing);
+    expect(find.text('Save Photo'), findsNothing);
+    expect(find.text('Retake'), findsNothing);
+    final preview = find.byType(Texture);
+    expect(tester.getRect(shutter).top, greaterThan(tester.getRect(preview).bottom),
+        reason: 'The shutter must not be obstructed by the preview/geotag overlay.');
+    Future<void> capture() async {
+      await tester.ensureVisible(shutter);
+      await tester.runAsync(() async {
+        await tester.tap(shutter);
+        for (var frame = 0; frame < 250 && find.text('Photo notes').evaluate().isEmpty; frame++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump();
+        }
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('Photo notes'), findsOneWidget);
+      expect(find.text('Save Photo'), findsOneWidget);
+      expect(shutter, findsNothing);
+    }
+    await capture();
+    await tester.tap(find.text('Retake'));
+    await tester.pumpAndSettle();
+    expect(find.text('Photo notes'), findsNothing);
+    expect(shutter, findsOneWidget);
+    await capture();
+    await tester.ensureVisible(find.byType(TextField));
+    await tester.enterText(find.byType(TextField), 'Local fixture photo notes');
+    await tester.ensureVisible(find.text('Save Photo'));
+    await tester.tap(find.text('Save Photo'));
+    await tester.pumpAndSettle();
+    final provider = tester.element(find.byType(CapturePhotoScreen)).read<InspectionProvider>();
+    expect(provider.capturedPhotos, hasLength(1));
+    expect(provider.capturedPhotos.single['notes'], 'Local fixture photo notes');
+    expect(File(provider.capturedPhotos.single['photoPath'] as String).existsSync(), isTrue);
+    expect(find.text('Capture Site Photo'), findsNothing);
+    expect(find.bySemanticsLabel(RegExp('View photo 1')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('security status distinguishes enrollment from activated login and reports actual opening protection', (tester) async {
+    final storage = <String, String>{};
+    const secure = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    const localAuth = MethodChannel('plugins.flutter.io/local_auth');
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(localAuth,
+        (call) async => call.method == 'getAvailableBiometrics' ? ['fingerprint'] : true);
+    addTearDown(() => binding.defaultBinaryMessenger.setMockMethodCallHandler(localAuth,
+        (call) async => call.method == 'getAvailableBiometrics' ? <String>[] : true));
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(secure, (call) async {
+      final args = call.arguments as Map;
+      switch (call.method) {
+        case 'read': return storage[args['key']];
+        case 'write': storage[args['key'] as String] = args['value'] as String; return null;
+        case 'delete': storage.remove(args['key']); return null;
+        default: return null;
+      }
+    });
+    addTearDown(() => binding.defaultBinaryMessenger.setMockMethodCallHandler(secure, (_) async => null));
+    final profile = UserProfile(id: 'ui-layout-inspector', fullName: 'Inspector', role: 'inspector');
+    await mount(tester, SecuritySettingsScreen(profile: profile), const Size(360, 800), scale: 1);
+    await tester.runAsync(() async {
+      await tester.tap(find.byType(Switch).first);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Pending Activation'), findsOneWidget);
+    expect(find.textContaining('Fingerprint Active'), findsNothing);
+    await SecurePrefsService.setBioConfirmed(true);
+    await SecurePrefsService.setBioRequireOnOpen(false);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await mount(tester, SecuritySettingsScreen(profile: profile), const Size(320, 640));
+    expect(find.text('Fingerprint Active'), findsOneWidget);
+    expect(find.textContaining('App opening protection off'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('review groups each section in its own surface', (tester) async {
     await mount(
@@ -504,6 +892,14 @@ void main() {
         final root = binding.pipelineOwner.semanticsOwner!.rootSemanticsNode!;
         SemanticsNode? link() => namedNode(root, label);
         expect(link(), isNotNull);
+        // These are inline links inside one sentence, so they stay at the
+        // baseline 48x24 text-link box (keyboard-focusable) rather than the
+        // 48px-square floor reserved for standalone tap targets; a taller box
+        // would push the two notice sentences apart again.
+        expect(tester.getSize(find.widgetWithText(TextButton, label)).width,
+            greaterThanOrEqualTo(48), reason: 'Legal links keep a 48px minimum width.');
+        expect(tester.getSize(find.widgetWithText(TextButton, label)).height,
+            lessThanOrEqualTo(20), reason: 'Inline links must not inflate the sentence line.');
         // ignore: deprecated_member_use
         final flags = link()!.getSemanticsData().flagsCollection;
         expect(
@@ -529,6 +925,43 @@ void main() {
         await tester.pumpAndSettle();
       }
       semantics.dispose();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'login legal notice reads as one compact sentence below the brand, '
+    'without a sign-in heading competing with the app title',
+    (tester) async {
+      await mount(tester, const LoginScreen(), const Size(360, 800), scale: 1);
+      await tester.ensureVisible(find.byTooltip('Show passcode'));
+      await tester.pumpAndSettle();
+      final notice = tester.getRect(
+        find.ancestor(
+          of: find.text('Authorized MPDO personnel only.'),
+          matching: find.byType(Column),
+        ).first,
+      );
+      final links = find.text('Terms of Use');
+      final lastLine = tester.getRect(find.text('Authorized MPDO personnel only.'));
+      // Two 12px lines at 1.4 line-height need ~17px each; the notice should read
+      // as one tight block. Anything past ~24px means a gap crept back in.
+      expect(
+        lastLine.top - tester.getRect(links).bottom,
+        lessThanOrEqualTo(24),
+        reason: 'The two notice sentences must not drift apart.',
+      );
+      expect(
+        notice.height,
+        lessThanOrEqualTo(64),
+        reason: 'A two-sentence notice must not occupy a tall empty block.',
+      );
+      // The notice supports the brand block; it must not read as a second title.
+      expect(find.text('Inspector sign-in'), findsNothing);
+      expect(find.text('Use your authorized inspector account.'), findsNothing);
+      final brand = tester.getRect(find.text('FieldSync'));
+      expect(brand.top, lessThan(notice.top),
+          reason: 'The app title must stay above the legal notice.');
       expect(tester.takeException(), isNull);
     },
   );

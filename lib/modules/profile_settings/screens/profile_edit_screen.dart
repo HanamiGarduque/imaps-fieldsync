@@ -355,7 +355,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   borderRadius: BorderRadius.circular(48),
                   onTap: _isUploadingAvatar ? null : _pickAvatarSource,
                   child: Container(
-                    margin: const EdgeInsets.only(top: 6, bottom: 28),
+                    margin: const EdgeInsets.only(top: 4, bottom: 20),
                     child: Stack(
                       clipBehavior: Clip.none,
                       alignment: Alignment.bottomRight,
@@ -507,7 +507,7 @@ class _ProfileField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.only(bottom: 16),
       child: TextField(
         controller: controller,
         enabled: isEnabled,
@@ -521,7 +521,7 @@ class _ProfileField extends StatelessWidget {
           w: FontWeight.w500,
           c: isEnabled ? InsightTheme.ink : InsightTheme.ink3,
         ),
-        decoration: InsightTheme.formInput.copyWith(
+        decoration: InsightTheme.compactFormInput.copyWith(
           labelText: label,
           helperText: helper,
           floatingLabelBehavior: FloatingLabelBehavior.always,

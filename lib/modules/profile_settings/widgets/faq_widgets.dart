@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../models/faq_item.dart';
 
 class FaqExpansionTile extends StatelessWidget {
@@ -20,8 +21,9 @@ class FaqExpansionTile extends StatelessWidget {
     final answer = isTagalog ? item.answerTl : item.answerEn;
     return ExpansionTile(
       key: PageStorageKey(question),
-      tilePadding: const EdgeInsets.symmetric(vertical: 4),
-      childrenPadding: const EdgeInsets.only(bottom: 16),
+      minTileHeight: 48,
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 12),
       shape: const Border(),
       collapsedShape: const Border(),
       iconColor: InsightTheme.blueInk,
@@ -56,26 +58,13 @@ class FaqLanguageSegmentControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<bool>(
-      showSelectedIcon: false,
-      segments: const [
-        ButtonSegment(value: false, label: Text('English')),
-        ButtonSegment(value: true, label: Text('Tagalog')),
-      ],
-      selected: {isTagalog},
-      onSelectionChanged: (selection) {
+    return FieldSegmentedControl<bool>(
+      labels: const {false: 'English', true: 'Tagalog'},
+      value: isTagalog,
+      onChanged: (selection) {
         HapticFeedback.selectionClick();
-        onToggle(selection.single);
+        onToggle(selection);
       },
-      style: SegmentedButton.styleFrom(
-        minimumSize: const Size(48, 48),
-        foregroundColor: InsightTheme.ink2,
-        selectedForegroundColor: InsightTheme.blueInk,
-        selectedBackgroundColor: InsightTheme.blueTint,
-        side: const BorderSide(color: InsightTheme.line),
-        shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
-        textStyle: InsightTheme.inter(13, w: FontWeight.w600),
-      ),
     );
   }
 }

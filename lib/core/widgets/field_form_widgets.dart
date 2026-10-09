@@ -1,7 +1,64 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../layout/responsive_layout.dart';
 import '../theme/insight_theme.dart';
+
+/// Existing document/settings navigation, with a content-sized title.
+class FieldPageHeader extends StatelessWidget {
+  const FieldPageHeader({super.key, required this.title, this.onBack});
+  final String title;
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    IconButton(
+      tooltip: 'Back',
+      onPressed: onBack ?? () => Navigator.maybePop(context),
+      style: IconButton.styleFrom(
+        backgroundColor: InsightTheme.surface,
+        minimumSize: const Size(48, 48),
+        shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
+      ),
+      icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: InsightTheme.ink),
+    ),
+    const SizedBox(width: 12),
+    Expanded(child: Semantics(header: true,
+        child: Text(title, style: InsightTheme.urbanist(20, w: FontWeight.w700)))),
+  ]);
+}
+
+/// Restyles existing two-way selectors; values and callbacks stay screen-owned.
+class FieldSegmentedControl<T extends Object> extends StatelessWidget {
+  const FieldSegmentedControl({super.key, required this.labels,
+    required this.value, required this.onChanged});
+  final Map<T, String> labels;
+  final T value;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) => CupertinoSlidingSegmentedControl<T>(
+    groupValue: value,
+    backgroundColor: InsightTheme.surface2,
+    thumbColor: InsightTheme.surface,
+    padding: const EdgeInsets.all(4),
+    children: {
+      for (final entry in labels.entries)
+        entry.key: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Text(entry.value, textAlign: TextAlign.center,
+                style: InsightTheme.inter(13, w: FontWeight.w600,
+                    c: entry.key == value ? InsightTheme.blueInk : InsightTheme.ink2)),
+          ),
+        ),
+    },
+    onValueChanged: (selection) {
+      if (selection != null) onChanged(selection);
+    },
+  );
+}
 
 /// Shared presentation for FieldSync's document and form screens.
 class FieldFormBody extends StatelessWidget {
@@ -67,6 +124,7 @@ class FieldSectionHeading extends StatelessWidget {
     this.hint,
     this.trailing,
     this.hintSize = 14,
+    this.bottomSpacing = 12,
   });
   final String title;
   final String? hint;
@@ -75,10 +133,11 @@ class FieldSectionHeading extends StatelessWidget {
   /// Hint size for guidance that must stay fully readable but must not compete
   /// with the section title. Defaults to the shared 14px hint size.
   final double hintSize;
+  final double bottomSpacing;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
+    padding: EdgeInsets.only(bottom: bottomSpacing),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

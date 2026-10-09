@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/services/app_info_service.dart';
 
 class AboutInsightScreen extends StatelessWidget {
@@ -12,7 +13,7 @@ class AboutInsightScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return Scaffold(
-      backgroundColor: InsightTheme.surface,
+      backgroundColor: InsightTheme.bg,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -21,25 +22,11 @@ class AboutInsightScreen extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Row(
-                    children: [
-                      const BackButton(color: InsightTheme.ink),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Semantics(
-                          header: true,
-                          child: Text(
-                            'About iMAPS',
-                            style: InsightTheme.urbanist(20),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: const FieldPageHeader(title: 'About iMAPS'),
                 ),
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.only(top: 16, bottom: 32),
+                    padding: const EdgeInsets.only(top: 12, bottom: 24),
                     children: [
                       Align(
                         alignment: Alignment.centerLeft,
@@ -50,7 +37,7 @@ class AboutInsightScreen extends StatelessWidget {
                           excludeFromSemantics: true,
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       Semantics(
                         header: true,
                         child: Text(
@@ -58,14 +45,14 @@ class AboutInsightScreen extends StatelessWidget {
                           style: InsightTheme.urbanist(26),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       Text(
                         AppInfoService.fullVersionString,
                         style: InsightTheme.inter(14, c: InsightTheme.ink3),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 12),
                       const Divider(height: 1, color: InsightTheme.line),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 12),
                       Text(
                         'The field inspection app for authorized MPDO and Zoning personnel in Rosario, Batangas.',
                         style: InsightTheme.inter(
@@ -83,7 +70,7 @@ class AboutInsightScreen extends StatelessWidget {
                           h: 1.7,
                         ),
                       ),
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 20),
                       Text(
                         'Municipal Planning and Development Office (MPDO)',
                         style: InsightTheme.inter(

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 
 class TermsPrivacyScreen extends StatefulWidget {
   final bool initialShowTerms;
@@ -26,7 +27,7 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return Scaffold(
-      backgroundColor: InsightTheme.surface,
+      backgroundColor: InsightTheme.bg,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -35,57 +36,22 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Row(
-                    children: [
-                      const BackButton(color: InsightTheme.ink),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Semantics(
-                          header: true,
-                          child: Text(
-                            'Legal Information',
-                            style: InsightTheme.urbanist(20),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: const FieldPageHeader(title: 'Legal Information'),
                 ),
                 Expanded(
                   child: ListView(
                     key: ValueKey(_showTerms),
                     padding: const EdgeInsets.only(bottom: 32),
                     children: [
-                      SegmentedButton<bool>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(
-                            value: true,
-                            label: Text('Terms of Use'),
-                          ),
-                          ButtonSegment(
-                            value: false,
-                            label: Text('Privacy Policy'),
-                          ),
-                        ],
-                        selected: {_showTerms},
-                        onSelectionChanged: (selection) {
+                      FieldSegmentedControl<bool>(
+                        labels: const {true: 'Terms of Use', false: 'Privacy Policy'},
+                        value: _showTerms,
+                        onChanged: (selection) {
                           HapticFeedback.selectionClick();
-                          setState(() => _showTerms = selection.single);
+                          setState(() => _showTerms = selection);
                         },
-                        style: SegmentedButton.styleFrom(
-                          minimumSize: const Size(48, 48),
-                          foregroundColor: InsightTheme.ink2,
-                          selectedForegroundColor: InsightTheme.blueInk,
-                          selectedBackgroundColor: InsightTheme.blueTint,
-                          side: const BorderSide(color: InsightTheme.line),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: InsightTheme.roundedSm,
-                          ),
-                          textStyle: InsightTheme.inter(13, w: FontWeight.w600),
-                        ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
                       _showTerms
                           ? _buildTermsContent()
                           : _buildPrivacyContent(),
@@ -217,12 +183,12 @@ class _HeaderSection extends StatelessWidget {
           header: true,
           child: Text(title, style: InsightTheme.urbanist(24)),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Text(
           'Effective date: $date',
           style: InsightTheme.inter(13, c: InsightTheme.ink3),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         const Divider(height: 1, color: InsightTheme.line),
       ],
     );
@@ -238,7 +204,7 @@ class _PolicySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

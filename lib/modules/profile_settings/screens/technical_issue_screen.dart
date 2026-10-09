@@ -112,7 +112,7 @@ class _TechnicalIssueScreenState extends State<TechnicalIssueScreen> {
                 'Report a problem with FieldSync itself. No task or application is needed.',
                 style: InsightTextStyles.bodySecondary(),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               ReportTextField(
                 label: 'Title',
                 hint: 'e.g. App closes when I open a task',
@@ -238,7 +238,7 @@ class _TechnicalIssueScreenState extends State<TechnicalIssueScreen> {
                 const SizedBox(height: 16),
                 ReportNotice(_error!, error: true),
               ],
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               ReportSubmitButton(submitting: _submitting, onPressed: _submit),
               const SizedBox(height: 16),
               const ReportOfflineNote(),

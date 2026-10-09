@@ -14,7 +14,7 @@ EdgeInsets reportPagePadding(BuildContext context) {
     20.0,
     (media.size.width - media.padding.horizontal - 640) / 2,
   );
-  return EdgeInsets.fromLTRB(gutter, 16, gutter, 32);
+  return EdgeInsets.fromLTRB(gutter, 16, gutter, 24);
 }
 
 InputDecoration reportInputDecoration(String hint) => InputDecoration(
@@ -23,8 +23,8 @@ InputDecoration reportInputDecoration(String hint) => InputDecoration(
   hintStyle: InsightTheme.inter(14, c: InsightTheme.ink3),
   filled: true,
   fillColor: InsightTheme.surface,
-  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-  constraints: const BoxConstraints(minHeight: 56),
+  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+  constraints: const BoxConstraints(minHeight: 48),
   border: OutlineInputBorder(borderRadius: InsightTheme.roundedSm),
   enabledBorder: OutlineInputBorder(
     borderRadius: InsightTheme.roundedSm,
@@ -165,7 +165,7 @@ class ReportSubmitButton extends StatelessWidget {
         disabledForegroundColor: Colors.white,
         elevation: 0,
         minimumSize: const Size(48, 52),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
         textStyle: InsightTextStyles.buttonPrimary(),
       ),
@@ -205,7 +205,7 @@ class ReportNotice extends StatelessWidget {
     liveRegion: error,
     child: Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: error ? InsightTheme.redTint : InsightTheme.blueTint,
         borderRadius: InsightTheme.roundedSm,
@@ -223,7 +223,7 @@ class ReportNotice extends StatelessWidget {
             size: 20,
             color: error ? InsightTheme.redInk : InsightTheme.blueInk,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               message,

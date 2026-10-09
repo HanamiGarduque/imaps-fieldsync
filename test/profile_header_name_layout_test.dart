@@ -14,6 +14,7 @@ void main() {
     String name = fullName,
     String role = 'Zoning Officer I',
     double textScale = 1,
+    bool compact = false,
     VoidCallback? onEditTap,
   }) {
     return MaterialApp(
@@ -28,6 +29,7 @@ void main() {
                   child: SizedBox(
                     width: width,
                     child: ProfileIdentityCard(
+                      compact: compact,
                       avatarUrl: null,
                       initials: UserProfile.avatarInitials(name),
                       displayName: UserProfile.displayFullName(name),
@@ -161,7 +163,7 @@ void main() {
         .getBottomLeft(find.byType(ProfileIdentityCard))
         .dy;
     final emailBottom = tester.getBottomLeft(find.text(email)).dy;
-    expect(cardBottom - emailBottom, closeTo(18, 0.1));
+    expect(cardBottom - emailBottom, closeTo(16, 0.1));
   });
 
   testWidgets('Edit action remains tappable on a narrow card', (tester) async {
@@ -180,6 +182,42 @@ void main() {
 
     expect(editTapped, isTrue);
   });
+
+  testWidgets(
+    'compact identity retains long names, role and email at 2x text',
+    (tester) async {
+      const name = 'Gemini Norawit Alexandria Maria Dela Cruz Example';
+      var edited = false;
+      await tester.pumpWidget(
+        identityCard(
+          width: 280,
+          name: name,
+          textScale: 2,
+          compact: true,
+          onEditTap: () => edited = true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text(name), findsOneWidget);
+      expect(find.text('Zoning Officer I'), findsOneWidget);
+      expect(find.text(email), findsOneWidget);
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(name));
+      expect(paragraph.didExceedMaxLines, isFalse);
+      expect(paragraph.overflow, isNot(TextOverflow.ellipsis));
+      expect(
+        tester.getBottomLeft(find.text(email)).dy,
+        lessThan(tester.getBottomLeft(find.byType(ProfileIdentityCard)).dy),
+      );
+      final edit = find.byKey(const Key('profile-edit-button'));
+      expect(tester.getSize(edit).shortestSide, greaterThanOrEqualTo(48));
+      await tester.ensureVisible(edit);
+      await tester.pumpAndSettle();
+      await tester.tap(edit);
+      await tester.pump();
+      expect(edited, isTrue);
+    },
+  );
 
   for (final name in [
     'Gemini Example',

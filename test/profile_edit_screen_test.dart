@@ -86,4 +86,41 @@ void main() {
       expect(find.text(profile.fullName), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'identity stays visible through Log Out and restores on upward scroll',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(home: ProfileScreen(profile: profile)),
+      );
+      await tester.pumpAndSettle();
+      final identity = find.byType(ProfileIdentityCard);
+      final expandedHeight = tester.getSize(identity).height;
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
+      await tester.pumpAndSettle();
+      expect(find.text(profile.fullName).hitTestable(), findsOneWidget);
+      expect(tester.getSize(identity).height, lessThan(expandedHeight));
+      await tester.scrollUntilVisible(
+        find.text('Log Out'),
+        160,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Log Out').hitTestable(), findsOneWidget);
+      expect(find.text(profile.fullName).hitTestable(), findsOneWidget);
+      expect(find.text('No email found').hitTestable(), findsOneWidget);
+      expect(
+        find.byKey(const Key('profile-edit-button')).hitTestable(),
+        findsOneWidget,
+      );
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 140));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(identity).height, closeTo(expandedHeight, 0.1));
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

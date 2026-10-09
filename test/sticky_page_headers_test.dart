@@ -392,7 +392,7 @@ void main() {
 
     testWidgets('19. legitimate blue controls are NOT stripped', (tester) async {
       await pumpTasks(tester);
-      // Brand blue survives on real UI: the ACTIVE MONITORING pill in the live
+      // Brand blue survives on real UI: the ASSIGNED counter in the live
       // widget is the proof, and the theme tokens themselves are untouched.
       expect(
         find.descendant(
@@ -410,8 +410,8 @@ void main() {
 // ==========================================================================
   // PART A2 — the My Tasks header GROUP stays pinned whole
   //
-  // ACTIVE MONITORING, "My Tasks" and the ASSIGNED counter are ONE header
-  // group in the original arrangement, and all three live in Scaffold appBar
+  // "My Tasks" and the ASSIGNED counter are ONE header
+  // group, and both live in Scaffold appBar
   // chrome, which the body can never scroll. Search/Filter are the only part
   // that scrolls away; the pinned category sliver then parks directly beneath
   // the complete header.
@@ -434,7 +434,7 @@ void main() {
         (tester) async {
       await pumpTasks(tester);
       expect(find.text('My Tasks'), findsOneWidget);
-      for (final marker in ['My Tasks', 'ACTIVE MONITORING', 'ASSIGNED']) {
+      for (final marker in ['My Tasks', 'ASSIGNED']) {
         expect(
           find.descendant(
             of: find.byType(AppBar),
@@ -447,17 +447,16 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('TOP — the original header composition is intact, in the AppBar', (tester) async {
+    testWidgets('TOP — title and counter remain pinned without Active Monitoring', (tester) async {
       await pumpTasks(tester, width: 800);
-      expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 85);
-      for (final label in ['ACTIVE MONITORING', 'My Tasks', 'ASSIGNED']) {
+      expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, lessThan(85));
+      for (final label in ['My Tasks', 'ASSIGNED']) {
         expect(find.text(label), findsOneWidget, reason: '$label is not duplicated in the scrolling content.');
         expect(find.descendant(of: find.byType(AppBar), matching: find.text(label)), findsOneWidget);
       }
-      final pill = tester.getRect(find.text('ACTIVE MONITORING'));
+      expect(find.text('ACTIVE MONITORING'), findsNothing);
       final title = tester.getRect(find.text('My Tasks'));
       final counter = tester.getRect(find.text('ASSIGNED'));
-      expect(pill.bottom, lessThanOrEqualTo(title.top), reason: 'the pill sits above My Tasks');
       expect(counter.left, greaterThan(title.right), reason: 'the counter sits beside the title when space permits.');
       expect(tester.takeException(), isNull);
     });
@@ -516,7 +515,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(AppBar),
-          matching: find.text('ACTIVE MONITORING'),
+          matching: find.text('My Tasks'),
         ),
         findsOneWidget,
         reason: 'the header group survives scrolling',
@@ -549,7 +548,7 @@ void main() {
       await pumpTasks(tester, width: 320);
       expect(tester.takeException(), isNull);
       expect(find.text('My Tasks'), findsOneWidget);
-      expect(find.text('ACTIVE MONITORING'), findsOneWidget);
+      expect(find.text('ACTIVE MONITORING'), findsNothing);
       expect(find.text('ASSIGNED'), findsOneWidget);
     });
   });

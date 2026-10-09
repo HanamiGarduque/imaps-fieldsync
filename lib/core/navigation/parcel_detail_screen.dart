@@ -363,71 +363,31 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                         ),
                       ),
 
-                      if (task.assignmentInstructions?.trim().isNotEmpty == true) ...[
+                      if (task.assignmentInstructions?.trim().isNotEmpty == true ||
+                          task.assignedByName?.trim().isNotEmpty == true) ...[
                         const SizedBox(height: 16),
                         _GlassCard(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            padding: const EdgeInsets.all(16),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
-                                      child: const Icon(Icons.assignment_ind_outlined, color: InsightTheme.ink2, size: 16),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text('Assignment Instructions', style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.ink)),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.surface2.withValues(alpha: 0.5),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: InsightTheme.line.withValues(alpha: 0.5)),
-                                  ),
-                                  child: Text(
+                                if (task.assignmentInstructions?.trim().isNotEmpty == true) ...[
+                                  Text('Assignment Instructions', style: InsightTheme.urbanist(18, w: FontWeight.w700)),
+                                  const SizedBox(height: 8),
+                                  Text(
                                     task.assignmentInstructions!,
                                     style: InsightTheme.inter(13, w: FontWeight.w400, c: InsightTheme.ink),
-                                    maxLines: null,
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-
-                      // Loop 3 — Assigning Planning Officer (read-only).
-                      // Displayed only when assigned_by_name is non-null and non-empty.
-                      // Never shows "Admin" as a fallback — null/missing renders nothing.
-                      if (task.assignedByName?.trim().isNotEmpty == true) ...[
-                        const SizedBox(height: 16),
-                        _GlassCard(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
-                                  child: const Icon(Icons.person_outline_rounded, color: InsightTheme.ink2, size: 16),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Assigned by', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink3)),
-                                      const SizedBox(height: 2),
-                                      Text(task.assignedByName!, style: InsightTheme.poppins(13, w: FontWeight.w600, c: InsightTheme.ink)),
-                                    ],
-                                  ),
-                                ),
+                                ],
+                                if (task.assignmentInstructions?.trim().isNotEmpty == true &&
+                                    task.assignedByName?.trim().isNotEmpty == true)
+                                  const Divider(height: 17, color: InsightTheme.line),
+                                if (task.assignedByName?.trim().isNotEmpty == true) ...[
+                                  Text('Assigned by', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3)),
+                                  const SizedBox(height: 4),
+                                  Text(task.assignedByName!, style: InsightTheme.inter(14, w: FontWeight.w500)),
+                                ],
                               ],
                             ),
                           ),
@@ -644,9 +604,11 @@ class _StepRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final markerSize = MediaQuery.textScalerOf(context).scale(12) * 2 + 8;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       margin: const EdgeInsets.only(bottom: 6),
+      constraints: const BoxConstraints(minHeight: 48),
       decoration: BoxDecoration(
         color: isCurrent ? InsightTheme.surface2 : Colors.transparent,
         borderRadius: BorderRadius.circular(14),
@@ -660,7 +622,7 @@ class _StepRow extends StatelessWidget {
             step.onTap();
           },
           child: Padding(
-            padding: EdgeInsets.all(isCurrent ? 12 : 6),
+            padding: const EdgeInsets.all(8),
             child: IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -668,15 +630,16 @@ class _StepRow extends StatelessWidget {
                   Column(
                     children: [
                       Container(
-                        width: 28, height: 28,
+                        width: markerSize, height: markerSize,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: isDone ? InsightTheme.greenTint : (isCurrent ? InsightTheme.blue1 : InsightTheme.surface2),
                         ),
-                        child: Icon(
-                          isDone ? Icons.check_rounded : (isLocked ? Icons.lock_outline_rounded : step.icon),
-                          size: 13,
-                          color: isDone ? InsightTheme.greenInk : (isCurrent ? Colors.white : InsightTheme.ink3),
+                        alignment: Alignment.center,
+                        child: Text(
+                          step.index.toString().padLeft(2, '0'),
+                          style: InsightTheme.inter(12, w: FontWeight.w700,
+                              c: isDone ? InsightTheme.greenInk : (isCurrent ? Colors.white : InsightTheme.ink3)),
                         ),
                       ),
                       if (!isLast)
@@ -693,20 +656,21 @@ class _StepRow extends StatelessWidget {
                   
                   Expanded(
                     child: Padding(
-                      padding: EdgeInsets.only(bottom: isLast ? 0 : 10, top: 2),
+                      padding: EdgeInsets.only(bottom: isLast ? 0 : 4, top: 2),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              Expanded(
-                                child: Text(
+                              Text(
                                   step.title, 
                                   style: InsightTheme.poppins(13.5, w: FontWeight.w600, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink),
-                                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                                ),
                               ),
+                              if (isLocked)
+                                const Icon(Icons.lock_outline_rounded, size: 14, color: InsightTheme.ink3),
                               if (isCurrent)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -735,7 +699,6 @@ class _StepRow extends StatelessWidget {
                                          ? 'Saved on ${_formatSavedAt(savedAt!)}'
                                          : 'Completed',
                                      style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.greenInk),
-                                     maxLines: 1, overflow: TextOverflow.ellipsis,
                                    ),
                                  ),
                                ],
@@ -744,8 +707,6 @@ class _StepRow extends StatelessWidget {
                             Text(
                               step.description,
                               style: InsightTheme.inter(11, w: FontWeight.w400, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink2),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
                             ),
                         ],
                       ),

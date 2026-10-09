@@ -215,13 +215,14 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                 hint:
                     'Record the site condition, land use and notable features.',
                 hintSize: 12.5,
+                bottomSpacing: 8,
               ),
               TextField(
                 controller: _notesController,
                 maxLines: 4,
                 minLines: 3,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),
-                decoration: InsightTheme.formInput.copyWith(
+                decoration: InsightTheme.compactFormInput.copyWith(
                   labelText: 'Site observations',
                   alignLabelWithHint: true,
                   hintText: 'Describe what you observed on-site…',
@@ -229,7 +230,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
               ),
               if (widget.capturedPhotos.isNotEmpty ||
                   widget.checklistTotal > 0) ...[
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 16,
                   runSpacing: 8,
@@ -247,19 +248,20 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                   ],
                 ),
               ],
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               const FieldSectionHeading(
                 title: 'Discrepancies',
                 hint:
                     'Optional. Leave these fields blank if no issues were found.',
                 hintSize: 12.5,
+                bottomSpacing: 8,
               ),
               TextField(
                 controller: _discrepancyTitleController,
                 maxLines: 2,
                 minLines: 1,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),
-                decoration: InsightTheme.formInput.copyWith(
+                decoration: InsightTheme.compactFormInput.copyWith(
                   labelText: 'Issue title',
                   hintText: 'Brief description of the issue',
                 ),
@@ -270,25 +272,26 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                 minLines: 2,
                 maxLines: 5,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),
-                decoration: InsightTheme.formInput.copyWith(
+                decoration: InsightTheme.compactFormInput.copyWith(
                   labelText: 'Issue details',
                   alignLabelWithHint: true,
                   hintText: 'Location and supporting details',
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               const FieldSectionHeading(
                 title: 'Recommendations',
                 hint:
                     'Describe any permits, follow-up or other recommended action.',
                 hintSize: 12.5,
+                bottomSpacing: 8,
               ),
               TextField(
                 controller: _recommendationsController,
                 maxLines: 3,
                 minLines: 2,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),
-                decoration: InsightTheme.formInput.copyWith(
+                decoration: InsightTheme.compactFormInput.copyWith(
                   labelText: 'Recommended action',
                   alignLabelWithHint: true,
                   hintText: 'Enter your recommendation…',

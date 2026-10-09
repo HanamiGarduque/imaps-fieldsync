@@ -235,6 +235,10 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
     final checklistDone =
         provider.siteCondition.values.where((v) => v).length +
         provider.zoningObservations.values.where((v) => v).length;
+    final checklistAnswers = {
+      ...provider.siteCondition,
+      ...provider.zoningObservations,
+    }.entries.toList(growable: false);
     final effectiveTotal = checklistTotal > 0
         ? checklistTotal
         : widget.checklistTotal;
@@ -304,21 +308,22 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               ),
               if (provider.capturedPhotos.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const FieldSectionHeading(
+                FieldSectionHeading(
                   title: 'Attached photos',
                   hint: 'Tap a photo to inspect the full image.',
+                  bottomSpacing: 8,
+                  trailing: Text('${provider.capturedPhotos.length} photos',
+                    style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
                 ),
                 FieldReadOnlyCard(
-                  padding: EdgeInsets.zero,
+                  padding: const EdgeInsets.all(12),
                   children: [
-                    SizedBox(
-                      height: 128,
-                      child: ListView.separated(
+                    SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        itemCount: provider.capturedPhotos.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 8),
-                        itemBuilder: (_, i) {
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        for (var i = 0; i < provider.capturedPhotos.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 12),
+                          Builder(builder: (context) {
                           final paths = inspectionDisplayPaths(
                             provider.capturedPhotos
                                 .map((p) => p['photoPath'] as String? ?? '')
@@ -330,10 +335,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                           return Semantics(
                             button: true,
                             label: 'View photo ${i + 1}',
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
+                            child: SizedBox(width: 128,
                               child: Material(
                                 color: Colors.transparent,
                                 child: InkWell(
@@ -343,33 +345,45 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                     paths,
                                     i,
                                   ),
-                                  child: ClipRRect(
-                                    borderRadius: InsightTheme.roundedSm,
-                                    child: SizedBox(
-                                      width: 128,
-                                      child: AdaptivePhotoImage(path: paths[i]),
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    ClipRRect(
+                                      borderRadius: InsightTheme.roundedSm,
+                                      child: SizedBox(height: 100, width: 128,
+                                        child: AdaptivePhotoImage(path: paths[i])),
                                     ),
-                                  ),
+                                    const SizedBox(height: 6),
+                                    Row(children: [
+                                      const Icon(Icons.camera_alt_outlined, size: 14, color: InsightTheme.ink2),
+                                      const SizedBox(width: 6),
+                                      Expanded(child: Text('Photo ${i + 1}',
+                                        style: InsightTheme.inter(12, c: InsightTheme.ink2))),
+                                    ]),
+                                  ]),
                                 ),
                               ),
                             ),
                           );
-                        },
-                      ),
+                          }),
+                        ],
+                      ]),
                     ),
                   ],
                 ),
               ],
               if (widget.task.confirmedLatitude != null &&
                   widget.task.confirmedLongitude != null) ...[
-                const SizedBox(height: 24),
-                const FieldSectionHeading(title: 'GPS record'),
+                const SizedBox(height: 16),
+                const FieldSectionHeading(
+                  title: 'GPS record',
+                  bottomSpacing: 8,
+                ),
                 FieldReadOnlyCard(
                   children: [
                     _SummaryRow(
                       label: 'Coordinates',
                       value:
                           '${widget.task.confirmedLatitude!.toStringAsFixed(6)}, ${widget.task.confirmedLongitude!.toStringAsFixed(6)}',
+                      compact: true,
                       isLast: widget.task.gpsAccuracyM == null,
                     ),
                     if (widget.task.gpsAccuracyM != null)
@@ -377,29 +391,38 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                         label: 'Recorded accuracy',
                         value:
                             '${widget.task.gpsAccuracyM!.toStringAsFixed(1)} m',
+                        compact: true,
                         isLast: true,
                       ),
                   ],
                 ),
               ],
               if (checklistTotal > 0) ...[
-                const SizedBox(height: 24),
-                const FieldSectionHeading(title: 'Checklist answers'),
+                const SizedBox(height: 16),
+                FieldSectionHeading(
+                  title: 'Checklist answers',
+                  bottomSpacing: 8,
+                  trailing: Text('$checklistDone/$checklistTotal checked',
+                    style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                ),
                 FieldReadOnlyCard(
                   children: [
-                    for (final answer in {
-                      ...provider.siteCondition,
-                      ...provider.zoningObservations,
-                    }.entries)
+                    for (final (index, answer) in checklistAnswers.indexed)
                       _SummaryRow(
                         label: answer.key,
                         value: answer.value ? 'Checked' : 'Unchecked',
+                        compact: true,
+                        checked: answer.value,
+                        isLast: index == checklistAnswers.length - 1,
                       ),
                   ],
                 ),
               ],
-              const SizedBox(height: 24),
-              const FieldSectionHeading(title: 'Field findings'),
+              const SizedBox(height: 16),
+              const FieldSectionHeading(
+                title: 'Field findings',
+                bottomSpacing: 8,
+              ),
               FieldReadOnlyCard(
                 children: [
                   _SummaryRow(
@@ -407,18 +430,21 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                     value: provider.notes.isEmpty
                         ? 'No observations recorded'
                         : provider.notes,
+                    compact: true,
                   ),
                   _SummaryRow(
                     label: 'Discrepancies',
                     value: provider.discrepancies.isEmpty
                         ? 'No discrepancies recorded'
                         : provider.discrepancies,
+                    compact: true,
                   ),
                   _SummaryRow(
                     label: 'Recommendations',
                     value: provider.recommendations.isEmpty
                         ? 'No recommendations recorded'
                         : provider.recommendations,
+                    compact: true,
                     isLast: true,
                   ),
                 ],
@@ -453,36 +479,49 @@ class _SummaryRow extends StatelessWidget {
   final String label;
   final String value;
   final bool isLast;
+  final bool compact;
+  final bool? checked;
   const _SummaryRow({
     required this.label,
     required this.value,
     this.isLast = false,
+    this.compact = false,
+    this.checked,
   });
   @override
   Widget build(BuildContext context) {
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: InsightTheme.inter(checked == null ? 13 : 14,
+            c: checked == null ? InsightTheme.ink3 : InsightTheme.ink)),
+        const SizedBox(height: 4),
+        Text(value, style: InsightTheme.inter(checked == null ? 15 : 12.5,
+            w: checked == null ? FontWeight.w500 : FontWeight.w400,
+            c: checked == null ? InsightTheme.ink : InsightTheme.ink2)),
+      ],
+    );
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: EdgeInsets.symmetric(vertical: compact ? 8 : 12),
       decoration: BoxDecoration(
         border: isLast
             ? null
             : const Border(bottom: BorderSide(color: InsightTheme.line)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: InsightTheme.inter(13, c: InsightTheme.ink3)),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: InsightTheme.inter(
-              15,
-              w: FontWeight.w500,
-              c: InsightTheme.ink,
-            ),
+      child: checked == null ? text : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 20, height: 20,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: checked! ? InsightTheme.blueTint : InsightTheme.surface,
+            border: Border.all(color: checked! ? InsightTheme.blue1.withValues(alpha: 0.2) : InsightTheme.lineStrong),
           ),
-        ],
-      ),
+          child: checked! ? const Icon(Icons.check_rounded, size: 14, color: InsightTheme.blue1) : null,
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: text),
+      ]),
     );
   }
 }

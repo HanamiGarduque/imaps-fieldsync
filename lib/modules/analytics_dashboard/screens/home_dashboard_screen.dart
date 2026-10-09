@@ -525,7 +525,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
         ? filteredActivity
         : filteredActivity.take(_kVisibleActivityLimit).toList();
     final activityMotion = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero : const Duration(milliseconds: 220);
+         ? Duration.zero : const Duration(milliseconds: 220);
+    final calendarMotion = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero : const Duration(milliseconds: 320);
 
     return Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -735,7 +737,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                 Text('Calendar', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
                                 AnimatedRotation(
                                   turns: _showFullCalendar ? 0.5 : 0,
-                                  duration: const Duration(milliseconds: 220),
+                                   duration: calendarMotion,
                                   child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: InsightTheme.blue1),
                                 ),
                               ],
@@ -743,11 +745,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                           ),
                         ),
                       ),
-                      SpringSlide(
-                      animation: springFor(1),
-                      beginOffset: const Offset(0, 18),
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 320),
+                   ],
+                 ),
+               ),
+               ),
+                       AnimatedSwitcher(
+                         duration: calendarMotion,
                         switchInCurve: Curves.easeOutCubic,
                         switchOutCurve: Curves.easeInCubic,
                         transitionBuilder: (child, animation) => FadeTransition(
@@ -764,8 +767,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                         child: _showFullCalendar
                             ? Padding(
                                 key: const ValueKey('full_calendar'),
-                                padding: const EdgeInsets.symmetric(horizontal: 16),
-                                child: _InlineFullCalendarCard(
+                                 // Gutter follows the content: seven 48px day targets
+                                 // need 336px, so this keeps the standard 20px
+                                 // margin where it fits and only tightens on
+                                 // narrower phones, never to zero.
+                                 padding: _kFullCalendarGutter(context),
+                                 child: ConstrainedContent(
+                                   maxWidth: 560,
+                                   child: Column(children: [
+                                     const ExcludeSemantics(child: CustomPaint(
+                                       size: Size(160, 24), painter: _CalendarTetherPainter(),
+                                     )),
+                                     _InlineFullCalendarCard(
                                   month: _calendarMonth,
                                   selectedDay: _selectedDay,
                                   taskDaysForMonth: _taskDaysInMonth,
@@ -774,16 +787,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   onPrevMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
                                   onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
                                   onPick: _onFullCalendarPick,
-                                ),
+                                     ),
+                                   ]),
+                                 ),
                               )
                              : const SizedBox.shrink(),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              ),
-              const SizedBox(height: 8),
+               const SizedBox(height: 8),
 
               // ----------------------------------------------------
               // 2. ACTIVE ASSIGNMENTS
@@ -1002,8 +1012,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: InsightTheme.surface,
+                  color: InsightTheme.bg,
                   borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: InsightTheme.lineStrong),
                 ),
                 child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1960,11 +1971,44 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
   }
 }
 
-/// Inline full-month calendar (Master's Image 2 reference) — swapped in
-/// for the day strip via the toggle button in build()'s AnimatedSwitcher.
-/// No longer a modal/bottom sheet: it's stateless and driven entirely by
-/// the parent screen's _calendarMonth/_selectedDay, so the strip and the
-/// full grid can never disagree with each other.
+/// Page gutter for the full-month card.
+///
+/// Seven Android-sized day targets need 336px. The standard 20px page margin
+/// is used whenever it fits; on narrower phones it tightens so the targets
+/// stay full size, and it never reaches zero, so the month is never flush
+/// against the phone edge.
+EdgeInsets _kFullCalendarGutter(BuildContext context) {
+  const sevenTargets = 7 * 48.0;
+  final width = MediaQuery.sizeOf(context).width;
+  // Clamp the gutter itself: the narrowest margin that still fits seven 48px
+  // day targets, and never more than the standard 20px page margin.
+  final gutter = ((width - sevenTargets) / 2).clamp(4.0, 20.0);
+  return EdgeInsets.symmetric(horizontal: gutter);
+}
+
+/// Decorative lanyard from the existing Calendar toggle to its separate card.
+class _CalendarTetherPainter extends CustomPainter {
+  const _CalendarTetherPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = InsightTheme.blue1.withValues(alpha: 0.45)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    for (final direction in [-1.0, 1.0]) {
+      canvas.drawPath(Path()
+        ..moveTo(size.width / 2 + direction * 12, 0)
+        ..quadraticBezierTo(size.width / 2 + direction * 16, size.height / 2,
+            size.width / 2 + direction * 64, size.height), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_CalendarTetherPainter oldDelegate) => false;
+}
+
+/// A separate full-month card sharing the strip's real selection/task sources.
 class _InlineFullCalendarCard extends StatelessWidget {
   final DateTime month;
   final int selectedDay;
@@ -2006,17 +2050,19 @@ class _InlineFullCalendarCard extends StatelessWidget {
     final selectedTasks = tasksByDayInMonth[clampedDay] ?? const <TaskItem>[];
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: InsightTheme.roundedMd,
         border: Border.all(color: InsightTheme.line, width: 1.2),
         boxShadow: kCardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
             children: [
               Expanded(
                 child: Text(headerLabel, style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
@@ -2033,8 +2079,9 @@ class _InlineFullCalendarCard extends StatelessWidget {
                 icon: Icon(Icons.chevron_right_rounded, color: InsightTheme.ink2),
               ),
             ],
+            ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           LayoutBuilder(builder: (context, constraints) {
             final dayStyle = InsightTheme.inter(12.5, w: FontWeight.w700);
             var columnWidth = 48.0;
@@ -2048,11 +2095,10 @@ class _InlineFullCalendarCard extends StatelessWidget {
               if (painter.height + 24 > rowHeight) rowHeight = painter.height + 24;
               painter.dispose();
             }
-            final gridWidth = constraints.maxWidth.clamp(columnWidth * 7 + 24, double.infinity).toDouble();
+            final gridWidth = constraints.maxWidth.clamp(columnWidth * 7, double.infinity).toDouble();
             final calendar = SizedBox(width: gridWidth, child: Column(children: [
               Row(children: [
                 for (var index = 0; index < _weekdayAbbrSunStart.length; index++) ...[
-                  if (index > 0) const SizedBox(width: 4),
                   Expanded(child: Center(child: Text(_weekdayAbbrSunStart[index],
                       style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)))),
                 ],
@@ -2065,7 +2111,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
               mainAxisSpacing: 4,
-              crossAxisSpacing: 4,
+               crossAxisSpacing: 0,
               mainAxisExtent: rowHeight,
             ),
             itemCount: daysInMonth + leadingBlanks,
@@ -2124,7 +2170,9 @@ class _InlineFullCalendarCard extends StatelessWidget {
           }),
           if (selectedTasks.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Container(
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: InsightTheme.surface2,
@@ -2140,6 +2188,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   ...selectedTasks.map((task) => _CalendarTaskRow(task: task, color: dotColorForTask(task))),
                 ],
+              ),
               ),
             ),
           ],

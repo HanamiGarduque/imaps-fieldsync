@@ -469,7 +469,7 @@ void main() {
     final counter = tester.getRect(find.text('ASSIGNED'));
     expect(counter.right, lessThanOrEqualTo(640 - 24 - 16));
     expect(
-      tester.getRect(find.text('ACTIVE MONITORING')).left,
+      tester.getRect(find.text('My Tasks')).left,
       greaterThanOrEqualTo(32 + 16),
     );
   });

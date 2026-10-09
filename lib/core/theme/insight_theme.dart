@@ -190,6 +190,12 @@ class InsightTheme {
     ),
   );
 
+  /// Compact forms retain the Android touch floor and grow with multiline text.
+  static InputDecoration get compactFormInput => formInput.copyWith(
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    constraints: const BoxConstraints(minHeight: 48),
+  );
+
   static final BorderRadius roundedSm = BorderRadius.circular(radiusSm);
   static final BorderRadius roundedMd = BorderRadius.circular(radiusMd);
   static final BorderRadius roundedLg = BorderRadius.circular(radiusLg);

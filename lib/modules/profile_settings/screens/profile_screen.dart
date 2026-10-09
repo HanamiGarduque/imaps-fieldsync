@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 
 import '../../../core/models/user_profile.dart';
@@ -17,6 +20,8 @@ import 'help_faq_screen.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/insight_bottom_nav.dart'
+    show kInsightBottomNavReserve;
 import '../../../core/services/app_info_service.dart';
 
 import '../../../core/theme/insight_theme.dart';
@@ -58,6 +63,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   int _analyticsTabIndex = 0;
   bool _analyticsIsWeek = true;
   final GlobalKey _analyticsSectionKey = GlobalKey();
+  bool _identityCompact = false;
 
   @override
   void initState() {
@@ -348,211 +354,272 @@ class _ProfileScreenState extends State<ProfileScreen>
           // removed so Profile matches the other main pages' plain neutral
           // background. They were page-background ornament only — no blue was
           // removed from any legitimate control on this screen.
-
           SafeArea(
             bottom: false,
-            child: RefreshIndicator(
-              color: InsightTheme.blue1,
-              onRefresh: () async {
-                await Future.wait([_refreshProfileFromServer(), _loadStats()]);
-              },
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
-                ),
-                slivers: [
-                  // Phone portrait lays these out exactly as before. Wider
-                  // viewports bound the identity card so it does not become a
-                  // ~1240px-wide banner.
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-                      child: ConstrainedContent.wide(
-                        child: ProfileIdentityCard(
-                          avatarUrl: _currentProfile.avatarUrl,
-                          initials: initials,
-                          displayName: displayName,
-                          positionLabel: positionLabel,
-                          userEmail: userEmail,
-                          onEditTap: _openEditScreen,
-                        ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final gutter =
+                    constraints.maxHeight < InsightBreakpoints.shortHeight
+                    ? 4.0
+                    : 12.0;
+                final usableHeight =
+                    constraints.maxHeight -
+                    MediaQuery.paddingOf(context).bottom;
+                final identityMaxHeight = math.min(
+                  constraints.maxHeight,
+                  math.max(96.0, (usableHeight - gutter * 2) / 2),
+                );
+                final identity = ProfileIdentityCard(
+                  compact: _identityCompact,
+                  avatarUrl: _currentProfile.avatarUrl,
+                  initials: initials,
+                  displayName: displayName,
+                  positionLabel: positionLabel,
+                  userEmail: userEmail,
+                  onEditTap: _openEditScreen,
+                );
+                return RefreshIndicator(
+                  color: InsightTheme.blue1,
+                  onRefresh: () async {
+                    await Future.wait([
+                      _refreshProfileFromServer(),
+                      _loadStats(),
+                    ]);
+                  },
+                  child: NotificationListener<UserScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification.depth == 0 &&
+                          notification.direction != ScrollDirection.idle) {
+                        final compact =
+                            notification.direction == ScrollDirection.reverse;
+                        if (compact != _identityCompact) {
+                          setState(() => _identityCompact = compact);
+                        }
+                      }
+                      return false;
+                    },
+                    child: CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: BouncingScrollPhysics(),
                       ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 140),
-                    sliver: SliverList(
-                      delegate: SliverChildListDelegate([
-                        // 1. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
-                        // IntrinsicHeight guarantees both cards match the
-                        // taller one's height regardless of label wrapping.
-                        IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(
-                                child: SpringSlide(
-                                  animation: springFor(1),
-                                  beginOffset: const Offset(0, 34),
-                                  child: _buildStatCard(
-                                    'Pending / Ongoing',
-                                    _isLoadingStats
-                                        ? '—'
-                                        : '${_stats.tasksTodayOrPendingCount}',
-                                    Icons.access_time_rounded,
-                                    InsightTheme.surface2,
-                                    InsightTheme.blue1,
-                                  ),
+                      slivers: [
+                        PinnedHeaderSliver(
+                          child: Container(
+                            color: InsightTheme.bg,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: gutter,
+                            ),
+                            child: ConstrainedContent.wide(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxHeight: identityMaxHeight,
                                 ),
+                                child: MediaQuery.disableAnimationsOf(context)
+                                    ? identity
+                                    : AnimatedSize(
+                                        alignment: Alignment.topCenter,
+                                        duration: const Duration(
+                                          milliseconds: 240,
+                                        ),
+                                        curve: Curves.easeOutCubic,
+                                        child: identity,
+                                      ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: SpringSlide(
-                                  animation: springFor(2),
-                                  beginOffset: const Offset(0, 34),
-                                  child: _buildStatCard(
-                                    'Completed Inspections',
-                                    _isLoadingStats
-                                        ? '—'
-                                        : '${_stats.completedCount}',
-                                    Icons.check_circle_outline_rounded,
-                                    InsightTheme.blueTint,
-                                    InsightTheme.blueInk,
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
-
-                        const SizedBox(height: 16),
-
-                        // 2. PERFORMANCE ANALYTICS — single card with
-                        // internal segmented tab bar (Bars / Activity /
-                        // Gauge / Sectors) + Week/Month toggle.
-                        // Matches HTML reference design: no PageView swipe,
-                        // no separate section label, no dot indicators.
-                        if (_hasStatsError)
-                          _dashboardErrorCard()
-                        else if (_isLoadingStats)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 40),
-                            child: Center(
-                              child: ImapsLoadingIndicator(size: 50),
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            20,
+                            4,
+                            20,
+                            math.max(
+                              kInsightBottomNavReserve,
+                              MediaQuery.paddingOf(context).bottom,
                             ),
-                          )
-                        else
-                          KeyedSubtree(
-                            key: _analyticsSectionKey,
-                            child: _analyticsCard(),
                           ),
-
-                        const SizedBox(height: 24),
-
-                        // 3. GROUPED ACTION CARDS — split from one long list
-                        // into related groups, with Sign out separated by
-                        // whitespace rather than sharing a divider with
-                        // neutral settings rows (destructive actions get
-                        // visual distance, not just a color change).
-                        SpringSlide(
-                          animation: springFor(5),
-                          beginOffset: const Offset(0, 30),
-                          child: Column(
-                            children: [
-                              _actionGroupCard([
-                                _ActionTile(
-                                  icon: Icons.fingerprint_rounded,
-                                  title: 'Security & Protection',
-                                  subtitle:
-                                      'Biometric login, auto-lock & protection',
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => SecuritySettingsScreen(
-                                          profile: _currentProfile,
+                          sliver: SliverList(
+                            delegate: SliverChildListDelegate([
+                              // 1. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
+                              // IntrinsicHeight guarantees both cards match the
+                              // taller one's height regardless of label wrapping.
+                              IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      child: SpringSlide(
+                                        animation: springFor(1),
+                                        beginOffset: const Offset(0, 34),
+                                        child: _buildStatCard(
+                                          'Pending / Ongoing',
+                                          _isLoadingStats
+                                              ? '—'
+                                              : '${_stats.tasksTodayOrPendingCount}',
+                                          Icons.access_time_rounded,
+                                          InsightTheme.surface2,
+                                          InsightTheme.blue1,
                                         ),
                                       ),
-                                    );
-                                  },
-                                ),
-                                _ActionTile(
-                                  icon: Icons.help_outline_rounded,
-                                  title: 'Help & FAQ',
-                                  subtitle: 'Guide, color codes & field rules',
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => const HelpFaqScreen(),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: SpringSlide(
+                                        animation: springFor(2),
+                                        beginOffset: const Offset(0, 34),
+                                        child: _buildStatCard(
+                                          'Completed Inspections',
+                                          _isLoadingStats
+                                              ? '—'
+                                              : '${_stats.completedCount}',
+                                          Icons.check_circle_outline_rounded,
+                                          InsightTheme.blueTint,
+                                          InsightTheme.blueInk,
+                                        ),
                                       ),
-                                    );
-                                  },
+                                    ),
+                                  ],
                                 ),
-                                _ActionTile(
-                                  icon: Icons.flag_outlined,
-                                  title: 'Reports & Support',
-                                  subtitle:
-                                      'Report a problem or an application concern',
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            const ReportsSupportScreen(),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ]),
+                              ),
+
                               const SizedBox(height: 16),
-                              _actionGroupCard([
-                                _ActionTile(
-                                  icon: Icons.shield_outlined,
-                                  title: 'Privacy Policy',
-                                  subtitle: 'Legal information & policies',
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            const TermsPrivacyScreen(),
+
+                              // 2. PERFORMANCE ANALYTICS — single card with
+                              // internal segmented tab bar (Bars / Activity /
+                              // Gauge / Sectors) + Week/Month toggle.
+                              // Matches HTML reference design: no PageView swipe,
+                              // no separate section label, no dot indicators.
+                              if (_hasStatsError)
+                                _dashboardErrorCard()
+                              else if (_isLoadingStats)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                  child: Center(
+                                    child: ImapsLoadingIndicator(size: 50),
+                                  ),
+                                )
+                              else
+                                KeyedSubtree(
+                                  key: _analyticsSectionKey,
+                                  child: _analyticsCard(),
+                                ),
+
+                              const SizedBox(height: 20),
+
+                              // 3. GROUPED ACTION CARDS — split from one long list
+                              // into related groups, with Sign out separated by
+                              // whitespace rather than sharing a divider with
+                              // neutral settings rows (destructive actions get
+                              // visual distance, not just a color change).
+                              SpringSlide(
+                                animation: springFor(5),
+                                beginOffset: const Offset(0, 30),
+                                child: Column(
+                                  children: [
+                                    _actionGroupCard([
+                                      _ActionTile(
+                                        icon: Icons.fingerprint_rounded,
+                                        title: 'Security & Protection',
+                                        subtitle:
+                                            'Biometric login, auto-lock & protection',
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  SecuritySettingsScreen(
+                                                    profile: _currentProfile,
+                                                  ),
+                                            ),
+                                          );
+                                        },
                                       ),
-                                    );
-                                  },
-                                ),
-                                _ActionTile(
-                                  icon: Icons.info_outline_rounded,
-                                  title: 'About iMAPS',
-                                  subtitle: AppInfoService.fullVersionString,
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            const AboutInsightScreen(),
+                                      _ActionTile(
+                                        icon: Icons.help_outline_rounded,
+                                        title: 'Help & FAQ',
+                                        subtitle:
+                                            'Guide, color codes & field rules',
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const HelpFaqScreen(),
+                                            ),
+                                          );
+                                        },
                                       ),
-                                    );
-                                  },
+                                      _ActionTile(
+                                        icon: Icons.flag_outlined,
+                                        title: 'Reports & Support',
+                                        subtitle:
+                                            'Report a problem or an application concern',
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const ReportsSupportScreen(),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ]),
+                                    const SizedBox(height: 12),
+                                    _actionGroupCard([
+                                      _ActionTile(
+                                        icon: Icons.shield_outlined,
+                                        title: 'Privacy Policy',
+                                        subtitle:
+                                            'Legal information & policies',
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const TermsPrivacyScreen(),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      _ActionTile(
+                                        icon: Icons.info_outline_rounded,
+                                        title: 'About iMAPS',
+                                        subtitle:
+                                            AppInfoService.fullVersionString,
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const AboutInsightScreen(),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ]),
+                                    const SizedBox(height: 12),
+                                    _actionGroupCard([
+                                      _ActionTile(
+                                        icon: Icons.logout_rounded,
+                                        title: 'Log Out',
+                                        isDestructive: true,
+                                        onTap: () => _confirmSignOut(context),
+                                      ),
+                                    ]),
+                                  ],
                                 ),
-                              ]),
-                              const SizedBox(height: 16),
-                              _actionGroupCard([
-                                _ActionTile(
-                                  icon: Icons.logout_rounded,
-                                  title: 'Log Out',
-                                  isDestructive: true,
-                                  onTap: () => _confirmSignOut(context),
-                                ),
-                              ]),
-                            ],
+                              ),
+                            ]),
                           ),
                         ),
-                      ]),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -593,152 +660,152 @@ class _ProfileScreenState extends State<ProfileScreen>
     // Phone portrait (390) is under the cap and lays out exactly as before.
     return ConstrainedContent.wide(
       child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: kCardShadow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // ── Header row ──────────────────────────────────────────────
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Performance Analytics',
-                      style: InsightTheme.urbanist(
-                        15,
-                        w: FontWeight.w700,
-                        c: InsightTheme.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'MPDO Field Operational Metrics',
-                      style: InsightTheme.inter(12, c: InsightTheme.ink2),
-                    ),
-                  ],
-                ),
-              ),
-              // Week / Month toggle pills
-              Container(
-                padding: const EdgeInsets.all(3),
-                decoration: BoxDecoration(
-                  color: InsightTheme.surface2,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _timeframePill(
-                      'Week',
-                      _analyticsIsWeek,
-                      () => setState(() => _analyticsIsWeek = true),
-                    ),
-                    _timeframePill(
-                      'Month',
-                      !_analyticsIsWeek,
-                      () => setState(() => _analyticsIsWeek = false),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 14),
-
-          // ── Segmented tab bar ────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              color: InsightTheme.surface2,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: InsightTheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: kCardShadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Header row ──────────────────────────────────────────────
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (int i = 0; i < tabs.length; i++)
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _analyticsTabIndex = i),
-                      behavior: HitTestBehavior.opaque,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutCubic,
-                        constraints: const BoxConstraints(minHeight: 44),
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _analyticsTabIndex == i
-                              ? InsightTheme.surface
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: _analyticsTabIndex == i
-                              ? const [
-                                  BoxShadow(
-                                    color: Color(0x0A141628),
-                                    blurRadius: 6,
-                                    offset: Offset(0, 2),
-                                  ),
-                                ]
-                              : null,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Performance Analytics',
+                        style: InsightTheme.urbanist(
+                          15,
+                          w: FontWeight.w700,
+                          c: InsightTheme.ink,
                         ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              tabs[i].$1,
-                              size: 16,
-                              color: _analyticsTabIndex == i
-                                  ? InsightTheme.blueInk
-                                  : InsightTheme.ink2,
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              tabs[i].$2,
-                              style: InsightTheme.inter(
-                                12,
-                                w: _analyticsTabIndex == i
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                                c: _analyticsTabIndex == i
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'MPDO Field Operational Metrics',
+                        style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                      ),
+                    ],
+                  ),
+                ),
+                // Week / Month toggle pills
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface2,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _timeframePill(
+                        'Week',
+                        _analyticsIsWeek,
+                        () => setState(() => _analyticsIsWeek = true),
+                      ),
+                      _timeframePill(
+                        'Month',
+                        !_analyticsIsWeek,
+                        () => setState(() => _analyticsIsWeek = false),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Segmented tab bar ────────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: InsightTheme.surface2,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  for (int i = 0; i < tabs.length; i++)
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _analyticsTabIndex = i),
+                        behavior: HitTestBehavior.opaque,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutCubic,
+                          constraints: const BoxConstraints(minHeight: 44),
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _analyticsTabIndex == i
+                                ? InsightTheme.surface
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: _analyticsTabIndex == i
+                                ? const [
+                                    BoxShadow(
+                                      color: Color(0x0A141628),
+                                      blurRadius: 6,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                tabs[i].$1,
+                                size: 16,
+                                color: _analyticsTabIndex == i
                                     ? InsightTheme.blueInk
                                     : InsightTheme.ink2,
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 3),
+                              Text(
+                                tabs[i].$2,
+                                style: InsightTheme.inter(
+                                  12,
+                                  w: _analyticsTabIndex == i
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  c: _analyticsTabIndex == i
+                                      ? InsightTheme.blueInk
+                                      : InsightTheme.ink2,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
 
-          const SizedBox(height: 14),
+            const SizedBox(height: 14),
 
-          // ── Chart body ───────────────────────────────────────────────
-          // IMPORTANT: the Activity calendar must size to its own content. A fixed
-          // parent height clips the grid when the month spans more rows than the
-          // assumed 340px placeholder. The other charts DO need a bounded height:
-          // their chart area is an Expanded, which throws in an unbounded Column.
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            height: _analyticsTabIndex == 1 ? null : 250.0,
-            child: chartBody,
-          ),
-        ],
-      ),
+            // ── Chart body ───────────────────────────────────────────────
+            // IMPORTANT: the Activity calendar must size to its own content. A fixed
+            // parent height clips the grid when the month spans more rows than the
+            // assumed 340px placeholder. The other charts DO need a bounded height:
+            // their chart area is an Expanded, which throws in an unbounded Column.
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              height: _analyticsTabIndex == 1 ? null : 250.0,
+              child: chartBody,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -840,7 +907,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       width: double.infinity,
       decoration: BoxDecoration(
         color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: InsightTheme.roundedMd,
         boxShadow: kCardShadow,
       ),
       child: Column(
@@ -851,8 +918,8 @@ class _ProfileScreenState extends State<ProfileScreen>
               const Divider(
                 height: 1,
                 color: InsightTheme.line,
-                indent: 64,
-                endIndent: 20,
+                indent: 50,
+                endIndent: 16,
               ),
           ],
         ],
@@ -934,10 +1001,10 @@ class _ProfileScreenState extends State<ProfileScreen>
     Color iconFg,
   ) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: InsightTheme.roundedMd,
         border: Border.all(color: InsightTheme.line, width: 1),
         boxShadow: kCardShadow,
       ),
@@ -954,7 +1021,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             child: Icon(icon, size: 20, color: iconFg),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           Text(
             count,
             style: InsightTheme.urbanist(
@@ -971,8 +1038,6 @@ class _ProfileScreenState extends State<ProfileScreen>
               w: FontWeight.w600,
               c: InsightTheme.ink2,
             ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -1055,11 +1120,7 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-/// Content-sized identity card; names and roles can wrap at any text scale.
-/// • Avatar is a rounded-2xl gradient square chip (not a circle)
-/// • Role shown in a blueTint pill with jetBrains uppercase text
-/// • Email row below divider
-/// • Edit button: icon + "Edit" text label
+/// Content-sized expanded/compact identity; full fields wrap at any text scale.
 class ProfileIdentityCard extends StatelessWidget {
   final String? avatarUrl;
   final String initials;
@@ -1067,6 +1128,7 @@ class ProfileIdentityCard extends StatelessWidget {
   final String positionLabel;
   final String userEmail;
   final VoidCallback onEditTap;
+  final bool compact;
 
   const ProfileIdentityCard({
     super.key,
@@ -1076,98 +1138,71 @@ class ProfileIdentityCard extends StatelessWidget {
     required this.positionLabel,
     required this.userEmail,
     required this.onEditTap,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x08141628),
-            blurRadius: 20,
-            offset: Offset(0, 6),
+    final avatar = _Avatar(
+      avatarUrl: avatarUrl,
+      initials: initials,
+      size: compact ? 44 : 48,
+      fontSize: compact ? 16 : 18,
+    );
+    final edit = Semantics(
+      button: true,
+      label: 'Edit profile',
+      child: TextButton(
+        key: const Key('profile-edit-button'),
+        onPressed: onEditTap,
+        style: TextButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 8 : 12,
+            vertical: 8,
           ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Gradient rounded-square avatar chip (matches HTML rounded-2xl)
-              _Avatar(
-                avatarUrl: avatarUrl,
-                initials: initials,
-                size: 56,
-                fontSize: 18,
+          backgroundColor: compact ? null : InsightTheme.blueTint,
+          foregroundColor: InsightTheme.blueInk,
+          shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
+        ),
+        child: Flex(
+          direction: compact ? Axis.vertical : Axis.horizontal,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.person_outline_rounded, size: 16),
+            SizedBox(width: compact ? 0 : 4, height: compact ? 2 : 0),
+            Text(
+              'Edit',
+              style: InsightTheme.inter(
+                compact ? 12 : 13,
+                w: FontWeight.w600,
+                c: InsightTheme.blueInk,
               ),
-              const Spacer(),
-              // Edit button: icon + "Edit" label, blueTint bg (min 44x44 touch target)
-              Semantics(
-                button: true,
-                label: 'Edit profile',
-                child: GestureDetector(
-                  key: const Key('profile-edit-button'),
-                  onTap: onEditTap,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    constraints: const BoxConstraints(
-                      minHeight: 44,
-                      minWidth: 44,
-                    ),
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: InsightTheme.blueTint,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: InsightTheme.blue1.withValues(alpha: 0.15),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.person_outline_rounded,
-                          size: 16,
-                          color: InsightTheme.blueInk,
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Edit',
-                          style: InsightTheme.inter(
-                            13,
-                            w: FontWeight.w600,
-                            c: InsightTheme.blueInk,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            displayName,
-            key: const Key('profile-visible-name'),
-            style: InsightTheme.urbanist(
-              16,
-              w: FontWeight.w700,
-              c: InsightTheme.ink,
             ),
-          ),
-          const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+    final email = Text(
+      userEmail,
+      style: InsightTheme.inter(compact ? 12 : 13, c: InsightTheme.ink2),
+    );
+    final details = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          displayName,
+          key: const Key('profile-visible-name'),
+          style: InsightTheme.urbanist(compact ? 14 : 16, w: FontWeight.w700),
+        ),
+        SizedBox(height: compact ? 2 : 4),
+        if (compact)
+          Text(
+            positionLabel,
+            style: InsightTheme.inter(12, c: InsightTheme.blueInk),
+          )
+        else
           Container(
             key: const Key('profile-role-badge'),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -1188,31 +1223,86 @@ class ProfileIdentityCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 14),
-          Divider(height: 1, color: InsightTheme.line),
-          const SizedBox(height: 12),
-          // Email row
-          Row(
-            children: [
-              const Icon(
-                Icons.mail_outline_rounded,
-                size: 15,
-                color: InsightTheme.ink2,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  userEmail,
-                  style: InsightTheme.inter(
-                    13,
-                    w: FontWeight.w500,
-                    c: InsightTheme.ink2,
-                  ),
+        if (compact) ...[const SizedBox(height: 2), email],
+      ],
+    );
+    return Container(
+      padding: EdgeInsets.all(compact ? 12 : 16),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: InsightTheme.roundedMd,
+        boxShadow: kCardShadow,
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final inline =
+              (compact &&
+                  constraints.maxWidth >=
+                      MediaQuery.textScalerOf(context).scale(240)) ||
+              (constraints.maxWidth >= 280 &&
+                  MediaQuery.textScalerOf(context).scale(16) <= 20);
+          if (compact) {
+            final scrollableDetails = SingleChildScrollView(
+              primary: false,
+              child: details,
+            );
+            if (inline) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  avatar,
+                  const SizedBox(width: 12),
+                  Expanded(child: scrollableDetails),
+                  const SizedBox(width: 8),
+                  edit,
+                ],
+              );
+            }
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [avatar, const Spacer(), edit]),
+                const SizedBox(height: 8),
+                Flexible(child: scrollableDetails),
+              ],
+            );
+          }
+          return SingleChildScrollView(
+            primary: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    avatar,
+                    const SizedBox(width: 12),
+                    if (inline) Expanded(child: details) else const Spacer(),
+                    if (!inline) ...[const SizedBox(width: 8), edit],
+                  ],
                 ),
-              ),
-            ],
-          ),
-        ],
+                if (!inline) ...[const SizedBox(height: 8), details],
+                const SizedBox(height: 8),
+                const Divider(height: 1, color: InsightTheme.line),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.mail_outline_rounded,
+                      size: 15,
+                      color: InsightTheme.ink2,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: email),
+                    if (inline) ...[const SizedBox(width: 8), edit],
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -1246,18 +1336,21 @@ class _ActionTile extends StatelessWidget {
         HapticFeedback.lightImpact();
         onTap();
       },
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: InsightTheme.roundedMd,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 52),
+        constraints: const BoxConstraints(minHeight: 48),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: subtitle == null ? 8 : 12,
+          ),
           child: Row(
             children: [
               // Bare icon — the old rounded tinted chip behind each icon was
               // removed per design feedback (icons now sit directly on the
               // card, like the rest of the system's list rows).
               Icon(icon, size: 22, color: iconColor),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

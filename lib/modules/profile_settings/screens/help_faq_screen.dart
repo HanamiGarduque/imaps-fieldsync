@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../models/faq_item.dart';
 import '../models/faq_data.dart';
 import '../widgets/faq_widgets.dart';
@@ -70,7 +71,7 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final filteredCategories = _getFilteredCategories();
     return Scaffold(
-      backgroundColor: InsightTheme.surface,
+      backgroundColor: InsightTheme.bg,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -79,28 +80,14 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Row(
-                    children: [
-                      const BackButton(color: InsightTheme.ink),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Semantics(
-                          header: true,
-                          child: Text(
-                            _isTagalog ? 'Tulong at FAQ' : 'Help & FAQ',
-                            style: InsightTheme.urbanist(20),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: FieldPageHeader(title: _isTagalog ? 'Tulong at FAQ' : 'Help & FAQ'),
                 ),
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.only(bottom: 32),
+                    padding: const EdgeInsets.only(bottom: 24),
                     children: [
-                      Align(
-                        alignment: Alignment.centerRight,
+                      SizedBox(
+                        width: double.infinity,
                         child: FaqLanguageSegmentControl(
                           isTagalog: _isTagalog,
                           onToggle: (tagalog) =>
@@ -111,7 +98,7 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
                       _buildSearchBar(),
                       const SizedBox(height: 12),
                       _buildCategoryChips(),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
                       if (filteredCategories.isEmpty)
                         _buildEmptyState()
                       else
@@ -134,9 +121,9 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
       onChanged: (value) =>
           setState(() => _searchQuery = value.trim().toLowerCase()),
       style: InsightTheme.inter(14, c: InsightTheme.ink),
-      decoration: InputDecoration(
+      decoration: InsightTheme.compactFormInput.copyWith(
         labelText: _isTagalog ? 'Maghanap sa gabay' : 'Search the guide',
-        labelStyle: InsightTheme.inter(14, c: InsightTheme.ink3),
+        floatingLabelBehavior: FloatingLabelBehavior.always,
         hintText: _isTagalog ? 'Tanong o paksa' : 'Question or topic',
         hintStyle: InsightTheme.inter(14, c: InsightTheme.ink3),
         hintMaxLines: 2,
@@ -235,7 +222,7 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
 
   Widget _buildCategorySection(FaqCategory category) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -402,7 +402,6 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Widget _buildCameraMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final hasCapturedPhoto = _capturedPhotoPath != null;
 
     return Scaffold(
@@ -431,9 +430,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
                 return SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                  padding: EdgeInsets.only(
-                    bottom: keyboardInset > 0 ? keyboardInset : 18,
-                  ),
+                   padding: const EdgeInsets.only(bottom: 16),
                   child: Column(
                     children: [
                       Padding(
@@ -485,19 +482,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                           height: previewHeight,
                           decoration: BoxDecoration(
                             color: Colors.black,
-                            borderRadius: BorderRadius.circular(30),
+                             borderRadius: InsightTheme.roundedLg,
                             border: Border.all(
                               color: Colors.white.withValues(alpha: 0.14),
                               width: 1.2,
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.32),
-                                blurRadius: 28,
-                                spreadRadius: 1,
-                                offset: const Offset(0, 14),
-                              ),
-                            ],
                           ),
                           clipBehavior: Clip.antiAlias,
                           child: Stack(
@@ -557,10 +546,38 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                           ),
                         ),
                       ),
-                      if (!hasCapturedPhoto) const SizedBox(height: 8),
+                       if (!hasCapturedPhoto && _initializeControllerFuture != null)
+                         Padding(
+                           padding: const EdgeInsets.only(top: 16),
+                           child: FutureBuilder<void>(
+                             future: _initializeControllerFuture,
+                             builder: (context, snapshot) => snapshot.connectionState != ConnectionState.done
+                                 ? const SizedBox.shrink()
+                                 : Semantics(
+                                     button: true,
+                                     label: 'Capture site photo',
+                                     child: GestureDetector(
+                                       onTap: _isCapturing ? null : _capturePhoto,
+                                       child: Container(
+                                         width: 78,
+                                         height: 78,
+                                         padding: const EdgeInsets.all(6),
+                                         decoration: BoxDecoration(
+                                           shape: BoxShape.circle,
+                                           border: Border.all(color: Colors.white, width: 4),
+                                         ),
+                                         child: _isCapturing
+                                             ? const CircularProgressIndicator(color: Colors.white)
+                                             : const DecoratedBox(decoration: BoxDecoration(
+                                                 color: Colors.white, shape: BoxShape.circle)),
+                                       ),
+                                     ),
+                                   ),
+                           ),
+                         ),
                       if (hasCapturedPhoto) ...[
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                           child: Container(
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(
@@ -597,40 +614,37 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-                          decoration: const BoxDecoration(
-                            color: InsightTheme.surface,
-                            borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(30),
-                            ),
+                        const SizedBox(height: 12),
+                         Container(
+                           width: double.infinity,
+                           margin: const EdgeInsets.symmetric(horizontal: 16),
+                           padding: const EdgeInsets.all(16),
+                           decoration: BoxDecoration(
+                             color: InsightTheme.surface,
+                             borderRadius: InsightTheme.roundedMd,
+                             border: Border.all(color: InsightTheme.line),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const FieldSectionHeading(
                                 title: 'Photo notes',
+                                bottomSpacing: 8,
                                 hint: 'Optional context for this photo.',
                               ),
-                              const SizedBox(height: 14),
                               Container(
                                 width: double.infinity,
-                                constraints: const BoxConstraints(
-                                  minHeight: 120,
-                                ),
-                                padding: const EdgeInsets.all(16),
+                                padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
                                   color: InsightTheme.bg,
-                                  borderRadius: BorderRadius.circular(18),
+                                  borderRadius: InsightTheme.roundedSm,
                                   border: Border.all(color: InsightTheme.line),
                                 ),
                                 child: TextField(
                                   controller: _notesController,
                                   keyboardType: TextInputType.multiline,
                                   textInputAction: TextInputAction.newline,
-                                  minLines: 4,
+                                  minLines: 3,
                                   maxLines: 8,
                                   style: InsightTheme.inter(
                                     16,
@@ -647,7 +661,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 18),
+                              const SizedBox(height: 12),
                               SizedBox(
                                 width: double.infinity,
                                 child: FieldPrimaryButton(
@@ -713,42 +727,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: ImapsLoadingIndicator(size: 60));
         }
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            CameraPreview(_cameraController!),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 26),
-                child: GestureDetector(
-                  onTap: _capturePhoto,
-                  child: Container(
-                    width: 78,
-                    height: 78,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 4),
-                      color: Colors.white.withValues(alpha: 0.2),
-                    ),
-                    child: Center(
-                      child: _isCapturing
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : Container(
-                              width: 58,
-                              height: 58,
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
+        return CameraPreview(_cameraController!);
       },
     );
   }

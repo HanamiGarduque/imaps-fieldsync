@@ -883,8 +883,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   decoration: BoxDecoration(
                     color: AppColors.surface,
                     borderRadius: InsightTheme.roundedMd,
@@ -1043,7 +1044,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     label: Text('Sign in with $_biometricLabel', textAlign: TextAlign.center,
                       style: AppText.inter(16, w: FontWeight.w600, c: AppColors.blueInk)),
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       side: const BorderSide(color: AppColors.lineStrong),
                       shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
                       minimumSize: const Size(double.infinity, 52)),
@@ -1066,8 +1067,9 @@ class _LoginScreenState extends State<LoginScreen> {
         .copyWith(decoration: TextDecoration.underline, decorationColor: AppColors.blue1);
     // Native inline links keep keyboard focus without the old full-height row.
     final linkButtonStyle = TextButton.styleFrom(
-      minimumSize: const Size(48, 24),
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: EdgeInsets.zero,
+      minimumSize: const Size(48, 20),
+      visualDensity: VisualDensity.compact,
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
     return Column(
@@ -1077,13 +1079,13 @@ class _LoginScreenState extends State<LoginScreen> {
           style: AppText.inter(12, c: AppColors.ink3, lh: 1.4),
           children: [
             const TextSpan(text: 'By signing in, you agree to the '),
-            WidgetSpan(alignment: PlaceholderAlignment.middle, child: Semantics(link: true,
+            WidgetSpan(alignment: PlaceholderAlignment.baseline, baseline: TextBaseline.alphabetic, child: Semantics(link: true,
               child: TextButton(style: linkButtonStyle,
                 onPressed: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const TermsPrivacyScreen(initialShowTerms: true))),
                 child: Text('Terms of Use', style: linkStyle)))),
             const TextSpan(text: ' and '),
-            WidgetSpan(alignment: PlaceholderAlignment.middle, child: Semantics(link: true,
+            WidgetSpan(alignment: PlaceholderAlignment.baseline, baseline: TextBaseline.alphabetic, child: Semantics(link: true,
               child: TextButton(style: linkButtonStyle,
                 onPressed: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const TermsPrivacyScreen(initialShowTerms: false))),
@@ -1127,7 +1129,7 @@ class _LoginScreenState extends State<LoginScreen> {
       onChanged: onChanged,
       style: AppText.inter(16, w: FontWeight.w500, c: AppColors.ink),
       cursorColor: AppColors.blue1,
-      decoration: InsightTheme.formInput.copyWith(
+      decoration: InsightTheme.compactFormInput.copyWith(
         hintText: hintText,
         filled: true,
         fillColor: AppColors.bg.withValues(alpha: 0.6),

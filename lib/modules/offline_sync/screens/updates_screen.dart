@@ -882,10 +882,10 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     if (segments.isNotEmpty) segments.removeLast();
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: InsightTheme.roundedMd,
         border: Border.all(color: InsightTheme.line),
         boxShadow: const [
           BoxShadow(color: Color(0x08141628), blurRadius: 14, offset: Offset(0, 6)),
@@ -912,9 +912,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
             ],
           ),
           Padding(
-            padding: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.only(top: 8),
             child: Container(
-              padding: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.only(top: 8),
               decoration: const BoxDecoration(
                 border: Border(top: BorderSide(color: InsightTheme.line)),
               ),
@@ -932,7 +932,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 }
                 final columns = ((constraints.maxWidth + 12) / (minWidth + 12)).floor().clamp(1, 3);
                 final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
-                return Wrap(spacing: 12, runSpacing: 16, children: [
+                return Wrap(spacing: 12, runSpacing: 12, children: [
                   SizedBox(width: width, child: _PerfMetric(label: 'Synced items', value: values[0], color: InsightTheme.ink)),
                   SizedBox(width: width, child: _PerfMetric(label: 'Pending queue', value: values[1], color: InsightTheme.blue1)),
                   SizedBox(width: width, child: _PerfMetric(label: 'Pending size', value: values[2], color: InsightTheme.ink)),
@@ -940,7 +940,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
               }),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Wrap(
             alignment: WrapAlignment.spaceBetween,
             spacing: 12,
@@ -959,7 +959,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 ? const SizedBox.shrink()
                 : Row(children: segments),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           LayoutBuilder(builder: (context, constraints) {
             final twoColumns = constraints.maxWidth >= MediaQuery.textScalerOf(context).scale(160) * 2 + 8;
             final width = twoColumns ? (constraints.maxWidth - 8) / 2 : constraints.maxWidth;
@@ -1016,7 +1016,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           animation: springFor(0),
                           beginOffset: const Offset(0, -28),
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                             child: ValueListenableBuilder<SyncProgress?>(
                               valueListenable: SyncOutboxService.progress,
                               builder: (context, progress, _) {
@@ -1064,10 +1064,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                 ]);
                                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                                   Row(children: [
-                                    Container(width: 40, height: 40,
-                                        decoration: BoxDecoration(color: InsightTheme.blueTint, borderRadius: BorderRadius.circular(12)),
-                                        child: const Icon(Icons.cloud_sync_outlined, color: InsightTheme.blueInk, size: 22)),
-                                    const SizedBox(width: 12),
                                     Expanded(child: Semantics(header: true, child: Text(
                                            'Sync Center',
                                            style: InsightTheme.urbanist(
@@ -1082,7 +1078,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                           message: 'The Sync Center helps you manage your inspection information when working with or without an internet connection. When you are offline, the app keeps the information you need on your phone so you can continue working. When your internet connection returns, the app sends the information that is waiting to the system and updates the sync status.\n\nOffline to Online: If you complete or update an inspection while offline, the information stays safely on your phone while it is waiting to be sent. Once you are back online, the app can send the waiting information to the system. The Sync Center lets you check whether those updates have already been sent or are still waiting.',
                                         ),
                                   ]),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 8),
                                   LayoutBuilder(builder: (context, constraints) {
                                     double textWidth(String text, TextStyle style) {
                                       final painter = TextPainter(
@@ -1126,7 +1122,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           padding: const EdgeInsets.only(bottom: kInsightBottomNavReserve),
                           children: [
 
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 16),
 
                         // 2. SYNC PERFORMANCE CARD — replaces the old solid
                         // gradient hero card with a lighter card that shows
@@ -1142,7 +1138,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                           ),
                         ),
 
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 12),
 
                         // Entry point to full Synchronization History (deep-links to Notifications Sync tab)
                         Padding(
@@ -1155,8 +1151,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                               ),
                             ),
                             child: Container(
-                              constraints: const BoxConstraints(minHeight: 44),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              constraints: const BoxConstraints(minHeight: 48),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                               decoration: BoxDecoration(
                                 color: InsightTheme.surface,
                                 borderRadius: BorderRadius.circular(14),
@@ -1236,7 +1232,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     final columns = ((constraints.maxWidth + 12) /
                                         (MediaQuery.textScalerOf(context).scale(80) + 12)).floor().clamp(1, 3);
                                     final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
-                                    return Wrap(spacing: 12, runSpacing: 16, children: [
+                                    return Wrap(spacing: 12, runSpacing: 12, children: [
                                       SizedBox(width: width, child: _StorageStatItem(
                                           label: 'Cached Jobs',
                                           value: '$_cachedJobsCount',
@@ -1367,7 +1363,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
 
                               if (_syncedRows.isEmpty)
                                 Container(
-                                  padding: const EdgeInsets.all(20),
+                                  padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
                                     color: InsightTheme.surface,
                                     borderRadius: BorderRadius.circular(16),
@@ -1639,7 +1635,7 @@ class _LogDataRow extends StatelessWidget {
     final accentInk = isFailed ? InsightTheme.redInk : InsightTheme.amberInk;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: isPending ? 8 : 12),
       decoration: isPending
           ? BoxDecoration(
               color: InsightTheme.surface,
@@ -1669,7 +1665,7 @@ class _LogDataRow extends StatelessWidget {
               color: isPending ? accentInk : InsightTheme.greenInk,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

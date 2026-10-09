@@ -12,6 +12,7 @@ import 'package:http/testing.dart';
 import 'package:imaps_fieldsync/core/models/user_profile.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/supabase_service.dart';
+import 'package:imaps_fieldsync/core/theme/insight_theme.dart';
 import 'package:imaps_fieldsync/core/widgets/insight_bottom_nav.dart';
 import 'package:imaps_fieldsync/modules/analytics_dashboard/screens/home_dashboard_screen.dart';
 import 'package:imaps_fieldsync/modules/analytics_dashboard/widgets/active_assignments_folder_card.dart';
@@ -285,6 +286,79 @@ void main() {
     }
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Full calendar exposes every weekday and date on phones and keeps dotted-day tasks', (tester) async {
+    final now = DateTime.now();
+    scheduledOverride = DateTime(now.year, now.month, 2);
+    addTearDown(() => scheduledOverride = null);
+    for (final width in [360.0, 390.0]) {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(width, 844);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(home: HomeDashboardScreen(profile: UserProfile(
+        id: 'home-inspector', fullName: 'Maria Dela Cruz', role: 'inspector',
+      ))));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Show full calendar'));
+      await tester.tap(find.byTooltip('Show full calendar'));
+      await tester.pumpAndSettle();
+      final calendar = find.byKey(const ValueKey('full_calendar'));
+      // Measure the month card itself, not its full-width Padding wrapper.
+      final monthCard = find.descendant(
+        of: calendar,
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is Container &&
+              w.decoration is BoxDecoration &&
+              (w.decoration! as BoxDecoration).borderRadius ==
+                  BorderRadius.circular(16),
+        ),
+      );
+      expect(monthCard, findsOneWidget);
+      final bounds = tester.getRect(monthCard);
+      // The month must never run into the phone edges, and it must keep the
+      // page margin where the seven 48px day targets physically allow it.
+      expect(bounds.left, greaterThanOrEqualTo(8.0),
+          reason: 'The full calendar must keep a visible margin at ${width}px.');
+      expect(width - bounds.right, greaterThanOrEqualTo(8.0),
+          reason: 'The full calendar must keep a visible margin at ${width}px.');
+      if (width >= 376) {
+        final strip = tester.getRect(find.byKey(const ValueKey('calendar_section')));
+        expect(bounds.left, closeTo(strip.left, 0.5),
+            reason: 'Wide screens align with the day-strip card at ${width}px.');
+        expect(bounds.right, closeTo(strip.right, 0.5),
+            reason: 'Wide screens align with the day-strip card at ${width}px.');
+      }
+      for (final weekday in ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']) {
+        final label = find.descendant(of: calendar, matching: find.text(weekday));
+        expect(tester.getRect(label).left, greaterThanOrEqualTo(bounds.left));
+        expect(tester.getRect(label).right, lessThanOrEqualTo(bounds.right),
+            reason: '$weekday must fit without panning the month at ${width}px.');
+      }
+      for (var day = 1; day <= DateTime(now.year, now.month + 1, 0).day; day++) {
+        final tile = find.byKey(ValueKey('calendar_day_$day'));
+        expect(tile, findsOneWidget);
+        // A day target may sit flush against the card's 1.2px border, which
+        // is part of the visible card, so allow that and nothing more.
+        expect(tester.getRect(tile).left, greaterThanOrEqualTo(bounds.left - 1.5));
+        expect(tester.getRect(tile).right, lessThanOrEqualTo(bounds.right + 1.5),
+            reason: 'Date $day must be inside the visible month.');
+        expect(tester.getSize(tile).shortestSide, greaterThanOrEqualTo(48));
+      }
+      expect(find.descendant(of: find.byKey(const ValueKey('calendar_section')),
+          matching: calendar), findsNothing,
+          reason: 'The full month must not share the sliding calendar surface.');
+      final day2 = find.byKey(const ValueKey('calendar_day_2'));
+      await tester.ensureVisible(day2);
+      await tester.pumpAndSettle();
+      await tester.tap(day2);
+      await tester.pumpAndSettle();
+      expect(find.descendant(of: calendar, matching: find.text('Test applicant')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
   });
 
   testWidgets('Full calendar keeps two-digit task dates intact at enlarged text', (tester) async {
@@ -800,6 +874,29 @@ void main() {
             find.descendant(of: filters, matching: find.byType(FittedBox)),
             findsNothing,
           );
+          // Recent Activity reads as quiet list content on the page surface:
+          // its containers take the page background and rely on a gray border,
+          // never a colored fill, so the tiles stop shouting next to the cards.
+          // Recent Activity sits on the page itself: the container takes the page
+          // background and is defined by a gray hairline, not a colored fill.
+          final sectionCard = find.ancestor(
+            of: find.text('Recent activity'),
+            matching: find.byWidgetPredicate(
+              (w) =>
+                  w is Container &&
+                  w.decoration is BoxDecoration &&
+                  (w.decoration! as BoxDecoration).borderRadius ==
+                      BorderRadius.circular(20),
+            ),
+          );
+          expect(sectionCard, findsOneWidget);
+          final decoration =
+              tester.widget<Container>(sectionCard).decoration! as BoxDecoration;
+          expect(decoration.color, InsightTheme.bg,
+              reason: 'The Recent Activity container must match the page background.');
+          final border = decoration.border! as Border;
+          expect(border.top.color, InsightTheme.lineStrong,
+              reason: 'The container needs the app hairline gray to stay readable.');
           for (final label in ['Tasks', 'Sync', 'Reports', 'Profile', 'All']) {
             final tab = find.descendant(
               of: filters,

@@ -7,6 +7,8 @@ import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/layout/responsive_layout.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 
 typedef _Colors = InsightTheme;
 
@@ -68,6 +70,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         await SecurePrefsService.setBioRequireOnOpen(true);
         setState(() {
           _bioEnrolled = true;
+          _bioConfirmed = false;
           _requireOnOpen = true;
         });
         await SupabaseService.logActivity(
@@ -123,24 +126,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   Widget build(BuildContext context) {
     return SensitiveScreen(child: Scaffold(
       backgroundColor: _Colors.bg,
-      appBar: AppBar(
-        backgroundColor: _Colors.bg,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        title: Text(
-          'Security & Protection',
-          style: InsightTheme.urbanist(
-            18,
-            w: FontWeight.w700,
-            c: _Colors.ink,
-          ),
+      body: SafeArea(child: ConstrainedContent(child: Column(children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          child: FieldPageHeader(title: 'Security & Protection'),
         ),
-        iconTheme: const IconThemeData(color: _Colors.ink),
-      ),
-      body: _loading
+        Expanded(child: _loading
           ? const Center(child: ImapsLoadingIndicator(size: 50))
           : ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
               children: [
                 // Section 1: Device Status Header Card
                 _buildStatusCard(),
@@ -199,11 +193,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                   if (_bioEnrolled) ...[
                     const Divider(height: 1, indent: 16, endIndent: 16),
                     ListTile(
-                      leading: const Icon(Icons.fingerprint, color: _Colors.blue1),
                       title: Text('Test / Re-verify Sensor', style: InsightTheme.inter(14, w: FontWeight.w600, c: _Colors.ink)),
                       subtitle: Text('Scan fingerprint / face to verify hardware response', style: InsightTheme.inter(12, c: _Colors.ink2)),
-                      trailing: TextButton(
-                        style: TextButton.styleFrom(minimumSize: const Size(60, 44)),
+                      trailing: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(60, 48),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          side: const BorderSide(color: InsightTheme.lineStrong),
+                          shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
+                        ),
                         onPressed: _testBiometric,
                         child: Text('Test Scan', style: InsightTheme.inter(13, w: FontWeight.w700, c: _Colors.blue1)),
                       ),
@@ -261,6 +259,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                       child: Wrap(
                         spacing: 8,
+                        runSpacing: 8,
                         children: [
                           _lockChip('Immediately', -1),
                           _lockChip('1 Minute', 1),
@@ -289,65 +288,56 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 ),
                 const SizedBox(height: 24),
               ],
-            ),
+            )),
+      ]))),
     ));
   }
 
   Widget _buildStatusCard() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: _bioEnrolled
-              ? [_Colors.blue1, _Colors.blue2]
-              : [const Color(0xFF1E293B), const Color(0xFF0F172A)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: _bioEnrolled ? _Colors.blueTint : _Colors.surface2,
+        borderRadius: InsightTheme.roundedMd,
+        border: Border.all(color: _bioEnrolled ? _Colors.blue1.withValues(alpha: 0.18) : _Colors.line),
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
+              color: _Colors.surface,
+              borderRadius: InsightTheme.roundedSm,
             ),
             child: Icon(
               _bioEnrolled ? Icons.verified_user_rounded : Icons.shield_outlined,
-              color: Colors.white,
+              color: _Colors.blueInk,
               size: 26,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _bioEnrolled ? '$_biometricLabel Active' : 'Protection Disabled',
+                  !_bioEnrolled ? 'Protection Disabled'
+                      : _bioConfirmed ? '$_biometricLabel Active'
+                      : '$_biometricLabel Pending Activation',
                   style: InsightTheme.urbanist(
                     16,
                     w: FontWeight.w700,
-                    c: Colors.white,
+                    c: _Colors.blueInk,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   _bioEnrolled
-                      ? 'Keystore Protected · ${_requireOnOpen ? "Auto-Lock On" : "Standard"}'
+                      ? 'Keystore Protected · App opening protection ${_requireOnOpen ? "on" : "off"}'
                       : 'Toggle switch below to register $_biometricLabel',
                   style: InsightTheme.inter(
                     12,
-                    c: Colors.white.withValues(alpha: 0.85),
+                    c: _Colors.ink2,
                   ),
                 ),
               ],
@@ -371,13 +361,22 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   }
 
   Widget _card(List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _Colors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _Colors.line),
+    return Material(
+      color: _Colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: InsightTheme.roundedMd,
+        side: const BorderSide(color: _Colors.line),
       ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+      clipBehavior: Clip.antiAlias,
+      child: ListTileTheme(
+        data: const ListTileThemeData(
+          contentPadding: EdgeInsets.symmetric(horizontal: 16),
+          minVerticalPadding: 8,
+          minTileHeight: 64,
+          horizontalTitleGap: 12,
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: children),
+      ),
     );
   }
 
@@ -386,7 +385,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     return ChoiceChip(
       label: Text(label),
       selected: selected,
+      showCheckmark: false,
       selectedColor: _Colors.blue1,
+      backgroundColor: _Colors.surface,
+      side: BorderSide(color: selected ? _Colors.blue1 : _Colors.lineStrong),
+      shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
       labelStyle: InsightTheme.inter(
         12.5,
         w: FontWeight.w600,
