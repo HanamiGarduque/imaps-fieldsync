@@ -1,6 +1,6 @@
 # UI DESIGN ARCHITECTURE STANDARD (UDAS)
 ### InSight / iMAPS FieldSync — Frontend UI/UX Governing Document
-**Version:** 1.0
+**Version:** 1.1 — user-directed composition update, 2026-10-09
 **Owner / Master:** rlo.tot
 **Status:** ACTIVE
 **Applies to:** All UI/UX enhancement work across all screens and modules of the Flutter application.
@@ -185,6 +185,22 @@ Apply these where the interaction genuinely benefits from them — not decoratio
 - Avoid double-nested cards/containers — compounds padding and cramps content (see §5.3).
 - Padding on rounded cards: when one edge of the card content is non-round (icon, text) and another is round (image), the non-round edge typically needs roughly double the padding for visual balance.
 - Border-radius consistency: for nested rounded elements (image inside card), outer radius ≈ 2× inner radius as a rule of thumb.
+
+### Composition, Proportion & Information Density
+
+**User-directed FieldSync standard, 2026-10-09:** premium UI means purposeful composition, not oversized surfaces. The requested result is the minimum target, not the ceiling; creative freedom must improve usability rather than add decoration.
+
+- Establish the screen's primary working area first. Maps, evidence, and editable content must not be dominated by supporting cards without a functional reason.
+- Size surfaces to their content and purpose. A maximum-height constraint is a safety cap, not an invitation to fill the viewport. Avoid fixed heights, stretch, repeated padding and large empty regions when the content does not need them.
+- Group related information closely and align it deliberately. Use readable horizontal arrangements when width and text scaling permit; stack when actual content needs it, not merely because the device is a phone.
+- Separate primary values, secondary labels and supporting descriptions by appropriate type role, weight and contrast. Remove redundant captions before reducing readability; retain FieldSync's existing minimum type sizes and outdoor contrast.
+- Allocate whitespace by relationship: smaller within a group, larger between distinct groups. Every gap, divider, border, radius and shadow should explain structure or interaction.
+- Keep comfortable interaction areas even when visual plates are compact: 48dp Android control targets and the existing 52dp inspection primary action. Shrink ornament, not accessibility.
+- Respect actual font metrics, including Android's nonlinear text scaling. Scale font sizes, measure wrapped content, and verify the complete action fits inside its scroll viewport; do not pass layout widths/heights to `TextScaler.scale()` as though they were font sizes.
+- Use existing disclosure for optional supporting detail. Keep recovery actions, important limitations and truthful data states discoverable; do not hide errors or invent unsupported capabilities to make a panel smaller.
+- Judge the complete screen at actual phone widths, landscape, enlarged text and realistic content states. Check usable working area, scan order, clipped targets, internal scrolling and empty space—not only individual attractive components.
+- Apply refinements in audited, manageable screen groups with rendered visual review and functionality checks between groups. Calendar/lanyard appearance and motion require sample approval before production implementation.
+- Preserve Provider/state interfaces, actual data, callbacks, backend contracts and inspection workflows. These composition rules authorize visual judgment, not application-logic changes.
 
 ### Forms & Inputs
 - Placeholder text should guide the user, not just repeat the field's label.

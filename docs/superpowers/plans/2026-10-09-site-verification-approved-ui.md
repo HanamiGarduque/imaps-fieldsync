@@ -58,9 +58,27 @@
 **Files:** Existing/new widget tests and scoped evidence under `C:/Users/Ralph Lauren/AppData/Local/Temp/opencode/fieldsync-site-verification-implementation-20261009/`.
 
 - [x] Render the actual production Flutter screen with explicitly labeled demonstration task/GPS/route inputs and local OSM reference fixtures; save portrait, landscape and disclosure/offline screenshots.
-- [ ] Run analyzer and the broad regression suite with the two required exclusions; compare any failures against the independently recorded canonical-main baseline.
-- [ ] Build Android arm64 debug APK; review the scoped diff and obtain one independent read-only review.
+- [x] Run analyzer and the broad regression suite with the two required exclusions; compare any failures against the independently recorded canonical-main baseline.
+- [x] Obtain one independent read-only review; record its two Important findings and deferred marker-label Minor.
+- [x] Reproduce both Important findings RED→GREEN: settled startup camera fit and complete map-control target separation, preserving user camera and enlarged-text action access.
+- [x] Rebuild Android arm64 debug APK and review the final scoped diff after the fix pass.
 - [ ] Present Flutter renders and accurate verification results for visual acceptance. Integration/push is a separate operation.
+
+### User-approved follow-up: compact composition, broader audit and Calendar sample
+
+**Scope:** Content-driven Site Details, aligned metrics where readable, map beneath unused landscape-pane space, lasting composition standards and a source-backed application audit. The Calendar/lanyard is an isolated appearance/motion sample; obtain its visual approval before changing production Home.
+
+- [x] Reproduce compact alignment/action/map-area expectations before the presentation refinement; retain the established header and functional owners.
+- [x] Record the user's hierarchy, grouping, whitespace, proportion and responsive-composition principles in UDAS version 1.1.
+- [x] Audit application screens and propose bounded successive review groups in `docs/FIELDSYNC_COMPOSITION_AUDIT_2026-10-09.md`; verify source descriptions against current code.
+- [x] Build and verify the attached Calendar/lanyard HTML appearance sample, with local demonstration inputs, 48px dates, complete month rows, reversible motion and reduced-motion support.
+- [x] Obtain one independent compact-composition review; reproduce its nonlinear Android-scaling Important finding, fix it with measured disclosure/action sizes and clear it through reviewer follow-up.
+- [x] Pass 147 focused checks across eleven suites, including all fourteen layout cases; generate eleven native Flutter PNGs with actual widget measurements.
+- [x] Complete the refreshed analyzer/build/baseline-compared broad gate after the nonlinear fix and finalize the evidence gallery/accounting.
+- [x] Complete physical handset acceptance on RMX3085: portrait, genuine landscape, disclosure, fullscreen and rotation, without submitting an inspection; restore screenshot protection.
+- [ ] Record the feature-branch save point and present the compact Flutter renders plus Calendar sample for user visual review.
+
+Earlier Task 3 proof is retained in `fieldsync-site-verification-implementation-20261009`; current follow-up proof and rulings are in `fieldsync-composition-refinement-20261009`. The close-proximity marker-label Minor and the pre-existing late-cache/fresh-route race remain deferred findings.
 
 ## Execution record
 
