@@ -466,22 +466,22 @@ class FaqData {
         ),
       ],
     ),
-    // 10. REPORTS & SUPPORT — two report types, plus history/status.
+    // 10. SUPPORT DESK — two report types, plus history/status.
     FaqCategory(
-      titleEn: 'Reports & Support',
-      titleTl: 'Reports & Support',
+      titleEn: 'Support Desk',
+      titleTl: 'Support Desk',
       icon: Icons.flag_outlined,
       items: [
         FaqItem(
-          questionEn: 'What is Reports & Support?',
-          questionTl: 'Ano ang Reports & Support?',
+          questionEn: 'What is Support Desk?',
+          questionTl: 'Ano ang Support Desk?',
           answerEn:
-              'Open Profile → Reports & Support to tell the MPDO team what needs attention. '
+              'Open Profile → Support Desk to tell the MPDO team what needs attention. '
               'There are two report types: Technical Issue for FieldSync problems, and Application Support '
               'for concerns about a task or application assigned to you.\n\n'
               'My Reports is your history and status list, not another report type.',
           answerTl:
-              'Buksan ang Profile → Reports & Support para ipaalam sa MPDO team ang kailangang asikasuhin. '
+              'Buksan ang Profile → Support Desk para ipaalam sa MPDO team ang kailangang asikasuhin. '
               'May dalawang uri ng report: Technical Issue para sa problema sa FieldSync, at Application Support '
               'para sa concern sa task o application na nakatalaga sa iyo.\n\n'
               'Ang My Reports ay listahan ng history at status, hindi isa pang uri ng report.',

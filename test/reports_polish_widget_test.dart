@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:imaps_fieldsync/core/models/report_models.dart';
+import 'package:imaps_fieldsync/core/services/report_submission_service.dart';
 import 'package:imaps_fieldsync/core/services/reportable_tasks.dart';
 import 'package:imaps_fieldsync/core/theme/insight_theme.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/application_support_screen.dart';
@@ -331,7 +332,7 @@ void main() {
   );
 
   testWidgets(
-    'home distinguishes two report types from history at large text',
+    'Support Desk home keeps two report types distinct from My Reports at large text',
     (tester) async {
       await pump(
         tester,
@@ -339,6 +340,8 @@ void main() {
         size: const Size(320, 640),
         scale: 2,
       );
+      expect(find.text('Support Desk'), findsOneWidget);
+      expect(find.text('Reports & Support'), findsNothing);
       expect(find.text('FILE A REPORT'), findsOneWidget);
       expect(find.text('Technical Issue'), findsOneWidget);
       // SliverList builds lazily, so scroll before asserting later content.
@@ -357,6 +360,32 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('uncertain report retry still requires explicit duplicate-risk confirmation and can be cancelled', (tester) async {
+    var sends = 0;
+    ReportQueueService.remoteInsertOverride = (_) async {
+      sends++;
+      return {'id': 'not-dispatched'};
+    };
+    addTearDown(ReportQueueService.resetTestHooks);
+    await pump(tester, ReportHistoryScreen(
+      loadLocal: () async => [local(ReportQueueState.deliveryUnknown)],
+      loadRemote: () async => [],
+    ));
+    await tester.scrollUntilVisible(find.text('Try sending again'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Try sending again'));
+    await tester.pumpAndSettle();
+    expect(find.text('Send this again?'), findsOneWidget);
+    expect(find.textContaining('create a duplicate'), findsOneWidget);
+    expect(find.text('Send again'), findsOneWidget);
+    expect(sends, 0);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Send this again?'), findsNothing);
+    expect(find.text('Submission status uncertain'), findsOneWidget);
+    expect(sends, 0);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'history keeps local rows visible while loading; failure is not empty',
@@ -589,21 +618,23 @@ void main() {
   });
 
   testWidgets(
-    'Reports & Support FAQ is searchable and expands in both languages',
+    'Support Desk FAQ navigation help is searchable and expands in both languages',
     (tester) async {
       await pump(tester, const HelpFaqScreen());
-      await tester.enterText(find.byType(TextField), 'Reports & Support');
+      await tester.enterText(find.byType(TextField), 'Support Desk');
       await tester.pumpAndSettle();
-      expect(find.text('What is Reports & Support?'), findsOneWidget);
-      await tester.tap(find.text('What is Reports & Support?'));
+      expect(find.text('What is Support Desk?'), findsOneWidget);
+      await tester.tap(find.text('What is Support Desk?'));
       await tester.pumpAndSettle();
       expect(find.textContaining('two report types'), findsOneWidget);
+      expect(find.textContaining('Profile → Support Desk'), findsOneWidget);
       await tester.tap(find.text('Tagalog'));
       await tester.pumpAndSettle();
-      expect(find.text('Ano ang Reports & Support?'), findsOneWidget);
-      await tester.tap(find.text('Ano ang Reports & Support?'));
+      expect(find.text('Ano ang Support Desk?'), findsOneWidget);
+      await tester.tap(find.text('Ano ang Support Desk?'));
       await tester.pumpAndSettle();
       expect(find.textContaining('dalawang uri'), findsOneWidget);
+      expect(find.textContaining('Profile → Support Desk'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

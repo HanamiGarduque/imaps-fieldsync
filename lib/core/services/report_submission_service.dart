@@ -613,6 +613,31 @@ class ReportQueueService {
   static Object classifySendError(Object error) {
     final text = error.toString().toLowerCase();
 
+    // A lost response may follow an accepted insert. Ambiguity takes precedence
+    // over generic connectivity wording and numbers in socket diagnostics.
+    if (text.contains('timeout') ||
+        text.contains('timed out') ||
+        text.contains('connection reset') ||
+        text.contains('connection lost') ||
+        text.contains('connection closed') ||
+        text.contains('abort')) {
+      return const AmbiguousSendOutcome();
+    }
+
+    // Only explicit pre-dispatch failures prove that retrying is safe.
+    if (text.contains('failed host lookup') ||
+        text.contains('connection refused') ||
+        text.contains('network is unreachable') ||
+        text.contains('no address associated') ||
+        text.contains('unable to connect')) {
+      return TransientSendFailure(
+        'No connection when the report was sent. It will retry automatically.',
+      );
+    }
+    if (text.contains('socketexception')) {
+      return const AmbiguousSendOutcome();
+    }
+
     if (text.contains('row-level security') ||
         text.contains('permission denied') ||
         text.contains('42501') ||
@@ -623,7 +648,8 @@ class ReportQueueService {
     }
 
     // Definitive server-side rejection: the response proves the insert was
-    // refused because of the submitted data itself.
+    // refused because of the submitted data itself. HTTP codes need a status/code
+    // marker; a port or byte count is not evidence of a server response.
     if (text.contains('violates check constraint') ||
         text.contains('dr_') ||
         text.contains('pgrst') ||
@@ -631,38 +657,13 @@ class ReportQueueService {
         text.contains('foreign key') ||
         text.contains('invalid input value') ||
         text.contains('value too long') ||
-        text.contains('400') ||
-        text.contains('401') ||
-        text.contains('403') ||
-        text.contains('409') ||
-        text.contains('422')) {
+        RegExp(
+          r'\b(?:http|postgrest|status(?:[\s_-]*code)?|code)\s*[:=]?\s*(?:400|401|403|409|422)\b',
+        ).hasMatch(text)) {
       return DeterministicRejection(
         'The MPDO team\'s records refused this report as submitted. Nothing was '
         'lost — please send it to them directly.',
       );
-    }
-
-    // Proven before dispatch: nothing was ever sent, so the report itself is
-    // fine and another attempt may work.
-    if (text.contains('failed host lookup') ||
-        text.contains('connection refused') ||
-        text.contains('network is unreachable') ||
-        text.contains('no address associated') ||
-        text.contains('unable to connect') ||
-        text.contains('socketexception')) {
-      return TransientSendFailure(
-        'No connection when the report was sent. It will retry automatically.',
-      );
-    }
-
-    // Ambiguous: dispatched, no proof either way. A closed socket is NOT proof
-    // that the request never left the device, so it belongs here, not above.
-    if (text.contains('timeout') ||
-        text.contains('timed out') ||
-        text.contains('connection reset') ||
-        text.contains('connection lost') ||
-        text.contains('connection closed')) {
-      return const AmbiguousSendOutcome();
     }
 
     return const AmbiguousSendOutcome();

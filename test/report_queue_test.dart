@@ -324,7 +324,7 @@ void main() {
     );
     expect(
       ReportQueueService.classifySendError(Exception('SocketException')),
-      isA<TransientSendFailure>(),
+      isA<AmbiguousSendOutcome>(),
     );
     expect(
       ReportQueueService.classifySendError(Exception('jwt expired')),
@@ -338,6 +338,86 @@ void main() {
       ReportQueueService.classifySendError(Exception('Connection refused')),
       isA<TransientSendFailure>(),
     );
+  });
+
+  group('ambiguous socket delivery never resends automatically', () {
+    final failures = <String, Object>{
+      'generic socket': const SocketException('Transport failure', port: 40000),
+      'reset socket': const SocketException('Connection reset by peer', port: 40123),
+      'lost socket': Exception('ClientException with SocketException: Connection lost'),
+      'closed socket': const SocketException('Connection closed'),
+      'closed HTTP connection': const HttpException('Connection closed before full header was received'),
+      'aborted socket': const SocketException('Software caused connection abort'),
+      'ambiguous wording overrides inability to connect': Exception('Unable to connect: connection reset after dispatch'),
+      'abort overrides inability to connect': Exception('Unable to connect: connection aborted after dispatch'),
+      'aborted HTTP connection with status-like port': HttpException('Software caused connection abort', uri: Uri.parse('https://example.test:40123/rest/v1/diagnostic_reports')),
+      'non-socket transport with status-like port': HttpException('Response unavailable', uri: Uri.parse('https://example.test:40000/rest/v1/diagnostic_reports')),
+      'transport byte count is not an HTTP status': Exception('400 bytes transferred; response unavailable'),
+    };
+    failures.forEach((name, error) {
+      test('$name is delivery_unknown with durable text and manual retry only', () async {
+        expect(ReportQueueService.classifySendError(error), isA<AmbiguousSendOutcome>());
+        ReportQueueService.connectivityOverride = () async => true;
+        var attempts = 0;
+        ReportQueueService.remoteInsertOverride = (_) async {
+          attempts++;
+          throw error;
+        };
+        final id = await ReportQueueService.enqueueTechnicalIssue(_techDraft);
+        final row = await rowOf(id);
+        expect(row.queueState, ReportQueueState.deliveryUnknown);
+        expect(row.payload['summary'], _techDraft.summary);
+        expect(row.remoteReportId, isNull);
+        expect(row.referenceCode, isNull);
+        expect(ReportQueueService.labelFor(row), 'Submission status uncertain');
+        await ReportQueueService.processPending();
+        expect(attempts, 1, reason: 'reconnection must not resend an uncertain submission');
+        expect(await ReportQueueService.retryableRowsForInspector('inspector-uuid'), isEmpty);
+        ReportQueueService.remoteInsertOverride = (_) async {
+          attempts++;
+          return {'id': 'confirmed-manual', 'reference_code': 'DR-2026-0099'};
+        };
+        await ReportQueueService.retryManually(id);
+        expect(attempts, 2);
+        expect((await rowOf(id)).queueState, ReportQueueState.sent);
+      });
+    });
+
+    test('socket ambiguity also preserves the exact Application Support identity', () async {
+      ReportQueueService.connectivityOverride = () async => true;
+      var attempts = 0;
+      ReportQueueService.remoteInsertOverride = (payload) async {
+        attempts++;
+        expect(payload['field_job_id'], 'job-uuid-1');
+        expect(payload['supabase_application_id'], 'app-uuid-1');
+        expect(payload['bridge_source_id'], 'rosario-imaps-local-0921-a');
+        throw const SocketException('Connection reset by peer');
+      };
+      final id = await ReportQueueService.enqueueApplicationSupport(_supportDraft);
+      await ReportQueueService.processPending();
+      final row = await rowOf(id);
+      expect(attempts, 1);
+      expect(row.queueState, ReportQueueState.deliveryUnknown);
+      expect(row.payload['requested_change'], _supportDraft.requestedChange);
+      expect(row.fieldJobId, 'job-uuid-1');
+    });
+
+    test('proven pre-dispatch socket failures stay safe despite port numbers resembling HTTP codes', () {
+      for (final message in ['Failed host lookup', 'Connection refused', 'Network is unreachable']) {
+        expect(
+          ReportQueueService.classifySendError(SocketException(message, port: 40000)),
+          isA<TransientSendFailure>(),
+        );
+      }
+    });
+
+    test('explicit HTTP status and PostgREST code representations retain proven refusal', () {
+      for (final code in [400, 401, 403, 409, 422]) {
+        for (final message in ['HTTP $code', 'status_code: $code', 'PostgrestException(message: Rejected, code: $code)']) {
+          expect(ReportQueueService.classifySendError(Exception(message)), isA<DeterministicRejection>());
+        }
+      }
+    });
   });
 
   group('every failure keeps the report text', () {
