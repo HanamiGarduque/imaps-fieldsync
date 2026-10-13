@@ -18,7 +18,7 @@ const _kBg = InsightTheme.bg;
 const _kGreen = InsightTheme.green;
 const _kCoral = InsightTheme.red;
 
-/// Reports & Support — the inspector's entry point.
+/// Support Desk — the inspector's entry point.
 ///
 /// Two clearly separated concerns, because they route to different people:
 ///   * Technical Issue     — something is wrong with FieldSync itself.
@@ -93,7 +93,7 @@ class _ReportsSupportScreenState extends State<ReportsSupportScreen> {
         child: Column(children: [
           Padding(
             padding: reportPagePadding(context).copyWith(top: 12, bottom: 12),
-            child: const FieldPageHeader(title: 'Reports & Support'),
+            child: const FieldPageHeader(title: 'Support Desk'),
           ),
           Expanded(child: RefreshIndicator(
           onRefresh: _loadUnsent,

@@ -553,7 +553,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                       ),
                                       _ActionTile(
                                         icon: Icons.flag_outlined,
-                                        title: 'Reports & Support',
+                                        title: 'Support Desk',
                                         subtitle:
                                             'Report a problem or an application concern',
                                         onTap: () {
