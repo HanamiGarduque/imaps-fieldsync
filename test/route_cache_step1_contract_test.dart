@@ -266,7 +266,7 @@ void main() {
   });
 
   test('the Rosario boundary remains an independent local render layer', () {
-    expect(step1Source, contains('const RosarioBoundaryOverlay(subdued: true)'));
+    expect(step1Source, contains('const RosarioBoundaryOverlay()'));
     for (final forbidden in [
       'RouteService',
       'CachedRoute',

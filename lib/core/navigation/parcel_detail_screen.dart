@@ -19,6 +19,7 @@ import '../../modules/inspection/screens/completed_inspection_detail_screen.dart
 import '../../modules/inspection/widgets/inspection_round_widgets.dart';
 
 import '../theme/insight_theme.dart';
+import '../widgets/field_form_widgets.dart';
 import '../services/inspection_start_service.dart';
 
 class ParcelDetailScreen extends StatefulWidget {
@@ -252,8 +253,8 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Row(
                     children: [
-                      _GlassBackButton(onTap: () => Navigator.pop(context)),
-                      const SizedBox(width: 14),
+                      FieldBackButton(onPressed: () => Navigator.pop(context)),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Task Overview',
@@ -722,38 +723,6 @@ class _StepRow extends StatelessWidget {
   }
 }
 
-class _GlassBackButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _GlassBackButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 38, height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.9)),
-          boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2))],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: const Center(
-              child: Padding(
-                padding: EdgeInsets.only(left: 4),
-                child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // Fullscreen photo viewer moved to lib/modules/inspection/widgets/photo_viewer.dart
 // (FullscreenPhotoViewer) so it's shared across every screen with task

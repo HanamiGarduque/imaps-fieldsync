@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -753,16 +754,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                          visible: _showFullCalendar,
                          child: Padding(
                                 key: const ValueKey('full_calendar'),
-                                 // Gutter follows the content: seven 48px day targets
-                                 // need 336px, so this keeps the standard 20px
-                                 // margin where it fits and only tightens on
-                                 // narrower phones, never to zero.
-                                 padding: _kFullCalendarGutter(context),
+                                  // The monthly grid fits the card's available
+                                  // width, keeping the surrounding Home gutter.
+                                 padding: const EdgeInsets.symmetric(horizontal: 20),
                                  child: ConstrainedContent(
                                    maxWidth: 560,
-                                   child: Column(mainAxisSize: MainAxisSize.min, children: [
-                                     const _CalendarLanyard(),
-                                     _InlineFullCalendarCard(
+                                    child: _CalendarLanyard(
+                                      child: _InlineFullCalendarCard(
                                   month: _calendarMonth,
                                   selectedDay: _selectedDay,
                                   taskDaysForMonth: _taskDaysInMonth,
@@ -772,7 +770,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
                                   onPick: _onFullCalendarPick,
                                      ),
-                                   ]),
+                                    ),
                                  ),
                               ),
                       ),
@@ -931,18 +929,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: SpringSlide(
-                  animation: springFor(3),
-                  beginOffset: const Offset(0, 20),
-                  child: _SectionLabel(
-                    title: "Task completion flow",
-                    trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab),
-                  ),
-              ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: SpringSlide(
                   animation: springFor(4),
                   beginOffset: const Offset(0, 24),
                   // Group container (Pattern A) — the ring chart previously
@@ -956,7 +942,11 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(color: InsightTheme.line),
                     ),
-                    child: _isLoadingTasks
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      _SectionLabel(title: 'Task completion flow',
+                        trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab)),
+                      const SizedBox(height: 12),
+                      _isLoadingTasks
                         ? const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: ImapsLoadingIndicator(size: 40)))
                         : _allTasks.isEmpty
                             ? Text('No tasks yet.', style: InsightTheme.inter(12, c: InsightTheme.ink2))
@@ -981,7 +971,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       fractions: fractions,
                                       overdueCount: overdueCount,
                                 );
-                              }),
+                               }),
+                    ]),
                   ),
               ),
               ),
@@ -995,9 +986,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
-                  color: InsightTheme.bg,
+                  color: InsightTheme.surface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: InsightTheme.lineStrong),
+                  border: Border.all(color: InsightTheme.line),
                 ),
                 child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1762,7 +1753,7 @@ class _ActivityFilterChip extends StatelessWidget {
       button: true,
       selected: selected,
       child: Material(
-        color: selected ? InsightTheme.ink : InsightTheme.surface2,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
@@ -1771,8 +1762,11 @@ class _ActivityFilterChip extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             alignment: Alignment.center,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: selected ? InsightTheme.blue1 : InsightTheme.surface2,
+              borderRadius: BorderRadius.circular(999)),
             child: Text(
               label,
               textAlign: TextAlign.center,
@@ -1789,8 +1783,8 @@ class _ActivityFilterChip extends StatelessWidget {
 /// Concentric ring chart for Task Completion Flow (replaces the old
 /// stacked progress-bar rows). One ring per category — Scheduled (outer)
 /// through Completed (inner) — each ring's filled arc is that category's
-/// share of the total task count. Categories stay in a compact two-by-two
-/// layout, beside the rings when they fit and below on narrow layouts.
+/// share of the total task count. Four direct label/count rows sit beside the
+/// rings when they fit and below on narrow or enlarged-text layouts.
 class _CompletionRingChart extends StatefulWidget {
   final int total;
   final List<String> labels;
@@ -1830,8 +1824,25 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
-    final ringSize = scaler.scale(_outerSize);
+    final inheritedStyle = DefaultTextStyle.of(context).style;
+    final numberStyle = inheritedStyle.merge(InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink));
+    final tasksStyle = inheritedStyle.merge(InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3));
+    Size measure(String text, TextStyle style) {
+      final painter = TextPainter(text: TextSpan(text: text, style: style),
+        textDirection: Directionality.of(context), textScaler: scaler)..layout();
+      final size = painter.size;
+      painter.dispose();
+      return size;
+    }
+    final number = measure('${widget.total}', numberStyle);
+    final tasks = measure('Tasks', tasksStyle);
+    final readoutWidth = math.max(number.width, tasks.width);
+    final readoutHeight = number.height + 2 + tasks.height;
+    // Measure text, not geometry through the font scaler: Android scaling is nonlinear.
+    final hole = math.sqrt(readoutWidth * readoutWidth + readoutHeight * readoutHeight) + 8;
+    final ringSize = math.max(_outerSize, hole + _ringStep * 3 + _strokeWidth);
     final rings = SizedBox(
+      key: const ValueKey('completion_rings'),
       width: ringSize,
       height: ringSize,
       child: Stack(
@@ -1839,29 +1850,30 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
         children: [
           for (int i = 0; i < widget.labels.length; i++)
             SizedBox(
-              width: ringSize - (scaler.scale(_ringStep) * i),
-              height: ringSize - (scaler.scale(_ringStep) * i),
+              width: ringSize - _ringStep * i,
+              height: ringSize - _ringStep * i,
               child: TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: _filled ? widget.fractions[i].clamp(0.0, 1.0) : 0.0),
                 duration: const Duration(milliseconds: 750),
                 curve: Curves.easeOutCubic,
                 builder: (context, value, _) => CircularProgressIndicator(
                   value: value <= 0 ? 0.001 : value,
-                  strokeWidth: scaler.scale(_strokeWidth),
+                  strokeWidth: _strokeWidth,
                   strokeCap: StrokeCap.round,
                   backgroundColor: widget.colors[i].withValues(alpha: 0.12),
                   valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
                 ),
               ),
             ),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: scaler.scale(44)),
+          SizedBox(
+            key: const ValueKey('completion_readout'),
+            width: readoutWidth,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('${widget.total}', style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink)),
+                Text('${widget.total}', style: numberStyle),
                 const SizedBox(height: 2),
-                Text('Tasks', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3)),
+                Text('Tasks', style: tasksStyle),
               ],
             ),
           ),
@@ -1871,9 +1883,6 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
     final labelStyle = DefaultTextStyle.of(context).style.merge(
       InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2),
     );
-    // White meets AA on the dark blue; lighter status fills use dark ink.
-    final foregroundColors = widget.colors.map((color) =>
-        color.computeLuminance() < 0.18 ? Colors.white : InsightTheme.ink).toList();
     var labelWidth = 0.0;
     for (final label in widget.labels) {
       final painter = TextPainter(
@@ -1884,89 +1893,43 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
       if (painter.width > labelWidth) labelWidth = painter.width;
       painter.dispose();
     }
-    final legend = Stack(
-      alignment: Alignment.center,
-      children: [
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (int row = 0; row < widget.labels.length; row += 2) ...[
-              if (row == 2) SizedBox(height: scaler.scale(widget.overdueCount > 0 ? 12 : 4)),
-              Table(
-                children: [TableRow(children: [
-                  for (int i = row; i < row + 2; i++)
-                    Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: Container(
-                        key: ValueKey('completion_${widget.labels[i]}'),
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: scaler.scale(4)),
-                        decoration: BoxDecoration(
-                          color: widget.colors[i],
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: widget.colors[i]),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (i < 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
-                            Text('${widget.counts[i]}', style: InsightTheme.urbanist(22, w: FontWeight.w700, c: foregroundColors[i])),
-                            if (i >= 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
-                          ],
-                        ),
-                      ),
-                    ),
-                ])],
-              ),
-            ],
-          ],
-        ),
-        if (widget.overdueCount > 0)
-          Container(
-            key: const ValueKey('completion_overdue'),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: InsightTheme.redTint, borderRadius: BorderRadius.circular(999)),
-            child: Text('${widget.overdueCount} Overdue', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.redInk)),
-          ),
-      ],
-    );
+    final legend = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (var i = 0; i < widget.labels.length; i++) Container(
+        key: ValueKey('completion_${widget.labels[i]}'),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: const BoxDecoration(color: InsightTheme.surface),
+        child: Row(children: [
+          Container(key: ValueKey('completion_color_${widget.labels[i]}'), width: 8, height: 8,
+            decoration: BoxDecoration(color: widget.colors[i], shape: BoxShape.circle)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(widget.labels[i], style: labelStyle)),
+          const SizedBox(width: 8),
+          Text('${widget.counts[i]}', style: InsightTheme.inter(16, w: FontWeight.w700, c: InsightTheme.ink)),
+        ]),
+      ),
+      if (widget.overdueCount > 0) Padding(padding: const EdgeInsets.only(top: 8),
+        child: Text('${widget.overdueCount} Overdue', key: const ValueKey('completion_overdue'),
+          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.redInk))),
+    ]);
     return LayoutBuilder(key: const ValueKey('completion_chart'), builder: (context, constraints) {
       // Keep category words intact with the actual font and accessibility size.
-      final legendWidth = (labelWidth + 18) * 2;
-      if (constraints.maxWidth < ringSize + 8 + legendWidth) {
+      final countWidth = widget.counts.map((count) => measure('$count', InsightTheme.inter(16, w: FontWeight.w700)).width)
+        .fold<double>(0, math.max);
+      final legendWidth = labelWidth + countWidth + 36;
+      if (constraints.maxWidth < ringSize + 12 + legendWidth) {
         return Column(children: [
           rings,
-          const SizedBox(height: 4),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: constraints.maxWidth.clamp(legendWidth, double.infinity),
-              child: legend,
-            ),
-          ),
+           const SizedBox(height: 12),
+           legend,
         ]);
       }
       return Row(children: [
         rings,
-        const SizedBox(width: 8),
+        const SizedBox(width: 12),
         Expanded(child: legend),
       ]);
     });
   }
-}
-
-/// Page gutter for the full-month card.
-///
-/// Seven Android-sized day targets need 336px. The standard 20px page margin
-/// is used whenever it fits; on narrower phones it tightens so the targets
-/// stay full size, and it never reaches zero, so the month is never flush
-/// against the phone edge.
-EdgeInsets _kFullCalendarGutter(BuildContext context) {
-  const sevenTargets = 7 * 48.0;
-  final width = MediaQuery.sizeOf(context).width;
-  // Clamp the gutter itself: the narrowest margin that still fits seven 48px
-  // day targets, and never more than the standard 20px page margin.
-  final gutter = ((width - sevenTargets) / 2).clamp(4.0, 20.0);
-  return EdgeInsets.symmetric(horizontal: gutter);
 }
 
 /// One shared hanging pivot for the strap and the month card it carries.
@@ -2042,26 +2005,29 @@ class _SuspendedMonthCalendarState extends State<_SuspendedMonthCalendar>
 /// lanyard reads as attached hardware rather than decoration floating between
 /// the toggle and the card.
 class _CalendarLanyard extends StatelessWidget {
-  const _CalendarLanyard();
+  const _CalendarLanyard({required this.child});
+
+  final Widget child;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    key: const ValueKey('calendar_lanyard'),
-    height: 30,
-    // The clip deliberately overhangs the card edge so the card looks gripped
-    // rather than merely placed underneath a strap.
-    child: Stack(
+  Widget build(BuildContext context) => Stack(
       clipBehavior: Clip.none,
-      alignment: Alignment.bottomCenter,
+      alignment: Alignment.topCenter,
       children: [
-        const Positioned.fill(
-          child: ExcludeSemantics(
-            child: CustomPaint(painter: _CalendarLanyardPainter()),
+        Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(
+            key: ValueKey('calendar_lanyard'),
+            height: 30,
+            width: double.infinity,
+            child: ExcludeSemantics(child: CustomPaint(painter: _CalendarLanyardPainter())),
           ),
-        ),
+          child,
+        ]),
+        // Paint the hardware after the card: geometric overlap otherwise gets
+        // hidden by the card's opaque background.
         Positioned(
-          bottom: -5,
-          child: Container(
+          top: 19,
+          child: ExcludeSemantics(child: Container(
             key: const ValueKey('calendar_lanyard_clip'),
             width: 12,
             height: 16,
@@ -2069,16 +2035,11 @@ class _CalendarLanyard extends StatelessWidget {
               color: InsightTheme.ink3,
               borderRadius: BorderRadius.circular(2),
             ),
-            // The slot the strap passes through, drawn on the clip itself so
-            // the attachment is legible at small sizes.
-            child: Center(
-              child: Container(width: 12, height: 2, color: InsightTheme.surface),
-            ),
-          ),
+            child: Center(child: Container(width: 12, height: 2, color: InsightTheme.surface)),
+          )),
         ),
       ],
-    ),
-  );
+    );
 }
 
 class _CalendarLanyardPainter extends CustomPainter {
@@ -2161,6 +2122,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
     final selectedTasks = tasksByDayInMonth[clampedDay] ?? const <TaskItem>[];
 
     return Container(
+      key: const ValueKey('calendar_month_card'),
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
@@ -2209,92 +2171,115 @@ class _InlineFullCalendarCard extends StatelessWidget {
           ),
           LayoutBuilder(builder: (context, constraints) {
             final dayStyle = InsightTheme.inter(12.5, w: FontWeight.w700);
-            var columnWidth = 48.0;
-            var rowHeight = 48.0;
-            for (final label in [..._weekdayAbbrSunStart, '88']) {
+            final weekdayStyle = InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3);
+            final columnWidth = constraints.maxWidth / 7;
+            Size measure(String label, TextStyle style) {
               final painter = TextPainter(
-                text: TextSpan(text: label, style: DefaultTextStyle.of(context).style.merge(dayStyle)),
+                text: TextSpan(text: label, style: DefaultTextStyle.of(context).style.merge(style)),
                 textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
               )..layout();
-              if (painter.width + 12 > columnWidth) columnWidth = painter.width + 12;
-              if (painter.height + 24 > rowHeight) rowHeight = painter.height + 24;
+              final size = painter.size;
               painter.dispose();
+              return size;
             }
-            final gridWidth = constraints.maxWidth.clamp(columnWidth * 7, double.infinity).toDouble();
-            final calendar = SizedBox(width: gridWidth, child: Column(children: [
+
+            // Adapt the heading, not the user's text size or the grid width.
+            var weekdayLength = 3;
+            while (weekdayLength > 1 && _weekdayAbbrSunStart.any((label) =>
+                measure(label.substring(0, weekdayLength), weekdayStyle).width + 4 > columnWidth)) {
+              weekdayLength--;
+            }
+            var plateWidth = 32.0;
+            var plateHeight = 32.0;
+            for (var day = 1; day <= daysInMonth; day++) {
+              final size = measure('$day', dayStyle);
+              if (size.width + 8 > plateWidth) plateWidth = size.width + 8;
+              if (size.height + 8 > plateHeight) plateHeight = size.height + 8;
+            }
+            plateWidth = plateWidth.clamp(0.0, columnWidth).toDouble();
+            // Number plate, 2dp separation, 4dp task track, 4dp breathing room.
+            // The approved compact Calendar uses the full cell as its target.
+            final rowHeight = (plateHeight + 2 + 4 + 4).clamp(44.0, double.infinity).toDouble();
+            return Column(children: [
               Row(children: [
-                for (var index = 0; index < _weekdayAbbrSunStart.length; index++) ...[
-                  Expanded(child: Center(child: Text(_weekdayAbbrSunStart[index],
-                      style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)))),
-                ],
+                for (var index = 0; index < _weekdayAbbrSunStart.length; index++)
+                  Expanded(child: Semantics(
+                    key: ValueKey('calendar_weekday_$index'),
+                    label: _fullWeekdayNames[(index + 6) % 7],
+                    excludeSemantics: true,
+                    child: Center(child: Text(_weekdayAbbrSunStart[index].substring(0, weekdayLength),
+                        style: weekdayStyle)),
+                  )),
               ]),
               const SizedBox(height: 2),
               GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              // Week rows sit flush: gaps between them are wasted height.
-              mainAxisSpacing: 0,
-               crossAxisSpacing: 0,
-              mainAxisExtent: rowHeight,
-            ),
-            itemCount: daysInMonth + leadingBlanks,
-            itemBuilder: (context, i) {
-              if (i < leadingBlanks) return const SizedBox.shrink();
-              final day = i - leadingBlanks + 1;
-              final isSelected = day == clampedDay;
-              final hasTask = taskDays.contains(day);
-              final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
-              final dotColors = dayTasks
-                  .map(dotColorForTask)
-                  .toSet()
-                  .toList();
-              return InkWell(
-                key: ValueKey('calendar_day_$day'),
-                onTap: () => onPick(month, day),
-                borderRadius: BorderRadius.circular(24),
-                child: Center(
-                  child: Container(
-                    key: ValueKey('calendar_day_plate_$day'),
-                    // A quieter 32px plate inside the full 48px target: the
-                    // selection reads clearly without filling the whole cell.
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    decoration: BoxDecoration(
-                      color: isSelected ? InsightTheme.blue1 : Colors.transparent,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('$day', style: InsightTheme.inter(12.5, w: FontWeight.w700, c: isSelected ? Colors.white : InsightTheme.ink)),
-                        if (hasTask)
-                          Row(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  mainAxisSpacing: 0,
+                  crossAxisSpacing: 0,
+                  mainAxisExtent: rowHeight,
+                ),
+                itemCount: daysInMonth + leadingBlanks,
+                itemBuilder: (context, i) {
+                  if (i < leadingBlanks) return const SizedBox.shrink();
+                  final day = i - leadingBlanks + 1;
+                  final isSelected = day == clampedDay;
+                  final hasTask = taskDays.contains(day);
+                  final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
+                  final dotColors = dayTasks.map(dotColorForTask).toSet().toList();
+                  return Semantics(
+                    key: ValueKey('calendar_day_$day'),
+                    container: true,
+                    button: true,
+                    selected: isSelected,
+                    label: '${_fullWeekdayNames[DateTime(month.year, month.month, day).weekday - 1]}, '
+                        '${_HomeDashboardScreenState._fullMonthNames[month.month - 1]} $day, ${month.year}, '
+                        '${dayTasks.length} ${dayTasks.length == 1 ? 'task' : 'tasks'}',
+                    onTap: () => onPick(month, day),
+                    excludeSemantics: true,
+                    child: InkWell(
+                      onTap: () => onPick(month, day),
+                      borderRadius: BorderRadius.circular(24),
+                      child: Center(child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            key: ValueKey('calendar_day_plate_$day'),
+                            width: plateWidth,
+                            height: plateHeight,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelected ? InsightTheme.blue1 : Colors.transparent,
+                              // A circle at normal text; a content-sized capsule when
+                              // large digits need more height than a narrow column.
+                              borderRadius: BorderRadius.circular(plateHeight / 2),
+                            ),
+                            child: Text('$day', style: dayStyle.copyWith(
+                                color: isSelected ? Colors.white : InsightTheme.ink)),
+                          ),
+                          const SizedBox(height: 2),
+                          SizedBox(height: 4, child: Row(
                             mainAxisSize: MainAxisSize.min,
-                            children: dotColors.take(3).map((dotColor) {
-                              return Container(
+                            children: (hasTask ? dotColors : const <Color>[]).take(3).map((dotColor) =>
+                              Container(
                                 margin: const EdgeInsets.symmetric(horizontal: 1),
                                 width: 4,
                                 height: 4,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isSelected ? Colors.white : dotColor,
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                      ],
+                                decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor),
+                              ),
+                            ).toList(),
+                          )),
+                        ],
+                      )),
                     ),
-                  ),
-                ),
-              );
-            },
+                  );
+                },
               ),
-            ]));
-            return gridWidth > constraints.maxWidth
-                ? SingleChildScrollView(scrollDirection: Axis.horizontal, child: calendar) : calendar;
+            ]);
           }),
           if (selectedTasks.isNotEmpty) ...[
             const SizedBox(height: 8),

@@ -899,7 +899,7 @@ void main() {
         expect(tester.getSize(find.widgetWithText(TextButton, label)).width,
             greaterThanOrEqualTo(48), reason: 'Legal links keep a 48px minimum width.');
         expect(tester.getSize(find.widgetWithText(TextButton, label)).height,
-            lessThanOrEqualTo(20), reason: 'Inline links must not inflate the sentence line.');
+            lessThanOrEqualTo(24), reason: 'Inline links retain the documented compact text-link box.');
         // ignore: deprecated_member_use
         final flags = link()!.getSemanticsData().flagsCollection;
         expect(
@@ -930,8 +930,7 @@ void main() {
   );
 
   testWidgets(
-    'login legal notice reads as one compact sentence below the brand, '
-    'without a sign-in heading competing with the app title',
+    'login legal notice reads as one compact sentence below the approved neutral heading',
     (tester) async {
       await mount(tester, const LoginScreen(), const Size(360, 800), scale: 1);
       await tester.ensureVisible(find.byTooltip('Show passcode'));
@@ -942,13 +941,13 @@ void main() {
           matching: find.byType(Column),
         ).first,
       );
-      final links = find.text('Terms of Use');
+      final sentence = find.byKey(const ValueKey('login-legal-sentence'));
       final lastLine = tester.getRect(find.text('Authorized MPDO personnel only.'));
       // Two 12px lines at 1.4 line-height need ~17px each; the notice should read
       // as one tight block. Anything past ~24px means a gap crept back in.
       expect(
-        lastLine.top - tester.getRect(links).bottom,
-        lessThanOrEqualTo(24),
+        lastLine.top - tester.getRect(sentence).bottom,
+        lessThanOrEqualTo(6),
         reason: 'The two notice sentences must not drift apart.',
       );
       expect(
@@ -959,6 +958,7 @@ void main() {
       // The notice supports the brand block; it must not read as a second title.
       expect(find.text('Inspector sign-in'), findsNothing);
       expect(find.text('Use your authorized inspector account.'), findsNothing);
+      expect(find.text('Access your workspace'), findsOneWidget);
       final brand = tester.getRect(find.text('FieldSync'));
       expect(brand.top, lessThan(notice.top),
           reason: 'The app title must stay above the legal notice.');

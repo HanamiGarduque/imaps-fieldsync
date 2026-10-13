@@ -14,6 +14,7 @@ import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../profile_settings/screens/notifications_screen.dart';
 
@@ -85,11 +86,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   }
 
   Widget _sectionHelpButton({required String title, required String message}) {
-    return IconButton(
-      tooltip: 'About $title',
+    return FieldInfoButton(
+      label: 'About $title',
       onPressed: () => _showSectionHelp(title: title, message: message),
-      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-      icon: const Icon(Icons.info_outline_rounded, size: 20, color: InsightTheme.blueInk),
     );
   }
 

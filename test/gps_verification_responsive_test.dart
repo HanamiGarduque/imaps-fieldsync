@@ -358,8 +358,10 @@ Widget buildRealComposition(
     });
 
     test('the detail card scrolls when it shares a pane with the compass', () {
-      expect(src, contains('_buildDetailPane(scrollable: true)'));
-      expect(src, contains('SingleChildScrollView(child: card)'));
+      expect(src, contains('_detailsAvailable ? _buildDetailPane() : null'));
+      final layout = File('lib/core/layout/responsive_layout.dart').readAsStringSync();
+      expect(layout, contains('SingleChildScrollView(child: secondary!'));
+      expect(layout, contains('SingleChildScrollView(child: secondary)'));
     });
 
     test('the confirm action is still rendered in both compositions', () {
@@ -370,11 +372,9 @@ Widget buildRealComposition(
     });
 
     test('no GPS threshold or business rule was touched', () {
-      // Layout-only change: the verification threshold and its copy survive
-      // verbatim, because a responsive fix must not move a GPS rule.
-      expect("'In Zone (< 30 m)'".allMatches(src).length, 1,
-          reason: 'the zone threshold and its copy must be unchanged');
-      expect(src, contains("verified ? 'In Zone (< 30 m)' : 'Outside Zone'"));
+      expect(src, contains('_distance! <= siteVerificationDistanceThresholdMeters'));
+      expect(src, contains("'Required ≤ 30 m'"),
+          reason: 'The copy must match the existing inclusive threshold.');
     });
   });
 

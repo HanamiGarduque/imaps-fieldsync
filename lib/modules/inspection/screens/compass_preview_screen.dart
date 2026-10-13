@@ -9,6 +9,7 @@ import '../../../core/layout/responsive_layout.dart';
 import 'gps_verification_screen.dart' show fitCompassDiameter;
 
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// Standalone Compass — reached from the nav bar's Quick Actions sheet.
@@ -147,11 +148,10 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _GlassIconButton(
-                            icon: Icons.arrow_back_ios_new_rounded,
-                            onTap: () => Navigator.pop(context),
+                          FieldBackButton(
+                            onPressed: () => Navigator.pop(context),
                           ),
-                          const SizedBox(width: 14),
+                          const SizedBox(width: 8),
                           Flexible(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -273,11 +273,12 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                           );
 
                           return Center(
-                            child: _StandaloneCompassDial(
+                            child: RepaintBoundary(key: const ValueKey('compass-face'),
+                              child: ExcludeSemantics(child: MediaQuery.withNoTextScaling(child: _StandaloneCompassDial(
                               size: compassSize,
                               heading: _heading,
                               headingCardinal: _headingCardinal,
-                            ),
+                            )))),
                           );
                         },
                       ),
@@ -295,12 +296,8 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                       ),
                 // Landscape reclaims the header's space for the dial and keeps
                 // only this floating back control; portrait retains the header.
-                landscapeBackButton: SizedBox.square(
-                  dimension: InsightBreakpoints.minTouchTarget,
-                  child: _GlassIconButton(
-                    icon: Icons.arrow_back_ios_new_rounded,
-                    onTap: () => Navigator.pop(context),
-                  ),
+                landscapeBackButton: FieldBackButton(
+                    onPressed: () => Navigator.pop(context),
                 ),
               ),
             ),
@@ -642,154 +639,51 @@ class _StandaloneOrientationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      key: const ValueKey('compass-details'),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(InsightTheme.radiusLg),
+        borderRadius: InsightTheme.roundedMd,
         border: Border.all(color: InsightTheme.line),
         boxShadow: InsightTheme.cardShadow,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: InsightTheme.blueTint,
-                      borderRadius: BorderRadius.circular(
-                        InsightTheme.radiusSm,
-                      ),
-                      border: Border.all(
-                        color: InsightTheme.blueInk.withValues(alpha: 0.15),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.explore_rounded,
-                      size: 16,
-                      color: InsightTheme.blueInk,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'ORIENTATION DATA',
-                          style: InsightTheme.jetBrains(
-                            8.5,
-                            w: FontWeight.w800,
-                            ls: 1,
-                            c: InsightTheme.ink3,
-                          ),
-                        ),
-                        Text(
-                          'Live Device Magnetometer',
-                          style: InsightTheme.poppins(
-                            13.5,
-                            w: FontWeight.w700,
-                            c: InsightTheme.ink,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: InsightTheme.greenTint,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: InsightTheme.green.withValues(alpha: 0.25),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: const BoxDecoration(
-                        color: InsightTheme.green,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'ACTIVE',
-                      style: InsightTheme.jetBrains(
-                        9,
-                        w: FontWeight.w700,
-                        c: InsightTheme.green,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(height: 1, color: InsightTheme.line),
+          Row(children: [
+            Expanded(child: Semantics(header: true,
+              child: Text('Orientation details', style: InsightTheme.urbanist(14, w: FontWeight.w700)))),
+            const SizedBox(width: 8),
+            Flexible(child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: heading == null ? InsightTheme.surface2 : InsightTheme.greenTint,
+                borderRadius: BorderRadius.circular(10)),
+              child: Text(heading == null ? 'Waiting' : 'Active',
+                style: InsightTheme.inter(12, w: FontWeight.w600,
+                  c: heading == null ? InsightTheme.ink3 : InsightTheme.greenInk)))),
+          ]),
           const SizedBox(height: 12),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 24,
+            runSpacing: 12,
             children: [
               _MetricTile(
-                label: 'HEADING',
+                label: 'Heading',
                 value: heading != null ? '${heading!.round()}°' : '--',
+                semanticsLabel: heading == null ? 'Heading unavailable' : 'Heading ${heading!.round()} degrees, $headingCardinal',
               ),
-              _MetricTile(label: 'CARDINAL', value: headingCardinal),
+              _MetricTile(label: 'Cardinal', value: headingCardinal),
               _MetricTile(
-                label: 'ACCURACY',
-                value: accuracy != null ? '±${accuracy!.round()}°' : 'High',
+                label: 'Accuracy',
+                value: accuracy != null && accuracy! >= 0 ? '± ${accuracy!.round()}°' : 'Unavailable',
               ),
             ],
           ),
+          const Divider(height: 24),
+          Text('Sensor · Live Device Magnetometer', style: InsightTheme.inter(12)),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: InsightTheme.blueTint,
-              borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
-              border: Border.all(
-                color: InsightTheme.blue1.withValues(alpha: 0.15),
-              ),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.info_outline_rounded,
-                  size: 13,
-                  color: InsightTheme.blue1,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Rotate your device to observe real-time bearing in the field.',
-                    style: InsightTheme.inter(
-                      11,
-                      w: FontWeight.w500,
-                      c: InsightTheme.blueInk,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          Text('Rotate your device to observe real-time bearing in the field.',
+            style: InsightTheme.inter(12, c: InsightTheme.blueInk)),
         ],
       ),
     );
@@ -799,68 +693,25 @@ class _StandaloneOrientationCard extends StatelessWidget {
 class _MetricTile extends StatelessWidget {
   final String label;
   final String value;
-  const _MetricTile({required this.label, required this.value});
+  final String? semanticsLabel;
+  const _MetricTile({required this.label, required this.value, this.semanticsLabel});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: InsightTheme.surface2,
-        borderRadius: BorderRadius.circular(InsightTheme.radiusSm),
-        border: Border.all(color: InsightTheme.line),
-      ),
-      child: Column(
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             label,
-            style: InsightTheme.jetBrains(
-              8,
-              w: FontWeight.w700,
-              ls: 0.8,
-              c: InsightTheme.ink3,
-            ),
+            style: InsightTheme.inter(12),
           ),
           const SizedBox(height: 2),
-          Text(
+          Semantics(label: semanticsLabel, excludeSemantics: semanticsLabel != null, child: Text(
             value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: InsightTheme.jetBrains(
-              13,
-              w: FontWeight.w800,
-              c: InsightTheme.ink,
-            ),
-          ),
+            style: InsightTheme.inter(16, w: FontWeight.w700, c: InsightTheme.ink),
+          )),
         ],
-      ),
-    );
-  }
-}
-
-class _GlassIconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _GlassIconButton({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: InsightTheme.glassIconButtonDecoration(),
-            child: Icon(icon, size: 18, color: InsightTheme.ink),
-          ),
-        ),
-      ),
     );
   }
 }

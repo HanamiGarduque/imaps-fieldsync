@@ -17,6 +17,7 @@ import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 
 
 import '../../../core/theme/insight_theme.dart';
@@ -2109,19 +2110,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                 ),
                               ),
                               const SizedBox(width: 4),
-                              InkWell(
-                                onTap: _showContextualInfo,
-                                borderRadius: BorderRadius.circular(999),
-                                child: Container(
-                                  width: 20,
-                                  height: 20,
-                                  alignment: Alignment.center,
-                                  decoration: const BoxDecoration(
-                                    color: InsightTheme.blue1,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(Icons.info_outline_rounded, size: 15, color: Colors.white),
-                                ),
+                              FieldInfoButton(
+                                label: 'About task details for ${widget.task.name}',
+                                onPressed: _showContextualInfo,
                               ),
                               const SizedBox(width: 6),
                               AnimatedRotation(

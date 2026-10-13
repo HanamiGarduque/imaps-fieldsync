@@ -279,6 +279,7 @@ void main() {
               const Positioned.fill(child: SizedBox(key: Key('map'))),
               Positioned.fill(
                 child: MapDetailPanel(
+                  title: 'Your current location',
                   child: Container(
                     key: const Key('panel'),
                     height: 200,
@@ -309,6 +310,7 @@ void main() {
               const Positioned.fill(child: SizedBox(key: Key('map'))),
               Positioned.fill(
                 child: MapDetailPanel(
+                  title: 'Your current location',
                   child: Container(
                     key: const Key('panel'),
                     height: 200,
@@ -345,14 +347,15 @@ void main() {
             children: [
               const Positioned.fill(child: SizedBox()),
               Positioned.fill(
-                child: MapDetailPanel(child: Container(height: 100)),
+                child: MapDetailPanel(title: 'Your current location', child: Container(height: 100)),
               ),
             ],
           ),
         ),
       ));
       await tester.pump();
-      final t = tester.getRect(find.byIcon(Icons.keyboard_arrow_down_rounded));
+      final t = tester.getRect(find.ancestor(of: find.byIcon(Icons.keyboard_arrow_down_rounded),
+        matching: find.byType(TextButton)));
       expect(t.width, greaterThanOrEqualTo(InsightBreakpoints.minTouchTarget));
       expect(t.height, greaterThanOrEqualTo(InsightBreakpoints.minTouchTarget));
     });
@@ -371,6 +374,7 @@ void main() {
                 right: 16,
                 bottom: 16,
                 child: MapDetailPanel(
+                  title: 'Your current location',
                   child: Container(key: const Key('panel'), height: 120),
                 ),
               ),
@@ -394,7 +398,8 @@ void main() {
               .readAsStringSync();
       expect(preview, contains('MapDetailPanel'));
       expect(preview, isNot(contains('bottom: 210')));
-      expect(preview, contains('kInsightBottomNavReserve'));
+      expect(preview, contains('attributionHeight'));
+      expect(preview, contains('Recenter on your location'));
     });
 
     test('map CTA and routing logic are untouched', () {

@@ -37,12 +37,14 @@ class QuickAction {
 class MapDetailPanel extends StatefulWidget {
   const MapDetailPanel({
     super.key,
+    required this.title,
     required this.child,
     this.sidePanelWidthFactor = 0.36,
     this.minSidePanelWidth = 280,
     this.maxSidePanelWidth = 400,
   });
 
+  final String title;
   final Widget child;
   final double sidePanelWidthFactor;
   final double minSidePanelWidth;
@@ -61,66 +63,40 @@ class _MapDetailPanelState extends State<MapDetailPanel> {
   @override
   Widget build(BuildContext context) {
     final bp = context.responsive;
-
-    // The expand/collapse control: always present, always reachable, and a
-    // comfortable tap target.
-    final toggle = Semantics(
-      button: true,
-      label: _collapsed ? 'Show details' : 'Hide details',
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        elevation: 3,
-        child: InkWell(
-          onTap: () => setState(() => _collapsed = !_collapsed),
-          borderRadius: BorderRadius.circular(14),
-          // 48px: the accessibility floor, and it has to stay reachable with the
-          // map underneath it.
-          child: SizedBox(
-            width: 48,
-            height: 48,
-            child: Icon(
-              _collapsed
-                  ? Icons.keyboard_arrow_up_rounded
-                  : Icons.keyboard_arrow_down_rounded,
-              size: 22,
-              color: InsightTheme.ink2,
-            ),
+    return LayoutBuilder(builder: (context, constraints) {
+      final split = bp.canSplitTwoPane || (bp.isLandscape && !bp.isCompactWidth);
+      final width = split ? (bp.width * widget.sidePanelWidthFactor)
+        .clamp(widget.minSidePanelWidth, widget.maxSidePanelWidth).toDouble()
+        : MapDetailPanel.kCardMaxWidth;
+      return Align(alignment: split ? Alignment.bottomRight : Alignment.bottomCenter,
+        widthFactor: 1, heightFactor: 1, child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: math.min(width, constraints.maxWidth),
+          maxHeight: split ? constraints.maxHeight : constraints.maxHeight * 0.35),
+        child: DecoratedBox(decoration: BoxDecoration(color: InsightTheme.surface,
+          borderRadius: InsightTheme.roundedMd, border: Border.all(color: InsightTheme.line),
+          boxShadow: InsightTheme.cardShadow),
+          child: Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, _collapsed ? 0 : 12),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Expanded(child: Semantics(header: true,
+                  child: Text(widget.title, style: InsightTheme.urbanist(14, w: FontWeight.w700)))),
+                const SizedBox(width: 8),
+                TextButton(onPressed: () => setState(() => _collapsed = !_collapsed),
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: InsightTheme.ink2),
+                  child: Tooltip(message: _collapsed ? 'Show location details' : 'Hide location details',
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(_collapsed ? 'Show' : 'Hide', style: InsightTheme.inter(12)),
+                      const SizedBox(width: 4),
+                      Icon(_collapsed ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 18),
+                    ]))),
+              ]),
+              if (!_collapsed) Flexible(child: SingleChildScrollView(child: widget.child)),
+            ]),
           ),
         ),
-      ),
-    );
-
-    if (!bp.canSplitTwoPane || _collapsed) {
-      // Floating card, content-sized and bounded; the toggle sits just above it.
-      final panel = ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: MapDetailPanel.kCardMaxWidth),
-        child: widget.child,
-      );
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          toggle,
-          const SizedBox(height: 8),
-          if (_collapsed) const SizedBox.shrink() else panel,
-        ],
-      );
-    }
-
-    // Side pane on the right: the map keeps the primary share.
-    final width = (bp.width * widget.sidePanelWidthFactor)
-        .clamp(widget.minSidePanelWidth, widget.maxSidePanelWidth)
-        .toDouble();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Spacer(),
-        SizedBox(width: width, child: widget.child),
-        const SizedBox(width: 8),
-        toggle,
-      ],
-    );
+      ));
+    });
   }
 }
 
