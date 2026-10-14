@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -27,6 +28,64 @@ import 'package:imaps_fieldsync/modules/inspection/widgets/rosario_boundary_over
 import 'package:imaps_fieldsync/modules/inspection/widgets/inspection_step_header.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'support/site_map_http_fixture.dart';
+
+// Delay the real DB query result while preserving insert/query side effects.
+class _DelayedRouteRead implements Database {
+  _DelayedRouteRead(this.inner, this.release, {this.delayWrites = false});
+  final Database inner;
+  final Future<void> release;
+  final bool delayWrites;
+
+  @override
+  Future<List<Map<String, Object?>>> query(
+    String table, {
+    bool? distinct,
+    List<String>? columns,
+    String? where,
+    List<Object?>? whereArgs,
+    String? groupBy,
+    String? having,
+    String? orderBy,
+    int? limit,
+    int? offset,
+  }) async {
+    final rows = await inner.query(
+      table,
+      distinct: distinct,
+      columns: columns,
+      where: where,
+      whereArgs: whereArgs,
+      groupBy: groupBy,
+      having: having,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+    );
+    if (table == 'local_route_cache' && !delayWrites) await release;
+    return rows;
+  }
+
+  @override
+  Future<int> insert(
+    String table,
+    Map<String, Object?> values, {
+    String? nullColumnHack,
+    ConflictAlgorithm? conflictAlgorithm,
+  }) async {
+    if (table == 'local_route_cache' && delayWrites) await release;
+    return inner.insert(
+      table,
+      values,
+      nullColumnHack: nullColumnHack,
+      conflictAlgorithm: conflictAlgorithm,
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError(
+    'Unexpected fixture DB call: ${invocation.memberName}',
+  );
+}
 
 // AOSP FontScaleConverterFactory's 200% curve, with linear interpolation.
 // https://github.com/aosp-mirror/platform_frameworks_base/blob/master/core/java/android/content/res/FontScaleConverterFactory.java
@@ -63,6 +122,10 @@ void main() {
   var online = false;
   var gps = true;
   var locationRequests = 0;
+  var boundaryRequests = 0;
+  var gpsAccuracy = 5.0;
+  DateTime? gpsTimestamp;
+  Future<List<String>> Function()? connectivityResponse;
   final task = TaskItem(
     id: 'site-ui-fixture',
     parcelId: 'fixture-parcel',
@@ -75,6 +138,18 @@ void main() {
   );
   const device = LatLng(13.8425, 121.1765);
   const target = LatLng(13.8486, 121.19);
+  var gpsPoint = device;
+
+  Map<String, Object> positionEvent() => {
+    'latitude': gpsPoint.latitude,
+    'longitude': gpsPoint.longitude,
+    'accuracy': gpsAccuracy,
+    'timestamp': (gpsTimestamp ?? DateTime.now()).millisecondsSinceEpoch,
+    'altitude': 0.0,
+    'heading': 0.0,
+    'speed': 0.0,
+    'speed_accuracy': 0.0,
+  };
 
   setUpAll(() async {
     originalHttp = HttpOverrides.current;
@@ -159,8 +234,11 @@ void main() {
         detectSessionInUri: false,
         localStorage: EmptyLocalStorage(),
       ),
-      httpClient: MockClient(
-        (request) async => http.Response(
+      httpClient: MockClient((request) async {
+        if (request.url.path.contains('distance_to_parcel')) {
+          boundaryRequests++;
+        }
+        return http.Response(
           request.url.path.contains('/rpc/')
               ? '1600'
               : jsonEncode({
@@ -170,8 +248,8 @@ void main() {
           200,
           request: request,
           headers: {'content-type': 'application/json'},
-        ),
-      ),
+        );
+      }),
     );
     messenger.setMockMethodCallHandler(
       const MethodChannel('flutter.baseflow.com/geolocator'),
@@ -183,23 +261,18 @@ void main() {
             return 3;
           case 'getCurrentPosition':
             locationRequests++;
-            return {
-              'latitude': device.latitude,
-              'longitude': device.longitude,
-              'accuracy': 5.0,
-              'timestamp': 0,
-              'altitude': 0.0,
-              'heading': 0.0,
-              'speed': 0.0,
-              'speed_accuracy': 0.0,
-            };
+            return positionEvent();
         }
         return null;
       },
     );
     messenger.setMockMethodCallHandler(
       const MethodChannel('dev.fluttercommunity.plus/connectivity'),
-      (_) async => [online ? 'wifi' : 'none'],
+      (_) async {
+        final response = connectivityResponse;
+        connectivityResponse = null;
+        return response == null ? [online ? 'wifi' : 'none'] : await response();
+      },
     );
     for (final channel in [
       'flutter.baseflow.com/geolocator_updates',
@@ -216,10 +289,17 @@ void main() {
 
   setUp(() async {
     httpFixture.routeJson = null;
+    httpFixture.routeResponse = null;
+    httpFixture.requestedRoutes.clear();
     httpFixture.streetTilesAvailable = true;
     online = false;
     gps = true;
     locationRequests = 0;
+    boundaryRequests = 0;
+    gpsPoint = device;
+    gpsAccuracy = 5;
+    gpsTimestamp = null;
+    connectivityResponse = null;
     InspectionProgress.instance.reset();
     await db.delete('local_jobs');
     await db.delete('local_route_cache');
@@ -261,6 +341,10 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 40));
       });
     }
+    await tester.pumpAndSettle();
+    // The app-wide provider budget intentionally outlives a screen by at most
+    // one second. Drain that finite timer before Flutter checks test invariants.
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
   }
 
@@ -328,6 +412,927 @@ void main() {
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       await settle(tester);
+      await tester.pump(const Duration(seconds: 2));
+    });
+  }
+
+  List<Polyline> routeLines(WidgetTester tester) => tester
+      .widgetList<PolylineLayer>(find.byType(PolylineLayer))
+      .expand((layer) => layer.polylines)
+      .toList();
+
+  Future<void> sendPosition(WidgetTester tester) async {
+    await messenger.handlePlatformMessage(
+      'flutter.baseflow.com/geolocator_updates',
+      const StandardMethodCodec().encodeSuccessEnvelope(positionEvent()),
+      (_) {},
+    );
+    await tester.pump();
+  }
+
+  Future<void> captureGuidance(WidgetTester tester, String name) async {
+    final output = Platform.environment['IMAPS_GUIDANCE_VISUAL_DIR'];
+    if (output == null) return;
+    final boundary =
+        captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    await tester.runAsync(() async {
+      final frame = await boundary.toImage(pixelRatio: 2);
+      final bytes = await frame.toByteData(format: ui.ImageByteFormat.png);
+      Directory(output).createSync(recursive: true);
+      File('$output/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+      frame.dispose();
+    });
+  }
+
+  String roadResponse(List<LatLng> points) => jsonEncode({
+    'code': 'Ok',
+    'routes': [
+      {
+        'distance': 3372,
+        'duration': 462.7,
+        'geometry': {
+          'coordinates': points.map((p) => [p.longitude, p.latitude]).toList(),
+        },
+      },
+    ],
+  });
+
+  Future<void> saveRoad(List<LatLng> points) => DBHelper.saveRouteCache(
+    CachedRoute(
+      jobId: task.id,
+      points: points,
+      originLat: device.latitude,
+      originLng: device.longitude,
+      distanceMeters: 3372,
+      durationSeconds: 462.7,
+      fetchedAt: DateTime.utc(2026, 10, 9),
+    ),
+  );
+
+  const offsetStart = LatLng(13.8425, 121.1775);
+  const offsetEnd = LatLng(13.8486, 121.189);
+  for (final scenario in [
+    (name: 'user off-route', points: [offsetStart, target], links: 1),
+    (name: 'target off-route', points: [device, offsetEnd], links: 1),
+    (
+      name: 'both offset',
+      points: [
+        LatLng(13.8445, 121.18),
+        LatLng(13.8452, 121.186),
+        LatLng(13.8478, 121.186),
+      ],
+      links: 2,
+    ),
+    (
+      name: 'tiny gaps',
+      points: [LatLng(13.8425, 121.17651), LatLng(13.8486, 121.18999)],
+      links: 0,
+    ),
+  ]) {
+    testWidgets(
+      'guidance: ${scenario.name} keeps real roads and unsnapped GPS',
+      (tester) async {
+        await tester.runAsync(() => saveRoad(scenario.points));
+        await mount(tester, const Size(390, 844));
+        await captureGuidance(tester, scenario.name.replaceAll(' ', '-'));
+        final lines = routeLines(tester);
+        final road = lines.where(
+          (p) => p.pattern == const StrokePattern.solid(),
+        );
+        final direct = lines
+            .where((p) => p.pattern.spacingFactor != null)
+            .toList();
+        expect(road, hasLength(1));
+        expect(road.single.points, scenario.points);
+        expect(direct, hasLength(scenario.links));
+        final markers = tester.widget<MarkerLayer>(find.byType(MarkerLayer));
+        expect(markers.markers.last.point, device);
+        expect(markers.markers.first.point, target);
+        if (scenario.links > 0) {
+          expect(
+            find.text('··· Unverified links'),
+            findsOneWidget,
+            reason: 'Schematic links must be identified without scrolling',
+          );
+          expect(
+            find.text('··· Unverified links').hitTestable(),
+            findsOneWidget,
+          );
+          expect(find.textContaining('not verified roads'), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'guidance: road contrast adapts to zoom without hiding controls',
+    (tester) async {
+      await tester.runAsync(() => saveRoad([offsetStart, offsetEnd]));
+      await mount(tester, const Size(390, 844));
+      final controller = tester
+          .widget<FlutterMap>(find.byType(FlutterMap))
+          .mapController!;
+      final widths = <double>[];
+      for (final zoom in [13.0, 16.0, 18.0]) {
+        controller.move(const LatLng(13.846, 121.183), zoom);
+        await settle(tester);
+        final road = routeLines(
+          tester,
+        ).singleWhere((p) => p.pattern == const StrokePattern.solid());
+        expect(road.strokeWidth, inInclusiveRange(6, 8));
+        widths.add(road.strokeWidth);
+        expect(road.borderStrokeWidth, greaterThanOrEqualTo(2));
+        expect(
+          find.byTooltip('Fit both markers').hitTestable(),
+          findsOneWidget,
+        );
+        expect(find.byTooltip('Full map').hitTestable(), findsOneWidget);
+        await captureGuidance(tester, 'both-offset-zoom-${zoom.round()}');
+      }
+      expect(
+        widths[1],
+        greaterThan(widths.first),
+        reason: 'Street-level guidance must be stronger than the overview',
+      );
+      tester.view.physicalSize = const Size(360, 800);
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      await settle(tester);
+      await tester.ensureVisible(find.text('Proceed to Location'));
+      await settle(tester);
+      await captureGuidance(tester, 'both-offset-small-text-2x');
+      expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final coordinates in [
+    <List<double>>[],
+    [
+      [121.1765, 13.8425],
+    ],
+    [
+      [121.1765, 13.8425],
+      [181.0, 13.8486],
+    ],
+    [
+      [121.1765, 13.8425],
+      [121.1765, 13.8425],
+    ],
+  ]) {
+    testWidgets(
+      'guidance: unusable provider geometry $coordinates draws no road',
+      (tester) async {
+        online = true;
+        httpFixture.routeJson = jsonEncode({
+          'code': 'Ok',
+          'routes': [
+            {
+              'distance': 123.0,
+              'duration': 45.0,
+              'geometry': {'coordinates': coordinates},
+            },
+          ],
+        });
+        await tester.runAsync(() => db.delete('local_route_cache'));
+        await mount(tester, const Size(390, 844));
+        expect(routeLines(tester), isEmpty);
+        expect(find.text('Road route unavailable'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'guidance: live direct distance uses the mapped point without RPC',
+    (tester) async {
+      online = true;
+      gpsPoint = const LatLng(13.848, 121.19); // ~67 m south of mapped point.
+      await mount(tester, const Size(390, 844));
+      expect(find.text('67 m'), findsOneWidget);
+      expect(boundaryRequests, 0);
+      gpsPoint = const LatLng(13.8484, 121.19); // ~22 m south.
+      await sendPosition(tester);
+      await settle(tester);
+      expect(find.text('22 m'), findsOneWidget);
+      expect(boundaryRequests, 0);
+      expect(
+        routeLines(tester).where((p) => p.pattern.spacingFactor == null),
+        hasLength(1),
+      ); // Near-site guidance never discards the saved road.
+      expect(InspectionProgress.instance.highestCompleted, 0);
+    },
+  );
+
+  testWidgets('guidance: 100m advisory has hysteresis and expires with GPS', (
+    tester,
+  ) async {
+    gpsPoint = const LatLng(13.8476, 121.19); // ~111 m.
+    await mount(tester, const Size(390, 844));
+    final notice = find.textContaining('Near the mapped site');
+    expect(notice, findsNothing);
+    for (final latitude in [13.8478, 13.84765, 13.8478, 13.84765]) {
+      gpsPoint = LatLng(latitude, 121.19); // ~89 m / ~106 m.
+      await sendPosition(tester);
+      await settle(tester);
+      expect(notice, findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(find.byType(GpsVerificationScreen), findsNothing);
+    }
+    await captureGuidance(tester, 'near-100m-advisory');
+    gpsPoint = const LatLng(13.8473, 121.19); // ~145 m: leaves episode.
+    await sendPosition(tester);
+    await settle(tester);
+    expect(notice, findsNothing);
+    gpsPoint = const LatLng(13.84765, 121.19); // Outside entry zone.
+    await sendPosition(tester);
+    await settle(tester);
+    expect(notice, findsNothing);
+    gpsPoint = const LatLng(13.8478, 121.19);
+    await sendPosition(tester);
+    await settle(tester);
+    expect(notice, findsOneWidget);
+    await tester.pump(const Duration(seconds: 16));
+    await tester.pumpAndSettle();
+    expect(notice, findsNothing);
+    expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('guidance: approach notice leaves the direct distance visible', (
+    tester,
+  ) async {
+    gpsPoint = const LatLng(13.848, 121.19);
+    await mount(tester, const Size(390, 844));
+    for (final size in [
+      const Size(390, 844),
+      const Size(375, 812),
+      const Size(360, 800),
+    ]) {
+      tester.view.physicalSize = size;
+      await sendPosition(tester);
+      await settle(tester);
+      final distance = find.text('67 m');
+      final viewport = tester.getRect(
+        find
+            .ancestor(
+              of: distance,
+              matching: find.byType(SingleChildScrollView),
+            )
+            .first,
+      );
+      expect(
+        tester.getRect(distance).bottom,
+        lessThanOrEqualTo(viewport.bottom),
+        reason: '$size distance ${tester.getRect(distance)} / $viewport',
+      );
+      expect(tester.getRect(distance).top, greaterThanOrEqualTo(viewport.top));
+      expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+    }
+  });
+
+  for (final quality in [
+    (name: 'inaccurate', accuracy: 60.0, age: const Duration()),
+    (name: 'old', accuracy: 5.0, age: const Duration(seconds: 40)),
+    (name: 'unknown accuracy', accuracy: 0.0, age: const Duration()),
+    (name: 'future', accuracy: 5.0, age: const Duration(seconds: -60)),
+  ]) {
+    testWidgets('guidance: ${quality.name} GPS never announces approach', (
+      tester,
+    ) async {
+      gpsPoint = const LatLng(13.848, 121.19);
+      gpsAccuracy = quality.accuracy;
+      gpsTimestamp = DateTime.now().subtract(quality.age);
+      await mount(tester, const Size(390, 844));
+      expect(find.textContaining('Near the mapped site'), findsNothing);
+      expect(find.textContaining('GPS old or imprecise'), findsOneWidget);
+      final markers = tester.widget<MarkerLayer>(find.byType(MarkerLayer));
+      expect(markers.markers.last.point, gpsPoint);
+      expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+    });
+  }
+
+  for (final location in [
+    (name: 'above 100m', point: device, available: true),
+    (name: 'around 100m', point: LatLng(13.8477, 121.19), available: true),
+    (name: 'under 30m', point: LatLng(13.8484, 121.19), available: true),
+    (name: 'missing route and GPS', point: device, available: false),
+  ]) {
+    testWidgets('guidance: ${location.name} can enter Step 2 but not Step 3', (
+      tester,
+    ) async {
+      gpsPoint = location.point;
+      gps = location.available;
+      await tester.runAsync(() => db.delete('local_route_cache'));
+      InspectionProgress.instance.ensureActiveInspection(
+        task.id,
+        initialStep: 0,
+      );
+      await mount(tester, const Size(390, 844));
+      expect(InspectionProgress.instance.highestCompleted, 0);
+      expect(InspectionProgress.instance.isLocked(3), isTrue);
+      await tester.ensureVisible(find.text('Proceed to Location'));
+      await tester.tap(find.text('Proceed to Location'));
+      await settle(tester);
+      expect(find.byType(GpsVerificationScreen), findsOneWidget);
+      expect(InspectionProgress.instance.highestCompleted, 1);
+      expect(InspectionProgress.instance.isLocked(3), isTrue);
+      final confirmFinder = find.ancestor(
+        of: find.text('Confirm GPS'),
+        matching: find.byType(ElevatedButton),
+      );
+      if (location.available) {
+        final confirm = tester.widget<ElevatedButton>(confirmFinder);
+        expect(confirm.onPressed == null, location.name != 'under 30m');
+      } else {
+        expect(confirmFinder, findsNothing);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'lifecycle: fresh drive estimates are qualified and motion hides them',
+    (tester) async {
+      online = true;
+      httpFixture.routeJson = roadResponse([device, target]);
+      await tester.runAsync(() => db.delete('local_route_cache'));
+      await mount(tester, const Size(390, 844));
+      expect(find.text('ESTIMATED drive · ~8 min'), findsOneWidget);
+      expect(find.textContaining('not traffic-aware'), findsOneWidget);
+      gpsPoint = const LatLng(13.84285, 121.1765); // ~39 m movement.
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(1));
+      expect(find.text('ESTIMATED drive · ~8 min'), findsNothing);
+      expect(find.text('Estimate out of date'), findsOneWidget);
+      expect(routeLines(tester).first.points, [device, target]);
+    },
+  );
+
+  testWidgets(
+    'lifecycle: movement reroutes after 15s, never on every GPS tick',
+    (tester) async {
+      online = true;
+      httpFixture.routeJson = roadResponse([device, target]);
+      await tester.runAsync(() => db.delete('local_route_cache'));
+      await mount(tester, const Size(390, 844));
+      expect(httpFixture.requestedRoutes, hasLength(1));
+      gpsPoint = const LatLng(13.84285, 121.1765);
+      for (var i = 0; i < 10; i++) {
+        await sendPosition(tester);
+        await tester.pump(const Duration(seconds: 1));
+        expect(httpFixture.requestedRoutes, hasLength(1));
+      }
+      await tester.pump(const Duration(seconds: 6));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      expect(
+        httpFixture.requestedRoutes.last.path,
+        contains('121.1765,13.84285;'),
+      );
+      for (var i = 0; i < 10; i++) {
+        await sendPosition(tester);
+        await tester.pump();
+      }
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      expect(boundaryRequests, 0);
+    },
+  );
+
+  testWidgets(
+    'review: connectivity latency cannot shorten actual request spacing',
+    (tester) async {
+      online = true;
+      final dispatches = <DateTime>[];
+      httpFixture.routeResponse = (_) async {
+        dispatches.add(tester.binding.clock.now());
+        return roadResponse([gpsPoint, target]);
+      };
+      await mount(tester, const Size(390, 844));
+      await tester.pump(const Duration(seconds: 16));
+      final gate = Completer<List<String>>();
+      connectivityResponse = () => gate.future;
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete(['none']);
+      });
+      gpsPoint = const LatLng(13.84285, 121.1765);
+      await sendPosition(tester);
+      await tester.pump(const Duration(seconds: 12));
+      gate.complete(['wifi']);
+      await settle(tester);
+      expect(dispatches, hasLength(2));
+      gpsPoint = const LatLng(13.8432, 121.1765); // Another ~39m.
+      await sendPosition(tester);
+      await tester.pump(const Duration(seconds: 4));
+      await settle(tester);
+      expect(
+        dispatches,
+        hasLength(2),
+        reason: 'connectivity time cannot spend the provider request budget',
+      );
+      for (var i = 0; i < 10; i++) {
+        await sendPosition(tester);
+        await tester.pump(const Duration(seconds: 1));
+      }
+      await settle(tester);
+      expect(dispatches, hasLength(3));
+      expect(
+        dispatches.last.difference(dispatches[1]),
+        greaterThanOrEqualTo(const Duration(seconds: 15)),
+      );
+    },
+  );
+
+  testWidgets('review: obsolete failures still escalate 30/60/120s backoff', (
+    tester,
+  ) async {
+    online = true;
+    final replies = <Completer<String?>>[];
+    httpFixture.routeResponse = (_) {
+      final reply = Completer<String?>();
+      replies.add(reply);
+      return reply.future;
+    };
+    addTearDown(() async {
+      for (final reply in replies) {
+        if (!reply.isCompleted) reply.complete(null);
+      }
+      await settle(tester);
+    });
+    await mount(tester, const Size(390, 844));
+    final saved = routeLines(tester).first.points;
+    for (final stage in [
+      (delay: 30, count: 1),
+      (delay: 60, count: 2),
+      (delay: 120, count: 3),
+    ]) {
+      expect(replies, hasLength(stage.count));
+      gpsPoint = LatLng(
+        gpsPoint.latitude + 0.0006,
+        gpsPoint.longitude,
+      ); // ~67m.
+      await sendPosition(tester);
+      final failedAt = tester.binding.clock.now();
+      replies.last.complete(null);
+      await settle(tester);
+      final deadline = failedAt.add(Duration(seconds: stage.delay));
+      while (tester.binding.clock.now().isBefore(
+        deadline.subtract(const Duration(seconds: 1)),
+      )) {
+        await sendPosition(tester);
+        await tester.pump(const Duration(seconds: 1));
+        expect(
+          httpFixture.requestedRoutes,
+          hasLength(stage.count),
+          reason: 'obsolete failure must retain ${stage.delay}s backoff',
+        );
+      }
+      await tester.pump(const Duration(seconds: 2));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(stage.count + 1));
+      expect(
+        httpFixture.requestedRoutes.last.path,
+        contains('${gpsPoint.longitude},${gpsPoint.latitude};'),
+      );
+      expect(routeLines(tester).first.points, saved);
+      final cached = await tester.runAsync(
+        () => DBHelper.getRouteCache(task.id),
+      );
+      expect(cached!.points, saved);
+    }
+    replies.last.complete(null);
+    await settle(tester);
+  });
+
+  testWidgets('review: failure after GPS expiry still starts 30s backoff', (
+    tester,
+  ) async {
+    online = true;
+    gpsTimestamp = DateTime.now().subtract(const Duration(seconds: 10));
+    final replies = <Completer<String?>>[];
+    httpFixture.routeResponse = (_) {
+      final reply = Completer<String?>();
+      replies.add(reply);
+      return reply.future;
+    };
+    addTearDown(() async {
+      for (final reply in replies) {
+        if (!reply.isCompleted) reply.complete(null);
+      }
+      await settle(tester);
+    });
+    await mount(tester, const Size(390, 844));
+    final saved = routeLines(tester).first.points;
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.textContaining('GPS old or imprecise'), findsOneWidget);
+    final failedAt = tester.binding.clock.now();
+    replies.single.complete(null);
+    await settle(tester);
+    gpsTimestamp = null;
+    final deadline = failedAt.add(const Duration(seconds: 30));
+    while (tester.binding.clock.now().isBefore(
+      deadline.subtract(const Duration(seconds: 1)),
+    )) {
+      await sendPosition(tester);
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        httpFixture.requestedRoutes,
+        hasLength(1),
+        reason: 'expiry cannot waive a provider failure',
+      );
+    }
+    await tester.pump(const Duration(seconds: 2));
+    await sendPosition(tester);
+    await settle(tester);
+    expect(httpFixture.requestedRoutes, hasLength(2));
+    expect(routeLines(tester).first.points, saved);
+    final cached = await tester.runAsync(() => DBHelper.getRouteCache(task.id));
+    expect(cached!.points, saved);
+    replies.last.complete(null);
+    await settle(tester);
+  });
+
+  testWidgets(
+    'lifecycle: meaningful lateral deviation responds below movement threshold',
+    (tester) async {
+      online = true;
+      httpFixture.routeJson = roadResponse([
+        device,
+        const LatLng(13.85, 121.1765),
+      ]);
+      await tester.runAsync(() => db.delete('local_route_cache'));
+      await mount(tester, const Size(390, 844));
+      gpsPoint = const LatLng(13.8425, 121.1763); // ~22 m lateral deviation.
+      await sendPosition(tester);
+      await tester.pump(const Duration(seconds: 16));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      for (var i = 0; i < 6; i++) {
+        await sendPosition(tester);
+        await tester.pump(const Duration(seconds: 3));
+      }
+      await settle(tester);
+      expect(
+        httpFixture.requestedRoutes,
+        hasLength(2),
+        reason:
+            'a stable snapped-road offset must not cause repeated rerouting',
+      );
+    },
+  );
+
+  testWidgets(
+    'lifecycle: failure backoff retains real cached roads while offline',
+    (tester) async {
+      online = true;
+      await mount(tester, const Size(390, 844));
+      final saved = routeLines(tester).first.points;
+      expect(httpFixture.requestedRoutes, hasLength(1));
+      for (var i = 0; i < 5; i++) {
+        await sendPosition(tester);
+        await tester.pump(const Duration(seconds: 4));
+      }
+      expect(httpFixture.requestedRoutes, hasLength(1));
+      await tester.pump(const Duration(seconds: 11));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      await tester.pump(const Duration(seconds: 40));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      await tester.pump(const Duration(seconds: 21));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(3));
+      online = false;
+      await tester.pump(const Duration(seconds: 121));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(3));
+      expect(routeLines(tester).first.points, saved);
+      expect(find.text('Saved road route'), findsOneWidget);
+      expect(find.text('ESTIMATED drive · ~8 min'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'lifecycle: obsolete response cannot replace current geometry or cache',
+    (tester) async {
+      online = true;
+      final reply = Completer<String?>();
+      httpFixture.routeResponse = (_) => reply.future;
+      addTearDown(() async {
+        if (!reply.isCompleted) reply.complete(null);
+        await settle(tester);
+      });
+      await mount(tester, const Size(390, 844));
+      final saved = routeLines(tester).first.points;
+      gpsPoint = const LatLng(
+        13.844,
+        121.1765,
+      ); // ~167 m beyond request origin.
+      await sendPosition(tester);
+      reply.complete(
+        roadResponse([device, const LatLng(13.84, 121.183), target]),
+      );
+      await settle(tester);
+      expect(routeLines(tester).first.points, saved);
+      final cache = await tester.runAsync(
+        () => DBHelper.getRouteCache(task.id),
+      );
+      expect(cache!.points, saved);
+      httpFixture.routeResponse = (_) async => roadResponse([gpsPoint, target]);
+      await tester.pump(const Duration(seconds: 16));
+      await sendPosition(tester);
+      await settle(tester);
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      expect(routeLines(tester).first.points, [gpsPoint, target]);
+      expect(
+        tester.widget<MarkerLayer>(find.byType(MarkerLayer)).markers.last.point,
+        gpsPoint,
+      );
+    },
+  );
+
+  testWidgets(
+    'lifecycle: response after screen disposal cannot mutate route cache',
+    (tester) async {
+      online = true;
+      final reply = Completer<String?>();
+      httpFixture.routeResponse = (_) => reply.future;
+      addTearDown(() async {
+        if (!reply.isCompleted) reply.complete(null);
+        await settle(tester);
+      });
+      await mount(tester, const Size(390, 844));
+      final saved = routeLines(tester).first.points;
+      await tester.pumpWidget(const SizedBox.shrink());
+      reply.complete(
+        roadResponse([device, const LatLng(13.84, 121.183), target]),
+      );
+      await settle(tester);
+      final cache = await tester.runAsync(
+        () => DBHelper.getRouteCache(task.id),
+      );
+      expect(cache!.points, saved);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'lifecycle: late cache read cannot overwrite a newer live route',
+    (tester) async {
+      online = true;
+      final release = Completer<void>();
+      DBHelper.useDatabaseForTesting(_DelayedRouteRead(db, release.future));
+      addTearDown(() async {
+        if (!release.isCompleted) release.complete();
+        DBHelper.useDatabaseForTesting(db);
+        await settle(tester);
+      });
+      final fresh = [device, const LatLng(13.84, 121.183), target];
+      httpFixture.routeJson = roadResponse(fresh);
+      await mount(tester, const Size(390, 844));
+      expect(routeLines(tester).first.points, fresh);
+      release.complete();
+      await settle(tester);
+      expect(routeLines(tester).first.points, fresh);
+      expect(find.text('Saved road route'), findsNothing);
+    },
+  );
+
+  testWidgets('lifecycle: reconnects share the same request budget', (
+    tester,
+  ) async {
+    await mount(tester, const Size(390, 844));
+    expect(httpFixture.requestedRoutes, isEmpty);
+    httpFixture.routeJson = roadResponse([device, target]);
+    Future<void> connectivity(bool connected) async {
+      online = connected;
+      await messenger.handlePlatformMessage(
+        'dev.fluttercommunity.plus/connectivity_status',
+        const StandardMethodCodec().encodeSuccessEnvelope([
+          connected ? 'wifi' : 'none',
+        ]),
+        (_) {},
+      );
+      await settle(tester);
+    }
+
+    await connectivity(true);
+    await connectivity(true);
+    expect(httpFixture.requestedRoutes, hasLength(1));
+    await connectivity(false);
+    await connectivity(true);
+    expect(httpFixture.requestedRoutes, hasLength(1));
+    await tester.pump(const Duration(seconds: 16));
+    await sendPosition(tester);
+    await settle(tester);
+    expect(httpFixture.requestedRoutes, hasLength(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'lifecycle: slow cache persistence drains the queued current route',
+    (tester) async {
+      online = true;
+      final release = Completer<void>();
+      DBHelper.useDatabaseForTesting(
+        _DelayedRouteRead(db, release.future, delayWrites: true),
+      );
+      httpFixture.routeResponse = (_) async => roadResponse([gpsPoint, target]);
+      addTearDown(() async {
+        if (!release.isCompleted) release.complete();
+        DBHelper.useDatabaseForTesting(db);
+        await settle(tester);
+      });
+      await mount(tester, const Size(390, 844));
+      await tester.pump(const Duration(seconds: 16));
+      gpsPoint = const LatLng(13.844, 121.1765);
+      await sendPosition(tester);
+      release.complete();
+      await settle(tester); // No additional GPS tick after cache completion.
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      expect(routeLines(tester).first.points, [gpsPoint, target]);
+    },
+  );
+
+  testWidgets(
+    'lifecycle: simultaneous Step 1 instances share the provider budget',
+    (tester) async {
+      online = true;
+      httpFixture.routeJson = roadResponse([device, target]);
+      final provider = InspectionProvider();
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(780, 844);
+      addTearDown(tester.view.reset);
+      addTearDown(provider.dispose);
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: provider,
+          child: MaterialApp(
+            home: Row(
+              children: [
+                Expanded(child: SiteMapScreen(task: task)),
+                Expanded(child: SiteMapScreen(task: task)),
+              ],
+            ),
+          ),
+        ),
+      );
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 25));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 40)),
+        );
+      }
+      expect(httpFixture.requestedRoutes, hasLength(1));
+      await tester.pump(const Duration(milliseconds: 1100));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 25));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 40)),
+        );
+      }
+      expect(httpFixture.requestedRoutes, hasLength(2));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'lifecycle: future timestamp does not trap subsequent healthy GPS',
+    (tester) async {
+      gpsPoint = const LatLng(13.848, 121.19);
+      gpsTimestamp = DateTime.now().add(const Duration(minutes: 1));
+      await mount(tester, const Size(390, 844));
+      expect(find.textContaining('Near the mapped site'), findsNothing);
+      gpsTimestamp = null;
+      await sendPosition(tester);
+      await settle(tester);
+      expect(find.textContaining('Near the mapped site'), findsOneWidget);
+    },
+  );
+
+  testWidgets('lifecycle: old GPS event cannot move the blue dot backwards', (
+    tester,
+  ) async {
+    await mount(tester, const Size(390, 844));
+    gpsPoint = const LatLng(13.8478, 121.19);
+    await sendPosition(tester);
+    await settle(tester);
+    gpsTimestamp = DateTime.now().subtract(const Duration(minutes: 1));
+    gpsPoint = device;
+    await sendPosition(tester);
+    await settle(tester);
+    expect(
+      tester.widget<MarkerLayer>(find.byType(MarkerLayer)).markers.last.point,
+      const LatLng(13.8478, 121.19),
+    );
+    expect(find.textContaining('Near the mapped site'), findsOneWidget);
+  });
+
+  testWidgets('lifecycle: aged geometry survives but its ETA expires', (
+    tester,
+  ) async {
+    online = true;
+    httpFixture.routeJson = roadResponse([device, target]);
+    await tester.runAsync(() => db.delete('local_route_cache'));
+    await mount(tester, const Size(390, 844));
+    expect(find.text('ESTIMATED drive · ~8 min'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 121));
+    await sendPosition(tester);
+    await settle(tester);
+    expect(find.text('ESTIMATED drive · ~8 min'), findsNothing);
+    expect(find.text('Estimate out of date'), findsOneWidget);
+    expect(routeLines(tester).first.points, [device, target]);
+    expect(
+      httpFixture.requestedRoutes,
+      hasLength(1),
+      reason: 'a stationary device must not poll the route provider',
+    );
+  });
+
+  for (final scale in [1.0, 2.0]) {
+    testWidgets('guidance: links and advisory keep controls usable at $scale', (
+      tester,
+    ) async {
+      gpsPoint = const LatLng(13.848, 121.19);
+      await tester.runAsync(
+        () => saveRoad([offsetStart, const LatLng(13.8478, 121.186)]),
+      );
+      await mount(tester, const Size(390, 844), scale: scale);
+      final semantics = tester.ensureSemantics();
+      try {
+        for (final size in [
+          const Size(390, 844),
+          const Size(320, 568),
+          const Size(640, 360),
+          const Size(844, 390),
+        ]) {
+          tester.view.physicalSize = size;
+          await sendPosition(tester);
+          await settle(tester);
+          final fit = tester.getRect(find.byTooltip('Fit both markers'));
+          final full = tester.getRect(find.byTooltip('Full map'));
+          final attribution = tester.getRect(
+            find
+                .ancestor(
+                  of: find.text('© OpenStreetMap contributors'),
+                  matching: find.byType(Container),
+                )
+                .first,
+          );
+          expect(fit.size, const Size(48, 48));
+          expect(full.size, const Size(48, 48));
+          expect(
+            fit.overlaps(attribution),
+            isFalse,
+            reason: '$size / $scale fit $fit attribution $attribution',
+          );
+          expect(
+            full.overlaps(attribution),
+            isFalse,
+            reason: '$size / $scale full $full attribution $attribution',
+          );
+          expect(
+            find.byTooltip('Fit both markers').hitTestable(),
+            findsOneWidget,
+          );
+          expect(find.byTooltip('Full map').hitTestable(), findsOneWidget);
+          await tester.ensureVisible(find.text('Proceed to Location'));
+          await settle(tester);
+          expect(
+            find.text('Proceed to Location').hitTestable(),
+            findsOneWidget,
+          );
+          await captureGuidance(
+            tester,
+            'near-${size.width.toInt()}-${size.height.toInt()}-${scale.toInt()}x',
+          );
+          await tester.tap(find.byTooltip('Full map'));
+          await settle(tester);
+          expect(
+            find.byTooltip('Fit both markers').hitTestable(),
+            findsOneWidget,
+          );
+          expect(find.text('© OpenStreetMap contributors'), findsOneWidget);
+          await captureGuidance(
+            tester,
+            'full-${size.width.toInt()}-${scale.toInt()}x',
+          );
+          await tester.tap(find.byTooltip('Exit full map'));
+          await settle(tester);
+          expect(tester.takeException(), isNull, reason: '$size / $scale');
+        }
+      } finally {
+        semantics.dispose();
+      }
     });
   }
 
@@ -413,10 +1418,17 @@ void main() {
               expect(bounds.bottom, lessThanOrEqualTo(size.height - 24));
             }
             if (size.width < size.height) {
-              expect(tester.getCenter(full).dx, tester.getCenter(fit).dx);
+              final fullBounds = tester.getRect(full);
+              final fitBounds = tester.getRect(fit);
               expect(
-                tester.getRect(full).bottom,
-                lessThanOrEqualTo(tester.getRect(fit).top),
+                (fullBounds.center.dx - fitBounds.center.dx).abs() < 1 &&
+                        fullBounds.bottom <= fitBounds.top ||
+                    (fullBounds.center.dy - fitBounds.center.dy).abs() < 1 &&
+                        fullBounds.right <= fitBounds.left,
+                isTrue,
+                reason:
+                    'Complete targets form a non-overlapping row or column '
+                    'at $size / $scale: $fullBounds and $fitBounds',
               );
             } else {
               expect(
@@ -460,7 +1472,7 @@ void main() {
     'normal phone details group related metrics without dominating the map',
     (tester) async {
       await mount(tester, const Size(360, 800));
-      final site = tester.getRect(find.text('Site distance'));
+      final site = tester.getRect(find.text('Direct to mapped site'));
       final road = tester.getRect(find.text('Saved road route'));
       expect((site.top - road.top).abs(), lessThan(4));
       expect(site.right, lessThan(road.left));
@@ -497,7 +1509,10 @@ void main() {
     );
     final viewport = tester.getRect(
       find
-          .ancestor(of: action, matching: find.byType(SingleChildScrollView))
+          .ancestor(
+            of: find.text('Site details'),
+            matching: find.byType(Container),
+          )
           .first,
     );
     final button = tester.getRect(action);
@@ -515,7 +1530,7 @@ void main() {
     await settle(tester);
     expect(
       tester.getRect(find.text('Saved road route')).top,
-      greaterThan(tester.getRect(find.text('Site distance')).bottom),
+      greaterThan(tester.getRect(find.text('Direct to mapped site')).bottom),
       reason: 'the actual enlarged caption size requires stacked metrics',
     );
     final backControl = find
@@ -537,38 +1552,98 @@ void main() {
   });
 
   for (final close in [false, true]) {
-    testWidgets('Map labels remain readable ${close ? 'near-coincident' : 'far'} at normal and enlarged text', (tester) async {
-      if (close) {
-        await tester.runAsync(() async {
-          await db.delete('local_route_cache');
-          await db.update('local_jobs', {'parcel_lat': 13.84251, 'parcel_lng': 121.17651});
-        });
-      }
-      for (final (size, scale) in [(const Size(390, 844), 1.0), (const Size(844, 390), 2.0)]) {
-        await tester.pumpWidget(const SizedBox.shrink());
-        await mount(tester, size, scale: scale);
-        await tester.tap(find.byTooltip('Fit both markers'));
-        await settle(tester);
-        final targetLabel = tester.getRect(find.ancestor(of: find.text('Target site'), matching: find.byType(Container)).first);
-        final deviceLabel = tester.getRect(find.ancestor(of: find.text('You'), matching: find.byType(Container)).first);
-        final header = find.ancestor(of: find.byType(InspectionStepHeader), matching: find.byType(SingleChildScrollView)).first;
-        final panel = find.ancestor(of: find.text('Site details'), matching: find.byType(Container)).first;
-        final attribution = find.ancestor(of: find.text('© OpenStreetMap contributors'), matching: find.byType(Container)).first;
-        for (final label in [targetLabel, deviceLabel]) {
-          expect(label.left, greaterThanOrEqualTo(0), reason: '$size/$scale: $label');
-          expect(label.right, lessThanOrEqualTo(size.width), reason: '$size/$scale: $label');
-          expect(label.top, greaterThanOrEqualTo(24));
-          expect(label.bottom, lessThanOrEqualTo(size.height - 24));
-          for (final overlay in [header, panel, attribution, find.byTooltip('Full map'), find.byTooltip('Fit both markers')]) {
-            expect(label.overlaps(tester.getRect(overlay)), isFalse,
-              reason: '$size/$scale: label $label overlaps $overlay ${tester.getRect(overlay)}');
-          }
+    testWidgets(
+      'Map labels remain readable ${close ? 'near-coincident' : 'far'} at normal and enlarged text',
+      (tester) async {
+        if (close) {
+          await tester.runAsync(() async {
+            await db.delete('local_route_cache');
+            await db.update('local_jobs', {
+              'parcel_lat': 13.84251,
+              'parcel_lng': 121.17651,
+            });
+          });
         }
-        expect(targetLabel.overlaps(deviceLabel), isFalse,
-          reason: 'Both identities must remain legible even when their coordinates are close.');
-        expect(tester.takeException(), isNull);
-      }
-    });
+        for (final (size, scale) in [
+          (const Size(390, 844), 1.0),
+          (const Size(844, 390), 2.0),
+        ]) {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await mount(tester, size, scale: scale);
+          await tester.tap(find.byTooltip('Fit both markers'));
+          await settle(tester);
+          final targetLabel = tester.getRect(
+            find
+                .ancestor(
+                  of: find.text('Target site'),
+                  matching: find.byType(Container),
+                )
+                .first,
+          );
+          final deviceLabel = tester.getRect(
+            find
+                .ancestor(
+                  of: find.text('You'),
+                  matching: find.byType(Container),
+                )
+                .first,
+          );
+          final header = find
+              .ancestor(
+                of: find.byType(InspectionStepHeader),
+                matching: find.byType(SingleChildScrollView),
+              )
+              .first;
+          final panel = find
+              .ancestor(
+                of: find.text('Site details'),
+                matching: find.byType(Container),
+              )
+              .first;
+          final attribution = find
+              .ancestor(
+                of: find.text('© OpenStreetMap contributors'),
+                matching: find.byType(Container),
+              )
+              .first;
+          for (final label in [targetLabel, deviceLabel]) {
+            expect(
+              label.left,
+              greaterThanOrEqualTo(0),
+              reason: '$size/$scale: $label',
+            );
+            expect(
+              label.right,
+              lessThanOrEqualTo(size.width),
+              reason: '$size/$scale: $label',
+            );
+            expect(label.top, greaterThanOrEqualTo(24));
+            expect(label.bottom, lessThanOrEqualTo(size.height - 24));
+            for (final overlay in [
+              header,
+              panel,
+              attribution,
+              find.byTooltip('Full map'),
+              find.byTooltip('Fit both markers'),
+            ]) {
+              expect(
+                label.overlaps(tester.getRect(overlay)),
+                isFalse,
+                reason:
+                    '$size/$scale: label $label overlaps $overlay ${tester.getRect(overlay)}',
+              );
+            }
+          }
+          expect(
+            targetLabel.overlaps(deviceLabel),
+            isFalse,
+            reason:
+                'Both identities must remain legible even when their coordinates are close.',
+          );
+          expect(tester.takeException(), isNull);
+        }
+      },
+    );
   }
 
   testWidgets('fresh small-phone open fits after enlarged overlays settle', (
@@ -681,7 +1756,9 @@ void main() {
           'cached label: ${find.text('Saved road route').evaluate().length}',
     );
     expect(find.text('Saved road route'), findsNothing);
-    expect(find.text('3.4 km · ~8 min'), findsOneWidget);
+    expect(find.text('3.4 km'), findsOneWidget);
+    expect(find.text('ESTIMATED drive · ~8 min'), findsOneWidget);
+    expect(find.textContaining('not traffic-aware'), findsOneWidget);
     final output = Platform.environment['IMAPS_SITE_VISUAL_DIR'];
     final measurements = <String, Object>{};
     Future<void> capture(String name) async {
@@ -892,7 +1969,7 @@ void main() {
       final mapState = tester.state(find.byType(FlutterMap));
       await tester.tap(find.byTooltip('Hide site details'));
       await settle(tester);
-      expect(find.text('Site distance'), findsNothing);
+      expect(find.text('Direct to mapped site'), findsNothing);
       expect(find.byTooltip('Show site details'), findsOneWidget);
       final collapsedFit = tester.getCenter(find.byTooltip('Fit both markers'));
       await tester.tap(find.byTooltip('Full map'));
@@ -910,7 +1987,7 @@ void main() {
       await settle(tester);
       await tester.tap(find.byTooltip('Show site details'));
       await settle(tester);
-      expect(find.text('Site distance'), findsOneWidget);
+      expect(find.text('Direct to mapped site'), findsOneWidget);
       expect(
         tester.getCenter(find.byTooltip('Fit both markers')).dy,
         lessThan(collapsedFit.dy),

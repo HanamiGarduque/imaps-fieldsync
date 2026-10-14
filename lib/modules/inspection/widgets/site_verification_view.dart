@@ -27,6 +27,10 @@ class SiteVerificationView extends StatefulWidget {
     this.distanceMeters,
     this.routeDistanceMeters,
     this.routeDurationSeconds,
+    this.approachNotice = false,
+    this.gpsReliable = false,
+    this.hasDirectLinks = false,
+    this.routeEstimateStale = false,
   });
 
   final Widget Function(EdgeInsets padding) mapBuilder;
@@ -41,6 +45,10 @@ class SiteVerificationView extends StatefulWidget {
   final double? distanceMeters;
   final double? routeDistanceMeters;
   final double? routeDurationSeconds;
+  final bool approachNotice;
+  final bool gpsReliable;
+  final bool hasDirectLinks;
+  final bool routeEstimateStale;
   final VoidCallback onBack;
   final VoidCallback onRetryLocation;
   final VoidCallback onFit;
@@ -65,6 +73,21 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
   double _detailsHeaderHeight = 48;
   double _actionHeight = 52;
   static const _motion = Duration(milliseconds: 220);
+
+  Size _textSize(
+    String text,
+    TextStyle style, {
+    double width = double.infinity,
+  }) {
+    final measure = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout(maxWidth: math.max(1.0, width));
+    final size = measure.size;
+    measure.dispose();
+    return size;
+  }
 
   void _measureOverlays(Size mapSize, EdgeInsets fitPadding) {
     if (!mounted) return;
@@ -112,9 +135,59 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         final split = landscape && !_fullscreen && !_collapsed && widget.ready;
         final sideWidth = (width * 0.34).clamp(260.0, 336.0);
         final mapRight = split ? safe.right + sideWidth + 24 : 0.0;
-        final controlsHeight = landscape ? 48.0 : 104.0;
+        // Measure these wrapping labels before the FIRST layout/rotation. The
+        // previous viewport's measured heights can be too small for a pinned CTA.
+        final innerWidth =
+            (split ? sideWidth : math.min(520.0, width - 32)) - 26;
+        final buttonStyle = Theme.of(context).textTheme.labelLarge!;
+        final hideStyle = buttonStyle.merge(InsightTheme.inter(12));
+        final hideWidth = math.max(
+          48.0,
+          _textSize(_collapsed ? 'Show' : 'Hide', hideStyle).width + 38,
+        );
+        final headerMinimum = math
+            .max(
+              48.0,
+              math.max(
+                _textSize(
+                  'Site details',
+                  DefaultTextStyle.of(
+                    context,
+                  ).style.merge(InsightTheme.urbanist(14)),
+                  width: innerWidth - hideWidth,
+                ).height,
+                _textSize('Hide', hideStyle).height + 16,
+              ),
+            )
+            .ceilToDouble();
+        final actionMinimum = math
+            .max(
+              52.0,
+              _textSize(
+                    widget.rework ? 'Save' : 'Proceed to Location',
+                    buttonStyle.merge(
+                      InsightTheme.inter(14, w: FontWeight.w600),
+                    ),
+                    width: innerWidth - 58,
+                  ).height +
+                  28,
+            )
+            .ceilToDouble();
         // Measured content covers nonlinear font scaling and wrapped actions.
-        final panelMinHeight = _detailsHeaderHeight + _actionHeight + 12 + 2;
+        // Reserve a readable scroll line as well as the pinned primary action.
+        final panelMinHeight =
+            math.max(_detailsHeaderHeight, headerMinimum) +
+            math.max(_actionHeight, actionMinimum) +
+            8 +
+            12 +
+            2 +
+            MediaQuery.textScalerOf(context).scale(12) * 1.6;
+        final horizontalControls =
+            landscape ||
+            (!_fullscreen &&
+                height <
+                    _headerHeight + panelMinHeight + _attributionHeight + 144);
+        final controlsHeight = horizontalControls ? 48.0 : 104.0;
         // The established header is unchanged. Very large text on a short phone
         // scrolls its two context containers rather than hiding either of them.
         final headerMaxHeight = landscape
@@ -135,7 +208,9 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
             : math.max(
                 panelMinHeight,
                 math.min(
-                  height * 0.44,
+                  (widget.approachNotice || widget.nearSite ? 240 : 216) *
+                      MediaQuery.textScalerOf(context).scale(12) /
+                      12,
                   // Reserve both full targets, three 8dp gaps and 16dp bottom.
                   height -
                       _headerHeight -
@@ -204,7 +279,9 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                 left: landscape ? safe.left + 16 : null,
                 right: landscape ? null : safe.right + 16,
                 child: Flex(
-                  direction: landscape ? Axis.horizontal : Axis.vertical,
+                  direction: horizontalControls
+                      ? Axis.horizontal
+                      : Axis.vertical,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _MapControl(
@@ -216,8 +293,8 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                           setState(() => _fullscreen = !_fullscreen),
                     ),
                     SizedBox(
-                      width: landscape ? 8 : 0,
-                      height: landscape ? 0 : 8,
+                      width: horizontalControls ? 8 : 0,
+                      height: horizontalControls ? 0 : 8,
                     ),
                     _MapControl(
                       label: 'Fit both markers',
@@ -240,7 +317,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                     key: _attributionKey,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
-                      vertical: 4,
+                      vertical: 2,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.72),
@@ -250,6 +327,9 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // A scrollable explanation can be off-screen. Keep the
+                        // legend on-map, or pinned in the expanded side pane.
+                        if (widget.hasDirectLinks && !split) _linkLegend(),
                         Text(
                           '– –  Rosario boundary · MPDO Rosario',
                           style: InsightTheme.inter(12, c: InsightTheme.ink2),
@@ -284,7 +364,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       duration: _motion,
                       curve: Curves.easeOutCubic,
                       alignment: Alignment.bottomCenter,
-                      child: _details(),
+                      child: _details(showLinkLegend: split),
                     ),
                   ),
                 ),
@@ -295,7 +375,16 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
     );
   }
 
-  Widget _details() {
+  Widget _linkLegend() => Semantics(
+    label: 'Schematic direct links: access unverified',
+    excludeSemantics: true,
+    child: Text(
+      '··· Unverified links',
+      style: InsightTheme.inter(12, c: InsightTheme.ink2),
+    ),
+  );
+
+  Widget _details({required bool showLinkLegend}) {
     return Container(
       key: _panelKey,
       decoration: BoxDecoration(
@@ -320,7 +409,15 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
               key: _detailsHeaderKey,
               children: [
                 Expanded(
-                  child: Text('Site details', style: InsightTheme.urbanist(14)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Site details', style: InsightTheme.urbanist(14)),
+                      if (showLinkLegend && widget.hasDirectLinks)
+                        _linkLegend(),
+                    ],
+                  ),
                 ),
                 TextButton(
                   onPressed: () => setState(() => _collapsed = !_collapsed),
@@ -353,13 +450,17 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                 ),
               ],
             ),
-            if (!_collapsed)
+            if (!_collapsed) ...[
               Flexible(
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (widget.approachNotice || widget.nearSite) ...[
+                        _guidanceNotice(),
+                        const SizedBox(height: 8),
+                      ],
                       LayoutBuilder(
                         builder: (context, box) {
                           final stacked =
@@ -392,102 +493,113 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            'Saved estimate. Offline rerouting is unavailable; street tiles may be missing. Connect to refresh.',
+                            'Saved geometry. Offline rerouting is unavailable; street tiles may be missing. Estimates need a fresh route.',
                             style: InsightTheme.inter(12, c: InsightTheme.ink3),
                           ),
                         ),
                       const SizedBox(height: 8),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.only(top: 2),
-                            child: Icon(
-                              Icons.info_outline_rounded,
-                              size: 14,
-                              color: InsightTheme.ink3,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              widget.nearSite
-                                  ? 'Near site · confirm GPS in Step 2.'
-                                  : 'GPS confirmation happens in Step 2.',
-                              style: InsightTheme.inter(
-                                12,
-                                c: widget.nearSite
-                                    ? InsightTheme.greenInk
-                                    : InsightTheme.ink3,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: InsightTheme.primaryGradient,
-                          borderRadius: BorderRadius.circular(16),
+                      if (!widget.approachNotice && !widget.nearSite)
+                        _guidanceNotice(),
+                      if (widget.approachNotice || widget.nearSite)
+                        Text(
+                          'Step 2 gives direct compass orientation when safely stopped/on foot. A bearing is not a verified access path.',
+                          style: InsightTheme.inter(12, c: InsightTheme.ink3),
                         ),
-                        child: ElevatedButton(
-                          key: _actionKey,
-                          onPressed: widget.onProceed,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.transparent,
-                            foregroundColor: Colors.white,
-                            shadowColor: Colors.transparent,
-                            elevation: 0,
-                            minimumSize: const Size(double.infinity, 52),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  widget.rework
-                                      ? 'Save'
-                                      : 'Proceed to Location',
-                                  textAlign: TextAlign.center,
-                                  style: InsightTheme.inter(
-                                    14,
-                                    w: FontWeight.w600,
-                                    c: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Icon(
-                                widget.rework
-                                    ? Icons.check_rounded
-                                    : Icons.arrow_forward_rounded,
-                                size: 18,
-                              ),
-                            ],
+                      if (widget.hasDirectLinks)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Dotted links are schematic straight lines, not verified roads or walkable access.',
+                            style: InsightTheme.inter(12, c: InsightTheme.ink3),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
               ),
+              const SizedBox(height: 8),
+              _proceedAction(),
+            ],
           ],
         ),
       ),
     );
   }
 
+  Widget _guidanceNotice() => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Padding(
+        padding: EdgeInsets.only(top: 2),
+        child: Icon(
+          Icons.info_outline_rounded,
+          size: 14,
+          color: InsightTheme.ink3,
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+          widget.nearSite
+              ? 'GPS estimate ≤30 m from the mapped point · informational only. Confirm in Step 2.'
+              : widget.approachNotice
+              ? 'Near the mapped site (~100 m). You can open GPS Verification when safely stopped/on foot; confirm within 30 m.'
+              : 'Step 2 provides direct compass orientation when safely stopped and on foot. Site confirmation requires 30 m; the compass does not verify an access path.',
+          style: InsightTheme.inter(
+            12,
+            c: widget.nearSite ? InsightTheme.greenInk : InsightTheme.ink3,
+          ),
+        ),
+      ),
+    ],
+  );
+
+  // Keep the primary action outside the scrolling guidance, at every distance.
+  Widget _proceedAction() => DecoratedBox(
+    decoration: BoxDecoration(
+      gradient: InsightTheme.primaryGradient,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: ElevatedButton(
+      key: _actionKey,
+      onPressed: widget.onProceed,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        shadowColor: Colors.transparent,
+        elevation: 0,
+        minimumSize: const Size(double.infinity, 52),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            child: Text(
+              widget.rework ? 'Save' : 'Proceed to Location',
+              textAlign: TextAlign.center,
+              style: InsightTheme.inter(
+                14,
+                w: FontWeight.w600,
+                c: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(
+            widget.rework ? Icons.check_rounded : Icons.arrow_forward_rounded,
+            size: 18,
+          ),
+        ],
+      ),
+    ),
+  );
+
   Widget _siteMetric() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text('Site distance', style: InsightTheme.inter(12)),
+      Text('Direct to mapped site', style: InsightTheme.inter(12)),
       const SizedBox(height: 6),
       if (widget.hasDeviceLocation) ...[
         Text(
@@ -499,6 +611,13 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
             w: FontWeight.w700,
             c: InsightTheme.ink,
           ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          widget.gpsReliable
+              ? 'Straight line to mapped point'
+              : 'GPS old or imprecise · approximate',
+          style: InsightTheme.inter(12, c: InsightTheme.ink3),
         ),
       ] else ...[
         Text(
@@ -559,18 +678,35 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
           widget.routeDistanceMeters == null &&
                   widget.routeDurationSeconds == null
               ? 'Estimate unavailable'
-              : [
-                  if (widget.routeDistanceMeters != null)
-                    _distance(widget.routeDistanceMeters!),
-                  if (widget.routeDurationSeconds != null)
-                    '~${_duration(widget.routeDurationSeconds!)}',
-                ].join(' · '),
+              : widget.routeEstimateStale
+              ? 'Estimate out of date'
+              : widget.routeDistanceMeters == null
+              ? 'Road length unavailable'
+              : _distance(widget.routeDistanceMeters!),
           style: InsightTheme.inter(
             15,
             w: FontWeight.w700,
             c: InsightTheme.ink,
           ),
         ),
+        if (!widget.routeEstimateStale && widget.routeDurationSeconds != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'ESTIMATED drive · ~${_duration(widget.routeDurationSeconds!)}',
+              style: InsightTheme.inter(12, w: FontWeight.w600),
+            ),
+          ),
+        if (!widget.routeEstimateStale &&
+            (widget.routeDistanceMeters != null ||
+                widget.routeDurationSeconds != null))
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Roads only · not traffic-aware; direct links excluded.',
+              style: InsightTheme.inter(12, c: InsightTheme.ink3),
+            ),
+          ),
       ] else ...[
         Text(
           'Road route unavailable',
@@ -590,8 +726,8 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
       : '${(meters / 1000).toStringAsFixed(meters < 10000 ? 1 : 0)} km';
 
   static String _duration(double seconds) {
-    final minutes = (seconds / 60).round();
-    if (minutes < 1) return 'less than a minute';
+    if (seconds < 60) return 'less than a minute';
+    final minutes = (seconds / 60).ceil();
     if (minutes < 60) return '$minutes min';
     return '${minutes ~/ 60}h ${minutes % 60}m';
   }

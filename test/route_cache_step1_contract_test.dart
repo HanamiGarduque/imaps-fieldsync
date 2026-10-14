@@ -2,8 +2,8 @@
 //
 // The DB-level behaviour (schema, isolation, serialization) is proven
 // executably in route_cache_db_test.dart. This file proves the SCREEN contract:
-// that only real OSRM geometry is ever drawn as a road route, that the
-// synthetic line is gone, that the blue dot stays independent, and that nothing
+// that only real OSRM geometry is ever drawn as a road route, schematic links
+// never become a synthetic road fallback, the blue dot stays independent, and nothing
 // about GPS verification, step completion, the Rosario boundary or Quick Action
 // changed.
 
@@ -30,7 +30,7 @@ void main() {
   final routeSource = File(routeService).readAsStringSync();
   final boundarySource = File(boundaryWidget).readAsStringSync();
 
-  test('the synthetic route is gone from the codebase entirely', () {
+  test('no fabricated road fallback survives in the codebase', () {
     expect(
       step1Source,
       isNot(contains('_buildRoutePath')),
@@ -74,11 +74,11 @@ void main() {
   test(
     'cache failure never removes the route the inspector is looking at',
     () async {
-      // The persist call is fire-and-forget and wrapped, and it is invoked AFTER
-      // the state fields are assigned, so a throw cannot undo them.
+      // Persistence is serialized with the request and wrapped, AFTER the state
+      // fields and paint are assigned, so a cache failure cannot undo the route.
       final assignAt = step1Source.indexOf('_routePoints = result.points;');
       final persistAt = step1Source.indexOf(
-        'unawaited(_persistRoute(result, start));',
+        'await _persistRoute(result, start);',
       );
       expect(assignAt, greaterThan(0));
       expect(persistAt, greaterThan(assignAt));
@@ -111,17 +111,15 @@ void main() {
     expect(step1Source, contains('routeFromCache: _routeFromCache'));
     expect(viewSource, contains("'Saved road route'"));
     expect(viewSource, contains("'Road route'"));
-    expect(viewSource, isNot(contains('Cached road route · Offline')),
-        reason: 'cache provenance does not prove current connectivity');
+    expect(
+      viewSource,
+      isNot(contains('Cached road route · Offline')),
+      reason: 'cache provenance does not prove current connectivity',
+    );
   });
 
   test('no route at all reports honestly instead of drawing a fake one', () {
-    expect(
-      viewSource,
-      contains(
-        'Road route unavailable',
-      ),
-    );
+    expect(viewSource, contains('Road route unavailable'));
     // The notice is informational: it must not gate the Proceed button.
     expect(viewSource, contains('onPressed: widget.onProceed'));
     expect(step1Source, contains('onProceed: _proceed'));
@@ -137,7 +135,14 @@ void main() {
     final updateEnd = step1Source.indexOf('\n  }', updateStart);
     final update = step1Source.substring(updateStart, updateEnd);
     // Moving the device marker must not recompute or mutate the route.
-    expect(update, contains('_deviceLatLng = newPos;'));
+    expect(update, contains('_acceptFix(pos)'));
+    final acceptStart = step1Source.indexOf('bool _acceptFix(');
+    final accept = step1Source.substring(
+      acceptStart,
+      step1Source.indexOf('\n  }', acceptStart),
+    );
+    expect(accept, contains('_deviceLatLng = newPos;'));
+    expect(accept, isNot(contains('nearestSiteRoadPoint')));
     expect(update, contains('setState('));
     // A GPS tick may never assign route geometry or touch the route cache.
     expect(RegExp(r'_routePoints\s*=').hasMatch(update), isFalse);
@@ -165,12 +170,12 @@ void main() {
         step1Source.indexOf('Future<void> _fetchRoute('),
         step1Source.indexOf('Future<void> _persistRoute('),
       );
+      expect(fetch, contains('requestVersion != _routeRequestVersion'));
       expect(
-        fetch,
-        contains(
-          'if (result == null || requestVersion != _routeRequestVersion) return;',
-        ),
+        fetch.indexOf('requestVersion != _routeRequestVersion'),
+        lessThan(fetch.indexOf('_routePoints = result.points;')),
       );
+      expect(fetch, contains('!usableSiteRoad(result.points)'));
       expect(fetch, isNot(contains('_routePoints = null')));
       expect(fetch, isNot(contains('DBHelper.deleteRouteCache')));
     },
@@ -234,18 +239,30 @@ void main() {
     expect(routeSource, isNot(contains('simplif')));
   });
 
-  test('GPSTask 9 — GPS, arrival and the 30 m rule are untouched', () {
-    expect(siteVerificationDistanceThresholdMeters, 30.0);
-    expect(
-      RegExp(
-        r'bool get _arrived =>\s*_distanceMeters != null &&\s*'
-        r'_distanceMeters! <= siteVerificationDistanceThresholdMeters;',
-      ).hasMatch(step1Source),
-      isTrue,
-    );
-    expect(step1Source, contains('getDistanceToParcelBoundary'));
-    expect(step1Source, contains('SpatialOfflineService.haversineMeters'));
-  });
+  test(
+    'Step 2 keeps 30m confirmation; Step 1 now estimates the mapped point',
+    () {
+      expect(siteVerificationDistanceThresholdMeters, 30.0);
+      expect(
+        RegExp(
+          r'bool get _arrived =>\s*_distanceMeters != null &&\s*'
+          r'_distanceMeters! <= siteVerificationDistanceThresholdMeters;',
+        ).hasMatch(step1Source),
+        isTrue,
+      );
+      expect(step1Source, isNot(contains('getDistanceToParcelBoundary')));
+      expect(step1Source, contains('SpatialOfflineService.haversineMeters'));
+      final gps = File(
+        'lib/modules/inspection/screens/gps_verification_screen.dart',
+      ).readAsStringSync();
+      expect(gps, contains('getDistanceToParcelBoundary'));
+      expect(
+        gps,
+        contains('_distance! <= siteVerificationDistanceThresholdMeters'),
+      );
+      expect(gps, contains('verified && !submitting ? onConfirm : null'));
+    },
+  );
 
   test('Quick Action Map gains no routing and no route cache', () {
     for (final forbidden in [
