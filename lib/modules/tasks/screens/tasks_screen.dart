@@ -11,7 +11,6 @@ import '../../../core/services/db_helper.dart';
 import '../../../core/navigation/parcel_detail_screen.dart';
 import '../../inspection/screens/completed_inspection_detail_screen.dart';
 import '../../inspection/screens/inspection_progress.dart';
-import '../../inspection/widgets/inspection_round_widgets.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
@@ -529,8 +528,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             task: task,
             onTapDetail: () => _openTask(context, task),
             onScheduled: _loadTasks,
-            relatedRounds: _allTasks.where(task.sameApplicationAs).toList(),
-            onOpenRound: (round) => _openTask(context, round),
           ),
         ),
       ),
@@ -1605,14 +1602,11 @@ class _SegmentTab extends StatelessWidget {
 }
 
 class _CompactTaskCard extends StatefulWidget {
-  final List<TaskItem> relatedRounds;
-  final ValueChanged<TaskItem>? onOpenRound;
   final TaskItem task;
   final VoidCallback onTapDetail;
   final VoidCallback? onScheduled;
 
-  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled,
-    this.relatedRounds = const [], this.onOpenRound});
+  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled});
 
   @override
   State<_CompactTaskCard> createState() => _CompactTaskCardState();
@@ -2099,14 +2093,28 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Expanded(
-                                child: Text(
-                                  widget.task.name,
-                                  style: InsightTheme.poppins(14.5, w: FontWeight.w700, c: InsightTheme.ink),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      widget.task.name,
+                                      style: InsightTheme.poppins(14.5, w: FontWeight.w700, c: InsightTheme.ink),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                      decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
+                                      child: Text(
+                                        widget.task.inspectionNo,
+                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.2),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                               const SizedBox(width: 4),
@@ -2125,17 +2133,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                 ),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 5),
-                          // Permit/inspection no. — moved below the name into
-                          // its own mono chip (was inline beside the name).
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                            decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
-                            child: Text(
-                              widget.task.inspectionNo,
-                              style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.2),
-                            ),
                           ),
                           if (widget.task.roundLabel != null) ...[
                             const SizedBox(height: 6),
@@ -2434,10 +2431,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             ),
                           ),
                         ),
-                        if (widget.relatedRounds.length > 1 && widget.onOpenRound != null) ...[
-                          const SizedBox(height: 12),
-                          InspectionRoundList(rounds: widget.relatedRounds, onOpen: widget.onOpenRound!),
-                        ],
                         if (canSchedule) ...[
                           const SizedBox(height: 8),
                           GestureDetector(
