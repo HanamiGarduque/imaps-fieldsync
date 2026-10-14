@@ -335,8 +335,13 @@ void main() {
         for (final value in ['13.842500', '121.176500', '± 5 m', '123°']) {
           await tester.ensureVisible(find.text(value));
           await tester.pump(const Duration(milliseconds: 200));
-          expect(find.text(value).hitTestable(), findsOneWidget);
+          expect(find.text(value).hitTestable(), findsOneWidget,
+            reason: '$value must remain reachable after disclosure at $size/${scale.runtimeType}.');
         }
+        await tester.ensureVisible(hide);
+        await tester.pump();
+        expect(hide.hitTestable(), findsOneWidget,
+          reason: 'Hide remains reachable after scrolling enlarged readings.');
         await tester.tap(recenter);
         await tester.pump();
         final beacon = find.byWidgetPredicate((widget) => widget.runtimeType.toString() == '_PulsingLocationBeacon');
@@ -386,7 +391,8 @@ void main() {
           await tester.pump(const Duration(milliseconds: 400));
           await tester.ensureVisible(find.text('121.176500'));
           await tester.pump();
-          expect(find.text('121.176500').hitTestable(), findsOneWidget);
+          expect(find.text('121.176500').hitTestable(), findsOneWidget,
+            reason: 'Longitude must remain reachable at $size/$padding/${scale.runtimeType}.');
           await tester.tap(find.byTooltip('Recenter on your location'));
           await tester.pump();
           final beacon = tester.getRect(find.byWidgetPredicate((widget) => widget.runtimeType.toString() == '_PulsingLocationBeacon'));

@@ -76,7 +76,8 @@ class _MapDetailPanelState extends State<MapDetailPanel> {
           borderRadius: InsightTheme.roundedMd, border: Border.all(color: InsightTheme.line),
           boxShadow: InsightTheme.cardShadow),
           child: Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, _collapsed ? 0 : 12),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // The title must scroll too: enlarged text can consume the whole short panel.
+            child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Row(children: [
                 Expanded(child: Semantics(header: true,
                   child: Text(widget.title, style: InsightTheme.urbanist(14, w: FontWeight.w700)))),
@@ -91,8 +92,8 @@ class _MapDetailPanelState extends State<MapDetailPanel> {
                       Icon(_collapsed ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 18),
                     ]))),
               ]),
-              if (!_collapsed) Flexible(child: SingleChildScrollView(child: widget.child)),
-            ]),
+              if (!_collapsed) widget.child,
+            ])),
           ),
         ),
       ));
