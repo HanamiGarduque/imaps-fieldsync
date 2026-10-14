@@ -7,10 +7,10 @@ import '../providers/inspection_provider.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../../../core/services/db_helper.dart';
+import '../../../core/services/auth_service.dart';
 import 'inspection_progress.dart';
 import '../../../core/navigation/main_shell_screen.dart';
 import '../../tasks/screens/tasks_screen.dart' show TaskItem;
-import '../../../core/models/user_profile.dart';
 import '../widgets/exit_confirm_dialog.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
@@ -46,6 +46,19 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
 
   late String _selectedStatus;
   bool _submitting = false;
+  String? _localSaveError;
+
+  void _localSaveFailure(Object error) {
+    if (!mounted) return;
+    final message = error is StateError &&
+        error.message.toString().startsWith('A final submission')
+        ? error.message.toString()
+        : 'Could not save locally. Your review and photos are still here. Please try again.';
+    setState(() {
+      _submitting = false;
+      _localSaveError = message;
+    });
+  }
 
   @override
   void initState() {
@@ -61,7 +74,11 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
     final String uid;
     try {
       provider.requireOwner();
+      if (!AuthService.isLoggedIn) throw StateError('Authenticated inspector required');
       uid = DBHelper.requireInspector();
+      if (provider.activeTask?.id != widget.task.id) {
+        throw StateError('Review must belong to the active inspection round');
+      }
     } on StateError {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -73,7 +90,21 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       return;
     }
     HapticFeedback.heavyImpact();
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      _localSaveError = null;
+    });
+    try {
+      // Local first: even a later enqueue failure cannot discard this review's
+      // checklist, findings, photos or previously reached step.
+      if (!await provider.saveAllInspectionState(syncOnline: false)) {
+        throw StateError('Inspection draft could not be saved');
+      }
+      DBHelper.requireSameInspector(uid);
+    } catch (e) {
+      _localSaveFailure(e);
+      return;
+    }
 
     final checklist = <Map<String, dynamic>>[
       ...provider.siteCondition.entries.map(
@@ -97,12 +128,27 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
 
     // Mark before the first remote attempt. Even if the upload or queue write
     // fails, the delete path must not treat this photo as safely local-only.
-    context.read<InspectionProvider>().markPhotosSubmitted();
+    provider.markPhotosSubmitted();
 
     // Try the real thing first — unchanged happy path when online.
     bool queuedOffline = false;
+    bool requiresReview = false;
     var submission = InspectionAuthorityResult.offlineOrUnverifiable;
     try {
+      final preserved = await DBHelper.getSyncCenterQueueActions();
+      DBHelper.requireSameInspector(uid);
+      if (preserved.any((a) => a['job_id'] == widget.task.id &&
+          a['type'] == 'submit_inspection')) {
+        // Restart/re-entry must recognize durable intent before any upload or
+        // business write. Enqueue below checks identical evidence atomically.
+        throw const InspectionAuthorityException(
+          InspectionAuthorityResult.offlineOrUnverifiable);
+      }
+      if (!await SyncOutboxService.hasConnection()
+          .timeout(const Duration(seconds: 2))) {
+        throw const InspectionAuthorityException(
+          InspectionAuthorityResult.offlineOrUnverifiable);
+      }
       final photoPaths = await SupabaseService.uploadInspectionPhotos(
         jobId: widget.task.id,
         photosData: photosData,
@@ -163,29 +209,15 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               submission == InspectionAuthorityResult.authRequired,
         );
         queuedOffline = true;
-      } catch (_) {
-        // Couldn't even save it locally — nothing more we can do here.
-        if (!mounted) return;
-        setState(() => _submitting = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed: $e')));
+        final preserved = await DBHelper.getSyncCenterQueueActions();
+        DBHelper.requireSameInspector(uid);
+        requiresReview = preserved.any((a) => a['job_id'] == widget.task.id &&
+          a['type'] == 'submit_inspection' &&
+          const ['conflict', 'paused'].contains(a['status']));
+      } catch (saveError) {
+        _localSaveFailure(saveError);
         return;
       }
-    }
-
-    if (queuedOffline) {
-      if (mounted) {
-        setState(() => _submitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${submission.message} Submission is saved locally; remote completion is not confirmed.',
-            ),
-          ),
-        );
-      }
-      return;
     }
 
     // Remote acceptance has already succeeded. Local cleanup must never enter
@@ -210,7 +242,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       }
     }
 
-    InspectionProgress.instance.markStepComplete(6);
+    if (!queuedOffline) InspectionProgress.instance.markStepComplete(6);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -218,6 +250,8 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
           referenceNo: widget.task.inspectionNo,
           finalStatus: _selectedStatus,
           queuedOffline: queuedOffline,
+          requiresReview: requiresReview,
+          inspectorId: uid,
         ),
       ),
     );
@@ -277,6 +311,15 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               onPressed: _submitting ? null : _handleSubmit,
             ),
             children: [
+              if (_localSaveError != null)
+                Semantics(
+                  liveRegion: true,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(_localSaveError!,
+                      style: InsightTheme.inter(14, c: InsightTheme.redInk)),
+                  ),
+                ),
               FieldSectionHeading(
                 title: 'Inspection record',
                 hint:
@@ -616,11 +659,15 @@ class SubmissionSuccessScreen extends StatelessWidget {
   final String referenceNo;
   final String finalStatus;
   final bool queuedOffline;
+  final bool requiresReview;
+  final String? inspectorId;
   const SubmissionSuccessScreen({
     super.key,
     required this.referenceNo,
     required this.finalStatus,
     this.queuedOffline = false,
+    this.requiresReview = false,
+    this.inspectorId,
   });
   @override
   Widget build(BuildContext context) {
@@ -630,23 +677,32 @@ class SubmissionSuccessScreen extends StatelessWidget {
       body: FieldFormBody(
         header: const SizedBox(height: 40),
         action: FieldPrimaryButton(
-          label: 'Back to Tasks',
+          label: 'Back to Home',
           onPressed: () async {
-            InspectionProgress.instance.reset();
-            final profileMap = await SupabaseService.fetchMyProfile();
-            if (!context.mounted) return;
-            if (profileMap != null) {
+            try {
+              final uid = inspectorId ?? DBHelper.requireInspector();
+              DBHelper.requireSameInspector(uid);
+              final profile = await AuthService.getCachedProfileForCurrentInspector();
+              DBHelper.requireSameInspector(uid);
+              if (profile == null || profile.id != uid) {
+                throw StateError('Authorized local profile unavailable');
+              }
+              if (!context.mounted) return;
+              InspectionProgress.instance.reset();
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(
                   builder: (_) => MainShellScreen(
-                    profile: UserProfile.fromMap(profileMap),
-                    initialIndex: 1,
+                    profile: profile,
+                    offlineSession: queuedOffline,
                   ),
                 ),
                 (route) => false,
               );
-            } else {
-              Navigator.of(context).popUntil((route) => route.isFirst);
+            } catch (_) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(
+                'Your saved submission is preserved. Sign in again to return Home.',
+              )));
             }
           },
         ),
@@ -677,14 +733,17 @@ class SubmissionSuccessScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  queuedOffline ? 'Saved Offline' : 'Inspection Submitted',
+                  queuedOffline ? (requiresReview ? 'Saved Locally' : 'Saved Offline')
+                      : 'Inspection Submitted',
                   textAlign: TextAlign.center,
                   style: InsightTheme.urbanist(24, w: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   queuedOffline
-                      ? 'Saved on this device. It will sync automatically once you\'re back online; remote completion is not confirmed.'
+                      ? (requiresReview
+                          ? 'Saved on this device. Delivery needs review in Sync Center; remote completion is not confirmed.'
+                          : 'Saved on this device. Pending Sync — remote completion is not confirmed. FieldSync will attempt delivery when connected; check Sync Center for updates.')
                       : 'Your inspection was accepted by the server.',
                   textAlign: TextAlign.center,
                   style: InsightTheme.inter(14, c: InsightTheme.ink2),
@@ -694,6 +753,11 @@ class SubmissionSuccessScreen extends StatelessWidget {
                 _SummaryRow(
                   label: 'Final assessment',
                   value: finalStatus,
+                ),
+                _SummaryRow(
+                  label: 'Synchronization',
+                  value: queuedOffline ? (requiresReview ? 'Review needed' : 'Pending Sync')
+                      : 'Server accepted',
                   isLast: true,
                 ),
               ],

@@ -529,6 +529,8 @@ class InspectionProvider extends ChangeNotifier {
     // Ownership was already established at entry, and every read below is
     // inspector-scoped, so this only hydrates memory.
     final draft = await DBHelper.getLocalInspection(jobId);
+    _requireOwner();
+    var hasFindingsSnapshot = false;
     if (draft != null) {
       _actualLandUse = draft['actual_land_use'] ?? _actualLandUse;
       _notes = draft['notes'] ?? _notes;
@@ -542,6 +544,13 @@ class InspectionProvider extends ChangeNotifier {
           final Map<String, dynamic> checklist = jsonDecode(
             draft['checklist_json'],
           );
+          final findings = checklist[DBHelper.inspectionDraftFindingsKey];
+          if (findings is Map) {
+            hasFindingsSnapshot = true;
+            _discrepancies = findings['discrepancies'] as String? ?? '';
+            _recommendations = findings['recommendations'] as String? ?? '';
+            _findingsObservations = findings['observations'] as String?;
+          }
           checklist.forEach((key, value) {
             if (_siteCondition.containsKey(key)) {
               _siteCondition[key] = value == true;
@@ -556,7 +565,21 @@ class InspectionProvider extends ChangeNotifier {
       }
     }
 
+    final pending = await DBHelper.getLocalFindingsIntent(jobId);
+    _requireOwner();
+    final queuedAt = DateTime.tryParse(pending?['localCreatedAt'] as String? ?? '');
+    final draftAt = DateTime.tryParse(draft?['updated_at'] as String? ?? '');
+    if (pending != null && (!hasFindingsSnapshot ||
+        (queuedAt != null && draftAt != null && queuedAt.isAfter(draftAt)))) {
+      _notes = pending['inspectorNotes'] as String? ?? _notes;
+      _discrepancies = pending['discrepancies'] as String? ?? '';
+      _recommendations = pending['recommendations'] as String? ?? '';
+      _findingsObservations = pending['observations'] as String?;
+      _inspectionResult = pending['inspectionResult'] as String? ?? _inspectionResult;
+    }
+
     final localPhotos = await DBHelper.getLocalPhotos(jobId);
+    _requireOwner();
     if (localPhotos.isNotEmpty) {
       _capturedPhotos.clear();
       for (final p in localPhotos) {
@@ -596,6 +619,8 @@ class InspectionProvider extends ChangeNotifier {
       checklist: combinedChecklist,
       boundaryStatus: _boundaryStatus,
       currentStep: _currentStep,
+      findings: {'discrepancies': _discrepancies,
+        'recommendations': _recommendations, 'observations': observations},
     );
 
     // 2. Save photos to local sqlite
@@ -611,6 +636,7 @@ class InspectionProvider extends ChangeNotifier {
         notes: photo.containsKey('notes') ? photo['notes'] : '',
         latitude: photo['latitude'],
         longitude: photo['longitude'],
+        capturedAt: photo['capturedAt'] as String?,
       );
     }
 
@@ -837,7 +863,7 @@ class InspectionProvider extends ChangeNotifier {
   /// Comprehensive save-all helper that persists the current inspection
   /// snapshot and also preserves the current rework mode alongside the
   /// task context for later resume/review flows.
-  Future<bool> saveAllInspectionState() async {
+  Future<bool> saveAllInspectionState({bool syncOnline = true}) async {
     _requireOwner();
     if (_activeTask == null) return false;
 
@@ -855,6 +881,8 @@ class InspectionProvider extends ChangeNotifier {
       checklist: combinedChecklist,
       boundaryStatus: _boundaryStatus,
       currentStep: _currentStep,
+      findings: {'discrepancies': _discrepancies,
+        'recommendations': _recommendations, 'observations': observations},
     );
 
     for (final photo in _capturedPhotos) {
@@ -875,11 +903,13 @@ class InspectionProvider extends ChangeNotifier {
         notes: photo.containsKey('notes') ? photo['notes'] : '',
         latitude: photo['latitude'],
         longitude: photo['longitude'],
+        capturedAt: photo['capturedAt'] as String?,
       );
     }
 
     notifyListeners();
 
+    if (!syncOnline) return true;
     final isConnected = await _checkConnectivity();
     if (isConnected) {
       _requireOwner();
@@ -911,10 +941,22 @@ class InspectionProvider extends ChangeNotifier {
       final uid = DBHelper.requireInspector();
       final supabase = SupabaseService.client;
 
+      // Final-submit intent owns delivery of its evidence. The legacy draft
+      // drainer must neither race it nor replay a completed round afterward.
+      final protectedJobs = <String>{
+        for (final a in await DBHelper.getSyncCenterQueueActions())
+          if (a['type'] == 'submit_inspection') a['job_id'] as String,
+        for (final job in await DBHelper.getCachedJobs())
+          if (const ['completed', 'Completed', 'submitted'].contains(job['status']))
+            job['id'] as String,
+      };
+      DBHelper.requireSameInspector(uid);
+
       // 1. Sync pending local photos through the one canonical remote writer.
       // Legacy local_photos rows are adapted here; all NEW remote identities
       // now use job ID + stable local path + UUIDv5 through the service path.
-      final pendingPhotos = await DBHelper.getPendingPhotos();
+      final pendingPhotos = (await DBHelper.getPendingPhotos())
+          .where((p) => !protectedJobs.contains(p['job_id'])).toList();
       final pendingPhotosByJob = <String, List<Map<String, dynamic>>>{};
       for (final photo in pendingPhotos) {
         final jobId = photo['job_id'] as String?;
@@ -982,13 +1024,15 @@ class InspectionProvider extends ChangeNotifier {
       }
 
       // 2. Sync Pending Inspections
-      final pendingInspections = await DBHelper.getPendingInspections();
+      final pendingInspections = (await DBHelper.getPendingInspections())
+          .where((d) => !protectedJobs.contains(d['id'])).toList();
       for (final insp in pendingInspections) {
         DBHelper.requireSameInspector(uid);
         final Map<String, dynamic> checklist = jsonDecode(
           insp['checklist_json'],
         );
         final checklistSummary = checklist.entries
+            .where((e) => e.value is bool)
             .map((e) => '${e.key}: ${e.value == true ? "Yes" : "No"}')
             .join('; ');
 
