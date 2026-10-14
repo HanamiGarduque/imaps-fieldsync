@@ -17,6 +17,7 @@ import 'inspection_progress.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../../core/services/db_helper.dart';
 import '../services/spatial_offline_service.dart';
+import '../services/site_route_guidance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -37,11 +38,7 @@ MapOptions siteMapOptions({
   initialCenter: parcel,
   initialZoom: 17,
   initialCameraFit: CameraFit.bounds(
-    bounds: LatLngBounds.fromPoints([
-      parcel,
-      ?device,
-      ...route,
-    ]),
+    bounds: LatLngBounds.fromPoints([parcel, ?device, ...route]),
     maxZoom: 17,
     padding: padding,
   ),
@@ -49,15 +46,9 @@ MapOptions siteMapOptions({
 
 /// Site Verification (Step 1): task-bound GPS, cached/live real road geometry
 /// and the existing inspection callbacks, with orientation-aware presentation.
-/// Road distance and driving time are guidance only; the separate site distance
-/// remains the parcel-boundary RPC / offline Haversine measurement. Routing
-/// failure preserves the last real route, or draws none when none is available.
-///
-///   - Parcel coordinates: SupabaseService.fetchParcelDetails(parcelId)
-///   - Device position: LocationService.getCurrentLocation()
-///   - Distance: SupabaseService.getDistanceToParcelBoundary() (same RPC
-///     Step 2 uses, so the number here matches what Step 2 will show —
-///     no confusing discrepancy between the two screens).
+/// The mapped geometry is a point: direct distance is calculated locally.
+/// Real roads and schematic dotted links are guidance, not verified access.
+/// Step 2 independently owns its existing server/offline 30m confirmation rule.
 class SiteMapScreen extends StatefulWidget {
   final TaskItem task;
   const SiteMapScreen({super.key, required this.task});
@@ -74,6 +65,10 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   ll.LatLng? _parcelLatLng;
   ll.LatLng? _deviceLatLng;
   double? _distanceMeters;
+  Position? _lastFix;
+  bool _gpsReliable = false;
+  bool _approachEpisode = false;
+  Timer? _fixExpiry;
   bool _retryingDeviceLocation = false;
   // Real road route only. Routing failure never supplies fabricated geometry.
   List<ll.LatLng>? _routePoints;
@@ -81,20 +76,26 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   bool _routeFromCache = false;
   double? _routeDistanceMeters;
   double? _routeDurationSeconds;
-  // Live GPS tracking (Phase B): the device marker and the authoritative
-  // distance update from the SAME shared LocationService stream that
-  // GPS Verification (Step 2) uses.
+  // The true marker and direct-point estimate use the SAME shared GPS stream
+  // as Step 2. Step 2 independently owns authoritative confirmation.
   StreamSubscription<Position>? _positionSub;
   bool _trackingActive = false;
-  bool _recomputingDistance = false;
-  DateTime _lastDistanceComputeAt = DateTime.fromMillisecondsSinceEpoch(0);
-  static const Duration _minDistanceRecalcInterval = Duration(seconds: 4);
   ll.LatLng? _routeOrigin;
+  ll.LatLng? _lastRouteAttempt;
+  ll.LatLng? _routeRequestedFrom;
   bool _routeRequestInFlight = false;
   int _routeRequestVersion = 0;
-  DateTime _lastRouteRequestAt = DateTime.fromMillisecondsSinceEpoch(0);
-  static const double _routeRefreshMovementMeters = 50.0;
-  static const Duration _routeRefreshCooldown = Duration(seconds: 30);
+  Timer? _routeCooldown;
+  Timer? _routeEstimateExpiry;
+  DateTime? _routeFetchedAt;
+  bool _routeEstimateExpired = true;
+  bool _routeRefreshPending = false;
+  bool _routeRefreshFailed = false;
+  int _routeFailures = 0;
+  // All Step 1 instances share the demo provider's maximum 1 request/sec.
+  // The 15s screen budget is stricter; this also covers fast screen reopening.
+  static Timer? _providerCooldown;
+  static const _routeRefreshCooldown = Duration(seconds: 15);
   final MapController _mapController = MapController();
   EdgeInsets _mapPadding = const EdgeInsets.fromLTRB(50, 160, 50, 220);
 
@@ -103,9 +104,8 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   // state — see MapConnectivityRecovery.
   final MapConnectivityRecovery _recovery = MapConnectivityRecovery();
 
-  /// Phase C: Arrival detection — true when the inspector is sufficiently
-  /// close to the target site. Uses the same threshold as GPS Verification
-  /// (Step 2) so the experience is consistent across the workflow.
+  /// Historical <=30m indicator, now explicitly an informational point estimate.
+  /// This and the optional 100m notice never authorize or gate any step.
   bool get _arrived =>
       _distanceMeters != null &&
       _distanceMeters! <= siteVerificationDistanceThresholdMeters;
@@ -143,6 +143,10 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
   @override
   void dispose() {
+    _fixExpiry?.cancel();
+    _routeCooldown?.cancel();
+    _routeEstimateExpiry?.cancel();
+    _routeRequestVersion++;
     _positionSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_recovery.stop());
@@ -179,23 +183,9 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     try {
       final online = await _checkOnline();
       final pos = await LocationService.getCurrentLocation();
-      final newDeviceLatLng = ll.LatLng(pos.latitude, pos.longitude);
-      final newDistance = online
-          ? await SupabaseService.getDistanceToParcelBoundary(
-              parcelId: widget.task.parcelId!,
-              latitude: pos.latitude,
-              longitude: pos.longitude,
-            )
-          : SpatialOfflineService.haversineMeters(
-              pos.latitude,
-              pos.longitude,
-              _parcelLatLng!.latitude,
-              _parcelLatLng!.longitude,
-            );
       if (!mounted) return;
       setState(() {
-        _deviceLatLng = newDeviceLatLng;
-        _distanceMeters = newDistance;
+        _acceptFix(pos);
         _retryingDeviceLocation = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _fitBounds());
@@ -251,25 +241,17 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         );
       }
       _parcelLatLng = ll.LatLng(lat, lng);
+      if (!validSiteMapPoint(_parcelLatLng!)) {
+        throw Exception('The mapped site coordinates are invalid.');
+      }
 
       // Device position is best-effort here — Step 1 is about orientation,
       // not verification, so a location error still lets the inspector see
       // the target site on the map and proceed; only Step 2 hard-requires it.
       try {
         final pos = await LocationService.getCurrentLocation();
-        _deviceLatLng = ll.LatLng(pos.latitude, pos.longitude);
-        _distanceMeters = online
-            ? await SupabaseService.getDistanceToParcelBoundary(
-                parcelId: widget.task.parcelId!,
-                latitude: pos.latitude,
-                longitude: pos.longitude,
-              )
-            : SpatialOfflineService.haversineMeters(
-                pos.latitude,
-                pos.longitude,
-                lat,
-                lng,
-              );
+        if (!mounted) return;
+        _acceptFix(pos);
       } catch (_) {
         _deviceLatLng = null;
         _distanceMeters = null;
@@ -326,57 +308,63 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     );
   }
 
-  /// Live position tick: moves the "You are here" marker on EVERY event
-  /// and refreshes the AUTHORITATIVE Site Verification distance (boundary
-  /// RPC online / haversine offline) behind a reentrancy guard plus a
-  /// minimum recalculation interval so rapid ticks cannot flood Supabase.
-  /// Online road requests have their own movement/cooldown guard below; GPS
-  /// ticks never fabricate geometry or directly change its cached copy.
+  /// Update the true GPS point and direct distance locally on each valid fix.
+  /// The road request has its own budget; GPS ticks never call a distance RPC.
   Future<void> _onPositionUpdate(Position pos) async {
     if (!mounted || _parcelLatLng == null) return;
-    final newPos = ll.LatLng(pos.latitude, pos.longitude);
-    final shouldRecompute =
-        !_recomputingDistance &&
-        DateTime.now().difference(_lastDistanceComputeAt) >=
-            _minDistanceRecalcInterval;
-
-    // Move the marker immediately and repaint in EVERY path so the UI is
-    // never frozen behind a throttled or in-flight distance recompute.
-    _deviceLatLng = newPos;
+    if (!_acceptFix(pos)) return;
     setState(() {});
-    unawaited(_maybeRefreshRoute(newPos));
+    unawaited(_maybeRefreshRoute(_deviceLatLng!));
+  }
 
-    if (!shouldRecompute) {
-      return;
+  bool _acceptFix(Position pos) {
+    final newPos = ll.LatLng(pos.latitude, pos.longitude);
+    final now = DateTime.now();
+    if (!validSiteMapPoint(newPos) ||
+        (_lastFix != null &&
+            !_lastFix!.timestamp.isAfter(now.add(const Duration(seconds: 2))) &&
+            pos.timestamp.isBefore(_lastFix!.timestamp))) {
+      return false;
     }
-    _recomputingDistance = true;
-    _lastDistanceComputeAt = DateTime.now();
-    try {
-      final online = await _checkOnline();
-      final dist = online
-          ? await SupabaseService.getDistanceToParcelBoundary(
-              parcelId: widget.task.parcelId!,
-              latitude: pos.latitude,
-              longitude: pos.longitude,
-            )
-          : SpatialOfflineService.haversineMeters(
-              pos.latitude,
-              pos.longitude,
-              _parcelLatLng!.latitude,
-              _parcelLatLng!.longitude,
-            );
-      if (!mounted) return;
-      setState(() => _distanceMeters = dist);
-    } catch (_) {
-      // Transient failure: keep the previous authoritative value; the next
-      // qualifying tick retries. The marker was already painted above.
-    } finally {
-      _recomputingDistance = false;
+    _lastFix = pos;
+    _deviceLatLng = newPos;
+    _distanceMeters = SpatialOfflineService.haversineMeters(
+      newPos.latitude,
+      newPos.longitude,
+      _parcelLatLng!.latitude,
+      _parcelLatLng!.longitude,
+    );
+    _gpsReliable = reliableSiteFix(
+      accuracyMeters: pos.accuracy,
+      timestamp: pos.timestamp,
+      now: now,
+    );
+    if (_gpsReliable &&
+        _routeRequestInFlight &&
+        _routeRequestedFrom != null &&
+        sitePointDistance(_routeRequestedFrom!, newPos) > 50) {
+      _routeRequestVersion++;
+      _routeRefreshPending = true;
     }
+    _approachEpisode = siteApproachEpisode(
+      wasNear: _approachEpisode,
+      distanceMeters: _distanceMeters!,
+      reliable: _gpsReliable,
+    );
+    _fixExpiry?.cancel();
+    if (_gpsReliable) {
+      _fixExpiry = Timer(
+        const Duration(seconds: 15) - now.difference(pos.timestamp),
+        () {
+          if (mounted) setState(() => _gpsReliable = false);
+        },
+      );
+    }
+    return true;
   }
 
   /// Single source of the online/offline decision for this screen. It only
-  /// gates whether ONLINE calls (Supabase RPC, OSRM route fetch) are
+  /// gates whether ONLINE calls (parcel lookup, OSRM route fetch) are
   /// attempted; every network/routing operation itself lives in its service
   /// (SupabaseService / LocationService / RouteService).
   Future<bool> _checkOnline() async {
@@ -386,63 +374,147 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         : connectivityResult != ConnectivityResult.none;
   }
 
-  /// Post-paint route request (initial open, location retries, and controlled
-  /// movement refreshes). Road-route distance/ETA are navigation/orientation
-  /// aids only - the authoritative Site Verification distance remains the
-  /// boundary-RPC/haversine number.
+  /// Every entry point goes through the same request budget. A recovery or retry
+  /// can request a refresh, but cannot bypass cooldown, GPS quality or backoff.
   Future<void> _fetchRouteAndUpdate({required bool online}) async {
     if (!online || _deviceLatLng == null || _parcelLatLng == null) return;
-    await _fetchRoute(start: _deviceLatLng!);
+    await _fetchRoute(start: _deviceLatLng!, online: online);
     if (!mounted) return;
     setState(() {});
   }
 
   Future<void> _maybeRefreshRoute(ll.LatLng currentPosition) async {
-    if (_routeRequestInFlight ||
-        DateTime.now().difference(_lastRouteRequestAt) <
-            _routeRefreshCooldown) {
+    if (!_gpsReliable) return;
+    final aged =
+        _routeFetchedAt != null &&
+        (_routeEstimateExpired ||
+            DateTime.now().difference(_routeFetchedAt!) >=
+                const Duration(seconds: 90));
+    if (!_routeRefreshPending &&
+        !siteRoadRefreshNeeded(
+          device: currentPosition,
+          previousAttempt: _lastRouteAttempt,
+          road: _routePoints ?? const [],
+          accuracyMeters: _lastFix!.accuracy,
+          aged: aged,
+          failed: _routeRefreshFailed,
+        )) {
       return;
     }
-
-    if (_routeOrigin != null) {
-      final movedMeters = Geolocator.distanceBetween(
-        _routeOrigin!.latitude,
-        _routeOrigin!.longitude,
-        currentPosition.latitude,
-        currentPosition.longitude,
-      );
-      if (movedMeters < _routeRefreshMovementMeters) return;
-    }
-    if (!await _checkOnline() || !mounted) return;
-
     await _fetchRoute(start: currentPosition);
     if (!mounted) return;
     setState(() {});
   }
 
-  /// Fetches a route through [RouteService]. A failed refresh preserves the
-  /// last successful route, while the request version prevents an older
-  /// asynchronous response from replacing a newer one.
-  Future<void> _fetchRoute({required ll.LatLng start}) async {
-    if (_parcelLatLng == null || _routeRequestInFlight) return;
+  void _deferRoute(Duration delay) {
+    _routeCooldown?.cancel();
+    _routeCooldown = Timer(delay, () {
+      _routeCooldown = null;
+      if (mounted &&
+          !_loading &&
+          _routeRefreshPending &&
+          _gpsReliable &&
+          _deviceLatLng != null) {
+        unawaited(_fetchRoute(start: _deviceLatLng!));
+      }
+    });
+  }
+
+  bool get _routeEstimateStale =>
+      _routeFromCache ||
+      _routeRefreshFailed ||
+      _routeEstimateExpired ||
+      !_gpsReliable ||
+      _routeOrigin == null ||
+      _deviceLatLng == null ||
+      siteRoadRefreshNeeded(
+        device: _deviceLatLng!,
+        previousAttempt: _routeOrigin,
+        road: _routePoints ?? const [],
+        accuracyMeters: _lastFix!.accuracy,
+        aged: false,
+        failed: false,
+      );
+
+  /// One in flight, >=15s between attempts; failures back off 30/60/120s.
+  /// Disposed screens and responses overtaken by >50m of reliable movement
+  /// cannot replace either the current real geometry or its cached copy.
+  Future<void> _fetchRoute({required ll.LatLng start, bool? online}) async {
+    if (!mounted || _parcelLatLng == null) return;
+    if (!_gpsReliable || _routeRequestInFlight || _routeCooldown != null) {
+      _routeRefreshPending = true;
+      return;
+    }
     _routeRequestInFlight = true;
+    _routeRefreshPending = false;
+    _routeRequestedFrom = start;
     final requestVersion = ++_routeRequestVersion;
-    _lastRouteRequestAt = DateTime.now();
-    _routeOrigin = start;
+    _deferRoute(_routeRefreshCooldown);
     try {
+      if (!(online ?? await _checkOnline())) {
+        _routeRefreshPending = true;
+        return;
+      }
+      if (!mounted || requestVersion != _routeRequestVersion) return;
+      if (_providerCooldown != null) {
+        _routeRefreshPending = true;
+        _deferRoute(const Duration(seconds: 1));
+        return;
+      }
+      _providerCooldown = Timer(const Duration(seconds: 1), () {
+        _providerCooldown = null;
+      });
+      _lastRouteAttempt = start;
+      // Connectivity/provider waits must not spend the HTTP dispatch budget.
+      _deferRoute(_routeRefreshCooldown);
       final result = await RouteService.fetchDrivingRoute(
         start: start,
         end: _parcelLatLng!,
       );
-      if (result == null || requestVersion != _routeRequestVersion) return;
+      if (!mounted) return;
+      if (result == null ||
+          !usableSiteRoad(result.points) ||
+          !result.distanceMeters.isFinite ||
+          result.distanceMeters < 0 ||
+          !result.durationSeconds.isFinite ||
+          result.durationSeconds < 0) {
+        _routeRefreshFailed = true;
+        _routeRefreshPending = true;
+        _routeFailures = (_routeFailures + 1).clamp(1, 3);
+        _deferRoute(Duration(seconds: 30 * (1 << (_routeFailures - 1))));
+        return;
+      }
+      // Provider failures still consume backoff when their origin/fix becomes
+      // obsolete. Eligibility only gates acceptance of successful geometry.
+      if (requestVersion != _routeRequestVersion || !_gpsReliable) {
+        _routeRefreshPending = true;
+        return;
+      }
       _routePoints = result.points;
       _routeDistanceMeters = result.distanceMeters;
       _routeDurationSeconds = result.durationSeconds;
       _routeFromCache = false;
-      unawaited(_persistRoute(result, start));
+      _routeOrigin = start;
+      _routeFetchedAt = DateTime.now();
+      _routeRefreshFailed = false;
+      _routeFailures = 0;
+      _routeEstimateExpired = false;
+      _routeEstimateExpiry?.cancel();
+      _routeEstimateExpiry = Timer(const Duration(minutes: 2), () {
+        if (mounted) setState(() => _routeEstimateExpired = true);
+      });
+      setState(() {});
+      // Serialize persistence with this request; a late cache write cannot
+      // overtake a later successful refresh. The already-painted map stays usable.
+      await _persistRoute(result, start);
     } finally {
-      if (requestVersion == _routeRequestVersion) {
-        _routeRequestInFlight = false;
+      _routeRequestInFlight = false;
+      _routeRequestedFrom = null;
+      if (mounted) {
+        setState(() {});
+        if (_routeRefreshPending && _routeCooldown == null && _gpsReliable) {
+          _deferRoute(Duration.zero);
+        }
       }
     }
   }
@@ -459,6 +531,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
           jobId: widget.task.id,
           route: result,
           origin: origin,
+          fetchedAt: _routeFetchedAt,
         ),
       );
     } catch (e) {
@@ -468,18 +541,20 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
   /// Restores this task's previously cached real road route.
   ///
-  /// Runs on every open, offline or not, BEFORE any network fetch. A fresh
-  /// online route fetched later simply overwrites both the displayed geometry
-  /// and the cache, so showing the cached copy first costs nothing and means an
-  /// offline open still draws genuine road geometry.
+  /// Read starts on open, but may finish after HTTP. A late read must never
+  /// replace a live route that was already accepted during this screen session.
   Future<void> _restoreCachedRoute() async {
     try {
       final cached = await DBHelper.getRouteCache(widget.task.id);
-      if (cached == null || !mounted) return;
+      if (cached == null || !mounted || !usableSiteRoad(cached.points)) return;
+      if (_routePoints != null && !_routeFromCache) return;
       _routePoints = cached.points;
       _routeDistanceMeters = cached.distanceMeters;
       _routeDurationSeconds = cached.durationSeconds;
       _routeFromCache = true;
+      final origin = ll.LatLng(cached.originLat, cached.originLng);
+      _routeOrigin = validSiteMapPoint(origin) ? origin : null;
+      _routeFetchedAt = cached.fetchedAt;
       setState(() {});
     } catch (e) {
       debugPrint('[SITE MAP] Could not read cached road route: $e');
@@ -503,7 +578,11 @@ class _SiteMapScreenState extends State<SiteMapScreen>
           routeFromCache: _routeFromCache,
           routeDistanceMeters: _routeDistanceMeters,
           routeDurationSeconds: _routeDurationSeconds,
+          routeEstimateStale: _routeEstimateStale,
           nearSite: _arrived,
+          approachNotice: _approachEpisode && _gpsReliable,
+          gpsReliable: _gpsReliable,
+          hasDirectLinks: _directLinks.isNotEmpty,
           rework: context.watch<InspectionProvider>().isReworkMode,
           onBack: () => Navigator.pop(context),
           onRetryLocation: _retryDeviceLocation,
@@ -539,6 +618,16 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     );
   }
 
+  List<List<ll.LatLng>> get _directLinks => _parcelLatLng == null
+      ? const []
+      : siteDirectLinks(
+          road: _routePoints ?? const [],
+          target: _parcelLatLng!,
+          device: _deviceLatLng,
+          accuracyMeters: _lastFix?.accuracy ?? double.infinity,
+          reliable: _gpsReliable,
+        );
+
   Widget _buildMap() => FlutterMap(
     mapController: _mapController,
     options: siteMapOptions(
@@ -562,16 +651,31 @@ class _SiteMapScreenState extends State<SiteMapScreen>
       // is deliberately NO synthetic fallback — a made-up line
       // must not be drawn as if it were a road.
       if (_routePoints != null)
-        PolylineLayer(
-          polylines: [
-            Polyline(
-              points: _routePoints!,
-              strokeWidth: 5,
-              color: InsightTheme.blue1,
-              borderStrokeWidth: 2,
-              borderColor: Colors.white,
+        Builder(
+          builder: (context) => IgnorePointer(
+            child: PolylineLayer(
+              polylines: [
+                Polyline(
+                  points: _routePoints!,
+                  strokeWidth: MapCamera.of(context).zoom < 16 ? 6 : 8,
+                  color: InsightTheme.blue1,
+                  borderStrokeWidth: 2,
+                  borderColor: Colors.white,
+                ),
+                for (final link in _directLinks)
+                  Polyline(
+                    points: link,
+                    pattern: const StrokePattern.dotted(spacingFactor: 1.8),
+                    strokeWidth: _approachEpisode && _gpsReliable ? 5 : 4,
+                    color: link.last == _parcelLatLng
+                        ? InsightTheme.red
+                        : InsightTheme.blueInk,
+                    borderStrokeWidth: 1,
+                    borderColor: Colors.white,
+                  ),
+              ],
             ),
-          ],
+          ),
         ),
       MarkerLayer(
         markers: [

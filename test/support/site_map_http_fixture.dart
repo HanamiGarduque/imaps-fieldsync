@@ -10,6 +10,7 @@ class SiteMapHttpFixture extends HttpOverrides {
 
   final String? tileDirectory;
   String? routeJson;
+  Future<String?> Function(Uri)? routeResponse;
   bool streetTilesAvailable = true;
   final requestedTiles = <String>{};
   final requestedRoutes = <Uri>[];
@@ -18,12 +19,15 @@ class SiteMapHttpFixture extends HttpOverrides {
   );
 
   @override
-  HttpClient createHttpClient(SecurityContext? context) => _Client((uri) {
+  HttpClient createHttpClient(SecurityContext? context) => _Client((uri) async {
     if (uri.host == 'router.project-osrm.org') {
       requestedRoutes.add(uri);
+      final body = routeResponse == null
+          ? routeJson
+          : await routeResponse!(uri);
       return _Response(
-        utf8.encode(routeJson ?? '{}'),
-        routeJson == null ? 503 : 200,
+        utf8.encode(body ?? '{}'),
+        body == null ? 503 : 200,
         'application/json',
       );
     }
@@ -45,7 +49,7 @@ class SiteMapHttpFixture extends HttpOverrides {
 
 class _Client implements HttpClient {
   _Client(this.respond);
-  final _Response Function(Uri) respond;
+  final Future<_Response> Function(Uri) respond;
 
   @override
   Future<HttpClientRequest> openUrl(String method, Uri uri) async =>
@@ -60,7 +64,7 @@ class _Client implements HttpClient {
 
 class _Request implements HttpClientRequest {
   _Request(this.response);
-  final _Response response;
+  final Future<_Response> response;
   @override
   final HttpHeaders headers = _Headers('application/json');
   @override
