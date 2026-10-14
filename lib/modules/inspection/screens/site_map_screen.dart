@@ -39,7 +39,7 @@ MapOptions siteMapOptions({
   initialCameraFit: CameraFit.bounds(
     bounds: LatLngBounds.fromPoints([
       parcel,
-      if (device != null) device,
+      ?device,
       ...route,
     ]),
     maxZoom: 17,

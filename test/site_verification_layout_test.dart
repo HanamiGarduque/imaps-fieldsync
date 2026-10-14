@@ -28,6 +28,31 @@ import 'package:imaps_fieldsync/modules/inspection/widgets/inspection_step_heade
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'support/site_map_http_fixture.dart';
 
+// AOSP FontScaleConverterFactory's 200% curve, with linear interpolation.
+// https://github.com/aosp-mirror/platform_frameworks_base/blob/master/core/java/android/content/res/FontScaleConverterFactory.java
+class _Android200TextScaler extends TextScaler {
+  const _Android200TextScaler();
+
+  @override
+  double get textScaleFactor => 2;
+
+  @override
+  double scale(double fontSize) {
+    const from = [8.0, 10.0, 12.0, 14.0, 18.0, 20.0, 24.0, 30.0, 100.0];
+    const to = [16.0, 20.0, 24.0, 26.0, 30.0, 34.0, 36.0, 38.0, 100.0];
+    if (fontSize <= from.first) return fontSize * 2;
+    for (var i = 1; i < from.length; i++) {
+      if (fontSize <= from[i]) {
+        return to[i - 1] +
+            (to[i] - to[i - 1]) *
+                (fontSize - from[i - 1]) /
+                (from[i] - from[i - 1]);
+      }
+    }
+    return fontSize;
+  }
+}
+
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   final messenger = binding.defaultBinaryMessenger;
@@ -243,6 +268,7 @@ void main() {
     WidgetTester tester,
     Size size, {
     double scale = 1,
+    TextScaler? textScaler,
     bool rework = false,
   }) async {
     tester.view.devicePixelRatio = 1;
@@ -272,8 +298,17 @@ void main() {
             ),
             scaffoldBackgroundColor: InsightTheme.bg,
           ),
-          builder: (_, child) =>
-              RepaintBoundary(key: captureKey, child: child!),
+          builder: (context, child) {
+            final rendered = RepaintBoundary(key: captureKey, child: child!);
+            return textScaler == null
+                ? rendered
+                : MediaQuery(
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(textScaler: textScaler),
+                    child: rendered,
+                  );
+          },
           home: Builder(
             builder: (context) => Scaffold(
               body: TextButton(
@@ -321,6 +356,28 @@ void main() {
             );
             final full = find.byTooltip('Full map');
             final fit = find.byTooltip('Fit both markers');
+            final headerBounds = tester.getRect(
+              find.ancestor(
+                of: find.byType(InspectionStepHeader),
+                matching: find.byType(SingleChildScrollView),
+              ),
+            );
+            final attributionBounds = tester.getRect(
+              find
+                  .ancestor(
+                    of: find.text('© OpenStreetMap contributors'),
+                    matching: find.byType(Container),
+                  )
+                  .first,
+            );
+            final detailsBounds = tester.getRect(
+              find
+                  .ancestor(
+                    of: find.text('Site details'),
+                    matching: find.byType(Container),
+                  )
+                  .first,
+            );
             expect(
               tester.getSemantics(full).tooltip,
               'Full map',
@@ -332,6 +389,7 @@ void main() {
               reason: tester.getSemantics(fit).toStringDeep(),
             );
             for (final control in [full, fit]) {
+              final bounds = tester.getRect(control);
               expect(control, findsOneWidget);
               expect(tester.getSize(control).width, greaterThanOrEqualTo(48));
               expect(tester.getSize(control).height, greaterThanOrEqualTo(48));
@@ -340,6 +398,19 @@ void main() {
                 findsOneWidget,
                 reason: '$size at $scale: ${tester.getRect(control)}',
               );
+              for (final overlay in [
+                headerBounds,
+                attributionBounds,
+                detailsBounds,
+              ]) {
+                expect(
+                  bounds.overlaps(overlay),
+                  isFalse,
+                  reason: '$size at $scale: target $bounds, overlay $overlay',
+                );
+              }
+              expect(bounds.top, greaterThanOrEqualTo(24));
+              expect(bounds.bottom, lessThanOrEqualTo(size.height - 24));
             }
             if (size.width < size.height) {
               expect(tester.getCenter(full).dx, tester.getCenter(fit).dx);
@@ -350,9 +421,14 @@ void main() {
             } else {
               expect(
                 tester.getRect(find.byType(FlutterMap)).right,
-                lessThanOrEqualTo(
-                  tester.getRect(find.text('Site details')).left,
-                ),
+                size.width,
+                reason:
+                    'the map remains visible beneath the content-sized side pane',
+              );
+              expect(headerBounds.right, lessThanOrEqualTo(detailsBounds.left));
+              expect(
+                attributionBounds.right,
+                lessThanOrEqualTo(detailsBounds.left),
               );
             }
             await tester.ensureVisible(find.text('Proceed to Location'));
@@ -360,6 +436,10 @@ void main() {
             expect(
               find.text('Proceed to Location').hitTestable(),
               findsOneWidget,
+              reason:
+                  '$size at $scale: details $detailsBounds, header '
+                  '$headerBounds, attribution $attributionBounds, action '
+                  '${tester.getRect(find.text('Proceed to Location'))}',
             );
             expect(
               find.byTooltip('Hide site details').hitTestable(),
@@ -375,6 +455,160 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'normal phone details group related metrics without dominating the map',
+    (tester) async {
+      await mount(tester, const Size(360, 800));
+      final site = tester.getRect(find.text('Site distance'));
+      final road = tester.getRect(find.text('Saved road route'));
+      expect((site.top - road.top).abs(), lessThan(4));
+      expect(site.right, lessThan(road.left));
+      final panel = tester.getRect(
+        find
+            .ancestor(
+              of: find.text('Site details'),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      expect(
+        panel.height,
+        lessThanOrEqualTo(272),
+        reason: 'even the saved-route warning must remain proportionate',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Android nonlinear 200% text keeps the complete action visible', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      const Size(320, 568),
+      textScaler: const _Android200TextScaler(),
+    );
+    await tester.ensureVisible(find.text('Proceed to Location'));
+    await settle(tester);
+    final action = find.ancestor(
+      of: find.text('Proceed to Location'),
+      matching: find.byType(ElevatedButton),
+    );
+    final viewport = tester.getRect(
+      find
+          .ancestor(of: action, matching: find.byType(SingleChildScrollView))
+          .first,
+    );
+    final button = tester.getRect(action);
+    final label = tester.getRect(find.text('Proceed to Location'));
+    expect(button.height, greaterThanOrEqualTo(52));
+    expect(
+      button.top,
+      greaterThanOrEqualTo(viewport.top),
+      reason: 'button $button, label $label, viewport $viewport',
+    );
+    expect(button.bottom, lessThanOrEqualTo(viewport.bottom));
+    expect(label.top, greaterThanOrEqualTo(viewport.top));
+    expect(label.bottom, lessThanOrEqualTo(viewport.bottom));
+    await tester.ensureVisible(find.text('Saved road route'));
+    await settle(tester);
+    expect(
+      tester.getRect(find.text('Saved road route')).top,
+      greaterThan(tester.getRect(find.text('Site distance')).bottom),
+      reason: 'the actual enlarged caption size requires stacked metrics',
+    );
+    final backControl = find
+        .ancestor(of: find.byTooltip('Back'), matching: find.byType(Container))
+        .first;
+    await tester.ensureVisible(backControl);
+    await settle(tester);
+    final headerViewport = tester.getRect(
+      find.ancestor(
+        of: find.byType(InspectionStepHeader),
+        matching: find.byType(SingleChildScrollView),
+      ),
+    );
+    final back = tester.getRect(backControl);
+    expect(back.height, greaterThanOrEqualTo(48));
+    expect(back.top, greaterThanOrEqualTo(headerViewport.top));
+    expect(back.bottom, lessThanOrEqualTo(headerViewport.bottom));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('fresh small-phone open fits after enlarged overlays settle', (
+    tester,
+  ) async {
+    await mount(tester, const Size(320, 568), scale: 2);
+    final controller = tester
+        .widget<FlutterMap>(find.byType(FlutterMap))
+        .mapController!;
+    expect(
+      controller.camera.zoom,
+      greaterThan(10),
+      reason:
+          'fresh open must frame the site, not the world, without a fit tap',
+    );
+    final header = tester.getRect(
+      find.ancestor(
+        of: find.byType(InspectionStepHeader),
+        matching: find.byType(SingleChildScrollView),
+      ),
+    );
+    final attribution = tester.getRect(
+      find
+          .ancestor(
+            of: find.text('© OpenStreetMap contributors'),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    for (final point in [device, target]) {
+      final projected = controller.camera.latLngToScreenPoint(point);
+      expect(projected.y, greaterThan(header.bottom + 16));
+      expect(projected.y, lessThan(attribution.top - 16));
+    }
+    controller.move(const LatLng(14, 121), 16);
+    await tester.tap(find.byTooltip('Hide site details'));
+    await settle(tester);
+    tester.view.physicalSize = const Size(844, 390);
+    await settle(tester);
+    expect(controller.camera.center, const LatLng(14, 121));
+    expect(controller.camera.zoom, 16);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('enlarged attribution leaves the complete fit target tappable', (
+    tester,
+  ) async {
+    await mount(tester, const Size(390, 844), scale: 2);
+    final attribution = tester.getRect(
+      find
+          .ancestor(
+            of: find.text('© OpenStreetMap contributors'),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    final fit = tester.getRect(find.byTooltip('Fit both markers'));
+    expect(
+      attribution.overlaps(fit),
+      isFalse,
+      reason:
+          'attribution $attribution must not cover any of the 48dp target $fit',
+    );
+    final controller = tester
+        .widget<FlutterMap>(find.byType(FlutterMap))
+        .mapController!;
+    controller.move(const LatLng(14, 121), 17);
+    await settle(tester);
+    await tester.tapAt(fit.bottomLeft + const Offset(1, -1));
+    await settle(tester);
+    expect(controller.camera.visibleBounds.contains(target), isTrue);
+    expect(controller.camera.visibleBounds.contains(device), isTrue);
+    expect(controller.camera.zoom, lessThan(17));
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('online road metrics and Flutter visual acceptance', (
     tester,
@@ -399,6 +633,7 @@ void main() {
             ],
           })
         : File('$fixtureDir/public-demo-route.json').readAsStringSync();
+    final onlineRoute = httpFixture.routeJson;
     // First online fetch: cached replay is exercised separately above. This
     // avoids the pre-existing late-cache/fast-network race in the data owner.
     await tester.runAsync(() => db.delete('local_route_cache'));
@@ -413,8 +648,29 @@ void main() {
     expect(find.text('Saved road route'), findsNothing);
     expect(find.text('3.4 km · ~8 min'), findsOneWidget);
     final output = Platform.environment['IMAPS_SITE_VISUAL_DIR'];
+    final measurements = <String, Object>{};
     Future<void> capture(String name) async {
       if (output == null) return;
+      final panel = tester.getSize(
+        find
+            .ancestor(
+              of: find.text('Site details'),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      measurements[name] = {
+        'screenDp': [
+          tester.view.physicalSize.width,
+          tester.view.physicalSize.height,
+        ],
+        'panelDp': [panel.width, panel.height],
+        'cameraZoom': tester
+            .widget<FlutterMap>(find.byType(FlutterMap))
+            .mapController!
+            .camera
+            .zoom,
+      };
       final boundary =
           captureKey.currentContext!.findRenderObject()!
               as RenderRepaintBoundary;
@@ -430,6 +686,31 @@ void main() {
     await tester.tap(find.byTooltip('Fit both markers'));
     await settle(tester);
     await capture('site-verification-portrait');
+    tester.view.physicalSize = const Size(360, 800);
+    await settle(tester);
+    await tester.tap(find.byTooltip('Fit both markers'));
+    await settle(tester);
+    final smallPanel = tester.getRect(
+      find
+          .ancestor(
+            of: find.text('Site details'),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    final action = tester.getRect(
+      find.ancestor(
+        of: find.text('Proceed to Location'),
+        matching: find.byType(ElevatedButton),
+      ),
+    );
+    expect(smallPanel.height, lessThanOrEqualTo(216));
+    expect(action.height, greaterThanOrEqualTo(52));
+    expect(action.bottom, lessThanOrEqualTo(smallPanel.bottom - 12));
+    expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+    await capture('site-verification-portrait-small');
+    tester.view.physicalSize = const Size(390, 844);
+    await settle(tester);
     await tester.tap(find.byTooltip('Hide site details'));
     await settle(tester);
     await capture('site-verification-collapsed');
@@ -475,7 +756,38 @@ void main() {
     await tester.tap(find.byTooltip('Fit both markers'));
     await settle(tester);
     await capture('site-verification-offline');
+    await tester.pumpWidget(const SizedBox.shrink());
+    await settle(tester);
+    online = true;
+    httpFixture.routeJson = onlineRoute;
+    httpFixture.streetTilesAvailable = true;
+    await tester.runAsync(() => db.delete('local_route_cache'));
+    await mount(tester, const Size(320, 568), scale: 2);
+    expect(
+      tester
+          .widget<FlutterMap>(find.byType(FlutterMap))
+          .mapController!
+          .camera
+          .zoom,
+      greaterThan(10),
+    );
+    await capture('site-verification-small-phone-text-2x');
+    await tester.pumpWidget(const SizedBox.shrink());
+    await settle(tester);
+    await tester.runAsync(() => db.delete('local_route_cache'));
+    await mount(
+      tester,
+      const Size(320, 568),
+      textScaler: const _Android200TextScaler(),
+    );
+    await capture('site-verification-android-nonlinear-200');
+    await tester.ensureVisible(find.text('Proceed to Location'));
+    await settle(tester);
+    await capture('site-verification-android-nonlinear-200-action');
     if (output != null) {
+      File('$output/composition-metrics.json').writeAsStringSync(
+        const JsonEncoder.withIndent('  ').convert(measurements),
+      );
       File('$output/requested-tiles.json').writeAsStringSync(
         jsonEncode(httpFixture.requestedTiles.toList()..sort()),
       );

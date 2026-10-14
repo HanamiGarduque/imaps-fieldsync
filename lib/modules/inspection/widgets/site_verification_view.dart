@@ -53,29 +53,50 @@ class SiteVerificationView extends StatefulWidget {
 class _SiteVerificationViewState extends State<SiteVerificationView> {
   bool _fullscreen = false;
   bool _collapsed = false;
+  bool _initialFitApplied = false;
   final _headerKey = GlobalKey();
   final _panelKey = GlobalKey();
   final _attributionKey = GlobalKey();
+  final _detailsHeaderKey = GlobalKey();
+  final _actionKey = GlobalKey();
   double _headerHeight = 156;
   double _panelHeight = 260;
   double _attributionHeight = 42;
+  double _detailsHeaderHeight = 48;
+  double _actionHeight = 52;
   static const _motion = Duration(milliseconds: 220);
 
-  void _measureOverlays() {
+  void _measureOverlays(Size mapSize, EdgeInsets fitPadding) {
     if (!mounted) return;
     final header = _headerKey.currentContext?.size?.height ?? _headerHeight;
     final panel = _panelKey.currentContext?.size?.height ?? _panelHeight;
     final attribution =
         _attributionKey.currentContext?.size?.height ?? _attributionHeight;
+    final detailsHeader =
+        _detailsHeaderKey.currentContext?.size?.height ?? _detailsHeaderHeight;
+    final action = _actionKey.currentContext?.size?.height ?? _actionHeight;
     if ((header - _headerHeight).abs() < 0.5 &&
         (panel - _panelHeight).abs() < 0.5 &&
-        (attribution - _attributionHeight).abs() < 0.5) {
+        (attribution - _attributionHeight).abs() < 0.5 &&
+        (detailsHeader - _detailsHeaderHeight).abs() < 0.5 &&
+        (action - _actionHeight).abs() < 0.5) {
+      // initialCameraFit runs before these overlays are measured. Repair that
+      // startup fit once, without resetting later map gestures or disclosure.
+      if (widget.ready &&
+          !_initialFitApplied &&
+          mapSize.width > fitPadding.horizontal &&
+          mapSize.height > fitPadding.vertical) {
+        _initialFitApplied = true;
+        widget.onFit();
+      }
       return;
     }
     setState(() {
       _headerHeight = header;
       _panelHeight = panel;
       _attributionHeight = attribution;
+      _detailsHeaderHeight = detailsHeader;
+      _actionHeight = action;
     });
   }
 
@@ -91,21 +112,36 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         final split = landscape && !_fullscreen && !_collapsed && widget.ready;
         final sideWidth = (width * 0.34).clamp(260.0, 336.0);
         final mapRight = split ? safe.right + sideWidth + 24 : 0.0;
+        final controlsHeight = landscape ? 48.0 : 104.0;
+        // Measured content covers nonlinear font scaling and wrapped actions.
+        final panelMinHeight = _detailsHeaderHeight + _actionHeight + 12 + 2;
         // The established header is unchanged. Very large text on a short phone
         // scrolls its two context containers rather than hiding either of them.
         final headerMaxHeight = landscape
             ? math.max(80.0, height - _attributionHeight - 144)
             : math.max(
-                80.0,
-                math.min(height * 0.4, height - _attributionHeight - 280),
+                48.0,
+                math.min(
+                  height * 0.4,
+                  height -
+                      _attributionHeight -
+                      controlsHeight -
+                      panelMinHeight -
+                      40,
+                ),
               );
         final panelMaxHeight = landscape
             ? height - 32
             : math.max(
-                104.0,
+                panelMinHeight,
                 math.min(
                   height * 0.44,
-                  height - _headerHeight - _attributionHeight - 128,
+                  // Reserve both full targets, three 8dp gaps and 16dp bottom.
+                  height -
+                      _headerHeight -
+                      _attributionHeight -
+                      controlsHeight -
+                      40,
                 ),
               );
         final panelBottom = safe.bottom + 16;
@@ -113,7 +149,6 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
             ? (split ? 0.0 : _panelHeight + 8)
             : 0.0;
         final attributionBottom = panelBottom + panelSpace;
-        final controlsHeight = landscape ? 48.0 : 104.0;
         final controlsTop = math.max(
           safe.top + (_fullscreen ? 8 : _headerHeight + 8),
           box.maxHeight -
@@ -125,22 +160,22 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         final fitPadding = EdgeInsets.fromLTRB(
           safe.left + 48,
           safe.top + (_fullscreen ? 48 : _headerHeight + 24),
-          (split ? 0 : safe.right) +
+          (split ? mapRight : safe.right) +
               MediaQuery.textScalerOf(context).scale(12) * 6 +
               76,
           safe.bottom + panelSpace + _attributionHeight + 32,
         );
-        WidgetsBinding.instance.addPostFrameCallback((_) => _measureOverlays());
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) =>
+              _measureOverlays(Size(box.maxWidth, box.maxHeight), fitPadding),
+        );
 
         return Stack(
           fit: StackFit.expand,
           children: [
             // The same element/controller survives disclosure, fullscreen and
-            // rotation. Expanding the side pane changes its viewport, not its data.
-            Positioned.fill(
-              right: mapRight,
-              child: widget.mapBuilder(fitPadding),
-            ),
+            // rotation. The map also fills unused space beneath the side pane.
+            Positioned.fill(child: widget.mapBuilder(fitPadding)),
             if (!_fullscreen)
               Positioned(
                 top: safe.top,
@@ -249,7 +284,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       duration: _motion,
                       curve: Curves.easeOutCubic,
                       alignment: Alignment.bottomCenter,
-                      child: _details(landscape),
+                      child: _details(),
                     ),
                   ),
                 ),
@@ -260,31 +295,32 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
     );
   }
 
-  Widget _details(bool landscape) {
+  Widget _details() {
     return Container(
       key: _panelKey,
       decoration: BoxDecoration(
         color: InsightTheme.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: InsightTheme.roundedMd,
         border: Border.all(color: InsightTheme.line),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: Color(0x1F0B1440),
-            blurRadius: 28,
-            offset: Offset(0, 12),
+            color: InsightTheme.ink.withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 4, 16, _collapsed ? 4 : 16),
+        padding: EdgeInsets.fromLTRB(12, 0, 12, _collapsed ? 0 : 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
+              key: _detailsHeaderKey,
               children: [
                 Expanded(
-                  child: Text('Site details', style: InsightTheme.urbanist(16)),
+                  child: Text('Site details', style: InsightTheme.urbanist(14)),
                 ),
                 TextButton(
                   onPressed: () => setState(() => _collapsed = !_collapsed),
@@ -324,13 +360,12 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const SizedBox(height: 6),
                       LayoutBuilder(
                         builder: (context, box) {
                           final stacked =
-                              landscape ||
-                              box.maxWidth < 310 ||
-                              MediaQuery.textScalerOf(context).scale(12) > 17;
+                              box.maxWidth <
+                              MediaQuery.textScalerOf(context).scale(12) * 20 +
+                                  12;
                           final site = _siteMetric();
                           final route = _routeMetric();
                           return stacked
@@ -339,7 +374,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                                       CrossAxisAlignment.stretch,
                                   children: [
                                     site,
-                                    const SizedBox(height: 16),
+                                    const SizedBox(height: 12),
                                     route,
                                   ],
                                 )
@@ -347,7 +382,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Expanded(child: site),
-                                    const SizedBox(width: 16),
+                                    const SizedBox(width: 12),
                                     Expanded(child: route),
                                   ],
                                 );
@@ -355,28 +390,13 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       ),
                       if (widget.hasRoute && widget.routeFromCache)
                         Padding(
-                          padding: const EdgeInsets.only(top: 10),
+                          padding: const EdgeInsets.only(top: 8),
                           child: Text(
                             'Saved estimate. Offline rerouting is unavailable; street tiles may be missing. Connect to refresh.',
                             style: InsightTheme.inter(12, c: InsightTheme.ink3),
                           ),
                         ),
-                      if (widget.nearSite)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Text(
-                            'Near site · confirm GPS in Step 2.',
-                            style: InsightTheme.inter(
-                              12,
-                              w: FontWeight.w600,
-                              c: InsightTheme.greenInk,
-                            ),
-                          ),
-                        ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Divider(height: 1, color: InsightTheme.line),
-                      ),
+                      const SizedBox(height: 8),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -391,22 +411,27 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'GPS confirmation happens in Step 2.',
+                              widget.nearSite
+                                  ? 'Near site · confirm GPS in Step 2.'
+                                  : 'GPS confirmation happens in Step 2.',
                               style: InsightTheme.inter(
                                 12,
-                                c: InsightTheme.ink3,
+                                c: widget.nearSite
+                                    ? InsightTheme.greenInk
+                                    : InsightTheme.ink3,
                               ),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 8),
                       DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: InsightTheme.primaryGradient,
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: ElevatedButton(
+                          key: _actionKey,
                           onPressed: widget.onProceed,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.transparent,
@@ -469,12 +494,11 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
           widget.distanceMeters == null
               ? 'Unavailable'
               : _distance(widget.distanceMeters!),
-          style: InsightTheme.urbanist(26),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Position to site',
-          style: InsightTheme.inter(12, c: InsightTheme.ink3),
+          style: InsightTheme.inter(
+            22,
+            w: FontWeight.w700,
+            c: InsightTheme.ink,
+          ),
         ),
       ] else ...[
         Text(
@@ -546,11 +570,6 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
             w: FontWeight.w700,
             c: InsightTheme.ink,
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Driving estimate',
-          style: InsightTheme.inter(12, c: InsightTheme.ink3),
         ),
       ] else ...[
         Text(
