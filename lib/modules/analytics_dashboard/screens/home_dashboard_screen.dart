@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -103,7 +102,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // without a widget tree; filtering happens client-side over the already-fetched
   // batch (see _kRecentActivityLimit below) rather than re-querying per tap.
   String _activityFilter = 'all';
-  bool _showAllActivity = false;
   final ScrollController _activityFilterController = ScrollController();
 
    // The calendar selection is independent of the live Today/Note card.
@@ -248,9 +246,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     }
   }
 
-  // Fetch once; each category initially reveals seven of this recent batch.
-  static const int _kRecentActivityLimit = 15;
-  static const int _kVisibleActivityLimit = 7;
+  // Fetch a bounded recent batch; the dashboard previews only one event.
+  static const int _kRecentActivityLimit = 50;
 
   Future<void> _loadRecentActivity() async {
     setState(() => _isLoadingActivity = true);
@@ -353,8 +350,102 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     if (_activityFilter == filter) return;
     setState(() {
       _activityFilter = filter;
-      _showAllActivity = false;
     });
+  }
+
+  /// One dashboard preview per filter. The modal carries the remaining
+  /// recent events, so the Home page doesn't grow with a long timeline.
+  void _showActivityHistory() {
+    final events = List<Map<String, dynamic>>.from(_filteredActivity);
+    if (events.isEmpty || _isLoadingActivity) return;
+    final category = _activityFilter == 'all'
+        ? 'All'
+        : ActivityEventCategory.labelFor(_activityFilter);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: InsightTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SizedBox(
+        height: MediaQuery.sizeOf(sheetContext).height * 0.82,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 2, 12, 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Recent activity',
+                                style: InsightTheme.urbanist(20,
+                                    w: FontWeight.w700, c: InsightTheme.ink)),
+                            const SizedBox(height: 3),
+                            Text('$category · Latest ${events.length} ${events.length == 1 ? 'event' : 'events'}',
+                                style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close recent activity',
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    key: const ValueKey('recent_activity_modal_list'),
+                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                    itemCount: events.length,
+                    itemBuilder: (context, index) {
+                      final event = events[index];
+                      final themeInfo = _eventTheme(event['event_type'] as String? ?? '');
+                      return Stack(
+                        children: [
+                          if (index < events.length - 1)
+                            Positioned(
+                              left: 16,
+                              top: 16,
+                              bottom: 0,
+                              child: Container(
+                                width: 2,
+                                color: InsightTheme.ink3.withValues(alpha: 0.15),
+                              ),
+                            ),
+                          _TimelineActivityTile(
+                            key: ValueKey('modal_${event['id'] ?? index}'),
+                            icon: themeInfo['icon'],
+                            color: themeInfo['color'],
+                            categoryLabel: _eventCategoryLabel(event['event_type'] as String? ?? ''),
+                            title: event['title'] as String? ?? 'Update',
+                            subtitle: event['subtitle'] as String? ?? '',
+                            time: _timeAgo(event['occurred_at'] as String?),
+                            occurredAtIso: event['occurred_at'] as String?,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   String _getInitials(String name) {
@@ -522,11 +613,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final greeting = _greeting(_now);
      final tasksByDay = _tasksByDayInMonth(_calendarMonth);
     final filteredActivity = _filteredActivity;
-    final visibleActivity = _showAllActivity
-        ? filteredActivity
-        : filteredActivity.take(_kVisibleActivityLimit).toList();
-    final activityMotion = MediaQuery.disableAnimationsOf(context)
-         ? Duration.zero : const Duration(milliseconds: 220);
     final calendarMotion = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero : const Duration(milliseconds: 320);
 
@@ -750,17 +836,36 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                  ),
                ),
                ),
-                       _SuspendedMonthCalendar(
-                         visible: _showFullCalendar,
-                         child: Padding(
+                       AnimatedSwitcher(
+                         duration: calendarMotion,
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: SizeTransition(
+                            sizeFactor: animation,
+                            alignment: Alignment(-1, -1),
+                            child: SlideTransition(
+                              position: Tween<Offset>(begin: const Offset(0, -0.06), end: Offset.zero).animate(animation),
+                              child: child,
+                            ),
+                          ),
+                        ),
+                        child: _showFullCalendar
+                            ? Padding(
                                 key: const ValueKey('full_calendar'),
-                                  // The monthly grid fits the card's available
-                                  // width, keeping the surrounding Home gutter.
-                                 padding: const EdgeInsets.symmetric(horizontal: 20),
+                                 // Gutter follows the content: seven 48px day targets
+                                 // need 336px, so this keeps the standard 20px
+                                 // margin where it fits and only tightens on
+                                 // narrower phones, never to zero.
+                                 padding: _kFullCalendarGutter(context),
                                  child: ConstrainedContent(
                                    maxWidth: 560,
-                                    child: _CalendarLanyard(
-                                      child: _InlineFullCalendarCard(
+                                   child: Column(children: [
+                                     const ExcludeSemantics(child: CustomPaint(
+                                       size: Size(160, 24), painter: _CalendarTetherPainter(),
+                                     )),
+                                     _InlineFullCalendarCard(
                                   month: _calendarMonth,
                                   selectedDay: _selectedDay,
                                   taskDaysForMonth: _taskDaysInMonth,
@@ -770,9 +875,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
                                   onPick: _onFullCalendarPick,
                                      ),
-                                    ),
+                                   ]),
                                  ),
-                              ),
+                              )
+                             : const SizedBox.shrink(),
                       ),
                const SizedBox(height: 8),
 
@@ -870,11 +976,22 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       _upcomingTasks[index].status,
                                     ),
                                     child: ActiveAssignmentsFolderCard(
+                                      // IDs remain in Task Details and are no
+                                      // longer printed on the carousel artwork.
                                       inspectionId: _formatShortId(_upcomingTasks[index].id),
                                       referenceNo: _upcomingTasks[index].inspectionNo,
-                                        date: _calendarDateForTask(_upcomingTasks[index]) != null
+                                      date: _calendarDateForTask(_upcomingTasks[index]) != null
                                           ? _formatScheduledDate(_calendarDateForTask(_upcomingTasks[index])!)
                                           : '—',
+                                      dateLabel: _calendarDateForTask(_upcomingTasks[index]) == null
+                                          ? null
+                                          : _upcomingTasks[index].pendingSection == PendingTaskSection.scheduled
+                                              ? 'Visit Date'
+                                              : 'Deadline',
+                                      savedStep: (_upcomingTasks[index].currentStep > 0
+                                              ? _upcomingTasks[index].currentStep
+                                              : _upcomingTasks[index].derivedHighestStep)
+                                          .clamp(0, 6),
                                       location: _upcomingTasks[index].location,
                                       applicantName: _upcomingTasks[index].name,
                                       applicationType: _upcomingTasks[index].applicationType?.isNotEmpty == true
@@ -929,6 +1046,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: SpringSlide(
+                  animation: springFor(3),
+                  beginOffset: const Offset(0, 20),
+                  child: _SectionLabel(
+                    title: "Task completion flow",
+                    trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab),
+                  ),
+              ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: SpringSlide(
                   animation: springFor(4),
                   beginOffset: const Offset(0, 24),
                   // Group container (Pattern A) — the ring chart previously
@@ -940,13 +1069,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                     decoration: BoxDecoration(
                       color: InsightTheme.surface,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: InsightTheme.line),
                     ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      _SectionLabel(title: 'Task completion flow',
-                        trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab)),
-                      const SizedBox(height: 12),
-                      _isLoadingTasks
+                    child: _isLoadingTasks
                         ? const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: ImapsLoadingIndicator(size: 40)))
                         : _allTasks.isEmpty
                             ? Text('No tasks yet.', style: InsightTheme.inter(12, c: InsightTheme.ink2))
@@ -971,198 +1095,118 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       fractions: fractions,
                                       overdueCount: overdueCount,
                                 );
-                               }),
-                    ]),
+                              }),
                   ),
               ),
               ),
               const SizedBox(height: 12),
 
               // ----------------------------------------------------
-              // 4. RECENT ACTIVITY
+              // 4. RECENT ACTIVITY — one Home preview, full history in a modal.
               // ----------------------------------------------------
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  color: InsightTheme.surface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: InsightTheme.line),
-                ),
-                child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: SpringSlide(
                   animation: springFor(8),
                   beginOffset: const Offset(0, 20),
-                   child: const _SectionLabel(title: "Recent activity"),
-                 ),
-               ),
-               const SizedBox(height: 12),
-
-              // Content-sized tabs keep their full touch targets. The native
-              // scroll track and next-tab peek make narrow-screen scrolling clear.
-              SpringSlide(
-                animation: springFor(8),
-                beginOffset: const Offset(0, 20),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: RawScrollbar(
-                    // The shell's bottom-nav inset must not displace this
-                    // small local track upward into the preceding section.
-                    padding: EdgeInsets.zero,
-                    controller: _activityFilterController,
-                    thumbVisibility: true,
-                    trackVisibility: true,
-                    thickness: 3,
-                    radius: const Radius.circular(3),
-                    scrollbarOrientation: ScrollbarOrientation.bottom,
-                    child: SingleChildScrollView(
+                  child: const _SectionLabel(title: 'Recent activity'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              // Intentionally no parent card or visible scrollbar. The tabs
+              // may extend beyond the right page gutter and swipe horizontally.
+              Padding(
+                padding: const EdgeInsets.only(left: 20),
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(
+                    scrollbars: false,
+                  ),
+                  child: SingleChildScrollView(
                     key: const ValueKey('activity_filters'),
                     controller: _activityFilterController,
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(right: 20),
                     child: Row(
-                    children: [
-                      _ActivityFilterChip(
-                        label: 'All',
-                        selected: _activityFilter == 'all',
-                        onTap: () => _selectActivityFilter('all'),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: 'Tasks',
-                        selected: _activityFilter == 'tasks',
-                        onTap: () => _selectActivityFilter('tasks'),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: 'Sync',
-                        selected: _activityFilter == 'sync',
-                        onTap: () => _selectActivityFilter('sync'),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: ActivityEventCategory.labelFor(
-                          ActivityEventCategory.reports,
+                      children: [
+                        _ActivityFilterChip(
+                          label: 'All',
+                          selected: _activityFilter == 'all',
+                          onTap: () => _selectActivityFilter('all'),
                         ),
-                        selected: _activityFilter == ActivityEventCategory.reports,
-                        onTap: () => _selectActivityFilter(ActivityEventCategory.reports),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: 'Profile',
-                        selected: _activityFilter == 'profile',
-                        onTap: () => _selectActivityFilter('profile'),
-                      ),
-                    ],
-                    ),
+                        const SizedBox(width: 8),
+                        _ActivityFilterChip(
+                          label: 'Tasks',
+                          selected: _activityFilter == 'tasks',
+                          onTap: () => _selectActivityFilter('tasks'),
+                        ),
+                        const SizedBox(width: 8),
+                        _ActivityFilterChip(
+                          label: 'Sync',
+                          selected: _activityFilter == 'sync',
+                          onTap: () => _selectActivityFilter('sync'),
+                        ),
+                        const SizedBox(width: 8),
+                        _ActivityFilterChip(
+                          label: ActivityEventCategory.labelFor(
+                              ActivityEventCategory.reports),
+                          selected: _activityFilter == ActivityEventCategory.reports,
+                          onTap: () => _selectActivityFilter(ActivityEventCategory.reports),
+                        ),
+                        const SizedBox(width: 8),
+                        _ActivityFilterChip(
+                          label: 'Profile',
+                          selected: _activityFilter == 'profile',
+                          onTap: () => _selectActivityFilter('profile'),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-
+              const SizedBox(height: 12),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: _isLoadingActivity
-                    ? const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: ImapsLoadingIndicator(size: 50)))
-                    // Crossfade the timeline content when the filter changes —
-                    // same easeOutCubic/220ms language _TimelineActivityTile
-                    // already uses for its own expand/collapse, so the motion
-                    // reads as one consistent feel rather than a second style.
-                    : AnimatedSize(
-                        duration: activityMotion,
-                        curve: Curves.easeOutCubic,
-                        alignment: Alignment.topCenter,
-                        child: AnimatedSwitcher(
-                        duration: activityMotion,
-                        switchInCurve: Curves.easeOutCubic,
-                        switchOutCurve: Curves.easeOutCubic,
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 18),
+                        child: Center(child: ImapsLoadingIndicator(size: 40)),
+                      )
+                    : AnimatedSwitcher(
+                        duration: MediaQuery.disableAnimationsOf(context)
+                            ? Duration.zero
+                            : const Duration(milliseconds: 220),
                         child: filteredActivity.isEmpty
                             ? Padding(
                                 key: ValueKey('empty_$_activityFilter'),
-                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                padding: const EdgeInsets.symmetric(vertical: 16),
                                 child: Text(
                                   _activityFilter == 'all'
                                       ? 'No recent activity yet.'
-                                      : 'No $_activityFilter activity yet.',
+                                      : 'No ${ActivityEventCategory.labelFor(_activityFilter).toLowerCase()} activity yet.',
                                   style: InsightTheme.inter(12, c: InsightTheme.ink2),
                                 ),
                               )
-                            : Stack(
-                                key: ValueKey('list_$_activityFilter'),
-                                children: [
-                                  Positioned(
-                                    left: 16, top: 16, bottom: 16,
-                                    child: Container(width: 2, color: InsightTheme.ink3.withValues(alpha: 0.15)),
-                                  ),
-                                  Column(
-                                    children: List.generate(visibleActivity.length, (i) {
-                                      final activity = visibleActivity[i];
-                                      final themeInfo = _eventTheme(activity['event_type'] as String? ?? '');
-                                      final activityId = activity['id'] ?? i;
-                                      return SpringSlide(
-                                        key: ValueKey(activityId),
-                                        // Existing rows retain their state; newly revealed rows
-                                        // enter immediately rather than waiting another second.
-                                        animation: springForKey('activity_$activityId', i < _kVisibleActivityLimit ? 9 + i : 0),
-                                        beginOffset: const Offset(0, 28),
-                                        child: UpdatingTile(
-                                          itemKey: activityId,
-                                          signature: Object.hash(
-                                            activity['title'],
-                                            activity['subtitle'],
-                                            activity['occurred_at'],
-                                          ),
-                                          child: _TimelineActivityTile(
-                                            icon: themeInfo['icon'],
-                                            color: themeInfo['color'],
-                                            categoryLabel: _eventCategoryLabel(activity['event_type'] as String? ?? ''),
-                                            title: activity['title'] as String? ?? 'Update',
-                                            subtitle: activity['subtitle'] as String? ?? '',
-                                            time: _timeAgo(activity['occurred_at'] as String?),
-                                            occurredAtIso: activity['occurred_at'] as String?,
-                                          ),
-                                        ),
-                                      );
-                                    }),
-                                  ),
-                                ],
-                              ),
-                        ),
+                            : Builder(builder: (context) {
+                                final activity = filteredActivity.first;
+                                final themeInfo = _eventTheme(
+                                    activity['event_type'] as String? ?? '');
+                                return _TimelineActivityTile(
+                                  key: ValueKey('preview_${_activityFilter}_${activity['id'] ?? ''}'),
+                                  icon: themeInfo['icon'],
+                                  color: themeInfo['color'],
+                                  categoryLabel: _eventCategoryLabel(
+                                      activity['event_type'] as String? ?? ''),
+                                  title: activity['title'] as String? ?? 'Update',
+                                  subtitle: activity['subtitle'] as String? ?? '',
+                                  time: _timeAgo(activity['occurred_at'] as String?),
+                                  occurredAtIso: activity['occurred_at'] as String?,
+                                  onOpenHistory: _showActivityHistory,
+                                  historyCount: filteredActivity.length,
+                                );
+                              }),
                       ),
               ),
-              if (filteredActivity.length > _kVisibleActivityLimit)
-                Center(
-                  child: Semantics(
-                    expanded: _showAllActivity,
-                    child: TextButton(
-                      onPressed: () => setState(() => _showAllActivity = !_showAllActivity),
-                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(_showAllActivity ? 'See less' : 'See more (${filteredActivity.length - _kVisibleActivityLimit})',
-                              style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
-                          const SizedBox(width: 6),
-                          AnimatedRotation(
-                            turns: _showAllActivity ? 0.5 : 0,
-                            duration: activityMotion,
-                            child: const Icon(Icons.keyboard_arrow_down_rounded, color: InsightTheme.blueInk, size: 20),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                 ],
-                 ),
-               ),
-              ),
+              const SizedBox(height: 12),
             ],
             ),
           ),
@@ -1753,7 +1797,7 @@ class _ActivityFilterChip extends StatelessWidget {
       button: true,
       selected: selected,
       child: Material(
-        color: Colors.transparent,
+        color: selected ? InsightTheme.blue1 : InsightTheme.surface2,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
@@ -1762,11 +1806,8 @@ class _ActivityFilterChip extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             alignment: Alignment.center,
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(color: selected ? InsightTheme.blue1 : InsightTheme.surface2,
-              borderRadius: BorderRadius.circular(999)),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Text(
               label,
               textAlign: TextAlign.center,
@@ -1783,8 +1824,8 @@ class _ActivityFilterChip extends StatelessWidget {
 /// Concentric ring chart for Task Completion Flow (replaces the old
 /// stacked progress-bar rows). One ring per category — Scheduled (outer)
 /// through Completed (inner) — each ring's filled arc is that category's
-/// share of the total task count. Four direct label/count rows sit beside the
-/// rings when they fit and below on narrow or enlarged-text layouts.
+/// share of the total task count. Categories stay in a compact two-by-two
+/// layout, beside the rings when they fit and below on narrow layouts.
 class _CompletionRingChart extends StatefulWidget {
   final int total;
   final List<String> labels;
@@ -1824,25 +1865,8 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
-    final inheritedStyle = DefaultTextStyle.of(context).style;
-    final numberStyle = inheritedStyle.merge(InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink));
-    final tasksStyle = inheritedStyle.merge(InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3));
-    Size measure(String text, TextStyle style) {
-      final painter = TextPainter(text: TextSpan(text: text, style: style),
-        textDirection: Directionality.of(context), textScaler: scaler)..layout();
-      final size = painter.size;
-      painter.dispose();
-      return size;
-    }
-    final number = measure('${widget.total}', numberStyle);
-    final tasks = measure('Tasks', tasksStyle);
-    final readoutWidth = math.max(number.width, tasks.width);
-    final readoutHeight = number.height + 2 + tasks.height;
-    // Measure text, not geometry through the font scaler: Android scaling is nonlinear.
-    final hole = math.sqrt(readoutWidth * readoutWidth + readoutHeight * readoutHeight) + 8;
-    final ringSize = math.max(_outerSize, hole + _ringStep * 3 + _strokeWidth);
+    final ringSize = scaler.scale(_outerSize);
     final rings = SizedBox(
-      key: const ValueKey('completion_rings'),
       width: ringSize,
       height: ringSize,
       child: Stack(
@@ -1850,30 +1874,29 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
         children: [
           for (int i = 0; i < widget.labels.length; i++)
             SizedBox(
-              width: ringSize - _ringStep * i,
-              height: ringSize - _ringStep * i,
+              width: ringSize - (scaler.scale(_ringStep) * i),
+              height: ringSize - (scaler.scale(_ringStep) * i),
               child: TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: _filled ? widget.fractions[i].clamp(0.0, 1.0) : 0.0),
                 duration: const Duration(milliseconds: 750),
                 curve: Curves.easeOutCubic,
                 builder: (context, value, _) => CircularProgressIndicator(
                   value: value <= 0 ? 0.001 : value,
-                  strokeWidth: _strokeWidth,
+                  strokeWidth: scaler.scale(_strokeWidth),
                   strokeCap: StrokeCap.round,
                   backgroundColor: widget.colors[i].withValues(alpha: 0.12),
                   valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
                 ),
               ),
             ),
-          SizedBox(
-            key: const ValueKey('completion_readout'),
-            width: readoutWidth,
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: scaler.scale(44)),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('${widget.total}', style: numberStyle),
+                Text('${widget.total}', style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink)),
                 const SizedBox(height: 2),
-                Text('Tasks', style: tasksStyle),
+                Text('Tasks', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3)),
               ],
             ),
           ),
@@ -1883,6 +1906,9 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
     final labelStyle = DefaultTextStyle.of(context).style.merge(
       InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2),
     );
+    // White meets AA on the dark blue; lighter status fills use dark ink.
+    final foregroundColors = widget.colors.map((color) =>
+        color.computeLuminance() < 0.18 ? Colors.white : InsightTheme.ink).toList();
     var labelWidth = 0.0;
     for (final label in widget.labels) {
       final painter = TextPainter(
@@ -1893,193 +1919,111 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
       if (painter.width > labelWidth) labelWidth = painter.width;
       painter.dispose();
     }
-    final legend = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      for (var i = 0; i < widget.labels.length; i++) Container(
-        key: ValueKey('completion_${widget.labels[i]}'),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: const BoxDecoration(color: InsightTheme.surface),
-        child: Row(children: [
-          Container(key: ValueKey('completion_color_${widget.labels[i]}'), width: 8, height: 8,
-            decoration: BoxDecoration(color: widget.colors[i], shape: BoxShape.circle)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(widget.labels[i], style: labelStyle)),
-          const SizedBox(width: 8),
-          Text('${widget.counts[i]}', style: InsightTheme.inter(16, w: FontWeight.w700, c: InsightTheme.ink)),
-        ]),
-      ),
-      if (widget.overdueCount > 0) Padding(padding: const EdgeInsets.only(top: 8),
-        child: Text('${widget.overdueCount} Overdue', key: const ValueKey('completion_overdue'),
-          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.redInk))),
-    ]);
+    final legend = Stack(
+      alignment: Alignment.center,
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int row = 0; row < widget.labels.length; row += 2) ...[
+              if (row == 2) SizedBox(height: scaler.scale(widget.overdueCount > 0 ? 12 : 4)),
+              Table(
+                children: [TableRow(children: [
+                  for (int i = row; i < row + 2; i++)
+                    Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: Container(
+                        key: ValueKey('completion_${widget.labels[i]}'),
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: scaler.scale(4)),
+                        decoration: BoxDecoration(
+                          color: widget.colors[i],
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: widget.colors[i]),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (i < 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
+                            Text('${widget.counts[i]}', style: InsightTheme.urbanist(22, w: FontWeight.w700, c: foregroundColors[i])),
+                            if (i >= 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
+                          ],
+                        ),
+                      ),
+                    ),
+                ])],
+              ),
+            ],
+          ],
+        ),
+        if (widget.overdueCount > 0)
+          Container(
+            key: const ValueKey('completion_overdue'),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: InsightTheme.redTint, borderRadius: BorderRadius.circular(999)),
+            child: Text('${widget.overdueCount} Overdue', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.redInk)),
+          ),
+      ],
+    );
     return LayoutBuilder(key: const ValueKey('completion_chart'), builder: (context, constraints) {
       // Keep category words intact with the actual font and accessibility size.
-      final countWidth = widget.counts.map((count) => measure('$count', InsightTheme.inter(16, w: FontWeight.w700)).width)
-        .fold<double>(0, math.max);
-      final legendWidth = labelWidth + countWidth + 36;
-      if (constraints.maxWidth < ringSize + 12 + legendWidth) {
+      final legendWidth = (labelWidth + 18) * 2;
+      if (constraints.maxWidth < ringSize + 8 + legendWidth) {
         return Column(children: [
           rings,
-           const SizedBox(height: 12),
-           legend,
+          const SizedBox(height: 4),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: constraints.maxWidth.clamp(legendWidth, double.infinity),
+              child: legend,
+            ),
+          ),
         ]);
       }
       return Row(children: [
         rings,
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
         Expanded(child: legend),
       ]);
     });
   }
 }
 
-/// One shared hanging pivot for the strap and the month card it carries.
-const double _kCalendarSwingRadians = 0.0349; // 2 degrees
-
-/// Reveals the month card hanging from its lanyard, and replays the same
-/// motion in reverse when it closes.
+/// Page gutter for the full-month card.
 ///
-/// One controller owns the whole reveal, so the strap, the card and the pivot
-/// always move as a single suspended piece instead of three decorations that
-/// happen to animate together.
-class _SuspendedMonthCalendar extends StatefulWidget {
-  const _SuspendedMonthCalendar({required this.visible, required this.child});
-
-  final bool visible;
-  final Widget child;
-
-  @override
-  State<_SuspendedMonthCalendar> createState() =>
-      _SuspendedMonthCalendarState();
+/// Seven Android-sized day targets need 336px. The standard 20px page margin
+/// is used whenever it fits; on narrower phones it tightens so the targets
+/// stay full size, and it never reaches zero, so the month is never flush
+/// against the phone edge.
+EdgeInsets _kFullCalendarGutter(BuildContext context) {
+  const sevenTargets = 7 * 48.0;
+  final width = MediaQuery.sizeOf(context).width;
+  // Clamp the gutter itself: the narrowest margin that still fits seven 48px
+  // day targets, and never more than the standard 20px page margin.
+  final gutter = ((width - sevenTargets) / 2).clamp(4.0, 20.0);
+  return EdgeInsets.symmetric(horizontal: gutter);
 }
 
-class _SuspendedMonthCalendarState extends State<_SuspendedMonthCalendar>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _swing = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 420),
-    value: widget.visible ? 1 : 0,
-  );
-
-  @override
-  void didUpdateWidget(_SuspendedMonthCalendar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.visible == widget.visible) return;
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _swing.value = widget.visible ? 1 : 0;
-      return;
-    }
-    _swing.animateTo(
-      widget.visible ? 1 : 0,
-      curve: Curves.easeOutCubic,
-    );
-  }
-
-  @override
-  void dispose() {
-    _swing.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _swing,
-    child: widget.child,
-    builder: (context, child) {
-      if (_swing.value <= 0) return const SizedBox.shrink();
-      return Transform.rotate(
-        angle: (1 - _swing.value) * _kCalendarSwingRadians,
-        alignment: Alignment.topCenter,
-        child: SizeTransition(
-          sizeFactor: _swing,
-          alignment: Alignment.topCenter,
-          child: child,
-        ),
-      );
-    },
-  );
-}
-
-/// The visible strap the month card actually hangs from.
-///
-/// The ribbon converges onto a real clip at the card's top-centre slot, so the
-/// lanyard reads as attached hardware rather than decoration floating between
-/// the toggle and the card.
-class _CalendarLanyard extends StatelessWidget {
-  const _CalendarLanyard({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.topCenter,
-      children: [
-        Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(
-            key: ValueKey('calendar_lanyard'),
-            height: 30,
-            width: double.infinity,
-            child: ExcludeSemantics(child: CustomPaint(painter: _CalendarLanyardPainter())),
-          ),
-          child,
-        ]),
-        // Paint the hardware after the card: geometric overlap otherwise gets
-        // hidden by the card's opaque background.
-        Positioned(
-          top: 19,
-          child: ExcludeSemantics(child: Container(
-            key: const ValueKey('calendar_lanyard_clip'),
-            width: 12,
-            height: 16,
-            decoration: BoxDecoration(
-              color: InsightTheme.ink3,
-              borderRadius: BorderRadius.circular(2),
-            ),
-            child: Center(child: Container(width: 12, height: 2, color: InsightTheme.surface)),
-          )),
-        ),
-      ],
-    );
-}
-
-class _CalendarLanyardPainter extends CustomPainter {
-  const _CalendarLanyardPainter();
+/// Decorative lanyard from the existing Calendar toggle to its separate card.
+class _CalendarTetherPainter extends CustomPainter {
+  const _CalendarTetherPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
-    final ribbon = Paint()
-      ..color = InsightTheme.blue1.withValues(alpha: 0.62);
-    final seam = Paint()
-      ..color = InsightTheme.blueInk.withValues(alpha: 0.5)
+    final paint = Paint()
+      ..color = InsightTheme.blue1.withValues(alpha: 0.45)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final centre = size.width / 2;
-    final clipTop = size.height - 6;
-    // Two ribbons hang from the toggle and converge onto the clip, so the card
-    // reads as carried hardware rather than sitting under loose lines.
+      ..strokeWidth = 1.5;
     for (final direction in [-1.0, 1.0]) {
-      final outer = centre + direction * 26;
-      final inner = centre + direction * 8;
-      canvas.drawPath(
-        Path()
-          ..moveTo(outer - direction * 5, 0)
-          ..lineTo(outer + direction * 5, 0)
-          ..lineTo(inner + direction * 3, clipTop)
-          ..lineTo(inner - direction * 3, clipTop)
-          ..close(),
-        ribbon,
-      );
-      canvas.drawPath(
-        Path()
-          ..moveTo(outer, 1)
-          ..lineTo(inner, clipTop - 1),
-        seam,
-      );
+      canvas.drawPath(Path()
+        ..moveTo(size.width / 2 + direction * 12, 0)
+        ..quadraticBezierTo(size.width / 2 + direction * 16, size.height / 2,
+            size.width / 2 + direction * 64, size.height), paint);
     }
   }
 
   @override
-  bool shouldRepaint(_CalendarLanyardPainter oldDelegate) => false;
+  bool shouldRepaint(_CalendarTetherPainter oldDelegate) => false;
 }
 
 /// A separate full-month card sharing the strip's real selection/task sources.
@@ -2119,11 +2063,12 @@ class _InlineFullCalendarCard extends StatelessWidget {
 
     final clampedDay = selectedDay.clamp(1, daysInMonth);
     final selectedDate = DateTime(month.year, month.month, clampedDay);
+    final headerLabel =
+        '$clampedDay ${_monthAbbr[month.month - 1]} ${(month.year % 100).toString().padLeft(2, '0')}, ${_fullWeekdayNames[selectedDate.weekday - 1]}';
     final selectedTasks = tasksByDayInMonth[clampedDay] ?? const <TaskItem>[];
 
     return Container(
-      key: const ValueKey('calendar_month_card'),
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
         borderRadius: InsightTheme.roundedMd,
@@ -2138,22 +2083,7 @@ class _InlineFullCalendarCard extends StatelessWidget {
             child: Row(
             children: [
               Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${_monthAbbr[month.month - 1]} ${month.year}',
-                        style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
-                    const SizedBox(height: 2),
-                    // The selected date rides in the header instead of a
-                    // separate caption row, so the month stays compact.
-                    Text(
-                      key: const ValueKey('calendar_selected_date'),
-                      '${_fullWeekdayNames[selectedDate.weekday - 1].substring(0, 3)} $clampedDay ${_monthAbbr[month.month - 1]}',
-                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
-                    ),
-                  ],
-                ),
+                child: Text(headerLabel, style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
               ),
               IconButton(
                 tooltip: 'Previous month',
@@ -2169,127 +2099,102 @@ class _InlineFullCalendarCard extends StatelessWidget {
             ],
             ),
           ),
+          const SizedBox(height: 8),
           LayoutBuilder(builder: (context, constraints) {
             final dayStyle = InsightTheme.inter(12.5, w: FontWeight.w700);
-            final weekdayStyle = InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3);
-            final columnWidth = constraints.maxWidth / 7;
-            Size measure(String label, TextStyle style) {
+            var columnWidth = 48.0;
+            var rowHeight = 48.0;
+            for (final label in [..._weekdayAbbrSunStart, '88']) {
               final painter = TextPainter(
-                text: TextSpan(text: label, style: DefaultTextStyle.of(context).style.merge(style)),
+                text: TextSpan(text: label, style: DefaultTextStyle.of(context).style.merge(dayStyle)),
                 textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
               )..layout();
-              final size = painter.size;
+              if (painter.width + 12 > columnWidth) columnWidth = painter.width + 12;
+              if (painter.height + 24 > rowHeight) rowHeight = painter.height + 24;
               painter.dispose();
-              return size;
             }
-
-            // Adapt the heading, not the user's text size or the grid width.
-            var weekdayLength = 3;
-            while (weekdayLength > 1 && _weekdayAbbrSunStart.any((label) =>
-                measure(label.substring(0, weekdayLength), weekdayStyle).width + 4 > columnWidth)) {
-              weekdayLength--;
-            }
-            var plateWidth = 32.0;
-            var plateHeight = 32.0;
-            for (var day = 1; day <= daysInMonth; day++) {
-              final size = measure('$day', dayStyle);
-              if (size.width + 8 > plateWidth) plateWidth = size.width + 8;
-              if (size.height + 8 > plateHeight) plateHeight = size.height + 8;
-            }
-            plateWidth = plateWidth.clamp(0.0, columnWidth).toDouble();
-            // Number plate, 2dp separation, 4dp task track, 4dp breathing room.
-            // The approved compact Calendar uses the full cell as its target.
-            final rowHeight = (plateHeight + 2 + 4 + 4).clamp(44.0, double.infinity).toDouble();
-            return Column(children: [
+            final gridWidth = constraints.maxWidth.clamp(columnWidth * 7, double.infinity).toDouble();
+            final calendar = SizedBox(width: gridWidth, child: Column(children: [
               Row(children: [
-                for (var index = 0; index < _weekdayAbbrSunStart.length; index++)
-                  Expanded(child: Semantics(
-                    key: ValueKey('calendar_weekday_$index'),
-                    label: _fullWeekdayNames[(index + 6) % 7],
-                    excludeSemantics: true,
-                    child: Center(child: Text(_weekdayAbbrSunStart[index].substring(0, weekdayLength),
-                        style: weekdayStyle)),
-                  )),
+                for (var index = 0; index < _weekdayAbbrSunStart.length; index++) ...[
+                  Expanded(child: Center(child: Text(_weekdayAbbrSunStart[index],
+                      style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)))),
+                ],
               ]),
-              const SizedBox(height: 2),
+              const SizedBox(height: 6),
               GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                padding: EdgeInsets.zero,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 7,
-                  mainAxisSpacing: 0,
-                  crossAxisSpacing: 0,
-                  mainAxisExtent: rowHeight,
-                ),
-                itemCount: daysInMonth + leadingBlanks,
-                itemBuilder: (context, i) {
-                  if (i < leadingBlanks) return const SizedBox.shrink();
-                  final day = i - leadingBlanks + 1;
-                  final isSelected = day == clampedDay;
-                  final hasTask = taskDays.contains(day);
-                  final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
-                  final dotColors = dayTasks.map(dotColorForTask).toSet().toList();
-                  return Semantics(
-                    key: ValueKey('calendar_day_$day'),
-                    container: true,
-                    button: true,
-                    selected: isSelected,
-                    label: '${_fullWeekdayNames[DateTime(month.year, month.month, day).weekday - 1]}, '
-                        '${_HomeDashboardScreenState._fullMonthNames[month.month - 1]} $day, ${month.year}, '
-                        '${dayTasks.length} ${dayTasks.length == 1 ? 'task' : 'tasks'}',
-                    onTap: () => onPick(month, day),
-                    excludeSemantics: true,
-                    child: InkWell(
-                      onTap: () => onPick(month, day),
-                      borderRadius: BorderRadius.circular(24),
-                      child: Center(child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            key: ValueKey('calendar_day_plate_$day'),
-                            width: plateWidth,
-                            height: plateHeight,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: isSelected ? InsightTheme.blue1 : Colors.transparent,
-                              // A circle at normal text; a content-sized capsule when
-                              // large digits need more height than a narrow column.
-                              borderRadius: BorderRadius.circular(plateHeight / 2),
-                            ),
-                            child: Text('$day', style: dayStyle.copyWith(
-                                color: isSelected ? Colors.white : InsightTheme.ink)),
-                          ),
-                          const SizedBox(height: 2),
-                          SizedBox(height: 4, child: Row(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 4),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 4,
+               crossAxisSpacing: 0,
+              mainAxisExtent: rowHeight,
+            ),
+            itemCount: daysInMonth + leadingBlanks,
+            itemBuilder: (context, i) {
+              if (i < leadingBlanks) return const SizedBox.shrink();
+              final day = i - leadingBlanks + 1;
+              final isSelected = day == clampedDay;
+              final hasTask = taskDays.contains(day);
+              final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
+              final dotColors = dayTasks
+                  .map(dotColorForTask)
+                  .toSet()
+                  .toList();
+              return InkWell(
+                key: ValueKey('calendar_day_$day'),
+                onTap: () => onPick(month, day),
+                borderRadius: BorderRadius.circular(24),
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: isSelected ? InsightTheme.blue1 : Colors.transparent,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('$day', style: InsightTheme.inter(12.5, w: FontWeight.w700, c: isSelected ? Colors.white : InsightTheme.ink)),
+                        if (hasTask)
+                          Row(
                             mainAxisSize: MainAxisSize.min,
-                            children: (hasTask ? dotColors : const <Color>[]).take(3).map((dotColor) =>
-                              Container(
+                            children: dotColors.take(3).map((dotColor) {
+                              return Container(
                                 margin: const EdgeInsets.symmetric(horizontal: 1),
                                 width: 4,
                                 height: 4,
-                                decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor),
-                              ),
-                            ).toList(),
-                          )),
-                        ],
-                      )),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isSelected ? Colors.white : dotColor,
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                      ],
                     ),
-                  );
-                },
+                  ),
+                ),
+              );
+            },
               ),
-            ]);
+            ]));
+            return gridWidth > constraints.maxWidth
+                ? SingleChildScrollView(scrollDirection: Axis.horizontal, child: calendar) : calendar;
           }),
           if (selectedTasks.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: InsightTheme.surface2,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2325,11 +2230,13 @@ class _TimelineActivityTile extends StatefulWidget {
   final String subtitle;
   final String time;
   final String? occurredAtIso;
+  final VoidCallback? onOpenHistory;
+  final int? historyCount;
 
   const _TimelineActivityTile({
     required this.icon, required this.color, required this.categoryLabel,
     required this.title, required this.subtitle, required this.time,
-    this.occurredAtIso,
+    this.occurredAtIso, this.onOpenHistory, this.historyCount,
   });
 
   @override
@@ -2356,36 +2263,37 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: EdgeInsets.only(bottom: widget.onOpenHistory == null ? 10 : 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Timeline node — kept from before so this still reads as part
-          // of the vertical timeline (the connector line sits behind it).
-          Container(
-            width: 34,
-            alignment: Alignment.topCenter,
-            padding: const EdgeInsets.only(top: 12),
-            child: Container(
-              width: 8, height: 8,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: widget.color,
-                border: Border.all(color: Colors.white, width: 2),
+          if (widget.onOpenHistory == null) ...[
+            // Timeline node remains within the scrollable modal.
+            Container(
+              width: 34,
+              alignment: Alignment.topCenter,
+              padding: const EdgeInsets.only(top: 12),
+              child: Container(
+                width: 8, height: 8,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: widget.color,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 6),
+            const SizedBox(width: 6),
+          ],
 
           // Activity card — tappable, animates open/closed for the exact
           // timestamp. Tinted fill instead of a white card + border.
           Expanded(
             child: Semantics(
               button: true,
-              expanded: _expanded,
+              expanded: widget.onOpenHistory == null && _expanded,
               child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() => _expanded = !_expanded),
+              onTap: widget.onOpenHistory ?? () => setState(() => _expanded = !_expanded),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOutCubic,
@@ -2438,6 +2346,22 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                       if (widget.subtitle.isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(widget.subtitle, style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2)),
+                      ],
+                      if (widget.onOpenHistory != null) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Text(
+                              'View ${widget.historyCount} ${widget.historyCount == 1 ? 'activity' : 'activities'}',
+                              style: InsightTheme.inter(12, w: FontWeight.w700,
+                                  c: InsightTheme.blueInk),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_forward_rounded,
+                                size: 16, color: InsightTheme.blueInk),
+                          ],
+                        ),
                       ],
                       if (_expanded && _exactTimestamp.isNotEmpty) ...[
                         const SizedBox(height: 8),

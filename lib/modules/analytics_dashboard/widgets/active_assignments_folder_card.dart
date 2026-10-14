@@ -29,7 +29,7 @@ String activeAssignmentStatusLabel(
 //   Layer 2 — Document sheets fanning out from inside the folder
 //   Layer 3 — Glossy front pocket (ClipPath with asymmetric folder tab)
 //   Layer 4 — Radial shine overlay on pocket surface
-//   Layer 5 — Content: iMAPS FieldSync brand + assignment data
+//   Layer 5 — Content: applicant, barangay, date and saved step
 //   Layer 6 — Status tab badge (top-right)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -64,6 +64,10 @@ class ActiveAssignmentsFolderCard extends StatefulWidget {
   final String inspectionId;
   final String referenceNo;
   final String date;
+  /// Date meaning is supplied by the caller from the real scheduling contract.
+  final String? dateLabel;
+  /// True persisted progress from the task's saved DB/cache fields (0..6).
+  final int? savedStep;
   final String location;
   final String applicantName;
   final String applicationType;
@@ -76,6 +80,8 @@ class ActiveAssignmentsFolderCard extends StatefulWidget {
     required this.inspectionId,
     required this.referenceNo,
     required this.date,
+    this.dateLabel,
+    this.savedStep,
     required this.location,
     required this.applicantName,
     required this.applicationType,
@@ -122,10 +128,14 @@ class _ActiveAssignmentsFolderCardState
 
   @override
   Widget build(BuildContext context) {
-    final status = activeAssignmentStatusLabel(
-      widget.lifecycleCategory,
-      widget.pendingSection,
-    );
+    // A scheduled visit is a *Pending subsection*, not a lifecycle status.
+    // Keep the public presentation helper unchanged for other screens/tests.
+    final status = switch (widget.lifecycleCategory) {
+      TaskLifecycleCategory.pending => 'Pending',
+      TaskLifecycleCategory.ongoing => 'Ongoing',
+      TaskLifecycleCategory.completed => 'Completed',
+      TaskLifecycleCategory.unknown => 'Unknown',
+    };
     final accent = _FolderAccent.forStatus(status);
     final gradient = _FolderAccent.gradientForStatus(status);
 
@@ -200,11 +210,9 @@ class _ActiveAssignmentsFolderCardState
                     gradient: gradient,
                     location: widget.location,
                     applicantName: widget.applicantName,
-                    applicationType: widget.applicationType,
-                    referenceNo: widget.referenceNo,
-                    inspectionId: widget.inspectionId,
                     date: widget.date,
-                    status: status,
+                    dateLabel: widget.dateLabel,
+                    savedStep: widget.savedStep,
                   ),
                 ),
 
@@ -345,255 +353,245 @@ class _GlossyPocket extends StatelessWidget {
   final List<Color> gradient;
   final String location;
   final String applicantName;
-  final String applicationType;
-  final String referenceNo;
-  final String inspectionId;
   final String date;
-  final String status;
+  final String? dateLabel;
+  final int? savedStep;
 
   const _GlossyPocket({
     required this.accent,
     required this.gradient,
     required this.location,
     required this.applicantName,
-    required this.applicationType,
-    required this.referenceNo,
-    required this.inspectionId,
     required this.date,
-    required this.status,
+    required this.dateLabel,
+    required this.savedStep,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final safeStep = savedStep?.clamp(0, 6);
+    final hasDate = dateLabel != null &&
+        dateLabel!.isNotEmpty &&
+        date.trim().isNotEmpty &&
+        date != '—';
+    final applicant = applicantName.trim().isEmpty
+        ? 'Applicant not on file'
+        : applicantName.trim();
+    final site = location.trim().isEmpty
+        ? 'Site not on file'
+        : location.trim();
+
     return ClipPath(
       clipper: _PocketClipper(),
-      // Keep the existing pocket height at normal text size; give wrapped
-      // brand text room at large accessibility sizes without changing styling.
       child: IntrinsicHeight(
-      child: Container(
-        constraints: BoxConstraints(minHeight: MediaQuery.textScalerOf(context).scale(154)),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              gradient[0].withValues(alpha: 0.96),
-              gradient[1].withValues(alpha: 0.88),
-              const Color(0xFF071120),
+        child: Container(
+          constraints: BoxConstraints(minHeight: scaler.scale(154)),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                gradient[0].withValues(alpha: 0.96),
+                gradient[1].withValues(alpha: 0.88),
+                const Color(0xFF071120),
+              ],
+              stops: const [0.0, 0.60, 1.0],
+            ),
+          ),
+          child: Stack(
+            children: [
+              // Preserve the existing restrained specular shine and folder rim.
+              Positioned(
+                top: -20,
+                left: 0,
+                child: Container(
+                  width: 160,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.14),
+                        Colors.white.withValues(alpha: 0.0),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  height: 1,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.0),
+                        Colors.white.withValues(alpha: 0.40),
+                        Colors.white.withValues(alpha: 0.12),
+                        Colors.white.withValues(alpha: 0.0),
+                      ],
+                      stops: const [0.0, 0.35, 0.65, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 26, 16, 14),
+                child: Builder(
+                  builder: (context) {
+                    // IntrinsicHeight cannot contain LayoutBuilder, so use
+                    // viewport information for the compact arrangement. The
+                    // text also stacks when Android font scaling is enlarged.
+                    final compact = MediaQuery.sizeOf(context).width < 370 ||
+                        scaler.scale(1.0) >= 1.5;
+                    final dateInfo = hasDate
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                dateLabel!,
+                                style: InsightTheme.inter(
+                                  12,
+                                  w: FontWeight.w500,
+                                  c: Colors.white.withValues(alpha: 0.78),
+                                ),
+                              ),
+                              Text(
+                                date,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: InsightTheme.inter(
+                                  13,
+                                  w: FontWeight.w700,
+                                  c: Colors.white,
+                                ),
+                              ),
+                            ],
+                          )
+                        : null;
+                    final stepInfo = safeStep == null
+                        ? null
+                        : Text(
+                            'STEP $safeStep/6',
+                            maxLines: 1,
+                            style: InsightTheme.inter(
+                              12,
+                              w: FontWeight.w700,
+                              c: Colors.white,
+                            ),
+                          );
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // The applicant is the assignment's primary identity.
+                        Text(
+                          applicant,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: InsightTheme.urbanist(
+                            19,
+                            w: FontWeight.w800,
+                            c: Colors.white,
+                            h: 1.12,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.location_on_outlined,
+                              size: 15,
+                              color: Colors.white.withValues(alpha: 0.84),
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                site,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: InsightTheme.inter(
+                                  12,
+                                  w: FontWeight.w500,
+                                  c: Colors.white.withValues(alpha: 0.87),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        // Original circular arrow remains as a visual cue
+                        // for tapping the card (the GestureDetector owns tap).
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Expanded(
+                              child: compact
+                                  ? Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (dateInfo != null) dateInfo,
+                                        if (dateInfo != null && stepInfo != null)
+                                          const SizedBox(height: 6),
+                                        if (stepInfo != null) stepInfo,
+                                      ],
+                                    )
+                                  : Row(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        if (dateInfo != null)
+                                          Expanded(child: dateInfo),
+                                        if (dateInfo != null && stepInfo != null)
+                                          const SizedBox(width: 8),
+                                        if (stepInfo != null) stepInfo,
+                                      ],
+                                    ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.white.withValues(alpha: 0.22),
+                                    Colors.white.withValues(alpha: 0.08),
+                                  ],
+                                ),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                  width: 1,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: accent.withValues(alpha: 0.30),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.arrow_forward_rounded,
+                                color: Colors.white,
+                                size: 17,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
             ],
-            stops: const [0.0, 0.60, 1.0],
           ),
         ),
-        child: Stack(
-          children: [
-            // ── Radial gloss orb (top-left of pocket) ──────────────────────
-            Positioned(
-              top: -20, left: 0,
-              child: Container(
-                width: 160, height: 100,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      Colors.white.withValues(alpha: 0.14),
-                      Colors.white.withValues(alpha: 0.0),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            // ── Gloss rim line at pocket top ────────────────────────────────
-            Positioned(
-              top: 0, left: 0, right: 0,
-              child: Container(
-                height: 1,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Colors.white.withValues(alpha: 0.0),
-                      Colors.white.withValues(alpha: 0.40),
-                      Colors.white.withValues(alpha: 0.12),
-                      Colors.white.withValues(alpha: 0.0),
-                    ],
-                    stops: const [0.0, 0.35, 0.65, 1.0],
-                  ),
-                ),
-              ),
-            ),
-
-            // ── Content ─────────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 24, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-
-                  // Brand row — iMAPS FieldSync
-                  Row(
-                    children: [
-                      // Mini logo mark
-                      Container(
-                        width: 18, height: 18,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.white.withValues(alpha: 0.30),
-                              Colors.white.withValues(alpha: 0.10),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.30),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.map_outlined,
-                          size: 11,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(
-                        'iMAPS FieldSync',
-                        style: InsightTheme.urbanist(
-                          12,
-                          w: FontWeight.w700,
-                          c: Colors.white.withValues(alpha: 0.70),
-                          ls: 0.4,
-                        ),
-                      )),
-                      // Date pill
-                      Flexible(child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 9, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Text(
-                          date,
-                          style: InsightTheme.mono(
-                            12,
-                            w: FontWeight.w600,
-                            c: Colors.white.withValues(alpha: 0.80),
-                          ),
-                        ),
-                      )),
-                    ],
-                  ),
-                  const SizedBox(height: 9),
-
-                  // Location — main title
-                  Text(
-                    location,
-                    style: InsightTheme.urbanist(
-                      18,
-                      w: FontWeight.w800,
-                      c: Colors.white,
-                      ls: -0.5,
-                      h: 1.1,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    applicantName,
-                    style: InsightTheme.inter(
-                      12,
-                      w: FontWeight.w400,
-                      c: Colors.white.withValues(alpha: 0.60),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  const Spacer(),
-
-                  // Bottom meta row
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              referenceNo,
-                              style: InsightTheme.mono(
-                                12.5,
-                                w: FontWeight.w700,
-                                c: Colors.white,
-                                ls: 0.4,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'ID: $inspectionId  ·  $applicationType',
-                              style: InsightTheme.inter(
-                                12,
-                                w: FontWeight.w400,
-                                c: Colors.white.withValues(alpha: 0.55),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-
-                      // Glossy action button
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Colors.white.withValues(alpha: 0.22),
-                              Colors.white.withValues(alpha: 0.08),
-                            ],
-                          ),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            width: 1,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: accent.withValues(alpha: 0.30),
-                              blurRadius: 10,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.arrow_forward_rounded,
-                          color: Colors.white,
-                          size: 17,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
       ),
     );
   }
