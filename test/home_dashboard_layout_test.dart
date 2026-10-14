@@ -21,11 +21,34 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+// Same AOSP 200% curve used by the Site Verification layout proof.
+class _Android200TextScaler extends TextScaler {
+  const _Android200TextScaler();
+
+  @override
+  double get textScaleFactor => 2;
+
+  @override
+  double scale(double fontSize) {
+    const from = [8.0, 10.0, 12.0, 14.0, 18.0, 20.0, 24.0, 30.0, 100.0];
+    const to = [16.0, 20.0, 24.0, 26.0, 30.0, 34.0, 36.0, 38.0, 100.0];
+    if (fontSize <= from.first) return fontSize * 2;
+    for (var i = 1; i < from.length; i++) {
+      if (fontSize <= from[i]) {
+        return to[i - 1] + (to[i] - to[i - 1]) *
+            (fontSize - from[i - 1]) / (from[i] - from[i - 1]);
+      }
+    }
+    return fontSize;
+  }
+}
+
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   late Database db;
   var noJobs = false;
   var activityCount = 1;
+  int? completionTotal;
   DateTime? scheduledOverride;
   Completer<void>? fontGate;
 
@@ -77,6 +100,10 @@ void main() {
               ).readAsBytesSync(),
             );
     });
+    final icons = FontLoader('MaterialIcons')..addFont(Future.value(
+      ByteData.sublistView(File('${fonts.path}/MaterialIcons-Regular.otf').readAsBytesSync()),
+    ));
+    await icons.load();
     binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('dev.fluttercommunity.plus/connectivity'),
       (_) async => ['wifi'],
@@ -194,6 +221,18 @@ void main() {
                     'is_read': false,
                   },
               ];
+        if (request.url.path.endsWith('/field_jobs') && completionTotal != null) {
+          rows.clear();
+          rows.addAll(<Map<String, Object>>[for (var i = 0; i < completionTotal!; i++) {
+            'id': 'completion-fixture-$i',
+            'status': ['assigned', 'assigned', 'in_progress', 'completed'][i % 4],
+            'is_self_scheduled': i % 4 == 0,
+            'scheduled_date': DateTime.now().add(const Duration(days: 1)).toIso8601String(),
+            'deadline_date': DateTime.now().add(const Duration(days: 2)).toIso8601String(),
+            'created_at': today,
+            'supabase_zoning_applications': {'applicant_name': 'Demonstration task $i', 'barangay': 'Rosario'},
+          }]);
+        }
         return http.Response(
           jsonEncode(rows),
           200,
@@ -289,11 +328,11 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('Full calendar exposes every weekday and date on phones and keeps dotted-day tasks', (tester) async {
+  testWidgets('Full calendar fits every weekday and date together on phones and keeps dotted-day tasks', (tester) async {
     final now = DateTime.now();
     scheduledOverride = DateTime(now.year, now.month, 2);
     addTearDown(() => scheduledOverride = null);
-    for (final width in [360.0, 390.0]) {
+    for (final width in [320.0, 360.0, 390.0]) {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = Size(width, 844);
       addTearDown(tester.view.reset);
@@ -307,47 +346,38 @@ void main() {
       await tester.pumpAndSettle();
       final calendar = find.byKey(const ValueKey('full_calendar'));
       // Measure the month card itself, not its full-width Padding wrapper.
-      final monthCard = find.descendant(
-        of: calendar,
-        matching: find.byWidgetPredicate(
-          (w) =>
-              w is Container &&
-              w.decoration is BoxDecoration &&
-              (w.decoration! as BoxDecoration).borderRadius ==
-                  BorderRadius.circular(16),
-        ),
-      );
+      final monthCard = find.byKey(const ValueKey('calendar_month_card'));
       expect(monthCard, findsOneWidget);
       final bounds = tester.getRect(monthCard);
-      // The month must never run into the phone edges, and it must keep the
-      // page margin where the seven 48px day targets physically allow it.
-      expect(bounds.left, greaterThanOrEqualTo(8.0),
-          reason: 'The full calendar must keep a visible margin at ${width}px.');
-      expect(width - bounds.right, greaterThanOrEqualTo(8.0),
-          reason: 'The full calendar must keep a visible margin at ${width}px.');
-      if (width >= 376) {
-        final strip = tester.getRect(find.byKey(const ValueKey('calendar_section')));
-        expect(bounds.left, closeTo(strip.left, 0.5),
-            reason: 'Wide screens align with the day-strip card at ${width}px.');
-        expect(bounds.right, closeTo(strip.right, 0.5),
-            reason: 'Wide screens align with the day-strip card at ${width}px.');
-      }
+      expect(bounds.left, greaterThanOrEqualTo(20.0),
+          reason: 'The month must retain the Home gutter even on a 360dp phone.');
+      expect(width - bounds.right, greaterThanOrEqualTo(20.0));
+      final strip = tester.getRect(find.byKey(const ValueKey('calendar_section')));
+      expect(bounds.left, closeTo(strip.left, 0.5));
+      expect(bounds.right, closeTo(strip.right, 0.5));
       for (final weekday in ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']) {
         final label = find.descendant(of: calendar, matching: find.text(weekday));
         expect(tester.getRect(label).left, greaterThanOrEqualTo(bounds.left));
         expect(tester.getRect(label).right, lessThanOrEqualTo(bounds.right),
-            reason: '$weekday must fit without panning the month at ${width}px.');
+            reason: '$weekday must fit in the same frame as all other weekdays.');
       }
       for (var day = 1; day <= DateTime(now.year, now.month + 1, 0).day; day++) {
         final tile = find.byKey(ValueKey('calendar_day_$day'));
         expect(tile, findsOneWidget);
-        // A day target may sit flush against the card's 1.2px border, which
-        // is part of the visible card, so allow that and nothing more.
-        expect(tester.getRect(tile).left, greaterThanOrEqualTo(bounds.left - 1.5));
-        expect(tester.getRect(tile).right, lessThanOrEqualTo(bounds.right + 1.5),
-            reason: 'Date $day must be inside the visible month.');
-        expect(tester.getSize(tile).shortestSide, greaterThanOrEqualTo(48));
+        expect(tester.getRect(tile).left, greaterThanOrEqualTo(bounds.left));
+        expect(tester.getRect(tile).right, lessThanOrEqualTo(bounds.right),
+            reason: 'Date $day must fit without horizontal scrolling.');
+        expect(tester.getSize(tile).height, greaterThanOrEqualTo(44));
+        expect(tester.getSize(tile).width, greaterThanOrEqualTo(width == 320 ? 39 : 44),
+            reason: 'Only the narrow phone needs the approved compact-width exception.');
       }
+      final plainDay = DateTime(now.year, now.month, 2).weekday == DateTime.sunday ? 3 : 1;
+      final firstNumber = find.descendant(of: find.byKey(ValueKey('calendar_day_$plainDay')),
+          matching: find.text('$plainDay'));
+      final dottedNumber = find.descendant(of: find.byKey(const ValueKey('calendar_day_2')),
+          matching: find.text('2'));
+      expect(tester.getRect(firstNumber).center.dy, closeTo(tester.getRect(dottedNumber).center.dy, 0.1),
+          reason: 'Task dots must not shift a date number off its week baseline.');
       expect(find.descendant(of: find.byKey(const ValueKey('calendar_section')),
           matching: calendar), findsNothing,
           reason: 'The full month must not share the sliding calendar surface.');
@@ -374,14 +404,7 @@ void main() {
     await tester.ensureVisible(find.byTooltip('Show full calendar'));
     await tester.tap(find.byTooltip('Show full calendar'));
     await tester.pumpAndSettle();
-    final calendar = find.byKey(const ValueKey('full_calendar'));
-    final card = find.descendant(
-      of: calendar,
-      matching: find.byWidgetPredicate((widget) => widget is Container &&
-          widget.decoration is BoxDecoration &&
-          (widget.decoration! as BoxDecoration).borderRadius ==
-              BorderRadius.circular(16)),
-    );
+    final card = find.byKey(const ValueKey('calendar_month_card'));
     final cardRect = tester.getRect(card);
     final firstTile = find.byKey(const ValueKey('calendar_day_1'));
     final first = tester.getRect(firstTile);
@@ -394,16 +417,19 @@ void main() {
         ? 0.0
         : tester.getSize(
             find.ancestor(of: summary, matching: find.byType(Container)).first,
-          ).height;
-    expect(cardRect.height - summaryHeight, lessThanOrEqualTo(336),
-        reason: 'A five-week month must stay proportionate on a normal phone.');
+          ).height + 8; // Include the task detail's separating gap.
+    final month = DateTime.now();
+    final days = DateTime(month.year, month.month + 1, 0).day;
+    final weeks = ((DateTime(month.year, month.month).weekday % 7 + days) / 7).ceil();
+    expect(cardRect.height - summaryHeight, lessThanOrEqualTo(86 + weeks * 44),
+        reason: 'Only the weeks this month needs may add to its compact height.');
     final selectedPlate =
         find.byKey(ValueKey('calendar_day_plate_${DateTime.now().day}'));
     expect(selectedPlate, findsOneWidget,
         reason: 'The selected date needs its own quieter visual plate.');
     expect(tester.getSize(selectedPlate).shortestSide, lessThanOrEqualTo(36));
-    expect(tester.getSize(firstTile).shortestSide, greaterThanOrEqualTo(48),
-        reason: 'The 48dp target must survive the smaller selected plate.');
+    expect(tester.getSize(firstTile).shortestSide, greaterThanOrEqualTo(44),
+        reason: 'The compact month keeps a full-cell target around the smaller plate.');
     final selectedDate = find.byKey(const ValueKey('calendar_selected_date'));
     expect(selectedDate, findsOneWidget,
         reason: 'The month header states the selected date.');
@@ -444,6 +470,368 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('Calendar audit renders the real Home viewport and measures responsive month shapes', (tester) async {
+    final output = Platform.environment['IMAPS_CALENDAR_AUDIT_DIR'];
+    final captureKey = GlobalKey();
+    final metrics = <Map<String, Object>>[];
+    final layoutErrors = <String>[];
+    if (output != null) {
+      Directory(output).createSync(recursive: true);
+      File('$output/layout-errors.txt').writeAsStringSync('');
+    }
+    final reportError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (output != null) {
+        File('$output/layout-errors.txt').writeAsStringSync(details.toString(), mode: FileMode.append);
+      }
+      reportError?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = reportError);
+    scheduledOverride = DateTime(2026, 10, 15);
+    addTearDown(() => scheduledOverride = null);
+    addTearDown(tester.view.reset);
+    Future<void> capture(String name) async {
+      if (output == null) return;
+      final boundary = captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage(pixelRatio: 2);
+        expect(image.width, tester.view.physicalSize.width * 2);
+        expect(image.height, tester.view.physicalSize.height * 2);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        Directory(output).createSync(recursive: true);
+        File('$output/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    }
+    for (final scenario in const [
+      (name: 'portrait', size: Size(390, 844), scaler: TextScaler.noScaling),
+      (name: 'phone-360', size: Size(360, 800), scaler: TextScaler.noScaling),
+      (name: 'small-phone', size: Size(320, 568), scaler: TextScaler.noScaling),
+      (name: 'landscape', size: Size(844, 390), scaler: TextScaler.noScaling),
+      (name: 'small-phone-130', size: Size(320, 568), scaler: TextScaler.linear(1.3)),
+      (name: 'phone-360-130', size: Size(360, 800), scaler: TextScaler.linear(1.3)),
+      (name: 'portrait-200', size: Size(390, 844), scaler: TextScaler.linear(2)),
+      (name: 'phone-360-200', size: Size(360, 800), scaler: TextScaler.linear(2)),
+      (name: 'small-phone-200', size: Size(320, 568), scaler: TextScaler.linear(2)),
+      (name: 'landscape-200', size: Size(844, 390), scaler: TextScaler.linear(2)),
+      (name: 'android-200', size: Size(320, 568), scaler: _Android200TextScaler()),
+      (name: 'tablet', size: Size(800, 1280), scaler: TextScaler.noScaling),
+    ]) {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = scenario.size;
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+      tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 24);
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(useMaterial3: true, colorScheme: const ColorScheme.light(
+          primary: InsightTheme.blue1, secondary: InsightTheme.blue2,
+          surface: InsightTheme.surface, error: InsightTheme.red)),
+        builder: (context, child) => RepaintBoundary(key: captureKey, child: MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: scenario.scaler), child: child!)),
+        home: Scaffold(extendBody: true,
+          bottomNavigationBar: InsightBottomNav(currentIndex: 0, items: const [
+            InsightNavItem(icon: Icons.home, label: 'Home'),
+            InsightNavItem(icon: Icons.assignment, label: 'Tasks'),
+            InsightNavItem(icon: Icons.sync, label: 'Updates'),
+            InsightNavItem(icon: Icons.person, label: 'Profile'),
+          ], onTap: (_) {}, onQuickActionsTap: () {}),
+          body: HomeDashboardScreen(profile: UserProfile(id: 'home-inspector',
+            fullName: 'Maria Dela Cruz', role: 'inspector'))),
+      ));
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await GoogleFonts.pendingFonts();
+      });
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Show full calendar'));
+      await tester.tap(find.byTooltip('Show full calendar'));
+      await tester.pumpAndSettle();
+      final calendar = find.byKey(const ValueKey('full_calendar'));
+      final card = find.byKey(const ValueKey('calendar_month_card'));
+      var displayedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+      Future<void> browse(DateTime target) async {
+        while (displayedMonth != target) {
+          final next = displayedMonth.isBefore(target);
+          await tester.ensureVisible(find.byTooltip(next ? 'Next month' : 'Previous month'));
+          await tester.tap(find.byTooltip(next ? 'Next month' : 'Previous month'));
+          await tester.pumpAndSettle();
+          displayedMonth = DateTime(displayedMonth.year, displayedMonth.month + (next ? 1 : -1));
+        }
+        await tester.ensureVisible(find.byKey(const ValueKey('calendar_day_8')));
+        await tester.tap(find.byKey(const ValueKey('calendar_day_8')));
+        await tester.pumpAndSettle();
+      }
+      for (final month in [DateTime(2026, 10), DateTime(2026, 2), DateTime(2026, 8)]) {
+        await browse(month);
+        final days = DateTime(month.year, month.month + 1, 0).day;
+        final weeks = ((DateTime(month.year, month.month).weekday % 7 + days) / 7).ceil();
+        final first = tester.getRect(find.byKey(const ValueKey('calendar_day_1')));
+        final eighth = tester.getRect(find.byKey(const ValueKey('calendar_day_8')));
+        expect(eighth.top - first.top, closeTo(first.height, 0.01));
+        final cardRect = tester.getRect(card);
+        for (var column = 0; column < 7; column++) {
+          final heading = find.descendant(of: find.byKey(ValueKey('calendar_weekday_$column')),
+              matching: find.byType(Text));
+          final rect = tester.getRect(heading);
+          expect(rect.left, greaterThanOrEqualTo(cardRect.left));
+          expect(rect.right, lessThanOrEqualTo(cardRect.right));
+        }
+        for (var day = 1; day <= days; day++) {
+          final tile = find.byKey(ValueKey('calendar_day_$day'));
+          final tileRect = tester.getRect(tile);
+          expect(tileRect.left, greaterThanOrEqualTo(cardRect.left));
+          expect(tileRect.right, lessThanOrEqualTo(cardRect.right));
+          expect(tester.getSize(tile).height, greaterThanOrEqualTo(44));
+          expect(tileRect.width, greaterThanOrEqualTo(scenario.size.width == 320 ? 39 : 44));
+          final label = find.descendant(of: tile, matching: find.text('$day'));
+          final paragraph = tester.renderObject<RenderParagraph>(label);
+          final glyphs = paragraph.getBoxesForSelection(TextSelection(baseOffset: 0, extentOffset: '$day'.length));
+          expect(glyphs, hasLength(1), reason: 'Two-digit dates must remain on one line.');
+          final plate = tester.getRect(find.byKey(ValueKey('calendar_day_plate_$day')));
+          expect(paragraph.localToGlobal(Offset(glyphs.single.left, 0)).dx, greaterThanOrEqualTo(plate.left));
+          expect(paragraph.localToGlobal(Offset(glyphs.single.right, 0)).dx, lessThanOrEqualTo(plate.right));
+          expect(tester.widget<Text>(label).style!.fontSize, greaterThanOrEqualTo(12.5),
+              reason: 'Grid fitting must not be achieved by shrinking date text.');
+          final column = DateTime(month.year, month.month, day).weekday % 7;
+          final heading = find.byKey(ValueKey('calendar_weekday_$column'));
+          expect(tileRect.center.dx, closeTo(tester.getRect(heading).center.dx, 0.01),
+              reason: 'Every date must align with its weekday column.');
+        }
+        final cardSize = tester.getSize(card);
+        metrics.add({
+          'scenario': scenario.name, 'month': '${month.year}-${month.month}',
+          'viewport': [scenario.size.width, scenario.size.height],
+          'card': [cardSize.width, cardSize.height], 'weeks': weeks,
+          'rowHeight': first.height, 'rowGap': eighth.top - first.bottom,
+          'gridWidth': first.width * 7,
+          'allColumnsFitTogether': true,
+          'weekdayLabels': [for (var column = 0; column < 7; column++)
+            tester.widget<Text>(find.descendant(of: find.byKey(ValueKey('calendar_weekday_$column')),
+                matching: find.byType(Text))).data!],
+          'compactCard': [tester.getSize(find.byKey(const ValueKey('calendar_section'))).width,
+            tester.getSize(find.byKey(const ValueKey('calendar_section'))).height],
+          'lanyardHeight': tester.getSize(find.byKey(const ValueKey('calendar_lanyard'))).height,
+        });
+        if (output != null) {
+          File('$output/metrics.json').writeAsStringSync(const JsonEncoder.withIndent('  ').convert(metrics));
+        }
+        final name = '${scenario.name}-$weeks-weeks';
+        await tester.ensureVisible(find.byKey(const ValueKey('calendar_section')));
+        await tester.pumpAndSettle();
+        await capture('$name-context');
+        await tester.ensureVisible(card);
+        await tester.pumpAndSettle();
+        await capture('$name-month');
+        if (scenario.name == 'small-phone-200' && month == DateTime(2026, 10)) {
+          final taskDate = find.byKey(const ValueKey('calendar_day_15'));
+          await tester.ensureVisible(taskDate);
+          await tester.tap(taskDate);
+          await tester.pumpAndSettle();
+          expect(find.descendant(of: calendar, matching: find.text('Test applicant')), findsOneWidget);
+          await capture('small-phone-200-task-selected');
+          await tester.ensureVisible(find.text('Tasks for 15 Oct'));
+          await tester.pumpAndSettle();
+          await capture('small-phone-200-task-detail');
+        }
+        // Vertical scrolling may be necessary; every weekday remains in frame.
+        final last = find.byKey(ValueKey('calendar_day_$days'));
+        await tester.ensureVisible(last);
+        await tester.pumpAndSettle();
+        await tester.tap(last);
+        await tester.pumpAndSettle();
+        expect(tester.widget<Text>(find.byKey(const ValueKey('calendar_selected_date'))).data,
+            contains(' $days '));
+        final error = tester.takeException();
+        if (error != null) layoutErrors.add('${scenario.name}: $error');
+      }
+      final lastWeek = find.byKey(const ValueKey('calendar_day_28'));
+      await tester.ensureVisible(lastWeek);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(lastWeek).bottom,
+          lessThan(tester.getRect(find.byType(InsightBottomNav)).top),
+          reason: 'Vertical scrolling must clear the fixed nav, including its middle columns.');
+      await tester.tap(lastWeek);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(find.byKey(const ValueKey('calendar_selected_date'))).data, contains(' 28 '));
+      if (scenario.name.contains('landscape') || scenario.name == 'small-phone-200') {
+        await capture('${scenario.name}-last-week-reachable');
+      }
+      if (scenario.name == 'portrait') {
+        await browse(DateTime(2026, 10));
+        await tester.ensureVisible(find.byKey(const ValueKey('calendar_day_15')));
+        await tester.tap(find.byKey(const ValueKey('calendar_day_15')));
+        await tester.pumpAndSettle();
+        expect(find.descendant(of: calendar, matching: find.text('Test applicant')), findsOneWidget);
+        await tester.ensureVisible(card);
+        await tester.pumpAndSettle();
+        await capture('portrait-task-selected');
+        await tester.ensureVisible(find.byTooltip('Hide full calendar'));
+        await tester.tap(find.byTooltip('Hide full calendar'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 90));
+        await capture('portrait-closing-90ms');
+        // Interrupt the reverse animation, then interrupt the subsequent reveal.
+        await tester.tap(find.byTooltip('Show full calendar'));
+        await tester.pump(const Duration(milliseconds: 60));
+        await tester.tap(find.byTooltip('Hide full calendar'));
+        await tester.pumpAndSettle();
+        expect(calendar, findsNothing);
+        await capture('portrait-collapsed');
+        await tester.tap(find.byTooltip('Show full calendar'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 90));
+        await capture('portrait-opening-90ms');
+        await tester.pumpAndSettle();
+        expect(calendar, findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+    if (output != null) {
+      File('$output/metrics.json').writeAsStringSync(const JsonEncoder.withIndent('  ').convert(metrics));
+    }
+    expect(layoutErrors, isEmpty,
+        reason: 'Complete Home errors remain failures; inspect layout-errors.txt for their owning widget.');
+  });
+
+  testWidgets('Completion readout and direct legend retain all counts under nonlinear scaling', (tester) async {
+    final captureKey = GlobalKey();
+    addTearDown(() => completionTotal = null);
+    addTearDown(tester.view.reset);
+    final output = Platform.environment['IMAPS_UI_CAPTURE_DIR'];
+    for (final (total, counts) in [(0, [0, 0, 0, 0]), (24, [6, 6, 6, 6]), (321, [81, 80, 80, 80])]) {
+      completionTotal = total;
+      for (final scale in [TextScaler.noScaling, const TextScaler.linear(2), const _Android200TextScaler()]) {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(390, 844);
+        await tester.pumpWidget(MaterialApp(
+          builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: scale),
+            child: RepaintBoundary(key: captureKey, child: child!)),
+          home: HomeDashboardScreen(profile: UserProfile(id: 'home-inspector', fullName: 'Demonstration Inspector', role: 'inspector')),
+        ));
+        for (var frame = 0; frame < 40; frame++) {
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+          await tester.pump(const Duration(milliseconds: 100));
+          if (find.byKey(const ValueKey('completion_chart')).evaluate().isNotEmpty ||
+              find.text('No tasks yet.').evaluate().isNotEmpty) {
+            break;
+          }
+        }
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Task completion flow'));
+        await tester.pumpAndSettle();
+        final chart = find.byKey(const ValueKey('completion_chart'));
+        if (total == 0) {
+          expect(find.text('No tasks yet.'), findsOneWidget);
+        } else {
+          for (final (i, label) in ['Scheduled', 'Pending', 'Ongoing', 'Completed'].indexed) {
+            final row = find.byKey(ValueKey('completion_$label'));
+            expect(find.descendant(of: row, matching: find.text('${counts[i]}')), findsOneWidget);
+            expect(find.descendant(of: row, matching: find.text(label)), findsOneWidget);
+            expect(tester.getRect(row).right, lessThanOrEqualTo(tester.getRect(chart).right));
+          }
+          final arcs = tester.widgetList<CircularProgressIndicator>(find.descendant(of: chart,
+            matching: find.byType(CircularProgressIndicator))).toList();
+          for (var i = 0; i < 4; i++) {
+            expect(arcs[i].value, closeTo(counts[i] / total, 0.001));
+          }
+          final readout = find.byKey(const ValueKey('completion_readout'));
+          final face = find.byKey(const ValueKey('completion_rings'));
+          final tasks = tester.renderObject<RenderParagraph>(
+            find.descendant(of: readout, matching: find.text('Tasks')));
+          expect(tasks.getBoxesForSelection(const TextSelection(baseOffset: 0, extentOffset: 5)),
+            hasLength(1), reason: 'The center label must remain a whole word with the actual inherited font.');
+          expect(tester.getRect(face).contains(tester.getRect(readout).topLeft), isTrue);
+          expect(tester.getRect(face).contains(tester.getRect(readout).bottomRight), isTrue);
+        }
+        if (output != null) {
+          final boundary = captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+          await tester.runAsync(() async {
+            final image = await boundary.toImage(pixelRatio: 1);
+            final png = await image.toByteData(format: ui.ImageByteFormat.png);
+            final file = File('$output/home-completion-$total-${scale.runtimeType}-${scale.scale(12).round()}.png');
+            file.parent.createSync(recursive: true);
+            file.writeAsBytesSync(png!.buffer.asUint8List());
+            image.dispose();
+          });
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    }
+  });
+
+  testWidgets('Lanyard clip is painted over the month card edge', (tester) async {
+    final captureKey = GlobalKey();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      builder: (context, child) => RepaintBoundary(key: captureKey, child: child!),
+      home: HomeDashboardScreen(profile: UserProfile(id: 'home-inspector',
+          fullName: 'Maria Dela Cruz', role: 'inspector'))));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Show full calendar'));
+    await tester.tap(find.byTooltip('Show full calendar'));
+    await tester.pumpAndSettle();
+    final clip = tester.getRect(find.byKey(const ValueKey('calendar_lanyard_clip')));
+    final boundary = captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final pixel = boundary.globalToLocal(Offset(clip.center.dx, clip.bottom - 2));
+    await tester.runAsync(() async {
+      final image = await boundary.toImage();
+      final rgba = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+      final index = (pixel.dy.floor() * image.width + pixel.dx.floor()) * 4;
+      expect(Color.fromARGB(rgba.getUint8(index + 3), rgba.getUint8(index),
+          rgba.getUint8(index + 1), rgba.getUint8(index + 2)), InsightTheme.ink3,
+          reason: 'Geometric overlap alone is insufficient: the card must not paint over its clip.');
+      image.dispose();
+    });
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Expanded dates announce full date selection and real task count', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final now = DateTime.now();
+    final day = now.day < 20 ? 25 : 5; // Distinct from today's other fixture jobs.
+    scheduledOverride = DateTime(now.year, now.month, day);
+    addTearDown(() => scheduledOverride = null);
+    try {
+    await tester.pumpWidget(MaterialApp(home: HomeDashboardScreen(profile: UserProfile(
+      id: 'home-inspector', fullName: 'Maria Dela Cruz', role: 'inspector'))));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Show full calendar'));
+    await tester.tap(find.byTooltip('Show full calendar'));
+    await tester.pumpAndSettle();
+    for (final (index, weekday) in const ['Sunday', 'Monday', 'Tuesday', 'Wednesday',
+      'Thursday', 'Friday', 'Saturday'].indexed) {
+      expect(tester.getSemantics(find.byKey(ValueKey('calendar_weekday_$index'))).label, weekday);
+    }
+    final date = find.byKey(ValueKey('calendar_day_$day'));
+    await tester.ensureVisible(date);
+    await tester.tap(date);
+    await tester.pumpAndSettle();
+    final node = tester.getSemantics(date);
+    expect(node.flagsCollection.isSelected, ui.Tristate.isTrue);
+    expect(node.flagsCollection.isButton, isTrue);
+    expect(node.label, contains('${DateTime.now().year}'));
+    expect(node.label, contains('1 task'));
+    expect(node.getSemanticsData().hasAction(ui.SemanticsAction.tap), isTrue);
+    expect(find.descendant(of: find.byKey(const ValueKey('full_calendar')),
+        matching: find.text('Test applicant')), findsOneWidget);
+    final another = tester.getSemantics(find.byKey(const ValueKey('calendar_day_3')));
+    binding.performSemanticsAction(ui.SemanticsActionEvent(type: ui.SemanticsAction.tap,
+        viewId: tester.view.viewId, nodeId: another.id));
+    await tester.pumpAndSettle();
+    expect(tester.getSemantics(date).flagsCollection.isSelected, ui.Tristate.isFalse);
+    expect(tester.widget<Text>(find.byKey(const ValueKey('calendar_selected_date'))).data, contains(' 3 '));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    } finally {
+      semantics.dispose();
+    }
+  });
+
   testWidgets('Calendar hangs from an attached lanyard and reverses on close', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(390, 844);
@@ -456,15 +844,8 @@ void main() {
     await tester.ensureVisible(find.byTooltip('Show full calendar'));
     await tester.tap(find.byTooltip('Show full calendar'));
     await tester.pumpAndSettle();
-    final calendar = find.byKey(const ValueKey('full_calendar'));
     final strap = find.byKey(const ValueKey('calendar_lanyard'));
-    final card = find.descendant(
-      of: calendar,
-      matching: find.byWidgetPredicate((widget) => widget is Container &&
-          widget.decoration is BoxDecoration &&
-          (widget.decoration! as BoxDecoration).borderRadius ==
-              BorderRadius.circular(16)),
-    );
+    final card = find.byKey(const ValueKey('calendar_month_card'));
     expect(strap, findsOneWidget);
     final clip = find.byKey(const ValueKey('calendar_lanyard_clip'));
     expect(clip, findsOneWidget,
@@ -530,13 +911,7 @@ void main() {
     await tester.tap(find.byTooltip('Show full calendar'));
     await tester.pump();
     final strap = find.byKey(const ValueKey('calendar_lanyard'));
-    final card = find.descendant(
-      of: find.byKey(const ValueKey('full_calendar')),
-      matching: find.byWidgetPredicate((widget) => widget is Container &&
-          widget.decoration is BoxDecoration &&
-          (widget.decoration! as BoxDecoration).borderRadius ==
-              BorderRadius.circular(16)),
-    );
+    final card = find.byKey(const ValueKey('calendar_month_card'));
     final first = tester.getRect(card);
     final firstStrap = tester.getRect(strap).topCenter;
     await tester.tap(find.byTooltip('Hide full calendar'));
@@ -572,11 +947,20 @@ void main() {
     final paragraph = tester.renderObject<RenderParagraph>(number);
     expect(paragraph.getBoxesForSelection(const TextSelection(baseOffset: 0, extentOffset: 2)),
         hasLength(1), reason: 'A day number is one intact label, including dates with task dots.');
-    expect(tester.getSize(tile).width, greaterThanOrEqualTo(48));
+    final card = find.byKey(const ValueKey('calendar_month_card'));
+    expect(tester.getSize(tile).width, lessThanOrEqualTo(tester.getSize(card).width / 7),
+        reason: 'Enlarged text must not widen the seven-column grid beyond its card.');
+    expect(tester.getSize(tile).height, greaterThanOrEqualTo(44));
     await tester.ensureVisible(tile);
     await tester.pumpAndSettle();
     await tester.tap(tile);
     await tester.pumpAndSettle();
+    final plate = tester.getRect(find.byKey(const ValueKey('calendar_day_plate_20')));
+    final label = tester.getRect(number);
+    expect(label.left - plate.left, greaterThanOrEqualTo(2),
+        reason: 'Large selected digits need breathing room inside the colored plate.');
+    expect(plate.right - label.right, greaterThanOrEqualTo(2));
+    expect(label.top - plate.top, greaterThanOrEqualTo(4));
     expect(find.descendant(of: find.byKey(const ValueKey('full_calendar')),
         matching: find.text('Test applicant')), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -942,29 +1326,11 @@ void main() {
           final completed = tester.getRect(
             find.byKey(const ValueKey('completion_Completed')),
           );
-          expect(scheduled.top, pending.top);
-          expect(ongoing.top, completed.top);
-          expect(ongoing.top, greaterThan(scheduled.bottom));
-          expect(pending.left, greaterThan(scheduled.right));
-          for (final label in ['Ongoing', 'Completed']) {
-            final cell = find.byKey(ValueKey('completion_$label'));
-            final texts = find.descendant(
-              of: cell,
-              matching: find.byType(Text),
-            );
-            expect(
-              tester.getTopLeft(texts.first).dy,
-              lessThan(
-                tester
-                    .getTopLeft(
-                      find.descendant(of: cell, matching: find.text(label)),
-                    )
-                    .dy,
-              ),
-              reason:
-                  'Lower-row counts sit above their labels in the supplied v3 reference.',
-            );
-          }
+          // The approved unified reference uses four direct label/count rows.
+          expect(pending.top, greaterThanOrEqualTo(scheduled.bottom));
+          expect(ongoing.top, greaterThanOrEqualTo(pending.bottom));
+          expect(completed.top, greaterThanOrEqualTo(ongoing.bottom));
+          expect(pending.left, scheduled.left);
           final chart = find.byKey(const ValueKey('completion_chart'));
           final arcs = tester
               .widgetList<CircularProgressIndicator>(
@@ -985,8 +1351,10 @@ void main() {
             final background =
                 (tester.widget<Container>(cell).decoration! as BoxDecoration)
                     .color!;
-            expect(background, entry.value);
-            expect(arcs[index].valueColor!.value, background);
+            expect(background, InsightTheme.surface);
+            final dot = tester.widget<Container>(find.byKey(ValueKey('completion_color_${entry.key}')));
+            expect((dot.decoration! as BoxDecoration).color, entry.value);
+            expect(arcs[index].valueColor!.value, entry.value);
             final labelFinder = find.descendant(
               of: cell,
               matching: find.text(entry.key),
@@ -1001,7 +1369,7 @@ void main() {
             expect(
               labelParagraph.localToGlobal(Offset(glyphs.single.right, 0)).dx,
               lessThanOrEqualTo(tester.getRect(cell).right - 6),
-              reason: 'The full status word fits inside its colored card.',
+              reason: 'The full status word fits inside its direct legend row.',
             );
             final foreground = tester
                 .widget<Text>(
@@ -1063,11 +1431,7 @@ void main() {
             find.descendant(of: filters, matching: find.byType(FittedBox)),
             findsNothing,
           );
-          // Recent Activity reads as quiet list content on the page surface:
-          // its containers take the page background and rely on a gray border,
-          // never a colored fill, so the tiles stop shouting next to the cards.
-          // Recent Activity sits on the page itself: the container takes the page
-          // background and is defined by a gray hairline, not a colored fill.
+          // Owner-approved white parent and quiet hairline; timeline tiles stay intact.
           final sectionCard = find.ancestor(
             of: find.text('Recent activity'),
             matching: find.byWidgetPredicate(
@@ -1081,10 +1445,10 @@ void main() {
           expect(sectionCard, findsOneWidget);
           final decoration =
               tester.widget<Container>(sectionCard).decoration! as BoxDecoration;
-          expect(decoration.color, InsightTheme.bg,
-              reason: 'The Recent Activity container must match the page background.');
+          expect(decoration.color, InsightTheme.surface,
+              reason: 'The approved Recent Activity parent uses one white surface.');
           final border = decoration.border! as Border;
-          expect(border.top.color, InsightTheme.lineStrong,
+          expect(border.top.color, InsightTheme.line,
               reason: 'The container needs the app hairline gray to stay readable.');
           for (final label in ['Tasks', 'Sync', 'Reports', 'Profile', 'All']) {
             final tab = find.descendant(
@@ -1286,6 +1650,19 @@ void main() {
   testWidgets(
     'Activity reveal shows seven, reveals the remainder, and resets on a new filter',
     (tester) async {
+      final captureKey = GlobalKey();
+      Future<void> captureActivity(String name) async {
+        final output = Platform.environment['IMAPS_UI_CAPTURE_DIR'];
+        if (output == null) return;
+        final boundary = captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 1);
+          final png = await image.toByteData(format: ui.ImageByteFormat.png);
+          final file = File('$output/$name.png')..parent.createSync(recursive: true);
+          file.writeAsBytesSync(png!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
       activityCount = 15;
       addTearDown(() => activityCount = 1);
       tester.view.devicePixelRatio = 1;
@@ -1293,6 +1670,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(
+          builder: (_, child) => RepaintBoundary(key: captureKey, child: child!),
           home: HomeDashboardScreen(
             profile: UserProfile(
               id: 'home-inspector',
@@ -1308,6 +1686,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Activity 7'), findsOneWidget);
       expect(find.text('Activity 8'), findsNothing);
+      await tester.ensureVisible(find.text('Recent activity'));
+      await tester.pumpAndSettle();
+      await captureActivity('home-activity-preview');
       await tester.ensureVisible(find.text('Activity 1'));
       await tester.tap(find.text('Activity 1'));
       await tester.pumpAndSettle();
@@ -1327,6 +1708,8 @@ void main() {
             'Revealing more rows preserves the expanded details of existing activities.',
       );
       await tester.ensureVisible(find.text('See less'));
+      await tester.pumpAndSettle();
+      await captureActivity('home-activity-expanded');
       await tester.tap(find.text('See less'));
       await tester.pumpAndSettle();
       expect(find.text('Activity 8'), findsNothing);

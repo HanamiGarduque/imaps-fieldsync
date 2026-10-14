@@ -355,7 +355,7 @@ void main() {
             (_) {},
           );
           await tester.pumpAndSettle();
-          for (final label in ['HEADING', 'CARDINAL', 'ACCURACY']) {
+          for (final label in ['Heading', 'Cardinal', 'Accuracy']) {
             final paragraph = tester.renderObject<RenderParagraph>(
               find.text(label),
             );
@@ -368,7 +368,7 @@ void main() {
             );
           }
           final sensor = tester.renderObject<RenderParagraph>(
-            find.text('Live Device Magnetometer'),
+            find.text('Sensor · Live Device Magnetometer'),
           );
           expect(
             sensor.didExceedMaxLines,
@@ -378,7 +378,7 @@ void main() {
           );
           expect(
             sensor.getBoxesForSelection(
-              const TextSelection(baseOffset: 12, extentOffset: 24),
+              const TextSelection(baseOffset: 21, extentOffset: 33),
             ),
             hasLength(1),
             reason: 'Magnetometer must fit without splitting the word.',

@@ -467,7 +467,7 @@ class _GlossyPocket extends StatelessWidget {
                         ),
                       )),
                       // Date pill
-                      Container(
+                      Flexible(child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 9, vertical: 3),
                         decoration: BoxDecoration(
@@ -486,7 +486,7 @@ class _GlossyPocket extends StatelessWidget {
                             c: Colors.white.withValues(alpha: 0.80),
                           ),
                         ),
-                      ),
+                      )),
                     ],
                   ),
                   const SizedBox(height: 9),

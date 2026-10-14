@@ -519,7 +519,7 @@ void main() {
       reason: 'the actual enlarged caption size requires stacked metrics',
     );
     final backControl = find
-        .ancestor(of: find.byTooltip('Back'), matching: find.byType(Container))
+        .ancestor(of: find.byTooltip('Back'), matching: find.byType(IconButton))
         .first;
     await tester.ensureVisible(backControl);
     await settle(tester);
@@ -535,6 +535,41 @@ void main() {
     expect(back.bottom, lessThanOrEqualTo(headerViewport.bottom));
     expect(tester.takeException(), isNull);
   });
+
+  for (final close in [false, true]) {
+    testWidgets('Map labels remain readable ${close ? 'near-coincident' : 'far'} at normal and enlarged text', (tester) async {
+      if (close) {
+        await tester.runAsync(() async {
+          await db.delete('local_route_cache');
+          await db.update('local_jobs', {'parcel_lat': 13.84251, 'parcel_lng': 121.17651});
+        });
+      }
+      for (final (size, scale) in [(const Size(390, 844), 1.0), (const Size(844, 390), 2.0)]) {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await mount(tester, size, scale: scale);
+        await tester.tap(find.byTooltip('Fit both markers'));
+        await settle(tester);
+        final targetLabel = tester.getRect(find.ancestor(of: find.text('Target site'), matching: find.byType(Container)).first);
+        final deviceLabel = tester.getRect(find.ancestor(of: find.text('You'), matching: find.byType(Container)).first);
+        final header = find.ancestor(of: find.byType(InspectionStepHeader), matching: find.byType(SingleChildScrollView)).first;
+        final panel = find.ancestor(of: find.text('Site details'), matching: find.byType(Container)).first;
+        final attribution = find.ancestor(of: find.text('© OpenStreetMap contributors'), matching: find.byType(Container)).first;
+        for (final label in [targetLabel, deviceLabel]) {
+          expect(label.left, greaterThanOrEqualTo(0), reason: '$size/$scale: $label');
+          expect(label.right, lessThanOrEqualTo(size.width), reason: '$size/$scale: $label');
+          expect(label.top, greaterThanOrEqualTo(24));
+          expect(label.bottom, lessThanOrEqualTo(size.height - 24));
+          for (final overlay in [header, panel, attribution, find.byTooltip('Full map'), find.byTooltip('Fit both markers')]) {
+            expect(label.overlaps(tester.getRect(overlay)), isFalse,
+              reason: '$size/$scale: label $label overlaps $overlay ${tester.getRect(overlay)}');
+          }
+        }
+        expect(targetLabel.overlaps(deviceLabel), isFalse,
+          reason: 'Both identities must remain legible even when their coordinates are close.');
+        expect(tester.takeException(), isNull);
+      }
+    });
+  }
 
   testWidgets('fresh small-phone open fits after enlarged overlays settle', (
     tester,

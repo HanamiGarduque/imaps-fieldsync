@@ -99,94 +99,90 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final header = Padding(
+      padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Image.asset('assets/icon/app_icon.png', width: 44, height: 44, excludeFromSemantics: true),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text('iMAPS', style: InsightTheme.inter(12, c: Colors.white)),
+            Text('FieldSync', style: InsightTheme.urbanist(20, w: FontWeight.w800, c: Colors.white)),
+          ]),
+        ]),
+        const SizedBox(height: 32),
+        Text('Your work.\nKept private.', style: InsightTheme.urbanist(34, w: FontWeight.w800, c: Colors.white)),
+        const SizedBox(height: 12),
+        Text('Confirm your identity to continue.', style: InsightTheme.inter(13, c: Colors.white)),
+      ]),
+    );
+    final workspace = Container(
+      decoration: const BoxDecoration(color: InsightTheme.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      child: Column(children: [
+        Expanded(child: Center(child: ConstrainedContent(maxWidth: 480,
+          child: Padding(padding: const EdgeInsets.all(28),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 72, height: 72,
+                decoration: BoxDecoration(color: InsightTheme.blueTint,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.2))),
+                child: const Icon(Icons.lock_outline_rounded, size: 30, color: InsightTheme.blueInk)),
+              const SizedBox(height: 24),
+              Text('App Locked', style: InsightTheme.urbanist(24, w: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text(_lastAttemptFailed ? 'That didn\'t match. Try again with $_bioLabel.' : 'Use $_bioLabel to continue',
+                textAlign: TextAlign.center, style: InsightTheme.inter(14)),
+              const SizedBox(height: 24),
+              SizedBox(width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: InsightTheme.blue1,
+                    foregroundColor: Colors.white, elevation: 0,
+                    minimumSize: const Size(48, 52),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd)),
+                  onPressed: _checking ? null : _attempt,
+                  child: Wrap(spacing: 8, runSpacing: 4, alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center, children: [
+                      if (_checking) const SizedBox.square(dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                      else const Icon(Icons.fingerprint_rounded, size: 20),
+                      Text(_checking ? 'Checking…' : 'Unlock with $_bioLabel', textAlign: TextAlign.center,
+                        style: InsightTheme.inter(16, w: FontWeight.w600,
+                          c: _checking ? InsightTheme.ink3 : Colors.white)),
+                    ]),
+                )),
+              const SizedBox(height: 8),
+              TextButton(style: TextButton.styleFrom(minimumSize: const Size(120, 48)),
+                onPressed: _checking ? null : _signOutInstead,
+                child: Text('Log Out', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.redInk))),
+            ]),
+          ),
+        ))),
+        Padding(padding: const EdgeInsets.only(bottom: 20),
+          child: Text('iMAPS FieldSync', style: InsightTheme.inter(12, c: InsightTheme.ink3))),
+      ]),
+    );
     return PopScope(
       canPop: false,
       child: SensitiveScreen(
         child: Scaffold(
-          backgroundColor: InsightTheme.bg,
+          backgroundColor: InsightTheme.blue2,
           body: SafeArea(
-            child: Center(
-              // Bounded and scrollable: the fixed column below summed to ~304px
-              // with only ~26px of slack, so a wrapped bio label or a system
-              // inset overflowed a 390px-tall landscape viewport.
-              child: ConstrainedContent(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 32,
-                    vertical: 16,
-                  ),
-                  child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 72,
-                      height: 72,
-                      decoration: const BoxDecoration(
-                        color: InsightTheme.blue1,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.lock_outline_rounded, size: 34, color: Colors.white),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'App Locked',
-                      style: InsightTheme.urbanist(22, w: FontWeight.w700, c: InsightTheme.ink),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _lastAttemptFailed
-                          ? 'That didn\'t match. Try again with $_bioLabel.'
-                          : 'Use $_bioLabel to continue',
-                      textAlign: TextAlign.center,
-                      style: InsightTheme.inter(14, w: FontWeight.w400, c: InsightTheme.ink2),
-                    ),
-                    const SizedBox(height: 28),
-                    SizedBox(
-                      width: double.infinity,
-                      // minHeight, not height: `_bioLabel` is a runtime string
-                      // ("fingerprint", "face recognition") that wraps to two
-                      // lines on a narrow screen, and a fixed 52 cut the second.
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 52),
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: InsightTheme.blue1,
-                            foregroundColor: Colors.white,
-                            elevation: 2,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          ),
-                          onPressed: _checking ? null : _attempt,
-                          child: _checking
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : Text(
-                                  'Unlock with $_bioLabel',
-                                  textAlign: TextAlign.center,
-                                  style: InsightTheme.inter(15, w: FontWeight.w600, c: Colors.white),
-                                ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(120, 44),
-                      ),
-                      onPressed: _checking ? null : _signOutInstead,
-                      child: Text(
-                        'Log Out',
-                        style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.red),
-                      ),
-                    ),
-                  ],
-                  ),
-                ),
-              ),
-            ),
+            child: LayoutBuilder(builder: (context, constraints) {
+              Widget scrollWorkspace() => SingleChildScrollView(child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(child: workspace)));
+              if (context.responsive.canSplitTwoPane) {
+                return Row(children: [
+                  Expanded(child: Center(child: SingleChildScrollView(child: header))),
+                  Expanded(child: scrollWorkspace()),
+                ]);
+              }
+              return SingleChildScrollView(child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [header, Expanded(child: workspace)]))));
+            }),
           ),
         ),
       ),

@@ -556,7 +556,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         reset: _recovery.tileResetStream,
         evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
       ),
-      const RosarioBoundaryOverlay(subdued: true),
+      const RosarioBoundaryOverlay(),
       // Only ever real road geometry: a live OSRM route, or the
       // same route restored from local cache while offline. There
       // is deliberately NO synthetic fallback — a made-up line
@@ -626,9 +626,12 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                     ),
                   ),
                   const Positioned(
-                    left: 40,
-                    top: 1,
-                    child: _MapMarkerLabel('You'),
+                    left: 17,
+                    bottom: 36,
+                    child: FractionalTranslation(
+                      translation: Offset(-0.5, 0),
+                      child: _MapMarkerLabel('You'),
+                    ),
                   ),
                 ],
               ),

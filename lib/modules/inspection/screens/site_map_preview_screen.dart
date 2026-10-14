@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -16,9 +15,9 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/layout/responsive_layout.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/widgets/quick_actions_sheet.dart' show MapDetailPanel;
-import '../../../core/widgets/insight_bottom_nav.dart'
-    show kInsightBottomNavReserve;
 
 /// Standalone Site Map viewer — full-bleed map showing only the
 /// inspector's own live position as a pulsing beacon marker. No route
@@ -48,6 +47,8 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
   String? _error;
   Position? _position;
   final MapController _mapController = MapController();
+  final _panelKey = GlobalKey();
+  final _headerKey = GlobalKey();
 
   StreamSubscription<CompassEvent>? _compassSub;
   double? _heading;
@@ -119,7 +120,7 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
       if (!mounted) return;
       setState(() => _loading = false);
       WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _mapController.move(_deviceLatLng!, 17),
+        (_) { if (mounted) _recenter(); },
       );
     } catch (e) {
       if (!mounted) return;
@@ -130,9 +131,40 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
     }
   }
 
+  void _recenter() {
+    final panel = _panelKey.currentContext?.findRenderObject() as RenderBox?;
+    final header = _headerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (panel == null || header == null || _deviceLatLng == null) return;
+    final size = MediaQuery.sizeOf(context);
+    final safe = MediaQuery.paddingOf(context);
+    final panelRect = panel.localToGlobal(Offset.zero) & panel.size;
+    final headerRect = header.localToGlobal(Offset.zero) & header.size;
+    final bp = context.responsive;
+    final clear = (bp.canSplitTwoPane || (bp.isLandscape && !bp.isCompactWidth))
+      // Reserve the recenter control's 16dp side margin and 48dp target too.
+      ? Rect.fromLTRB(safe.left + 64, headerRect.bottom + 12, panelRect.left - 16,
+          size.height - safe.bottom - 16)
+      : Rect.fromLTRB(safe.left, headerRect.bottom + 12, size.width - safe.right, panelRect.top - 12);
+    // Same device point and zoom; the native pixel offset clears the visible chrome.
+    _mapController.move(_deviceLatLng!, 17, offset: clear.center - Offset(size.width / 2, size.height / 2));
+  }
+
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    final size = MediaQuery.sizeOf(context);
+    final safe = MediaQuery.paddingOf(context);
+    final bp = context.responsive;
+    final split = bp.canSplitTwoPane || (bp.isLandscape && !bp.isCompactWidth);
+    final sideWidth = (size.width * 0.36).clamp(280.0, 400.0);
+    final attributionLeft = split ? size.width - safe.right - sideWidth - 16 : safe.left + 16;
+    final attributionStyle = InsightTheme.inter(12, c: InsightTheme.ink2);
+    const attributionText = 'Rosario boundary · MPDO Rosario\n© OpenStreetMap contributors';
+    final measure = TextPainter(text: TextSpan(text: attributionText, style: attributionStyle),
+      textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context))
+      ..layout(maxWidth: size.width - attributionLeft - safe.right - 16 - 16);
+    final attributionHeight = measure.height + 12;
+    measure.dispose();
 
     return SensitiveScreen(
       child: Scaffold(
@@ -189,13 +221,11 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
               child: SafeArea(
                 bottom: false,
                 child: Padding(
+                  key: _headerKey,
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: _GlassIconButton(
-                      icon: Icons.arrow_back_ios_new_rounded,
-                      onTap: () => Navigator.pop(context),
-                    ),
+                    child: FieldPageHeader(title: 'Site Map', onBack: () => Navigator.pop(context)),
                   ),
                 ),
               ),
@@ -206,14 +236,15 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
             // which collided with the info card in a short landscape viewport.
             if (!_loading && _error == null)
               Positioned(
-                right: 16,
-                bottom: kInsightBottomNavReserve,
+                left: 16,
+                top: safe.top + 84,
                 child: SafeArea(
-                  top: false,
-                  child: _GlassIconButton(
-                    icon: Icons.center_focus_strong_rounded,
-                    onTap: () => _mapController.move(_deviceLatLng!, 17),
-                  ),
+                  top: false, bottom: false,
+                  child: IconButton(tooltip: 'Recenter on your location', onPressed: _recenter,
+                    constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+                    style: IconButton.styleFrom(backgroundColor: InsightTheme.surface,
+                      shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm)),
+                    icon: const Icon(Icons.center_focus_strong_rounded, size: 20, color: InsightTheme.blueInk)),
                 ),
               ),
 
@@ -224,107 +255,39 @@ class _SiteMapPreviewScreenState extends State<SiteMapPreviewScreen>
             // permanently covered.
             if (!_loading && _error == null && _position != null)
               Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                top: 0,
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
+                left: safe.left + 16,
+                right: safe.right + 16,
+                bottom: safe.bottom + attributionHeight + 28,
+                top: safe.top + 16,
+                child: Padding(
+                    padding: EdgeInsets.zero,
                     child: Align(
-                      alignment: Alignment.bottomCenter,
+                      alignment: split ? Alignment.bottomRight : Alignment.bottomCenter,
                       child: MapDetailPanel(
-                        child: Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x1F0B1440),
-                          blurRadius: 32,
-                          offset: Offset(0, 16),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                color: InsightTheme.blue1.withValues(
-                                  alpha: 0.12,
-                                ),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.my_location_rounded,
-                                size: 17,
-                                color: InsightTheme.blue1,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Your current location',
-                              style: InsightTheme.poppins(
-                                15,
-                                w: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        Container(height: 1, color: InsightTheme.line),
-                        const SizedBox(height: 14),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _InfoField(
-                                label: 'LATITUDE',
-                                value: _position!.latitude.toStringAsFixed(6),
-                              ),
-                            ),
-                            Expanded(
-                              child: _InfoField(
-                                label: 'LONGITUDE',
-                                value: _position!.longitude.toStringAsFixed(6),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _InfoField(
-                                label: 'ACCURACY',
-                                value: '± ${_position!.accuracy.round()} m',
-                              ),
-                            ),
-                            Expanded(
-                              child: _InfoField(
-                                label: 'HEADING',
-                                value: _heading != null
-                                    ? '${_heading!.round()}°'
-                                    : '—',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                        ),
+                        key: _panelKey,
+                        title: 'Your current location',
+                        child: LayoutBuilder(builder: (context, box) {
+                          final stacked = box.maxWidth < MediaQuery.textScalerOf(context).scale(14) * 20;
+                          return Wrap(spacing: 16, runSpacing: 12, children: [
+                            for (final entry in {
+                              'Latitude': _position!.latitude.toStringAsFixed(6),
+                              'Longitude': _position!.longitude.toStringAsFixed(6),
+                              'Accuracy': '± ${_position!.accuracy.round()} m',
+                              'Heading': _heading != null ? '${_heading!.round()}°' : 'Unavailable',
+                            }.entries) SizedBox(width: stacked ? box.maxWidth : (box.maxWidth - 16) / 2,
+                              child: _InfoField(label: entry.key, value: entry.value)),
+                          ]);
+                        }),
                       ),
                     ),
-                  ),
                 ),
               ),
+            Positioned(left: attributionLeft, right: safe.right + 16, bottom: safe.bottom + 16,
+              child: IgnorePointer(child: Container(key: const ValueKey('quick-map-attribution'),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(8)),
+                child: Text(attributionText, style: attributionStyle)))),
           ],
         ),
       ),
@@ -344,21 +307,12 @@ class _InfoField extends StatelessWidget {
       children: [
         Text(
           label,
-          style: InsightTheme.jetBrains(
-            9.5,
-            w: FontWeight.w700,
-            c: InsightTheme.ink3,
-            ls: 0.4,
-          ),
+            style: InsightTheme.inter(12),
         ),
         const SizedBox(height: 3),
         Text(
           value,
-          style: InsightTheme.jetBrains(
-            14,
-            w: FontWeight.w700,
-            c: InsightTheme.ink,
-          ),
+            style: InsightTheme.inter(14, w: FontWeight.w700, c: InsightTheme.ink),
         ),
       ],
     );
@@ -459,30 +413,6 @@ class _PulsingLocationBeaconState extends State<_PulsingLocationBeacon>
   }
 }
 
-class _GlassIconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _GlassIconButton({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: InsightTheme.glassIconButtonDecoration(),
-            child: Icon(icon, size: 18, color: InsightTheme.ink),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _ErrorState extends StatelessWidget {
   final String message;

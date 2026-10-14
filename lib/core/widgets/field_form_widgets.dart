@@ -4,6 +4,54 @@ import 'package:flutter/material.dart';
 import '../layout/responsive_layout.dart';
 import '../theme/insight_theme.dart';
 
+/// Compact visual plate inside the full native navigation target.
+class FieldBackButton extends StatelessWidget {
+  const FieldBackButton({super.key, required this.onPressed, this.tooltip = 'Back'});
+  final VoidCallback onPressed;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 48,
+    child: IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+      icon: DecoratedBox(
+        decoration: BoxDecoration(color: InsightTheme.surface,
+          borderRadius: InsightTheme.roundedSm, border: Border.all(color: InsightTheme.line)),
+        child: const SizedBox.square(dimension: 38,
+          child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink)),
+      ),
+    ),
+  );
+}
+
+/// Secondary explanatory control; the screen owns its message and action.
+class FieldInfoButton extends StatelessWidget {
+  const FieldInfoButton({super.key, required this.label, required this.onPressed});
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 48,
+    child: IconButton(
+      tooltip: label,
+      onPressed: onPressed,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+      icon: DecoratedBox(
+        decoration: BoxDecoration(color: InsightTheme.blueTint,
+          borderRadius: BorderRadius.circular(10)),
+        child: const SizedBox.square(dimension: 28,
+          child: Icon(Icons.info_outline_rounded, size: 18, color: InsightTheme.blueInk)),
+      ),
+    ),
+  );
+}
+
 /// Existing document/settings navigation, with a content-sized title.
 class FieldPageHeader extends StatelessWidget {
   const FieldPageHeader({super.key, required this.title, this.onBack});
@@ -12,17 +60,10 @@ class FieldPageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(children: [
-    IconButton(
-      tooltip: 'Back',
+    FieldBackButton(
       onPressed: onBack ?? () => Navigator.maybePop(context),
-      style: IconButton.styleFrom(
-        backgroundColor: InsightTheme.surface,
-        minimumSize: const Size(48, 48),
-        shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
-      ),
-      icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20, color: InsightTheme.ink),
     ),
-    const SizedBox(width: 12),
+    const SizedBox(width: 8),
     Expanded(child: Semantics(header: true,
         child: Text(title, style: InsightTheme.urbanist(20, w: FontWeight.w700)))),
   ]);

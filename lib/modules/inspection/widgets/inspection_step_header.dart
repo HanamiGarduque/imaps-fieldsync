@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/layout/responsive_layout.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 
 /// ==================================================================
 /// INSPECTION STEP HEADER
@@ -64,13 +65,12 @@ class InspectionStepHeader extends StatelessWidget {
           // content gets the vertical space the banner was using.
           Row(
             children: [
-              _StepGlassIconButton(
-                icon: Icons.arrow_back_ios_new_rounded,
-                onTap: onBack,
+              FieldBackButton(
+                onPressed: onBack,
                 tooltip: formStyle ? 'Exit inspection' : 'Back',
               ),
               if (showContext) ...[
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _StepGlassPill(
                     child: Column(
@@ -200,40 +200,6 @@ class _StepGlassPill extends StatelessWidget {
             ],
           ),
           child: child,
-        ),
-      ),
-    );
-  }
-}
-
-class _StepGlassIconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final String tooltip;
-
-  const _StepGlassIconButton({
-    required this.icon,
-    required this.onTap,
-    required this.tooltip,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: InsightTheme.glassIconButtonDecoration(
-            fill: Colors.white.withValues(alpha: 0.88),
-          ),
-          child: IconButton(
-            tooltip: tooltip,
-            onPressed: onTap,
-            icon: Icon(icon, size: 20, color: InsightTheme.ink),
-          ),
         ),
       ),
     );

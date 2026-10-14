@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:imaps_fieldsync/main.dart';
+import 'package:imaps_fieldsync/modules/auth_startup/screens/splash_screen.dart' show LoginScreen;
 import 'package:imaps_fieldsync/modules/profile_settings/widgets/dashboard_widgets.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/models/analytics_activity_range.dart';
 
@@ -10,17 +11,19 @@ void main() {
     await tester.pumpWidget(const MyApp());
     await tester.pump();
 
-    // Splash renders the brand as two separate Text widgets (not one
-    // 'iMAPS\nFieldSync' string as the old expectation assumed).
+    // The approved wordmark separates Field and Sync visually, while exposing
+    // the full brand name as a single accessible header.
     expect(find.text('iMAPS'), findsOneWidget);
-    expect(find.text('FieldSync'), findsOneWidget);
+    expect(find.byWidgetPredicate((widget) => widget is Semantics &&
+      widget.properties.label == 'FieldSync' && widget.properties.header == true), findsOneWidget);
 
     // Session check waits 3s, then routes to LoginScreen via a 700ms fade
     // (splash_screen.dart _checkSession/_goToLogin).
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(milliseconds: 700));
 
-    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(find.widgetWithText(ElevatedButton, 'Sign in'), findsOneWidget);
   });
 
   testWidgets('Activity heatmap renders in a constrained card without overflow', (WidgetTester tester) async {

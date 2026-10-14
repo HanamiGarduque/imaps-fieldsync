@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:imaps_fieldsync/core/theme/insight_theme.dart';
 import 'package:imaps_fieldsync/modules/inspection/widgets/rosario_boundary_overlay.dart';
 
 class _Bundle extends CachingAssetBundle {
@@ -159,12 +160,12 @@ void main() {
   });
 
   testWidgets(
-    'subdued inspection paint preserves geometry and default Quick Action style',
+    'both map contexts share dashed blue ink and an aligned white under-stroke without changing geometry',
     (tester) async {
       final bundle = _Bundle(raw);
       final loader = RosarioBoundaryLoader(bundle: bundle);
       final original = (await tester.runAsync(loader.load))!;
-      for (final subdued in [false, true, false]) {
+      for (final context in ['Quick Action', 'Site Verification']) {
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -174,7 +175,7 @@ void main() {
                   initialZoom: 11,
                 ),
                 children: [
-                  RosarioBoundaryOverlay(loader: loader, subdued: subdued),
+                  RosarioBoundaryOverlay(key: ValueKey(context), loader: loader),
                 ],
               ),
             ),
@@ -185,25 +186,21 @@ void main() {
           find.byWidgetPredicate((w) => w is PolygonLayer<Object>),
         );
         expect(layer.simplificationTolerance, 0);
-        expect(layer.polygons.length, original.length);
-        for (var i = 0; i < original.length; i++) {
+        expect(layer.polygons.length, original.length * 2);
+        for (var i = 0; i < layer.polygons.length; i++) {
           final polygon = layer.polygons[i];
-          expect(polygon.points, same(original[i].points));
-          expect(polygon.holePointsList, same(original[i].holePointsList));
+          expect(polygon.points, same(original[i % original.length].points));
+          expect(polygon.holePointsList, same(original[i % original.length].holePointsList));
           expect(polygon.color, isNull);
-          if (subdued) {
-            expect(
-              polygon.borderStrokeWidth,
-              lessThan(original[i].borderStrokeWidth),
-            );
-            expect(polygon.borderColor, isNot(original[i].borderColor));
-            expect(polygon.pattern, isNot(original[i].pattern));
+          expect(polygon.strokeCap, StrokeCap.round);
+          expect(polygon.strokeJoin, StrokeJoin.round);
+          expect(polygon.pattern, StrokePattern.dashed(segments: const [6, 5]));
+          if (i < original.length) {
+            expect(polygon.borderStrokeWidth, 4);
+            expect(polygon.borderColor, Colors.white.withValues(alpha: 0.9));
           } else {
-            expect(
-              polygon,
-              same(original[i]),
-              reason: 'default shared map paint must survive',
-            );
+            expect(polygon.borderStrokeWidth, 2);
+            expect(polygon.borderColor, InsightTheme.blueInk);
           }
         }
         expect(bundle.reads, 1);

@@ -238,14 +238,15 @@ void main() {
     test('adaptive layout uses the shared foundation, not local MediaQuery', () {
       final src = _readSource();
       expect(src, contains('responsive_layout.dart'));
-      expect(src, contains('canSplitTwoPane'));
+      final sheet = src.substring(src.indexOf('class QuickActionsSheet'));
+      expect(sheet, contains('canSplitTwoPane'));
       // The column decision goes through the foundation. MediaQuery is used
       // only for the host-offset height bound and the row-width floor, never for
       // an orientation or breakpoint decision.
-      expect(src, isNot(contains('.orientation')));
-      expect(src, isNot(contains('isPortrait')));
-      expect(src, isNot(contains('isLandscape')));
-      expect(src, contains('kTwoColumnMinWidth'));
+      expect(sheet, isNot(contains('.orientation')));
+      expect(sheet, isNot(contains('isPortrait')));
+      expect(sheet, isNot(contains('isLandscape')));
+      expect(sheet, contains('kTwoColumnMinWidth'));
     });
 
     test('the action model is unchanged', () {

@@ -109,7 +109,8 @@ void main() {
   });
 
   test('the Rosario boundary is independent of route and connectivity', () {
-    expect(step1Source, contains('const RosarioBoundaryOverlay(subdued: true)'));
+    expect(step1Source, contains('const RosarioBoundaryOverlay()'));
+    expect(quickMapSource, contains('const RosarioBoundaryOverlay()'));
     // The overlay never sees connectivity, route, or map-controller concerns.
     for (final forbidden in [
       'MapConnectivityRecovery',

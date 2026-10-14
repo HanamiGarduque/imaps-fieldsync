@@ -301,23 +301,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           child: Row(
             children: [
-              IconButton(
-                tooltip: 'Back',
+              FieldBackButton(
                 onPressed: () => Navigator.pop(context, null),
-                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                style: IconButton.styleFrom(
-                  backgroundColor: InsightTheme.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: InsightTheme.roundedSm,
-                  ),
-                ),
-                icon: const Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  size: 20,
-                  color: InsightTheme.ink,
-                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Edit profile',

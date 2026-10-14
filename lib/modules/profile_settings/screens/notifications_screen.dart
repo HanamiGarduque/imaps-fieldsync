@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +7,7 @@ import '../../../core/services/db_helper.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 
 import '../../../core/theme/insight_theme.dart';
 
@@ -400,8 +400,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     child: Row(
                       children: [
-                        _GlassBackButton(onTap: () => Navigator.pop(context)),
-                        const SizedBox(width: 12),
+                        FieldBackButton(onPressed: () => Navigator.pop(context)),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _mode == 0 ? 'Notifications' : 'Synchronization History',
@@ -409,14 +409,15 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                           ),
                         ),
                         if ((_mode == 0 && _activity.isNotEmpty) || (_mode == 1 && _syncLogs.isNotEmpty))
-                          GestureDetector(
-                            onTap: _clearAll,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: InsightTheme.redTint,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                          TextButton(
+                            onPressed: _clearAll,
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(48, 48),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                              backgroundColor: InsightTheme.redTint,
+                              foregroundColor: InsightTheme.redInk,
+                              shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
+                            ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -431,7 +432,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                   ),
                                 ],
                               ),
-                            ),
                           ),
                       ],
                     ),
@@ -826,36 +826,6 @@ class _TabPill extends StatelessWidget {
         child: Text(
           text,
           style: InsightTheme.inter(12, w: FontWeight.w600, c: isActive ? Colors.white : InsightTheme.ink2),
-        ),
-      ),
-    );
-  }
-}
-
-class _GlassBackButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _GlassBackButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 38, height: 38,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
-          boxShadow: const [BoxShadow(color: Color(0x0F141628), blurRadius: 14, offset: Offset(0, 4))],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(13),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: const Center(
-              child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink),
-            ),
-          ),
         ),
       ),
     );
