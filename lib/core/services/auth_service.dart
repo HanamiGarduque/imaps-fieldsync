@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -17,6 +18,28 @@ class AuthService {
   // through a lot of screens. loadSoftLogoutState() populates this once at
   // startup, before anything else needs it.
   static bool _softLoggedOut = false;
+  static const _recoveryBudget = Duration(seconds: 8);
+  static final _profileRefusedOwner = ValueNotifier<String?>(null);
+  static ValueListenable<String?> get profileRefusedOwner => _profileRefusedOwner;
+
+  static void _requireSessionOwner(String uid, {bool allowSoftLogout = false}) {
+    if (_client.auth.currentSession?.user.id != uid ||
+        (!allowSoftLogout && !isLoggedIn)) {
+      throw AuthFailure.sessionRestoreFailed;
+    }
+  }
+
+  /// Local navigation/fallback only; a preference never invents a session.
+  static Future<UserProfile?> getCachedProfileForCurrentInspector() async {
+    final uid = _client.auth.currentSession?.user.id;
+    if (uid == null || !isLoggedIn || _profileRefusedOwner.value == uid) return null;
+    final cached = await SecurePrefsService.getCachedProfile()
+        .timeout(const Duration(seconds: 2));
+    _requireSessionOwner(uid);
+    if (_profileRefusedOwner.value == uid) return null;
+    return cached?.id == uid && cached!.isInspector && cached.fullName.trim().isNotEmpty
+        ? cached : null;
+  }
 
   /// Call once at app startup (see main.dart), before runApp(). Loads the
   /// persisted soft-logout flag so isLoggedIn is already correct for
@@ -126,17 +149,20 @@ class AuthService {
   /// rejection (revoked/rotated token) throws [AuthFailure.sessionRestoreFailed],
   /// which is never presented as a credential problem.
   static Future<void> restoreSessionOfflineAware() async {
+    final uid = _client.auth.currentSession?.user.id;
+    if (uid == null) throw AuthFailure.sessionRestoreFailed;
     try {
-      if (_client.auth.currentSession == null) {
-        throw AuthFailure.sessionRestoreFailed;
-      }
-      final res = await _client.auth.refreshSession();
+      if (!await hasConnectivity().timeout(_recoveryBudget)) return;
+      _requireSessionOwner(uid, allowSoftLogout: true);
+      final res = await _client.auth.refreshSession().timeout(_recoveryBudget);
       if (res.session == null) throw AuthFailure.sessionRestoreFailed;
+      _requireSessionOwner(uid, allowSoftLogout: true);
     } catch (e) {
       final failure = AuthFailure.classify(e,
           fallback: AuthFailure.sessionRestoreFailed);
       debugPrint('[AUTH] Session restore: ${failure.name}');
       if (failure != AuthFailure.networkUnavailable) throw failure;
+      _requireSessionOwner(uid, allowSoftLogout: true);
     }
   }
 
@@ -180,6 +206,7 @@ class AuthService {
           .select()
           .eq('id', user.id)
           .single();
+      _requireSessionOwner(user.id);
       // A usable profile needs the identity, name and role the UI relies on;
       // a row that resolves but cannot fill them is not a working account.
       if (data['id'] != user.id ||
@@ -189,9 +216,25 @@ class AuthService {
           (data['role'] as String).trim().isEmpty) {
         throw AuthFailure.profileUnavailable;
       }
+      _profileRefusedOwner.value = null;
       return UserProfile.fromMap(data, email: user.email);
     } catch (e) {
-      throw AuthFailure.classify(e, fallback: AuthFailure.profileUnavailable);
+      final failure = AuthFailure.classify(e, fallback: AuthFailure.profileUnavailable);
+      if (failure == AuthFailure.profileUnavailable &&
+          _client.auth.currentUser?.id == user.id) {
+        _profileRefusedOwner.value = user.id;
+        // An observed refusal must not become an offline success next restart.
+        // Local inspection rows/files are deliberately not auth-cache cleanup.
+        try {
+          final cached = await SecurePrefsService.getCachedProfile()
+              .timeout(const Duration(seconds: 2));
+          if (_client.auth.currentUser?.id == user.id && cached?.id == user.id) {
+            await SecurePrefsService.removeCachedProfile()
+                .timeout(const Duration(seconds: 2));
+          }
+        } catch (_) {}
+      }
+      throw failure;
     }
   }
 
@@ -226,15 +269,42 @@ class AuthService {
   /// Does NOT fall back on a genuine server-side rejection (e.g. the
   /// account row no longer exists) — that error is rethrown so the caller
   /// treats it as a real failure, not silently masked by a stale cache.
-  static Future<UserProfile?> getCurrentProfileOfflineAware() async {
+  static Future<UserProfile?> getCurrentProfileOfflineAware({
+    bool restoreSession = false,
+  }) async {
     final user = _client.auth.currentUser;
-    if (user == null) return null;
+    if (user == null || !isLoggedIn) return null;
+    var budgetExpired = false;
 
     try {
-      final profile = await getCurrentProfile();
+      // One deadline covers connectivity, optional refresh AND profile fetch.
+      // A late refresh may still be rejected by the SDK, but cannot dispatch a
+      // second startup request after this caller has fallen back to local work.
+      final profile = await (() async {
+        if (!await hasConnectivity()) throw AuthFailure.networkUnavailable;
+        _requireSessionOwner(user.id);
+        if (budgetExpired) throw AuthFailure.networkUnavailable;
+        if (restoreSession && isLocalSessionExpired) {
+          try {
+            final response = await _client.auth.refreshSession();
+            if (response.session == null) throw AuthFailure.sessionRestoreFailed;
+          } catch (e) {
+            throw AuthFailure.classify(e, fallback: AuthFailure.sessionRestoreFailed);
+          }
+        }
+        _requireSessionOwner(user.id);
+        if (budgetExpired) throw AuthFailure.networkUnavailable;
+        return getCurrentProfile();
+      })().timeout(_recoveryBudget, onTimeout: () {
+        budgetExpired = true;
+        throw TimeoutException('Startup network recovery deadline');
+      });
+      _requireSessionOwner(user.id);
       if (profile != null) {
-        await SecurePrefsService.setCachedProfile(profile);
+        await SecurePrefsService.setCachedProfile(profile)
+            .timeout(const Duration(seconds: 2));
       }
+      _requireSessionOwner(user.id);
       return profile;
     } catch (e) {
       // Only a connectivity failure may fall back to the cache. Any other
@@ -244,9 +314,11 @@ class AuthService {
       }
 
       debugPrint('[AUTH] Profile fetch: networkUnavailable; trying cache');
-      final cached = await SecurePrefsService.getCachedProfile();
-      if (cached != null && cached.id == user.id) return cached;
-      rethrow; // no usable cache for this specific user — surface the real error
+      _requireSessionOwner(user.id);
+      final cached = await getCachedProfileForCurrentInspector();
+      _requireSessionOwner(user.id);
+      if (cached != null) return cached;
+      throw AuthFailure.networkUnavailable;
     }
   }
 }

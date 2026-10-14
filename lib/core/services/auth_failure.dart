@@ -49,6 +49,9 @@ enum AuthFailure implements Exception {
         error is AuthRetryableFetchException) {
       return true;
     }
+    // A typed server refusal stays authoritative even if its message contains
+    // words such as "clientexception". Retryable Auth fetches were handled above.
+    if (error is AuthException || error is PostgrestException) return false;
     // Preserve the existing platform/SDK fallback in one place.
     final message = error.toString().toLowerCase();
     return const [

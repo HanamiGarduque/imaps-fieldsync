@@ -28,7 +28,9 @@ void main() {
     }
     DBHelper.useDatabaseForTesting(db);
     useOwnerFixture();
-    remote = {'id': 'a', 'status': 'assigned', 'updated_at': base, 'started_at': null};
+    remote = {'id': 'a', 'assigned_inspector_id': ownerFixture,
+      'status': 'assigned', 'current_step': 0, 'updated_at': base, 'started_at': null};
+    await DBHelper.cacheJobs([remote]);
     writes = 0;
     conditionalUpdates = 0;
     SyncOutboxService.recoveryReadForTesting = (_) async => remote;
@@ -166,7 +168,7 @@ void main() {
       conditionalUpdates = 0;
       await DBHelper.cacheJobs([{'id': 'a', 'status': 'completed'}]);
       if (applied) {
-        remote.addAll({'status': 'completed', 'submitted_at': base,
+        remote.addAll({'status': 'completed', 'current_step': 6, 'submitted_at': base,
           'rework_started_at': null, 'findings': 'finding', 'is_compliant': true,
           'inspection_result': 'Compliant', 'observations': 'test',
           'inspector_notes': 'notes', 'checklist_data': [],

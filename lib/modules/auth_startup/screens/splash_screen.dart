@@ -85,13 +85,11 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
 
-      // ── STEP 2: Refresh expired token if needed ───────────────────────
-      if (AuthService.isLocalSessionExpired) {
-        await AuthService.restoreSessionOfflineAware();
-      }
-
-      // ── STEP 3: Fetch profile (offline-aware) ──────────────────────────
-      final profile = await AuthService.getCurrentProfileOfflineAware();
+      // Connectivity, refresh and profile share ONE eight-second network
+      // recovery budget. Known offline owners use their authorized cache.
+      final profile = await AuthService.getCurrentProfileOfflineAware(
+        restoreSession: true,
+      );
       if (profile == null || !mounted) {
         await _goToLogin(AuthFailure.profileUnavailable);
         return;

@@ -769,6 +769,14 @@ class SyncOutboxService {
     }
     if (payload['r4RecoveryRequired'] == true) {
       await _reconcileInterruptedAction(action, payload);
+      if (type == 'submit_inspection') {
+        DBHelper.requireSameInspector(owner);
+        final reconciled = await DBHelper.finalizeAcceptedOnlineInspection(
+          jobId, remoteResult: InspectionAuthorityResult.authorized);
+        if (!reconciled) {
+          throw StateError('Accepted submission needs local reconciliation; preserved for recovery');
+        }
+      }
       return;
     }
     if (type == 'mark_ongoing' || type == 'current_step_update') {
@@ -1122,6 +1130,10 @@ class SyncOutboxService {
     if (remote == null) {
       throw _OutboxConflictException('Missing or reassigned job');
     }
+    if (type == 'submit_inspection' &&
+        (remote['id'] != jobId || remote['assigned_inspector_id'] != owner)) {
+      throw _OutboxConflictException('Submission receipt belongs to another owner or round');
+    }
     final status = remote['status'] as String?;
     if (!{
       'assigned',
@@ -1261,6 +1273,7 @@ class SyncOutboxService {
         }
         desired.addAll({'photo_paths': paths, 'photo_count': paths.length});
         if (type == 'submit_inspection') {
+          desired['current_step'] = 6;
           fields({
             'findings': 'findings',
             'is_compliant': 'isCompliant',
@@ -1343,6 +1356,16 @@ class SyncOutboxService {
         );
     if (result == null) {
       throw _OutboxConflictException('Conditional recovery affected zero rows');
+    }
+    DBHelper.requireSameInspector(owner);
+    if (type == 'submit_inspection' &&
+        (result['id'] != jobId || result['assigned_inspector_id'] != owner ||
+         result['status'] != 'completed' || result['current_step'] != 6 ||
+         !desired.entries.every((e) => result.containsKey(e.key) &&
+           (e.key == 'submitted_at'
+             ? result[e.key] is String && _sameInstant(e.value as String, result[e.key] as String)
+             : _sameEvidence(result[e.key], e.value))))) {
+      throw _OutboxConflictException('Conditional submission receipt does not prove accepted evidence');
     }
     if (type == 'findings_update') {
       await _recordFindingsActivity(jobId, payload, owner);

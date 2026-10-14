@@ -370,11 +370,24 @@ void main() {
     expect((await DBHelper.getCachedJobs()).first['status'], 'in_progress');
   });
 
-  test('one acknowledged submit does not erase another pending submit', () async {
+  test('repeated final submit preserves one intent and its first identity', () async {
     await submitFixture('fixture-A');
+    final first = (await DBHelper.getActionableActions()).single;
     await submitFixture('fixture-A');
     final actions = await DBHelper.getActionableActions();
-    expect(actions, hasLength(2)); // Existing UUID-per-submit contract.
+    expect(actions, hasLength(1));
+    expect(actions.single['id'], first['id']);
+    expect(actions.single['payload'], first['payload']);
+  });
+
+  test('one acknowledged legacy duplicate does not erase another pending submit', () async {
+    await submitFixture('fixture-A');
+    // A prior version could persist two UUIDs. Preserve those real disk rows;
+    // new final-submit retries must not create another one.
+    final first = (await DBHelper.getActionableActions()).single;
+    await db.insert('pending_actions', {...first, 'id': 'legacy-duplicate-submit'});
+    final actions = await DBHelper.getActionableActions();
+    expect(actions, hasLength(2));
     await DBHelper.markActionSynced(actions.first['id'] as String);
     expect((await SupabaseService.fetchMyJobs()).first['status'], 'in_progress');
   });

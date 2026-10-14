@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
+import '../services/auth_failure.dart';
+import '../services/supabase_service.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import '../services/sync_outbox_service.dart';
@@ -14,6 +17,7 @@ import '../widgets/sync_progress_banner.dart';
 import '../widgets/offline_banner.dart';
 import '../widgets/quick_actions_sheet.dart';
 import '../../modules/auth_startup/screens/app_resume_lock_screen.dart';
+import '../../modules/auth_startup/screens/splash_screen.dart' show LoginScreen;
 import '../../modules/analytics_dashboard/screens/home_dashboard_screen.dart';
 import '../../modules/tasks/screens/tasks_screen.dart';
 import 'package:imaps_fieldsync/modules/offline_sync/screens/updates_screen.dart';
@@ -49,6 +53,23 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   // ── Network connectivity state ──────────────────────────────────────────
   late bool _isOnline;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  StreamSubscription<AuthState>? _authSubscription;
+  bool _sessionRedirecting = false;
+
+  void _checkSessionAccess() {
+    if (!mounted || _sessionRedirecting) return;
+    final refused = AuthService.profileRefusedOwner.value == _inspectorId;
+    if (AuthService.isLoggedIn &&
+        DBHelper.currentInspectorId == _inspectorId && !refused) {
+      return;
+    }
+    _sessionRedirecting = true;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => LoginScreen(initialFailure: refused
+          ? AuthFailure.profileUnavailable : AuthFailure.sessionRestoreFailed)),
+      (_) => false,
+    );
+  }
 
   // ── App-resume lock (see AUTH_SECURITY_MASTER_DOC.md §5d) ───────────────
   // _pausedAt is set the moment the app leaves the foreground and cleared
@@ -161,6 +182,9 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     super.initState();
     _currentIndex = widget.initialIndex;
     _currentProfile = widget.profile;
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange
+        .listen((_) => _checkSessionAccess(), onError: (Object _) => _checkSessionAccess());
+    AuthService.profileRefusedOwner.addListener(_checkSessionAccess);
     _isOnline = !widget.offlineSession;
     _refreshTaskAttention();
     _checkInitialConnectivity();
@@ -208,6 +232,8 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   @override
   void dispose() {
     _connectivitySubscription?.cancel();
+    _authSubscription?.cancel();
+    AuthService.profileRefusedOwner.removeListener(_checkSessionAccess);
     WidgetsBinding.instance.removeObserver(this);
     _idleLockTimer?.cancel();
     super.dispose();

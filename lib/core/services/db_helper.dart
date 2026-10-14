@@ -14,6 +14,7 @@ import 'supabase_service.dart';
 enum LocalOwnershipResult { current, foreign, legacyUnknown, mixed }
 
 class DBHelper {
+  static const inspectionDraftFindingsKey = '_draft_findings';
   /// Local-only fixtures explicitly supply an authenticated identity. Production
   /// never falls back to a preference, assignment, name, or legacy NULL owner.
   @visibleForTesting
@@ -974,24 +975,36 @@ class DBHelper {
     required Map<String, dynamic> checklist,
     required String boundaryStatus,
     int currentStep = 0,
+    Map<String, dynamic>? findings,
   }) async {
     final uid = requireInspector();
     final db = await database;
     await db.transaction((txn) async {
     await requireOwnedJob(txn, jobId, uid);
-    await txn.insert('local_inspections', {
+    final previous = await txn.query('local_inspections',
+      where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, uid]);
+    final values = <String, Object?>{
       'id': jobId,
       'inspector_id': uid,
       'actual_land_use': actualLandUse,
       'notes': notes,
       'is_compliant': isCompliant ? 1 : 0,
       'inspection_result': inspectionResult,
-      'checklist_json': jsonEncode(checklist),
+      'checklist_json': jsonEncode({...checklist,
+        inspectionDraftFindingsKey: ?findings}),
       'boundary_status': boundaryStatus,
-      'current_step': currentStep,
+      'current_step': max(currentStep,
+        previous.isEmpty ? 0 : (previous.single['current_step'] as int? ?? 0)),
       'is_synced': 0,
       'updated_at': DateTime.now().toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    };
+    if (previous.isEmpty) {
+      await txn.insert('local_inspections', values);
+    } else {
+      // An older in-memory step cannot erase durable progress/timestamps.
+      await txn.update('local_inspections', values,
+        where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, uid]);
+    }
     requireSameInspector(uid);
     });
   }
@@ -1013,8 +1026,16 @@ class DBHelper {
     final db = await database;
     await db.transaction((txn) async {
       await requireOwnedJob(txn, jobId, inspectorId);
+      final previous = await txn.query('local_inspections',
+        where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, inspectorId]);
+      final prior = previous.isEmpty ? null : previous.single;
       final values = {
-        'current_step': step, 'step_timestamps': jsonEncode(timestamps),
+        'current_step': max(step, prior?['current_step'] as int? ?? 0),
+        'step_timestamps': jsonEncode({
+          if (prior?['step_timestamps'] is String)
+            ...jsonDecode(prior!['step_timestamps'] as String) as Map,
+          ...timestamps,
+        }),
         'updated_at': DateTime.now().toIso8601String(), 'is_synced': 0,
       };
       final updated = await txn.update('local_inspections', values,
@@ -1052,12 +1073,18 @@ class DBHelper {
     required String notes,
     required double? latitude,
     required double? longitude,
+    String? capturedAt,
   }) async {
     final uid = requireInspector();
     final db = await database;
     await db.transaction((txn) async {
     await requireOwnedJob(txn, jobId, uid);
     await _requireOwnedRow(txn, 'local_photos', 'id', photoId, uid);
+    final previous = await txn.query('local_photos',
+      where: 'id = ? AND inspector_id = ?', whereArgs: [photoId, uid]);
+    if (previous.isNotEmpty && previous.single['job_id'] != jobId) {
+      throw StateError('A captured photo cannot move between inspection rounds');
+    }
     await txn.insert('local_photos', {
       'id': photoId,
       'inspector_id': uid,
@@ -1066,8 +1093,14 @@ class DBHelper {
       'notes': notes,
       'latitude': latitude,
       'longitude': longitude,
-      'captured_at': DateTime.now().toIso8601String(),
-      'is_synced': 0,
+      'captured_at': previous.isNotEmpty ? previous.single['captured_at']
+          : capturedAt ?? DateTime.now().toIso8601String(),
+      'is_synced': previous.isNotEmpty &&
+          previous.single['photo_path'] == photoPath &&
+          previous.single['notes'] == notes &&
+          previous.single['latitude'] == latitude &&
+          previous.single['longitude'] == longitude
+          ? previous.single['is_synced'] : 0,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     requireSameInspector(uid);
     });
@@ -1175,7 +1208,26 @@ class DBHelper {
     await db.transaction((txn) async {
       await requireOwnedJob(txn, jobId, uid);
       await _requireOwnedRow(txn, 'pending_actions', 'id', id, uid);
-      await txn.insert('pending_actions', {
+      if (type == 'submit_inspection') {
+        final preserved = await txn.query('pending_actions',
+          where: "type = 'submit_inspection' AND job_id = ? AND inspector_id = ? AND status != 'synced'",
+          whereArgs: [jobId, uid], orderBy: 'created_at DESC, rowid DESC', limit: 1);
+        if (preserved.isNotEmpty) {
+          final prior = jsonDecode(preserved.single['payload'] as String) as Map;
+          // Compare evidence conservatively; recovery/clock metadata is not a
+          // new submit. Never replace a pending or already-claimed intent.
+          final identical = payload.entries
+              .where((e) => e.key != 'cachedUpdatedAtSnapshot')
+              .every((e) => prior.containsKey(e.key) &&
+                jsonEncode(prior[e.key]) == jsonEncode(e.value));
+          if (!identical) {
+            throw StateError('A final submission is already preserved. Review it in Sync Center before submitting different evidence.');
+          }
+          requireSameInspector(uid);
+          return;
+        }
+      }
+      final action = <String, Object?>{
         'id': id,
         'inspector_id': uid,
         'type': type,
@@ -1186,7 +1238,15 @@ class DBHelper {
         'last_error': null,
         'created_at': now,
         'updated_at': now,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      };
+      await txn.insert('pending_actions', action,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      final stored = await txn.query('pending_actions',
+        where: 'id = ? AND inspector_id = ?', whereArgs: [id, uid]);
+      if (stored.length != 1 ||
+          !action.entries.every((e) => stored.single[e.key] == e.value)) {
+        throw StateError('Offline action was not durably saved');
+      }
       if (type == 'gps_confirm' || type == 'mark_ongoing') {
         // A durable start action, not retention or a network failure, accepts
         // local field work. Queue replacement and lifecycle commit together.
@@ -1295,6 +1355,20 @@ class DBHelper {
       if (payload['activityId'] is String) return row['status'] == 'synced' ? null : payload;
     }
     return null;
+  }
+
+  /// Normal-workflow recovery also includes autosaves and final intent. This
+  /// never acknowledges, removes, or delivers an action; ownership stays exact.
+  static Future<Map<String, dynamic>?> getLocalFindingsIntent(String jobId) async {
+    final uid = requireInspector();
+    final db = await database;
+    final rows = await db.query('pending_actions',
+      where: "type IN ('findings_update', 'submit_inspection') AND job_id = ? AND inspector_id = ?",
+      whereArgs: [jobId, uid], orderBy: 'created_at DESC, rowid DESC', limit: 1);
+    requireSameInspector(uid);
+    if (rows.isEmpty) return null;
+    return {...Map<String, dynamic>.from(jsonDecode(rows.single['payload'] as String) as Map),
+      'localCreatedAt': rows.single['created_at']};
   }
 
   /// Commit a component receipt and this device's accepted revision together.
