@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -359,6 +360,178 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     }
+  });
+
+  testWidgets('Full month card is content-sized with a compact selected date plate', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: HomeDashboardScreen(profile: UserProfile(
+      id: 'home-inspector', fullName: 'Maria Dela Cruz', role: 'inspector',
+    ))));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Show full calendar'));
+    await tester.tap(find.byTooltip('Show full calendar'));
+    await tester.pumpAndSettle();
+    final calendar = find.byKey(const ValueKey('full_calendar'));
+    final card = find.descendant(
+      of: calendar,
+      matching: find.byWidgetPredicate((widget) => widget is Container &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration! as BoxDecoration).borderRadius ==
+              BorderRadius.circular(16)),
+    );
+    final cardRect = tester.getRect(card);
+    final firstTile = find.byKey(const ValueKey('calendar_day_1'));
+    final first = tester.getRect(firstTile);
+    final eighth = tester.getRect(find.byKey(const ValueKey('calendar_day_8')));
+    expect(eighth.top - first.top, closeTo(first.height, 0.5),
+        reason: 'Week rows must sit flush; decorative gaps are wasted height.');
+    // Selected-day task detail is real content, so judge the month itself.
+    final summary = find.descendant(of: card, matching: find.textContaining('Tasks for'));
+    final summaryHeight = summary.evaluate().isEmpty
+        ? 0.0
+        : tester.getSize(
+            find.ancestor(of: summary, matching: find.byType(Container)).first,
+          ).height;
+    expect(cardRect.height - summaryHeight, lessThanOrEqualTo(336),
+        reason: 'A five-week month must stay proportionate on a normal phone.');
+    final selectedPlate =
+        find.byKey(ValueKey('calendar_day_plate_${DateTime.now().day}'));
+    expect(selectedPlate, findsOneWidget,
+        reason: 'The selected date needs its own quieter visual plate.');
+    expect(tester.getSize(selectedPlate).shortestSide, lessThanOrEqualTo(36));
+    expect(tester.getSize(firstTile).shortestSide, greaterThanOrEqualTo(48),
+        reason: 'The 48dp target must survive the smaller selected plate.');
+    final selectedDate = find.byKey(const ValueKey('calendar_selected_date'));
+    expect(selectedDate, findsOneWidget,
+        reason: 'The month header states the selected date.');
+    expect(tester.getRect(selectedDate).top, lessThan(first.top),
+        reason: 'The selected date belongs in the header, not the grid.');
+    final output = Platform.environment['IMAPS_HOME_VISUAL_DIR'];
+    if (output != null) {
+      Future<void> capture(String name) async {
+        final boundary = tester.firstRenderObject<RenderRepaintBoundary>(
+        find.byType(RepaintBoundary).first,
+      );
+        await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 2);
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          Directory(output).createSync(recursive: true);
+          File('$output/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+      await capture('home-calendar-portrait');
+      await tester.ensureVisible(find.byKey(const ValueKey('calendar_day_2')));
+      await tester.tap(find.byKey(const ValueKey('calendar_day_2')));
+      await tester.pumpAndSettle();
+      await capture('home-calendar-task-day');
+      await tester.ensureVisible(find.byTooltip('Hide full calendar'));
+      await tester.tap(find.byTooltip('Hide full calendar'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 90));
+      await capture('home-calendar-closing');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Show full calendar'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 90));
+      await capture('home-calendar-opening');
+      await tester.pumpAndSettle();
+    }
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Calendar hangs from an attached lanyard and reverses on close', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: HomeDashboardScreen(profile: UserProfile(
+      id: 'home-inspector', fullName: 'Maria Dela Cruz', role: 'inspector',
+    ))));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Show full calendar'));
+    await tester.tap(find.byTooltip('Show full calendar'));
+    await tester.pumpAndSettle();
+    final calendar = find.byKey(const ValueKey('full_calendar'));
+    final strap = find.byKey(const ValueKey('calendar_lanyard'));
+    final card = find.descendant(
+      of: calendar,
+      matching: find.byWidgetPredicate((widget) => widget is Container &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration! as BoxDecoration).borderRadius ==
+              BorderRadius.circular(16)),
+    );
+    expect(strap, findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar_lanyard_clip')), findsOneWidget,
+        reason: 'A lanyard needs a visible clip and slot, not floating lines.');
+    final strapRect = tester.getRect(strap);
+    final cardRect = tester.getRect(card);
+    expect(strapRect.bottom, closeTo(cardRect.top, 1.0),
+        reason: 'The strap must meet the card, with no decorative gap.');
+    expect(strapRect.center.dx, closeTo(cardRect.center.dx, 1.0),
+        reason: 'The strap hangs from the centre of the card it carries.');
+    final restStrap = tester.getRect(strap).topCenter;
+    final restCard = tester.getRect(card).bottomCenter;
+    await tester.ensureVisible(find.byTooltip('Hide full calendar'));
+    await tester.tap(find.byTooltip('Hide full calendar'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    final midStrap = tester.getRect(strap).topCenter;
+    final midCard = tester.getRect(card).bottomCenter;
+    expect(midStrap.dx, closeTo(restStrap.dx, 0.5),
+        reason: 'The strap top is the single shared hanging pivot.');
+    expect((midCard.dx - restCard.dx).abs(), greaterThan(0.5),
+        reason: 'The card must swing about that pivot while closing.');
+    expect((midStrap.dy - restStrap.dy).abs(), lessThan(0.5));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('full_calendar')), findsNothing);
+    expect(find.byKey(const ValueKey('calendar_lanyard')), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Reduced motion reveals the calendar without a swing', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    Widget screen() => MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(disableAnimations: true),
+        child: child!,
+      ),
+      home: HomeDashboardScreen(profile: UserProfile(
+        id: 'home-inspector', fullName: 'Maria Dela Cruz', role: 'inspector',
+      )),
+    );
+    await tester.pumpWidget(screen());
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Show full calendar'));
+    await tester.tap(find.byTooltip('Show full calendar'));
+    await tester.pump();
+    final strap = find.byKey(const ValueKey('calendar_lanyard'));
+    final card = find.descendant(
+      of: find.byKey(const ValueKey('full_calendar')),
+      matching: find.byWidgetPredicate((widget) => widget is Container &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration! as BoxDecoration).borderRadius ==
+              BorderRadius.circular(16)),
+    );
+    final first = tester.getRect(card);
+    final firstStrap = tester.getRect(strap).topCenter;
+    await tester.tap(find.byTooltip('Hide full calendar'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Show full calendar'));
+    await tester.pump();
+    expect(tester.getRect(card), first,
+        reason: 'Reduced motion presents the calendar immediately.');
+    expect(tester.getRect(strap).topCenter, firstStrap);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('Full calendar keeps two-digit task dates intact at enlarged text', (tester) async {

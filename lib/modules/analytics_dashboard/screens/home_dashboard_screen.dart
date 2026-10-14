@@ -749,23 +749,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                  ),
                ),
                ),
-                       AnimatedSwitcher(
-                         duration: calendarMotion,
-                        switchInCurve: Curves.easeOutCubic,
-                        switchOutCurve: Curves.easeInCubic,
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: SizeTransition(
-                            sizeFactor: animation,
-                            alignment: Alignment(-1, -1),
-                            child: SlideTransition(
-                              position: Tween<Offset>(begin: const Offset(0, -0.06), end: Offset.zero).animate(animation),
-                              child: child,
-                            ),
-                          ),
-                        ),
-                        child: _showFullCalendar
-                            ? Padding(
+                       _SuspendedMonthCalendar(
+                         visible: _showFullCalendar,
+                         child: Padding(
                                 key: const ValueKey('full_calendar'),
                                  // Gutter follows the content: seven 48px day targets
                                  // need 336px, so this keeps the standard 20px
@@ -774,10 +760,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                  padding: _kFullCalendarGutter(context),
                                  child: ConstrainedContent(
                                    maxWidth: 560,
-                                   child: Column(children: [
-                                     const ExcludeSemantics(child: CustomPaint(
-                                       size: Size(160, 24), painter: _CalendarTetherPainter(),
-                                     )),
+                                   child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                     const _CalendarLanyard(),
                                      _InlineFullCalendarCard(
                                   month: _calendarMonth,
                                   selectedDay: _selectedDay,
@@ -790,8 +774,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                      ),
                                    ]),
                                  ),
-                              )
-                             : const SizedBox.shrink(),
+                              ),
                       ),
                const SizedBox(height: 8),
 
@@ -1986,26 +1969,145 @@ EdgeInsets _kFullCalendarGutter(BuildContext context) {
   return EdgeInsets.symmetric(horizontal: gutter);
 }
 
-/// Decorative lanyard from the existing Calendar toggle to its separate card.
-class _CalendarTetherPainter extends CustomPainter {
-  const _CalendarTetherPainter();
+/// One shared hanging pivot for the strap and the month card it carries.
+const double _kCalendarSwingRadians = 0.0349; // 2 degrees
+
+/// Reveals the month card hanging from its lanyard, and replays the same
+/// motion in reverse when it closes.
+///
+/// One controller owns the whole reveal, so the strap, the card and the pivot
+/// always move as a single suspended piece instead of three decorations that
+/// happen to animate together.
+class _SuspendedMonthCalendar extends StatefulWidget {
+  const _SuspendedMonthCalendar({required this.visible, required this.child});
+
+  final bool visible;
+  final Widget child;
+
+  @override
+  State<_SuspendedMonthCalendar> createState() =>
+      _SuspendedMonthCalendarState();
+}
+
+class _SuspendedMonthCalendarState extends State<_SuspendedMonthCalendar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _swing = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+    value: widget.visible ? 1 : 0,
+  );
+
+  @override
+  void didUpdateWidget(_SuspendedMonthCalendar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.visible == widget.visible) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _swing.value = widget.visible ? 1 : 0;
+      return;
+    }
+    _swing.animateTo(
+      widget.visible ? 1 : 0,
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  void dispose() {
+    _swing.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _swing,
+    child: widget.child,
+    builder: (context, child) {
+      if (_swing.value <= 0) return const SizedBox.shrink();
+      return Transform.rotate(
+        angle: (1 - _swing.value) * _kCalendarSwingRadians,
+        alignment: Alignment.topCenter,
+        child: SizeTransition(
+          sizeFactor: _swing,
+          alignment: Alignment.topCenter,
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+/// The visible strap the month card actually hangs from.
+///
+/// The ribbon converges onto a real clip at the card's top-centre slot, so the
+/// lanyard reads as attached hardware rather than decoration floating between
+/// the toggle and the card.
+class _CalendarLanyard extends StatelessWidget {
+  const _CalendarLanyard();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    key: const ValueKey('calendar_lanyard'),
+    height: 28,
+    child: Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        const Positioned.fill(
+          child: ExcludeSemantics(
+            child: CustomPaint(painter: _CalendarLanyardPainter()),
+          ),
+        ),
+        Container(
+          key: const ValueKey('calendar_lanyard_clip'),
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: InsightTheme.ink3,
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: InsightTheme.line),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CalendarLanyardPainter extends CustomPainter {
+  const _CalendarLanyardPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = InsightTheme.blue1.withValues(alpha: 0.45)
+    final ribbon = Paint()
+      ..color = InsightTheme.blue1.withValues(alpha: 0.62);
+    final seam = Paint()
+      ..color = InsightTheme.blueInk.withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+      ..strokeWidth = 1;
+    final centre = size.width / 2;
+    final clipTop = size.height - 14;
+    // Both ribbons hang from the toggle and converge onto the clip, so the
+    // card below is visibly carried rather than merely neighboured.
     for (final direction in [-1.0, 1.0]) {
-      canvas.drawPath(Path()
-        ..moveTo(size.width / 2 + direction * 12, 0)
-        ..quadraticBezierTo(size.width / 2 + direction * 16, size.height / 2,
-            size.width / 2 + direction * 64, size.height), paint);
+      final top = centre + direction * 19;
+      final meet = centre + direction * 7;
+      canvas.drawPath(
+        Path()
+          ..moveTo(top - direction * 6, 0)
+          ..lineTo(top + direction * 6, 0)
+          ..lineTo(meet, clipTop)
+          ..close(),
+        ribbon,
+      );
+      canvas.drawPath(
+        Path()
+          ..moveTo(top, 1)
+          ..lineTo(meet, clipTop - 1),
+        seam,
+      );
     }
   }
 
   @override
-  bool shouldRepaint(_CalendarTetherPainter oldDelegate) => false;
+  bool shouldRepaint(_CalendarLanyardPainter oldDelegate) => false;
 }
 
 /// A separate full-month card sharing the strip's real selection/task sources.
@@ -2045,12 +2147,10 @@ class _InlineFullCalendarCard extends StatelessWidget {
 
     final clampedDay = selectedDay.clamp(1, daysInMonth);
     final selectedDate = DateTime(month.year, month.month, clampedDay);
-    final headerLabel =
-        '$clampedDay ${_monthAbbr[month.month - 1]} ${(month.year % 100).toString().padLeft(2, '0')}, ${_fullWeekdayNames[selectedDate.weekday - 1]}';
     final selectedTasks = tasksByDayInMonth[clampedDay] ?? const <TaskItem>[];
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
         borderRadius: InsightTheme.roundedMd,
@@ -2065,7 +2165,22 @@ class _InlineFullCalendarCard extends StatelessWidget {
             child: Row(
             children: [
               Expanded(
-                child: Text(headerLabel, style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_monthAbbr[month.month - 1]} ${month.year}',
+                        style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
+                    const SizedBox(height: 2),
+                    // The selected date rides in the header instead of a
+                    // separate caption row, so the month stays compact.
+                    Text(
+                      key: const ValueKey('calendar_selected_date'),
+                      '${_fullWeekdayNames[selectedDate.weekday - 1].substring(0, 3)} $clampedDay ${_monthAbbr[month.month - 1]}',
+                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                    ),
+                  ],
+                ),
               ),
               IconButton(
                 tooltip: 'Previous month',
@@ -2081,7 +2196,6 @@ class _InlineFullCalendarCard extends StatelessWidget {
             ],
             ),
           ),
-          const SizedBox(height: 8),
           LayoutBuilder(builder: (context, constraints) {
             final dayStyle = InsightTheme.inter(12.5, w: FontWeight.w700);
             var columnWidth = 48.0;
@@ -2103,14 +2217,15 @@ class _InlineFullCalendarCard extends StatelessWidget {
                       style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)))),
                 ],
               ]),
-              const SizedBox(height: 6),
+              const SizedBox(height: 2),
               GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(bottom: 4),
+            padding: EdgeInsets.zero,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
-              mainAxisSpacing: 4,
+              // Week rows sit flush: gaps between them are wasted height.
+              mainAxisSpacing: 0,
                crossAxisSpacing: 0,
               mainAxisExtent: rowHeight,
             ),
@@ -2131,8 +2246,10 @@ class _InlineFullCalendarCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
                 child: Center(
                   child: Container(
-                    constraints: const BoxConstraints(minHeight: 48),
-                    alignment: Alignment.center,
+                    key: ValueKey('calendar_day_plate_$day'),
+                    // A quieter 32px plate inside the full 48px target: the
+                    // selection reads clearly without filling the whole cell.
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                     decoration: BoxDecoration(
                       color: isSelected ? InsightTheme.blue1 : Colors.transparent,
                       shape: BoxShape.circle,
@@ -2169,14 +2286,14 @@ class _InlineFullCalendarCard extends StatelessWidget {
                 ? SingleChildScrollView(scrollDirection: Axis.horizontal, child: calendar) : calendar;
           }),
           if (selectedTasks.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: InsightTheme.surface2,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
