@@ -92,6 +92,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   List<TaskItem> _allTasks = [];
   // Keep real fetched metadata for selected normal entry; display is read-only.
   Map<String, Map<String, dynamic>> _entryJobs = {};
+  Map<String, int> _cardSteps = {};
   bool _isLoadingTasks = true;
 
   List<Map<String, dynamic>> _recentActivity = [];
@@ -239,10 +240,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
         return aDate.compareTo(bDate);
       });
 
+    final cardSteps = <String, int>{};
+    for (final task in upcoming.take(6)) {
+      try {
+        final draft = await DBHelper.getLocalInspection(task.id);
+        DBHelper.requireSameInspector(widget.profile.id);
+        cardSteps[task.id] = math.max(
+          math.max(task.currentStep, task.derivedHighestStep),
+          (draft?['current_step'] as num?)?.toInt() ?? 0,
+        ).clamp(0, 6);
+      } catch (e) {
+        debugPrint('Saved assignment progress unavailable: ${e.runtimeType}');
+      }
+    }
+
     if (mounted) {
       setState(() {
         _allTasks = tasks;
         _upcomingTasks = upcoming.take(6).toList(); 
+        _cardSteps = cardSteps;
         _isLoadingTasks = false;
       });
     }
@@ -814,7 +830,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 animation: springFor(2),
                 beginOffset: const Offset(70, 0),
                 child: SizedBox(
-                height: MediaQuery.textScalerOf(context).scale(244).clamp(244, double.infinity),
+                height: 244 * math.max(1, MediaQuery.textScalerOf(context).scale(12) / 12),
                 child: _isLoadingTasks
                     ? const Center(child: ImapsLoadingIndicator(size: 50))
                     : _upcomingTasks.isEmpty
@@ -852,7 +868,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   }
                                   return Center(
                                     child: SizedBox(
-                                      height: Curves.easeOut.transform(value) * MediaQuery.textScalerOf(context).scale(220).clamp(220, double.infinity),
+                                      height: Curves.easeOut.transform(value) * 220 * math.max(1, MediaQuery.textScalerOf(context).scale(12) / 12),
                                       width: double.infinity,
                                       child: child,
                                     ),
@@ -867,14 +883,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       _upcomingTasks[index].location,
                                       _upcomingTasks[index].applicationType,
                                       _upcomingTasks[index].landUseClass,
-                                      _upcomingTasks[index].status,
+                                       _upcomingTasks[index].status,
+                                       _cardSteps[_upcomingTasks[index].id],
+                                       _upcomingTasks[index].name,
                                     ),
                                     child: ActiveAssignmentsFolderCard(
                                       inspectionId: _formatShortId(_upcomingTasks[index].id),
                                       referenceNo: _upcomingTasks[index].inspectionNo,
                                         date: _calendarDateForTask(_upcomingTasks[index]) != null
                                           ? _formatScheduledDate(_calendarDateForTask(_upcomingTasks[index])!)
-                                          : '—',
+                                           : '—',
+                                      dateLabel: _calendarDateForTask(_upcomingTasks[index]) == null
+                                          ? null
+                                          : _upcomingTasks[index].pendingSection == PendingTaskSection.scheduled
+                                              ? 'Visit Date' : 'Deadline',
+                                      savedStep: _cardSteps[_upcomingTasks[index].id],
                                       location: _upcomingTasks[index].location,
                                       applicantName: _upcomingTasks[index].name,
                                       applicationType: _upcomingTasks[index].applicationType?.isNotEmpty == true

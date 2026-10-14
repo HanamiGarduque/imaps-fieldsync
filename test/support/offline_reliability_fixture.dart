@@ -85,7 +85,7 @@ class OfflineReliabilityFixture {
     final fallback = fonts.listSync().whereType<File>()
         .firstWhere((f) => f.path.endsWith('.ttf')).readAsBytesSync();
     final manifest = <String, Object>{};
-    for (final family in ['Inter', 'Urbanist']) {
+    for (final family in ['Inter', 'Urbanist', 'OpenSans']) {
       for (final weight in ['Regular', 'Medium', 'SemiBold', 'Bold', 'ExtraBold']) {
         final asset = '$family-$weight.ttf';
         manifest[asset] = [{'asset': asset}];

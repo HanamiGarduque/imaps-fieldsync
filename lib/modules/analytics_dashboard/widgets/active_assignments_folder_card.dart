@@ -29,7 +29,7 @@ String activeAssignmentStatusLabel(
 //   Layer 2 — Document sheets fanning out from inside the folder
 //   Layer 3 — Glossy front pocket (ClipPath with asymmetric folder tab)
 //   Layer 4 — Radial shine overlay on pocket surface
-//   Layer 5 — Content: iMAPS FieldSync brand + assignment data
+//   Layer 5 — Content: applicant, barangay, date and saved step
 //   Layer 6 — Status tab badge (top-right)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -64,6 +64,8 @@ class ActiveAssignmentsFolderCard extends StatefulWidget {
   final String inspectionId;
   final String referenceNo;
   final String date;
+  final String? dateLabel;
+  final int? savedStep;
   final String location;
   final String applicantName;
   final String applicationType;
@@ -76,6 +78,8 @@ class ActiveAssignmentsFolderCard extends StatefulWidget {
     required this.inspectionId,
     required this.referenceNo,
     required this.date,
+    this.dateLabel,
+    this.savedStep,
     required this.location,
     required this.applicantName,
     required this.applicationType,
@@ -200,11 +204,9 @@ class _ActiveAssignmentsFolderCardState
                     gradient: gradient,
                     location: widget.location,
                     applicantName: widget.applicantName,
-                    applicationType: widget.applicationType,
-                    referenceNo: widget.referenceNo,
-                    inspectionId: widget.inspectionId,
                     date: widget.date,
-                    status: status,
+                    dateLabel: widget.dateLabel,
+                    savedStep: widget.savedStep,
                   ),
                 ),
 
@@ -345,33 +347,40 @@ class _GlossyPocket extends StatelessWidget {
   final List<Color> gradient;
   final String location;
   final String applicantName;
-  final String applicationType;
-  final String referenceNo;
-  final String inspectionId;
   final String date;
-  final String status;
+  final String? dateLabel;
+  final int? savedStep;
 
   const _GlossyPocket({
     required this.accent,
     required this.gradient,
     required this.location,
     required this.applicantName,
-    required this.applicationType,
-    required this.referenceNo,
-    required this.inspectionId,
     required this.date,
-    required this.status,
+    required this.dateLabel,
+    required this.savedStep,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final compact = MediaQuery.sizeOf(context).width < 370 || scaler.scale(12) >= 18;
+    final hasDate = dateLabel?.isNotEmpty == true && date.trim().isNotEmpty && date != '—';
+    final dateInfo = hasDate ? Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(dateLabel!, style: InsightTheme.inter(12, w: FontWeight.w500, c: Colors.white.withValues(alpha: 0.78))),
+        Text(date, maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: InsightTheme.inter(13, w: FontWeight.w700, c: Colors.white)),
+      ],
+    ) : null;
+    final stepInfo = savedStep == null ? null : Text('STEP ${savedStep!.clamp(0, 6)}/6',
+      maxLines: 1, style: InsightTheme.inter(12, w: FontWeight.w700, c: Colors.white));
     return ClipPath(
       clipper: _PocketClipper(),
-      // Keep the existing pocket height at normal text size; give wrapped
-      // brand text room at large accessibility sizes without changing styling.
-      child: IntrinsicHeight(
       child: Container(
-        constraints: BoxConstraints(minHeight: MediaQuery.textScalerOf(context).scale(154)),
+        constraints: BoxConstraints(minHeight: 154 * math.max(1, scaler.scale(12) / 12)),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -424,131 +433,44 @@ class _GlossyPocket extends StatelessWidget {
 
             // ── Content ─────────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 24, 16, 16),
+              padding: const EdgeInsets.fromLTRB(18, 26, 16, 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-
-                  // Brand row — iMAPS FieldSync
-                  Row(
-                    children: [
-                      // Mini logo mark
-                      Container(
-                        width: 18, height: 18,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Colors.white.withValues(alpha: 0.30),
-                              Colors.white.withValues(alpha: 0.10),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.30),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.map_outlined,
-                          size: 11,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(
-                        'iMAPS FieldSync',
-                        style: InsightTheme.urbanist(
-                          12,
-                          w: FontWeight.w700,
-                          c: Colors.white.withValues(alpha: 0.70),
-                          ls: 0.4,
-                        ),
-                      )),
-                      // Date pill
-                      Flexible(child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 9, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Text(
-                          date,
-                          style: InsightTheme.mono(
-                            12,
-                            w: FontWeight.w600,
-                            c: Colors.white.withValues(alpha: 0.80),
-                          ),
-                        ),
-                      )),
-                    ],
-                  ),
-                  const SizedBox(height: 9),
-
-                  // Location — main title
                   Text(
-                    location,
-                    style: InsightTheme.urbanist(
-                      18,
-                      w: FontWeight.w800,
-                      c: Colors.white,
-                      ls: -0.5,
-                      h: 1.1,
-                    ),
-                    maxLines: 1,
+                    applicantName.trim().isEmpty ? 'Applicant not on file' : applicantName.trim(),
+                    style: InsightTheme.urbanist(19, w: FontWeight.w800, c: Colors.white, h: 1.12),
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    applicantName,
-                    style: InsightTheme.inter(
-                      12,
-                      w: FontWeight.w400,
-                      c: Colors.white.withValues(alpha: 0.60),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  const Spacer(),
-
-                  // Bottom meta row
+                  const SizedBox(height: 5),
+                  Row(children: [
+                    Icon(Icons.location_on_outlined, size: 15, color: Colors.white.withValues(alpha: 0.84)),
+                    const SizedBox(width: 5),
+                    Expanded(child: Text(location.trim().isEmpty ? 'Site not on file' : location.trim(),
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: InsightTheme.inter(12, w: FontWeight.w500, c: Colors.white.withValues(alpha: 0.87)))),
+                  ]),
+                  const SizedBox(height: 14),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: Column(
+                        child: compact ? Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              referenceNo,
-                              style: InsightTheme.mono(
-                                12.5,
-                                w: FontWeight.w700,
-                                c: Colors.white,
-                                ls: 0.4,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'ID: $inspectionId  ·  $applicationType',
-                              style: InsightTheme.inter(
-                                12,
-                                w: FontWeight.w400,
-                                c: Colors.white.withValues(alpha: 0.55),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            ?dateInfo,
+                            if (dateInfo != null && stepInfo != null) const SizedBox(height: 6),
+                            ?stepInfo,
+                          ],
+                        ) : Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (dateInfo != null) Expanded(child: dateInfo),
+                            if (dateInfo != null && stepInfo != null) const SizedBox(width: 8),
+                            ?stepInfo,
                           ],
                         ),
                       ),
@@ -593,7 +515,6 @@ class _GlossyPocket extends StatelessWidget {
             ),
           ],
         ),
-      ),
       ),
     );
   }

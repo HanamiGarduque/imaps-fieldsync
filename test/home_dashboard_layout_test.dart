@@ -113,13 +113,13 @@ void main() {
       (_) async => null,
     );
     sqfliteFfiInit();
-    db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
-    await db.execute(
-      'CREATE TABLE local_jobs (id TEXT, status TEXT, inspector_id TEXT)',
-    );
-    await db.execute(
-      'CREATE TABLE pending_actions (job_id TEXT, type TEXT, status TEXT)',
-    );
+    // Layout tests run under a fake clock; keep SQLite in-process while using
+    // the real schema, including the owner-scoped drafts read by the cards.
+    db = await databaseFactoryFfiNoIsolate.openDatabase(inMemoryDatabasePath);
+    final schema = File('lib/core/services/db_helper.dart').readAsStringSync();
+    for (final table in RegExp(r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)').allMatches(schema)) {
+      await db.execute(table.group(0)!);
+    }
     DBHelper.useDatabaseForTesting(db);
     await Supabase.initialize(
       url: 'https://home.test',
