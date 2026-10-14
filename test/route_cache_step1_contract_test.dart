@@ -266,7 +266,7 @@ void main() {
   });
 
   test('the Rosario boundary remains an independent local render layer', () {
-    expect(step1Source, contains('const RosarioBoundaryOverlay()'));
+    expect(step1Source, contains('const RosarioBoundaryOverlay(subdued: true)'));
     for (final forbidden in [
       'RouteService',
       'CachedRoute',
@@ -283,7 +283,7 @@ void main() {
     }
     // Boundary still sits under the route and markers.
     expect(
-      step1Source.indexOf('const RosarioBoundaryOverlay()'),
+      step1Source.indexOf('const RosarioBoundaryOverlay('),
       lessThan(step1Source.indexOf('if (_routePoints != null)')),
     );
   });

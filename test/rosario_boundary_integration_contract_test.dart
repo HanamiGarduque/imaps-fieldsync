@@ -28,7 +28,7 @@ void main() {
         source,
         contains("import '../widgets/rosario_boundary_overlay.dart';"),
       );
-      expect(source, contains('const RosarioBoundaryOverlay()'));
+      expect(source, contains('const RosarioBoundaryOverlay('));
     }
     // One loader, one asset path — no per-screen duplicate implementation.
     expect(overlaySource, contains("'assets/maps/rosario_boundary.geojson'"));
@@ -39,14 +39,14 @@ void main() {
   test('overlay renders beneath route and marker layers', () {
     int indexOf(String source, String needle) => source.indexOf(needle);
     for (final source in [step1Source, quickMapSource]) {
-      final overlayAt = indexOf(source, 'const RosarioBoundaryOverlay()');
+      final overlayAt = indexOf(source, 'const RosarioBoundaryOverlay(');
       expect(overlayAt, greaterThan(indexOf(source, 'TileLayer(')));
       expect(overlayAt, lessThan(indexOf(source, 'MarkerLayer(')));
     }
     // Step 1's road route keeps its existing position above the boundary.
     expect(
       indexOf(step1Source, 'PolylineLayer('),
-      greaterThan(indexOf(step1Source, 'const RosarioBoundaryOverlay()')),
+      greaterThan(indexOf(step1Source, 'const RosarioBoundaryOverlay(')),
     );
   });
 

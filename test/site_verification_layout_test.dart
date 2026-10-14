@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,11 +18,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/route_service.dart';
+import 'package:imaps_fieldsync/core/theme/insight_theme.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/gps_verification_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/site_map_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/widgets/rosario_boundary_overlay.dart';
+import 'package:imaps_fieldsync/modules/inspection/widgets/inspection_step_header.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'support/site_map_http_fixture.dart';
 
@@ -29,6 +33,8 @@ void main() {
   final messenger = binding.defaultBinaryMessenger;
   late Database db;
   late HttpOverrides? originalHttp;
+  late SiteMapHttpFixture httpFixture;
+  final captureKey = GlobalKey();
   var online = false;
   var gps = true;
   var locationRequests = 0;
@@ -47,7 +53,9 @@ void main() {
 
   setUpAll(() async {
     originalHttp = HttpOverrides.current;
-    HttpOverrides.global = SiteMapHttpFixture();
+    HttpOverrides.global = httpFixture = SiteMapHttpFixture(
+      tileDirectory: Platform.environment['IMAPS_MAP_FIXTURE_DIR'],
+    );
     SharedPreferences.setMockInitialValues({});
     sqfliteFfiInit();
     db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
@@ -108,6 +116,15 @@ void main() {
       GoogleFonts.urbanist(fontWeight: weight);
     }
     await GoogleFonts.pendingFonts();
+    final icons = FontLoader('MaterialIcons')
+      ..addFont(
+        Future.value(
+          ByteData.sublistView(
+            File('${fonts.path}/MaterialIcons-Regular.otf').readAsBytesSync(),
+          ),
+        ),
+      );
+    await icons.load();
     await RosarioBoundaryLoader.shared.load();
     await Supabase.initialize(
       url: 'https://site-layout.test',
@@ -173,6 +190,8 @@ void main() {
   });
 
   setUp(() async {
+    httpFixture.routeJson = null;
+    httpFixture.streetTilesAvailable = true;
     online = false;
     gps = true;
     locationRequests = 0;
@@ -241,6 +260,20 @@ void main() {
       ChangeNotifierProvider.value(
         value: provider,
         child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            primaryColor: InsightTheme.blue1,
+            colorScheme: const ColorScheme.light(
+              primary: InsightTheme.blue1,
+              secondary: InsightTheme.blue2,
+              surface: InsightTheme.surface,
+              error: InsightTheme.red,
+            ),
+            scaffoldBackgroundColor: InsightTheme.bg,
+          ),
+          builder: (_, child) =>
+              RepaintBoundary(key: captureKey, child: child!),
           home: Builder(
             builder: (context) => Scaffold(
               body: TextButton(
@@ -268,54 +301,242 @@ void main() {
       'portrait controls and split landscape remain reachable at $scale',
       (tester) async {
         await mount(tester, const Size(390, 844), scale: scale);
-        for (final size in [
-          const Size(390, 844),
-          const Size(320, 568),
-          const Size(844, 390),
-          const Size(640, 360),
-          const Size(740, 320),
-          const Size(1280, 800),
-        ]) {
-          tester.view.physicalSize = size;
-          await settle(tester);
-          expect(find.text('Site details'), findsOneWidget);
-          expect(find.text('Site Verification'), findsOneWidget);
-          expect(
-            find.text('STEP 1 OF 6 — LOCATE TARGET', findRichText: true),
-            findsOneWidget,
-          );
-          final full = find.byTooltip('Full map');
-          final fit = find.byTooltip('Fit both markers');
-          for (final control in [full, fit]) {
-            expect(control, findsOneWidget);
-            expect(tester.getSize(control).width, greaterThanOrEqualTo(48));
-            expect(tester.getSize(control).height, greaterThanOrEqualTo(48));
-            expect(control.hitTestable(), findsOneWidget,
-                reason: '$size at $scale: ${tester.getRect(control)}');
-          }
-          if (size.width < size.height) {
-            expect(tester.getCenter(full).dx, tester.getCenter(fit).dx);
+        final semantics = tester.ensureSemantics();
+        try {
+          for (final size in [
+            const Size(390, 844),
+            const Size(320, 568),
+            const Size(844, 390),
+            const Size(640, 360),
+            const Size(740, 320),
+            const Size(1280, 800),
+          ]) {
+            tester.view.physicalSize = size;
+            await settle(tester);
+            expect(find.text('Site details'), findsOneWidget);
+            expect(find.text('Site Verification'), findsOneWidget);
             expect(
-              tester.getRect(full).bottom,
-              lessThanOrEqualTo(tester.getRect(fit).top),
+              find.text('STEP 1 OF 6 — LOCATE TARGET', findRichText: true),
+              findsOneWidget,
             );
-          } else {
+            final full = find.byTooltip('Full map');
+            final fit = find.byTooltip('Fit both markers');
             expect(
-              tester.getRect(find.byType(FlutterMap)).right,
-              lessThanOrEqualTo(tester.getRect(find.text('Site details')).left),
+              tester.getSemantics(full).tooltip,
+              'Full map',
+              reason: tester.getSemantics(full).toStringDeep(),
             );
+            expect(
+              tester.getSemantics(fit).tooltip,
+              'Fit both markers',
+              reason: tester.getSemantics(fit).toStringDeep(),
+            );
+            for (final control in [full, fit]) {
+              expect(control, findsOneWidget);
+              expect(tester.getSize(control).width, greaterThanOrEqualTo(48));
+              expect(tester.getSize(control).height, greaterThanOrEqualTo(48));
+              expect(
+                control.hitTestable(),
+                findsOneWidget,
+                reason: '$size at $scale: ${tester.getRect(control)}',
+              );
+            }
+            if (size.width < size.height) {
+              expect(tester.getCenter(full).dx, tester.getCenter(fit).dx);
+              expect(
+                tester.getRect(full).bottom,
+                lessThanOrEqualTo(tester.getRect(fit).top),
+              );
+            } else {
+              expect(
+                tester.getRect(find.byType(FlutterMap)).right,
+                lessThanOrEqualTo(
+                  tester.getRect(find.text('Site details')).left,
+                ),
+              );
+            }
+            await tester.ensureVisible(find.text('Proceed to Location'));
+            await settle(tester);
+            expect(
+              find.text('Proceed to Location').hitTestable(),
+              findsOneWidget,
+            );
+            expect(
+              find.byTooltip('Hide site details').hitTestable(),
+              findsOneWidget,
+              reason:
+                  'disclosure must stay reachable after details scroll at $size/$scale',
+            );
+            expect(tester.takeException(), isNull, reason: '$size at $scale');
           }
-          await tester.ensureVisible(find.text('Proceed to Location'));
-          await settle(tester);
-          expect(
-            find.text('Proceed to Location').hitTestable(),
-            findsOneWidget,
-          );
-          expect(tester.takeException(), isNull, reason: '$size at $scale');
+        } finally {
+          semantics.dispose();
         }
       },
     );
   }
+
+  testWidgets('online road metrics and Flutter visual acceptance', (
+    tester,
+  ) async {
+    online = true;
+    final fixtureDir = Platform.environment['IMAPS_MAP_FIXTURE_DIR'];
+    httpFixture.routeJson = fixtureDir == null
+        ? jsonEncode({
+            'code': 'Ok',
+            'routes': [
+              {
+                'distance': 3372,
+                'duration': 462.7,
+                'geometry': {
+                  'coordinates': [
+                    [121.1765, 13.8425],
+                    [121.1818, 13.8358],
+                    [121.19, 13.8486],
+                  ],
+                },
+              },
+            ],
+          })
+        : File('$fixtureDir/public-demo-route.json').readAsStringSync();
+    // First online fetch: cached replay is exercised separately above. This
+    // avoids the pre-existing late-cache/fast-network race in the data owner.
+    await tester.runAsync(() => db.delete('local_route_cache'));
+    await mount(tester, const Size(390, 844));
+    expect(
+      find.text('Road route'),
+      findsOneWidget,
+      reason:
+          'requests: ${httpFixture.requestedRoutes}, '
+          'cached label: ${find.text('Saved road route').evaluate().length}',
+    );
+    expect(find.text('Saved road route'), findsNothing);
+    expect(find.text('3.4 km · ~8 min'), findsOneWidget);
+    final output = Platform.environment['IMAPS_SITE_VISUAL_DIR'];
+    Future<void> capture(String name) async {
+      if (output == null) return;
+      final boundary =
+          captureKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      await tester.runAsync(() async {
+        final image = await boundary.toImage(pixelRatio: 2);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        Directory(output).createSync(recursive: true);
+        File('$output/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    }
+
+    await tester.tap(find.byTooltip('Fit both markers'));
+    await settle(tester);
+    await capture('site-verification-portrait');
+    await tester.tap(find.byTooltip('Hide site details'));
+    await settle(tester);
+    await capture('site-verification-collapsed');
+    await tester.tap(find.byTooltip('Show site details'));
+    await settle(tester);
+    tester.view.physicalSize = const Size(844, 390);
+    tester.view.padding = const FakeViewPadding(left: 24, bottom: 24);
+    await settle(tester);
+    await tester.tap(find.byTooltip('Fit both markers'));
+    await settle(tester);
+    await capture('site-verification-landscape');
+    expect(
+      find.text('Proceed to Location').hitTestable(),
+      findsOneWidget,
+      reason: 'the normal landscape action should be visible without a scroll',
+    );
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    await settle(tester);
+    await capture('site-verification-landscape-text-2x');
+    await tester.ensureVisible(find.text('Proceed to Location'));
+    await settle(tester);
+    await capture('site-verification-landscape-text-2x-action');
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
+    await settle(tester);
+    await tester.tap(find.byTooltip('Fit both markers'));
+    await settle(tester);
+    await capture('site-verification-portrait-text-2x');
+    tester.platformDispatcher.textScaleFactorTestValue = 1;
+    await tester.pumpWidget(const SizedBox.shrink());
+    await settle(tester);
+    online = false;
+    httpFixture.routeJson = null;
+    httpFixture.streetTilesAvailable = false;
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+    await mount(tester, const Size(390, 844));
+    expect(find.text('Saved road route'), findsOneWidget);
+    expect(
+      find.textContaining('Offline rerouting is unavailable'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Fit both markers'));
+    await settle(tester);
+    await capture('site-verification-offline');
+    if (output != null) {
+      File('$output/requested-tiles.json').writeAsStringSync(
+        jsonEncode(httpFixture.requestedTiles.toList()..sort()),
+      );
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('fit keeps real route geometry clear of header and details', (
+    tester,
+  ) async {
+    await mount(tester, const Size(390, 844));
+    await tester.tap(find.byTooltip('Fit both markers'));
+    await settle(tester);
+    final camera = tester
+        .widget<FlutterMap>(find.byType(FlutterMap))
+        .mapController!
+        .camera;
+    final route = tester
+        .widget<PolylineLayer>(find.byType(PolylineLayer))
+        .polylines
+        .single
+        .points;
+    expect(route, const [device, LatLng(13.8358, 121.1818), target]);
+    final top = tester.getRect(find.byType(InspectionStepHeader)).bottom + 8;
+    final bottom =
+        tester.getRect(find.text('© OpenStreetMap contributors')).top - 28;
+    for (final point in route) {
+      final screenPoint = camera.latLngToScreenPoint(point);
+      expect(screenPoint.y, inInclusiveRange(top, bottom));
+    }
+    final targetLabel = tester.getRect(find.text('Target site'));
+    expect(
+      targetLabel.right,
+      lessThanOrEqualTo(374),
+      reason: 'the full marker label must fit',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'saved geometry without metrics never fabricates a driving estimate',
+    (tester) async {
+      await tester.runAsync(
+        () => DBHelper.saveRouteCache(
+          CachedRoute(
+            jobId: task.id,
+            points: const [device, LatLng(13.8358, 121.1818), target],
+            originLat: device.latitude,
+            originLng: device.longitude,
+            fetchedAt: DateTime.utc(2026, 10, 9),
+          ),
+        ),
+      );
+      await mount(tester, const Size(390, 844));
+      expect(find.text('Saved road route'), findsOneWidget);
+      expect(find.byType(PolylineLayer), findsOneWidget);
+      expect(find.text('Estimate unavailable'), findsOneWidget);
+      expect(find.textContaining('less than a minute'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'collapse/fullscreen/rotation keep the map and restore disclosure state',
@@ -363,7 +584,7 @@ void main() {
       await mount(tester, const Size(390, 844));
       expect(find.text('Saved road route'), findsOneWidget);
       expect(
-        find.textContaining('Offline'),
+        find.textContaining('· Offline'),
         findsNothing,
         reason: 'cache provenance does not establish connectivity',
       );
@@ -394,7 +615,10 @@ void main() {
     (tester) async {
       gps = false;
       await tester.runAsync(() => db.delete('local_route_cache'));
-      InspectionProgress.instance.ensureActiveInspection(task.id, initialStep: 0);
+      InspectionProgress.instance.ensureActiveInspection(
+        task.id,
+        initialStep: 0,
+      );
       await mount(tester, const Size(390, 844));
       expect(find.text('Location unavailable'), findsOneWidget);
       expect(find.byType(PolylineLayer), findsNothing);
@@ -403,8 +627,14 @@ void main() {
       await settle(tester);
       expect(find.byType(GpsVerificationScreen), findsOneWidget);
       expect(InspectionProgress.instance.highestCompleted, 1);
-      final saved = await tester.runAsync(() => db.query('local_inspections',
-          columns: ['current_step'], where: 'id = ?', whereArgs: [task.id]));
+      final saved = await tester.runAsync(
+        () => db.query(
+          'local_inspections',
+          columns: ['current_step'],
+          where: 'id = ?',
+          whereArgs: [task.id],
+        ),
+      );
       expect(saved!.single['current_step'], 1);
       expect(tester.takeException(), isNull);
     },

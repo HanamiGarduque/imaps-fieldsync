@@ -110,9 +110,12 @@ class RosarioBoundaryLoader {
 }
 
 class RosarioBoundaryOverlay extends StatefulWidget {
-  const RosarioBoundaryOverlay({super.key, this.loader});
+  const RosarioBoundaryOverlay({super.key, this.loader, this.subdued = false});
 
   final RosarioBoundaryLoader? loader;
+
+  /// Step 1 has a prominent road route; Quick Action keeps its original paint.
+  final bool subdued;
 
   @override
   State<RosarioBoundaryOverlay> createState() => _RosarioBoundaryOverlayState();
@@ -120,6 +123,7 @@ class RosarioBoundaryOverlay extends StatefulWidget {
 
 class _RosarioBoundaryOverlayState extends State<RosarioBoundaryOverlay> {
   late final Future<List<Polygon>> _boundary;
+  List<Polygon>? _subduedPolygons;
 
   @override
   void initState() {
@@ -136,9 +140,23 @@ class _RosarioBoundaryOverlayState extends State<RosarioBoundaryOverlay> {
         if (polygons == null || polygons.isEmpty) {
           return const SizedBox.shrink();
         }
+        final displayPolygons = widget.subdued
+            ? _subduedPolygons ??= polygons
+                  .map(
+                    (polygon) => Polygon(
+                      points: polygon.points,
+                      holePointsList: polygon.holePointsList,
+                      color: null,
+                      borderColor: InsightTheme.inkMuted.withValues(alpha: 0.9),
+                      borderStrokeWidth: 1.5,
+                      pattern: StrokePattern.dashed(segments: const [6, 5]),
+                    ),
+                  )
+                  .toList(growable: false)
+            : polygons;
         return IgnorePointer(
           child: PolygonLayer(
-            polygons: polygons,
+            polygons: displayPolygons,
             // Preserve the raw export, including holes; no display simplification.
             simplificationTolerance: 0,
           ),
