@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:imaps_fieldsync/modules/inspection/inspection_constants.dart';
 
 const step1 = 'lib/modules/inspection/screens/site_map_screen.dart';
+const view = 'lib/modules/inspection/widgets/site_verification_view.dart';
 const quickMap = 'lib/modules/inspection/screens/site_map_preview_screen.dart';
 const dbHelper = 'lib/core/services/db_helper.dart';
 const routeService = 'lib/core/services/route_service.dart';
@@ -23,6 +24,7 @@ const recovery =
 
 void main() {
   final step1Source = File(step1).readAsStringSync();
+  final viewSource = File(view).readAsStringSync();
   final quickMapSource = File(quickMap).readAsStringSync();
   final dbSource = File(dbHelper).readAsStringSync();
   final routeSource = File(routeService).readAsStringSync();
@@ -106,36 +108,23 @@ void main() {
   });
 
   test('cached geometry is labelled as cached, never as newly calculated', () {
-    expect(step1Source, contains("'Cached road route · Offline'"));
-    final labelStart = step1Source.indexOf(
-      "_routeFromCache ? 'Cached road route",
-    );
-    final label = step1Source.substring(
-      labelStart,
-      labelStart + step1Source.substring(labelStart).indexOf('}'),
-    );
-    expect(
-      label,
-      contains("'Road route'"),
-      reason: 'the live label stays unchanged for a fresh route',
-    );
+    expect(step1Source, contains('routeFromCache: _routeFromCache'));
+    expect(viewSource, contains("'Saved road route'"));
+    expect(viewSource, contains("'Road route'"));
+    expect(viewSource, isNot(contains('Cached road route · Offline')),
+        reason: 'cache provenance does not prove current connectivity');
   });
 
   test('no route at all reports honestly instead of drawing a fake one', () {
     expect(
-      step1Source,
+      viewSource,
       contains(
-        'Road route unavailable offline. Connect once to load route guidance.',
+        'Road route unavailable',
       ),
     );
     // The notice is informational: it must not gate the Proceed button.
-    final noticeAt = step1Source.indexOf('Road route unavailable offline.');
-    final proceedAt = step1Source.indexOf('onPressed: () {');
-    expect(noticeAt, greaterThan(0));
-    expect(
-      step1Source.substring(noticeAt, proceedAt),
-      isNot(contains('return')),
-    );
+    expect(viewSource, contains('onPressed: widget.onProceed'));
+    expect(step1Source, contains('onProceed: _proceed'));
     expect(
       step1Source,
       contains('InspectionProgress.instance.markStepComplete(1)'),

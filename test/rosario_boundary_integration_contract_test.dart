@@ -100,7 +100,7 @@ void main() {
       step1Source,
       contains('InspectionProgress.instance.markStepComplete(1)'),
     );
-    final proceedAt = step1Source.indexOf('onPressed: () {');
+    final proceedAt = step1Source.indexOf('void _proceed()');
     final completeAt = step1Source.indexOf('markStepComplete(1)');
     expect(completeAt, greaterThan(proceedAt));
     expect(
@@ -157,12 +157,13 @@ void main() {
   });
 
   test('boundary attribution is factual and adds no invented metadata', () {
-    expect(step1Source, contains('Municipal boundary: MPDO Rosario'));
+    final viewSource = File('lib/modules/inspection/widgets/site_verification_view.dart').readAsStringSync();
+    expect(viewSource, contains('Rosario boundary · MPDO Rosario'));
     // Only the attribution line itself is constrained; unrelated screen text
     // may legitimately use these words.
-    final line = step1Source
+    final line = viewSource
         .split('\n')
-        .firstWhere((l) => l.contains('Municipal boundary: MPDO Rosario'));
+        .firstWhere((l) => l.contains('Rosario boundary · MPDO Rosario'));
     for (final invented in ['version', 'issue date', 'issued', 'licen', '©']) {
       expect(
         line.toLowerCase(),
