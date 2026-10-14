@@ -2047,8 +2047,11 @@ class _CalendarLanyard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
     key: const ValueKey('calendar_lanyard'),
-    height: 28,
+    height: 30,
+    // The clip deliberately overhangs the card edge so the card looks gripped
+    // rather than merely placed underneath a strap.
     child: Stack(
+      clipBehavior: Clip.none,
       alignment: Alignment.bottomCenter,
       children: [
         const Positioned.fill(
@@ -2056,14 +2059,21 @@ class _CalendarLanyard extends StatelessWidget {
             child: CustomPaint(painter: _CalendarLanyardPainter()),
           ),
         ),
-        Container(
-          key: const ValueKey('calendar_lanyard_clip'),
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            color: InsightTheme.ink3,
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: InsightTheme.line),
+        Positioned(
+          bottom: -5,
+          child: Container(
+            key: const ValueKey('calendar_lanyard_clip'),
+            width: 12,
+            height: 16,
+            decoration: BoxDecoration(
+              color: InsightTheme.ink3,
+              borderRadius: BorderRadius.circular(2),
+            ),
+            // The slot the strap passes through, drawn on the clip itself so
+            // the attachment is legible at small sizes.
+            child: Center(
+              child: Container(width: 12, height: 2, color: InsightTheme.surface),
+            ),
           ),
         ),
       ],
@@ -2083,24 +2093,25 @@ class _CalendarLanyardPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
     final centre = size.width / 2;
-    final clipTop = size.height - 14;
-    // Both ribbons hang from the toggle and converge onto the clip, so the
-    // card below is visibly carried rather than merely neighboured.
+    final clipTop = size.height - 6;
+    // Two ribbons hang from the toggle and converge onto the clip, so the card
+    // reads as carried hardware rather than sitting under loose lines.
     for (final direction in [-1.0, 1.0]) {
-      final top = centre + direction * 19;
-      final meet = centre + direction * 7;
+      final outer = centre + direction * 26;
+      final inner = centre + direction * 8;
       canvas.drawPath(
         Path()
-          ..moveTo(top - direction * 6, 0)
-          ..lineTo(top + direction * 6, 0)
-          ..lineTo(meet, clipTop)
+          ..moveTo(outer - direction * 5, 0)
+          ..lineTo(outer + direction * 5, 0)
+          ..lineTo(inner + direction * 3, clipTop)
+          ..lineTo(inner - direction * 3, clipTop)
           ..close(),
         ribbon,
       );
       canvas.drawPath(
         Path()
-          ..moveTo(top, 1)
-          ..lineTo(meet, clipTop - 1),
+          ..moveTo(outer, 1)
+          ..lineTo(inner, clipTop - 1),
         seam,
       );
     }
