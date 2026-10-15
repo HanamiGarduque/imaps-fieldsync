@@ -1,9 +1,11 @@
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/quick_actions_sheet.dart' show MapDetailPanel;
 import 'inspection_step_header.dart';
 
 /// Step 1 presentation only. GPS, road geometry, cache and progression remain
@@ -328,8 +330,8 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // A scrollable explanation can be off-screen. Keep the
-                        // legend on-map, or pinned in the expanded side pane.
-                        if (widget.hasDirectLinks && !split) _linkLegend(),
+                         // legend on-map, or pinned in the expanded side pane.
+                         if (widget.hasDirectLinks && !split) _linkLegend(),
                         Text(
                           '– –  Rosario boundary · MPDO Rosario',
                           style: InsightTheme.inter(12, c: InsightTheme.ink2),
@@ -364,7 +366,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       duration: _motion,
                       curve: Curves.easeOutCubic,
                       alignment: Alignment.bottomCenter,
-                      child: _details(showLinkLegend: split),
+                       child: _details(showLinkLegend: split),
                     ),
                   ),
                 ),
@@ -387,76 +389,19 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
   Widget _details({required bool showLinkLegend}) {
     return Container(
       key: _panelKey,
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: InsightTheme.roundedMd,
-        border: Border.all(color: InsightTheme.line),
-        boxShadow: [
-          BoxShadow(
-            color: InsightTheme.ink.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(12, 0, 12, _collapsed ? 0 : 12),
+      child: MapDetailPanel(
+        title: 'Site details',
+        embedded: true,
+        headerKey: _detailsHeaderKey,
+        initiallyCollapsed: _collapsed,
+        headerAccessory: showLinkLegend && widget.hasDirectLinks ? _linkLegend() : null,
+        collapseLabel: 'site details',
+        onCollapsedChanged: (collapsed) => setState(() => _collapsed = collapsed),
+        footer: _proceedAction(),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              key: _detailsHeaderKey,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('Site details', style: InsightTheme.urbanist(14)),
-                      if (showLinkLegend && widget.hasDirectLinks)
-                        _linkLegend(),
-                    ],
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _collapsed = !_collapsed),
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(48, 48),
-                    foregroundColor: InsightTheme.ink2,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  child: Tooltip(
-                    message: _collapsed
-                        ? 'Show site details'
-                        : 'Hide site details',
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _collapsed ? 'Show' : 'Hide',
-                          style: InsightTheme.inter(12),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          _collapsed
-                              ? Icons.keyboard_arrow_up_rounded
-                              : Icons.keyboard_arrow_down_rounded,
-                          size: 18,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (!_collapsed) ...[
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
                       if (widget.approachNotice || widget.nearSite) ...[
                         _guidanceNotice(),
                         const SizedBox(height: 8),
@@ -513,13 +458,6 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                             style: InsightTheme.inter(12, c: InsightTheme.ink3),
                           ),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              _proceedAction(),
-            ],
           ],
         ),
       ),
@@ -754,29 +692,17 @@ class _MapControl extends StatelessWidget {
       onPressed: onPressed,
       constraints: const BoxConstraints.tightFor(width: 48, height: 48),
       padding: const EdgeInsets.all(4),
-      icon: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: accented ? InsightTheme.blueTint : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: accented
-                ? InsightTheme.blue1.withValues(alpha: 0.25)
-                : InsightTheme.line,
+      icon: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: InsightTheme.glassIconButtonDecoration(),
+            child: Icon(icon, size: 18,
+              color: accented ? InsightTheme.blueInk : InsightTheme.ink),
           ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x140B1440),
-              blurRadius: 12,
-              offset: Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Icon(
-          icon,
-          size: 20,
-          color: accented ? InsightTheme.blueInk : InsightTheme.ink2,
         ),
       ),
     ),

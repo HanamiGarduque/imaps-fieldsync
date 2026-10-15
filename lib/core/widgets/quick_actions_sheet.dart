@@ -42,6 +42,13 @@ class MapDetailPanel extends StatefulWidget {
     this.sidePanelWidthFactor = 0.36,
     this.minSidePanelWidth = 280,
     this.maxSidePanelWidth = 400,
+    this.embedded = false,
+    this.footer,
+    this.headerKey,
+    this.onCollapsedChanged,
+    this.collapseLabel = 'location details',
+    this.initiallyCollapsed = false,
+    this.headerAccessory,
   });
 
   final String title;
@@ -49,6 +56,14 @@ class MapDetailPanel extends StatefulWidget {
   final double sidePanelWidthFactor;
   final double minSidePanelWidth;
   final double maxSidePanelWidth;
+  /// A map host that already measures overlays owns sizing in embedded mode.
+  final bool embedded;
+  final Widget? footer;
+  final Key? headerKey;
+  final ValueChanged<bool>? onCollapsedChanged;
+  final String collapseLabel;
+  final bool initiallyCollapsed;
+  final Widget? headerAccessory;
 
   /// Widest the floating form of this panel becomes.
   static const double kCardMaxWidth = 520;
@@ -61,7 +76,52 @@ class _MapDetailPanelState extends State<MapDetailPanel> {
   bool _collapsed = false;
 
   @override
+  void initState() {
+    super.initState();
+    _collapsed = widget.initiallyCollapsed;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final panel = DecoratedBox(decoration: BoxDecoration(color: InsightTheme.surface,
+      borderRadius: InsightTheme.roundedMd, border: Border.all(color: InsightTheme.line),
+      boxShadow: InsightTheme.cardShadow),
+      child: Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, _collapsed ? 0 : 12),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(key: widget.headerKey, children: [
+            Expanded(child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Semantics(header: true,
+                  child: Text(widget.title, style: widget.embedded
+                    ? InsightTheme.urbanist(14)
+                    : InsightTheme.urbanist(14, w: FontWeight.w700))),
+                if (widget.headerAccessory != null) widget.headerAccessory!,
+              ])),
+            if (!widget.embedded) const SizedBox(width: 8),
+            TextButton(onPressed: () {
+              setState(() => _collapsed = !_collapsed);
+              widget.onCollapsedChanged?.call(_collapsed);
+            },
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48),
+                padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: InsightTheme.ink2),
+              child: Tooltip(message: '${_collapsed ? 'Show' : 'Hide'} ${widget.collapseLabel}',
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(_collapsed ? 'Show' : 'Hide', style: InsightTheme.inter(12)),
+                  const SizedBox(width: 4),
+                  Icon(_collapsed ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 18),
+                ]))),
+          ]),
+          if (!_collapsed) ...[
+            Flexible(child: SingleChildScrollView(child: widget.child)),
+            if (widget.footer != null) ...[
+              const SizedBox(height: 8),
+              widget.footer!,
+            ],
+          ],
+        ]),
+      ),
+    );
+    if (widget.embedded) return panel;
     final bp = context.responsive;
     return LayoutBuilder(builder: (context, constraints) {
       final split = bp.canSplitTwoPane || (bp.isLandscape && !bp.isCompactWidth);
@@ -72,29 +132,7 @@ class _MapDetailPanelState extends State<MapDetailPanel> {
         widthFactor: 1, heightFactor: 1, child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: math.min(width, constraints.maxWidth),
           maxHeight: split ? constraints.maxHeight : constraints.maxHeight * 0.35),
-        child: DecoratedBox(decoration: BoxDecoration(color: InsightTheme.surface,
-          borderRadius: InsightTheme.roundedMd, border: Border.all(color: InsightTheme.line),
-          boxShadow: InsightTheme.cardShadow),
-          child: Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, _collapsed ? 0 : 12),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Row(children: [
-                Expanded(child: Semantics(header: true,
-                  child: Text(widget.title, style: InsightTheme.urbanist(14, w: FontWeight.w700)))),
-                const SizedBox(width: 8),
-                TextButton(onPressed: () => setState(() => _collapsed = !_collapsed),
-                  style: TextButton.styleFrom(minimumSize: const Size(48, 48),
-                    padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: InsightTheme.ink2),
-                  child: Tooltip(message: _collapsed ? 'Show location details' : 'Hide location details',
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(_collapsed ? 'Show' : 'Hide', style: InsightTheme.inter(12)),
-                      const SizedBox(width: 4),
-                      Icon(_collapsed ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 18),
-                    ]))),
-              ]),
-              if (!_collapsed) Flexible(child: SingleChildScrollView(child: widget.child)),
-            ]),
-          ),
-        ),
+        child: panel,
       ));
     });
   }
