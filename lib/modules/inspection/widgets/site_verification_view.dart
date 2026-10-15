@@ -238,8 +238,13 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
           safe.left + 48,
           safe.top + (_fullscreen ? 48 : _headerHeight + 24),
           (split ? mapRight : safe.right) +
-              MediaQuery.textScalerOf(context).scale(12) * 6 +
-              76,
+              _textSize(
+                'Target site',
+                InsightTheme.inter(12, w: FontWeight.w600),
+              ).width +
+              // 22dp marker offset + 22dp padded label border + 64dp control
+              // lane + 8dp clearance, including nonlinear/enlarged text.
+              116,
           safe.bottom + panelSpace + _attributionHeight + 32,
         );
         WidgetsBinding.instance.addPostFrameCallback(
@@ -454,7 +459,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            'Dotted links are schematic straight lines, not verified roads or walkable access.',
+                            'Dotted links are schematic straight lines, not verified roads or walkable access. Small gaps or GPS uncertainty may hide a link; zoom in to inspect short links.',
                             style: InsightTheme.inter(12, c: InsightTheme.ink3),
                           ),
                         ),
@@ -482,6 +487,10 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
               ? 'GPS estimate ≤30 m from the mapped point · informational only. Confirm in Step 2.'
               : widget.approachNotice
               ? 'Near the mapped site (~100 m). You can open GPS Verification when safely stopped/on foot; confirm within 30 m.'
+              : widget.hasDeviceLocation && !widget.gpsReliable
+              ? 'GPS-to-road link and ~100 m notice need a fix ≤15 s old with accuracy ≤25 m. Step 2 confirms within 30 m when safely stopped/on foot.'
+              : widget.hasRoute && !widget.hasDirectLinks
+              ? 'Small gaps or GPS uncertainty hide dotted links. Step 2 gives direct compass orientation when safely stopped/on foot; a bearing does not verify access.'
               : 'Step 2 provides direct compass orientation when safely stopped and on foot. Site confirmation requires 30 m; the compass does not verify an access path.',
           style: InsightTheme.inter(
             12,
