@@ -282,7 +282,9 @@ void main() {
       // The primary action and its copy
       final view = File('lib/modules/inspection/widgets/site_verification_view.dart').readAsStringSync();
       expect(view, contains('Proceed to Location'));
-      expect(view, contains('Site distance'));
+      // The metric headings the approved composition actually ships. The
+      // direct-link metric was reworded from the former 'Site distance'.
+      expect(view, contains('Direct to mapped site'));
       expect(view, contains('Road route'));
     });
 

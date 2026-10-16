@@ -108,7 +108,10 @@ void main() {
       if (call.method == 'checkPermission') return 3;
       if (call.method == 'getCurrentPosition') {
         return {
-          'latitude': 13.8425, 'longitude': 121.1765, 'accuracy': 5.0, 'timestamp': 0,
+          // A real device always reports a live timestamp; the GPS gate now
+          // rejects stale deliveries, so the fixture must be current.
+          'latitude': 13.8425, 'longitude': 121.1765, 'accuracy': 5.0,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
           'altitude': 0.0, 'heading': 0.0, 'speed': 0.0, 'speed_accuracy': 0.0,
         };
       }

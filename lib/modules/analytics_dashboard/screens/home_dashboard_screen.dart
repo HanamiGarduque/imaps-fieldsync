@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math' show max, min, pi;
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 
 import '../../../core/models/user_profile.dart';
 import '../models/activity_event_category.dart';
@@ -16,8 +18,13 @@ import '../../../core/widgets/insight_bottom_nav.dart'; // kInsightBottomNavRese
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
+import '../../../core/widgets/motion/linked_list_motion.dart';
+import '../../../core/widgets/app_feedback.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/offline_banner.dart';
+import '../../../core/widgets/task_sync_indicator.dart';
 import '../widgets/active_assignments_folder_card.dart';
+import '../widgets/recent_activity_folder.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// Whether a task belongs in the dashboard's Active Assignments carousel.
@@ -93,16 +100,37 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   Map<String, Map<String, dynamic>> _entryJobs = {};
   bool _isLoadingTasks = true;
 
+  /// Only the newest assignments load may write to this screen's state. A
+  /// superseded request, or a late answer to one, is discarded instead of
+  /// overwriting newer state.
+  int _tasksRequestId = 0;
+
+  /// Set while saved assignments are on screen and the remote refresh did not
+  /// complete, so the carousel says what it is showing instead of claiming
+  /// there is nothing.
+  String? _savedDataNotice;
+  TaskRefreshPhase _taskRefreshPhase = TaskRefreshPhase.checking;
+  DateTime? _lastTaskRefreshAt;
+
+  /// The authenticated owner whose assignments this page is currently showing.
+  ///
+  /// A genuine account change retires them instead of repurposing this
+  /// still-mounted page for the next inspector; the previous owner's durable
+  /// local rows are never deleted by that.
+  String? _tasksOwner;
+
+  StreamSubscription<AuthState>? _authSubscription;
+
+  /// Bounded remote refresh — same 10 s service bound My Tasks uses.
+  static const Duration _refreshTimeout = Duration(seconds: 10);
+
   List<Map<String, dynamic>> _recentActivity = [];
   bool _isLoadingActivity = true;
   int _unreadCount = 0;
 
-  // Recent Activity — category filter (All / Tasks / Sync / Reports / Profile).
-  // Buckets are owned by ActivityEventCategory so the mapping is testable
-  // without a widget tree; filtering happens client-side over the already-fetched
-  // batch (see _kRecentActivityLimit below) rather than re-querying per tap.
-  String _activityFilter = 'all';
-  final ScrollController _activityFilterController = ScrollController();
+  // Home selects one latest event per category from the already-fetched batch.
+  // Tapping that preview opens the category's full history in the modal.
+  String _activityPreviewCategory = 'tasks';
 
    // The calendar selection is independent of the live Today/Note card.
    final DateTime _now = DateTime.now();
@@ -165,8 +193,37 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       }
     });
 
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange
+        .listen((_) => _retireIfOwnerChanged(),
+            onError: (Object _) => _retireIfOwnerChanged());
     _loadUpcomingTasks();
     _loadRecentActivity();
+  }
+
+  /// A real account change invalidates what this mounted page is showing: the
+  /// previous inspector's assignments are retired from the display (their
+  /// durable local rows are left exactly as they are) and any navigation bound
+  /// before the change is refused instead of opening another inspector's task.
+  void _retireIfOwnerChanged() {
+    if (!mounted) return;
+    final current = DBHelper.currentInspectorId;
+    if (current != null && current == _tasksOwner) return;
+    if (_tasksOwner == null && _allTasks.isEmpty && _savedDataNotice == null) {
+      return;
+    }
+    setState(() {
+      _tasksRequestId++; // Retire every pending UI result with its owner.
+      _tasksOwner = null;
+      _allTasks = [];
+      _upcomingTasks = [];
+      _entryJobs = {};
+      _isLoadingTasks = false;
+      _savedDataNotice = SavedDataNotice.ownerChanged;
+      _taskRefreshPhase = TaskRefreshPhase.ownerChanged;
+      _lastTaskRefreshAt = null;
+    });
+    ScaffoldMessenger.maybeOf(context)?.removeCurrentSnackBar();
+    AppFeedback.dismiss();
   }
 
   // TextPainter-based layout must be measured again when runtime fonts load.
@@ -193,56 +250,219 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     _pageController.dispose();
     PaintingBinding.instance.systemFonts.removeListener(_onFontsChanged);
-    _activityFilterController.dispose();
     _connectivitySubscription.cancel();
     disposeSpringEntrance();
     super.dispose();
   }
 
-  Future<void> _loadUpcomingTasks() async {
-    setState(() => _isLoadingTasks = true);
-    List<TaskItem> tasks = [];
-    try {
-      final dynamic connectivityResult = await Connectivity().checkConnectivity();
-      final bool hasConnection;
-      if (connectivityResult is ConnectivityResult) {
-        hasConnection = connectivityResult != ConnectivityResult.none;
-      } else if (connectivityResult is List) {
-        hasConnection = connectivityResult
-            .cast<ConnectivityResult>()
-            .any((status) => status != ConnectivityResult.none);
-      } else {
-        hasConnection = false;
-      }
-
-      if (hasConnection) {
-        final jobs = await SupabaseService.fetchMyJobs();
-        _entryJobs = {for (final job in jobs) job['id'] as String: job};
-        tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
-      } else {
-        _entryJobs = {};
-        final localJobs = await DBHelper.getCachedJobs();
-        tasks = localJobs.map(TaskItem.fromCachedJob).toList();
-      }
-    } catch (e) {
-      debugPrint('Error loading tasks: $e');
-    }
-
+  /// The carousel population: exactly the filter and order the dashboard has
+  /// always used.
+  List<TaskItem> _upcomingFrom(List<TaskItem> tasks) {
     final upcoming = tasks.where(isHomeDashboardActiveAssignment).toList()
       ..sort((a, b) {
         final aDate = _calendarDateForTask(a) ?? '9999-12-31';
         final bDate = _calendarDateForTask(b) ?? '9999-12-31';
         return aDate.compareTo(bDate);
       });
+    return upcoming.take(6).toList();
+  }
 
-    if (mounted) {
+  /// Cache first, refresh second — the same contract My Tasks uses.
+  ///
+  /// 1. The owner-scoped cache renders immediately and is never gated on a
+  ///    connectivity indication, so a weak, captive or dead network cannot turn
+  ///    into an indefinite spinner while saved assignments sit unread. The
+  ///    moment saved rows are shown they are identified as saved data.
+  /// 2. The refresh is bounded, its commit is ordered per owner across every
+  ///    screen, and no failed, timed-out or superseded answer can erase what is
+  ///    on screen or leave the carousel claiming there is nothing.
+  /// 3. Reading the local store is as fallible as any other platform call: a
+  ///    damaged or unavailable store reaches a recoverable state instead of an
+  ///    unhandled future or a stuck spinner, and never deletes the row.
+  Future<void> _loadUpcomingTasks() async {
+    final requestId = ++_tasksRequestId;
+    final owner = DBHelper.currentInspectorId;
+    setState(() => _taskRefreshPhase = TaskRefreshPhase.checking);
+
+    List<Map<String, dynamic>> cached = const [];
+    var cacheFailed = false;
+    if (owner != null && owner.isNotEmpty) {
+      try {
+        cached = await DBHelper.getCachedJobs();
+      } catch (e) {
+        debugPrint('[HOME] saved task read failed: $e');
+        cacheFailed = true;
+      }
+    }
+    List<TaskItem>? parsed;
+    if (cached.isNotEmpty) {
+      try {
+        parsed = cached.map(TaskItem.fromCachedJob).toList();
+      } catch (e) {
+        debugPrint('[HOME] saved task rows unreadable: $e');
+        cacheFailed = true;
+      }
+    }
+    if (!mounted || requestId != _tasksRequestId) return;
+
+    setState(() {
+      if (parsed != null) {
+        _allTasks = parsed;
+        _upcomingTasks = _upcomingFrom(parsed);
+        _isLoadingTasks = false;
+        // Identified as saved from the first frame it is shown, not only once
+        // the refresh has finished or failed.
+        _savedDataNotice = SavedDataNotice.refreshing;
+      } else if (cacheFailed) {
+        _isLoadingTasks = false;
+        _upcomingTasks = [];
+        _savedDataNotice = SavedDataNotice.cacheReadFailed;
+        _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+      } else if (_allTasks.isEmpty) {
+        // Nothing is known yet, so "loading" is the only honest state.
+        _isLoadingTasks = true;
+      }
+    });
+
+    // The owner is recorded before any read: rows rendered from the cache
+    // while offline still belong to this inspector and stay openable.
+    if (owner != null && owner.isNotEmpty) {
+      _tasksOwner = owner;
+    }
+
+    if (!await _hasConnectivity()) {
+      if (!mounted || requestId != _tasksRequestId) return;
+      setState(() {
+        // Unchanged from the original offline path: entry detail is refetched
+        // by the detail screen rather than served from a remembered online row.
+        _entryJobs = {};
+        _isLoadingTasks = false;
+        _taskRefreshPhase = cacheFailed && parsed == null
+            ? TaskRefreshPhase.cacheUnavailable : TaskRefreshPhase.offline;
+        if (parsed != null || _upcomingTasks.isNotEmpty) {
+          _savedDataNotice = SavedDataNotice.offline;
+        } else if (cacheFailed) {
+          _savedDataNotice = SavedDataNotice.cacheReadFailed;
+        } else {
+          // An empty device is not proof that there is no work.
+          _savedDataNotice = SavedDataNotice.noCacheOffline;
+        }
+      });
+      return;
+    }
+
+    if (owner == null || owner.isEmpty) {
+      // No authenticated owner: nothing may be fetched, written, or shown.
+      if (!mounted || requestId != _tasksRequestId) return;
+      setState(() {
+        _allTasks = [];
+        _upcomingTasks = [];
+        _entryJobs = {};
+        _isLoadingTasks = false;
+        _savedDataNotice = SavedDataNotice.ownerChanged;
+        _taskRefreshPhase = TaskRefreshPhase.ownerChanged;
+        _lastTaskRefreshAt = null;
+      });
+      return;
+    }
+    // Captured before the remote read, so the shared commit boundary can reject
+    // a snapshot that another screen or a later load has already superseded.
+    final refresh = DBHelper.beginJobsRefresh();
+    try {
+      final jobs = await SupabaseService.fetchMyJobs().timeout(_refreshTimeout);
+      if (!mounted || requestId != _tasksRequestId) return;
+      // An answer that arrives after the device changed accounts belongs to
+      // the previous account: it is never rendered and never cached.
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      final applied = await DBHelper.cacheJobs(jobs, refresh: refresh);
+      if (!mounted || requestId != _tasksRequestId) return;
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      if (!applied) {
+        // A newer snapshot already reached this device, so this answer is
+        // never presented as the current picture.
+        setState(() {
+          _savedDataNotice = SavedDataNotice.saved;
+          _taskRefreshPhase = TaskRefreshPhase.saved;
+          _isLoadingTasks = false;
+        });
+        return;
+      }
+      _entryJobs = {for (final job in jobs) job['id'] as String: job};
+      final tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
       setState(() {
         _allTasks = tasks;
-        _upcomingTasks = upcoming.take(6).toList(); 
+        _upcomingTasks = _upcomingFrom(tasks);
         _isLoadingTasks = false;
+        _savedDataNotice = null;
+        _taskRefreshPhase = TaskRefreshPhase.fresh;
+        _lastTaskRefreshAt = DateTime.now();
       });
+    } catch (e) {
+      debugPrint('Assignment refresh failed (saved data kept): $e');
+      if (!mounted || requestId != _tasksRequestId) return;
+      setState(() {
+        _isLoadingTasks = false;
+        _taskRefreshPhase = cacheFailed && parsed == null
+            ? TaskRefreshPhase.cacheUnavailable : TaskRefreshPhase.failed;
+        if (parsed != null || _upcomingTasks.isNotEmpty) {
+          _savedDataNotice = SavedDataNotice.refreshFailed;
+        } else {
+          _savedDataNotice = cacheFailed
+              ? SavedDataNotice.cacheReadFailed
+              : SavedDataNotice.noCacheFailure;
+        }
+      });
+    }
+  }
+
+  void _retryTaskRefresh() {
+    if (!mounted) return;
+    if (_tasksOwner == null || _tasksOwner != DBHelper.currentInspectorId) {
+      _retireIfOwnerChanged();
+      return;
+    }
+    _loadUpcomingTasks();
+  }
+
+  /// Retry is offered only where it can change the outcome: a terminal state
+  /// with nothing usable on screen. While a refresh is outstanding, or while
+  /// saved rows are being shown, there is nothing to retry yet.
+  VoidCallback? get _noticeRetry {
+    final notice = _savedDataNotice;
+    if (notice == SavedDataNotice.cacheReadFailed ||
+        notice == SavedDataNotice.noCacheFailure ||
+        notice == SavedDataNotice.noCacheOffline) {
+      return _retryTaskRefresh;
+    }
+    return null;
+  }
+
+  /// Connectivity is advisory only: it chooses the wording of the notice and
+  /// never decides what is rendered. The read is bounded, so a hanging
+  /// platform call cannot hold the screen.
+  Future<bool> _hasConnectivity() async {
+    try {
+      final dynamic result = await Connectivity()
+          .checkConnectivity()
+          .timeout(const Duration(milliseconds: 500));
+      if (result is ConnectivityResult) {
+        return result != ConnectivityResult.none;
+      }
+      if (result is List) {
+        return result.any((status) => status != ConnectivityResult.none);
+      }
+      return false;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -339,28 +559,30 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   String _eventCategoryLabel(String eventType) =>
       ActivityEventCategory.labelFor(_eventCategory(eventType));
 
-  List<Map<String, dynamic>> get _filteredActivity {
-    if (_activityFilter == 'all') return _recentActivity;
+  /// "All" is available only inside the history sheet.
+  String _activityLabel(String key) =>
+      key == 'all' ? 'All' : ActivityEventCategory.labelFor(key);
+
+  /// Home's category shortcuts, in sheet order. 'all' intentionally excluded.
+  static const List<String> _activityShortcuts = [
+    'tasks',
+    'sync',
+    ActivityEventCategory.reports,
+    'profile',
+  ];
+
+  List<Map<String, dynamic>> _activityMatching(String filter) {
+    if (filter == 'all') return _recentActivity;
     return _recentActivity
-        .where((a) => _eventCategory(a['event_type'] as String? ?? '') == _activityFilter)
+        .where((a) => _eventCategory(a['event_type'] as String? ?? '') == filter)
         .toList();
   }
 
-  void _selectActivityFilter(String filter) {
-    if (_activityFilter == filter) return;
-    setState(() {
-      _activityFilter = filter;
-    });
-  }
-
-  /// One dashboard preview per filter. The modal carries the remaining
-  /// recent events, so the Home page doesn't grow with a long timeline.
-  void _showActivityHistory() {
-    final events = List<Map<String, dynamic>>.from(_filteredActivity);
-    if (events.isEmpty || _isLoadingActivity) return;
-    final category = _activityFilter == 'all'
-        ? 'All'
-        : ActivityEventCategory.labelFor(_activityFilter);
+  /// The sheet starts on the preview's category and can switch independently.
+  void _showActivityHistory({String initialFilter = 'all'}) {
+    if (_isLoadingActivity) return;
+    var filter = initialFilter;
+    String labelOf(String key) => _activityLabel(key);
 
     showModalBottomSheet<void>(
       context: context,
@@ -371,80 +593,142 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (sheetContext) => SizedBox(
-        height: MediaQuery.sizeOf(sheetContext).height * 0.82,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 2, 12, 10),
-                  child: Row(
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final shown = _activityMatching(filter);
+            return SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.82,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 2, 12, 10),
+                        child: Row(
                           children: [
-                            Text('Recent activity',
-                                style: InsightTheme.urbanist(20,
-                                    w: FontWeight.w700, c: InsightTheme.ink)),
-                            const SizedBox(height: 3),
-                            Text('$category · Latest ${events.length} ${events.length == 1 ? 'event' : 'events'}',
-                                style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Recent activity',
+                                      style: InsightTheme.urbanist(20,
+                                          w: FontWeight.w700,
+                                          c: InsightTheme.ink)),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                      '${labelOf(filter)} · ${shown.length} ${shown.length == 1 ? 'event' : 'events'}',
+                                      style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Close recent activity',
+                              onPressed: () => Navigator.of(sheetContext).pop(),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
                           ],
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Close recent activity',
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        icon: const Icon(Icons.close_rounded),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 20, top: 14),
+                        child: ScrollConfiguration(
+                          behavior: ScrollConfiguration.of(context)
+                              .copyWith(scrollbars: false),
+                          child: SingleChildScrollView(
+                            key: const ValueKey('modal_activity_filters'),
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                for (final key in ActivityEventCategory.filters)
+                                  Padding(
+                                    padding: EdgeInsets.only(
+                                        right: key == 'profile' ? 0 : 4),
+                                    child: _ActivityFilterChip(
+                                      label: labelOf(key),
+                                      selected: filter == key,
+                                      onTap: () =>
+                                          setSheetState(() => filter = key),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: shown.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'No ${labelOf(filter).toLowerCase()} activity yet.',
+                                  style: InsightTheme.inter(
+                                      13, c: InsightTheme.ink2),
+                                ),
+                              )
+                            : ListView.builder(
+                                key: const ValueKey('recent_activity_modal_list'),
+                                padding:
+                                    const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                                itemCount: shown.length,
+                                itemBuilder: (context, index) {
+                                  final event = shown[index];
+                                  final themeInfo = _eventTheme(
+                                      event['event_type'] as String? ?? '');
+                                  final tile = Stack(
+                                    children: [
+                                      if (index < shown.length - 1)
+                                        Positioned(
+                                          left: 16,
+                                          top: 16,
+                                          bottom: 0,
+                                          child: Container(
+                                            width: 2,
+                                            color: InsightTheme.ink3
+                                                .withValues(alpha: 0.15),
+                                          ),
+                                        ),
+                                      _TimelineActivityTile(
+                                        key: ValueKey(
+                                            'modal_${event['id'] ?? index}'),
+                                        icon: themeInfo['icon'],
+                                        color: themeInfo['color'],
+                                        categoryLabel: _eventCategoryLabel(event[
+                                                'event_type'] as String? ??
+                                            ''),
+                                        title: event['title'] as String? ??
+                                            'Update',
+                                        subtitle: event['subtitle'] as String? ??
+                                            '',
+                                        time: _timeAgo(
+                                            event['occurred_at'] as String?),
+                                        occurredAtIso:
+                                            event['occurred_at'] as String?,
+                                      ),
+                                    ],
+                                  );
+                                  return MediaQuery.disableAnimationsOf(context)
+                                      ? tile
+                                      : LinkedListSlide(
+                                          key: ValueKey('activity-rise-$filter-${event['id'] ?? index}'),
+                                          index: index,
+                                          itemDelay: Spring.step,
+                                          beginOffset: const Offset(0, 0.18),
+                                          child: tile,
+                                        );
+                                },
+                              ),
                       ),
                     ],
                   ),
                 ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView.builder(
-                    key: const ValueKey('recent_activity_modal_list'),
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-                    itemCount: events.length,
-                    itemBuilder: (context, index) {
-                      final event = events[index];
-                      final themeInfo = _eventTheme(event['event_type'] as String? ?? '');
-                      return Stack(
-                        children: [
-                          if (index < events.length - 1)
-                            Positioned(
-                              left: 16,
-                              top: 16,
-                              bottom: 0,
-                              child: Container(
-                                width: 2,
-                                color: InsightTheme.ink3.withValues(alpha: 0.15),
-                              ),
-                            ),
-                          _TimelineActivityTile(
-                            key: ValueKey('modal_${event['id'] ?? index}'),
-                            icon: themeInfo['icon'],
-                            color: themeInfo['color'],
-                            categoryLabel: _eventCategoryLabel(event['event_type'] as String? ?? ''),
-                            title: event['title'] as String? ?? 'Update',
-                            subtitle: event['subtitle'] as String? ?? '',
-                            time: _timeAgo(event['occurred_at'] as String?),
-                            occurredAtIso: event['occurred_at'] as String?,
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -612,7 +896,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final firstName = UserProfile.displayFullName(widget.profile.fullName);
     final greeting = _greeting(_now);
      final tasksByDay = _tasksByDayInMonth(_calendarMonth);
-    final filteredActivity = _filteredActivity;
+    final previewCategory = _activityPreviewCategory;
+    final previewList = _activityMatching(previewCategory);
+    final latestActivity = previewList.isEmpty ? null : previewList.first;
     final calendarMotion = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero : const Duration(milliseconds: 320);
 
@@ -836,36 +1122,17 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                  ),
                ),
                ),
-                       AnimatedSwitcher(
-                         duration: calendarMotion,
-                        switchInCurve: Curves.easeOutCubic,
-                        switchOutCurve: Curves.easeInCubic,
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: SizeTransition(
-                            sizeFactor: animation,
-                            alignment: Alignment(-1, -1),
-                            child: SlideTransition(
-                              position: Tween<Offset>(begin: const Offset(0, -0.06), end: Offset.zero).animate(animation),
-                              child: child,
-                            ),
-                          ),
-                        ),
-                        child: _showFullCalendar
-                            ? Padding(
+                       _SuspendedMonthCalendar(
+                         visible: _showFullCalendar,
+                         child: Padding(
                                 key: const ValueKey('full_calendar'),
-                                 // Gutter follows the content: seven 48px day targets
-                                 // need 336px, so this keeps the standard 20px
-                                 // margin where it fits and only tightens on
-                                 // narrower phones, never to zero.
-                                 padding: _kFullCalendarGutter(context),
+                                  // The monthly grid fits the card's available
+                                  // width, keeping the surrounding Home gutter.
+                                 padding: const EdgeInsets.symmetric(horizontal: 20),
                                  child: ConstrainedContent(
                                    maxWidth: 560,
-                                   child: Column(children: [
-                                     const ExcludeSemantics(child: CustomPaint(
-                                       size: Size(160, 24), painter: _CalendarTetherPainter(),
-                                     )),
-                                     _InlineFullCalendarCard(
+                                    child: _CalendarLanyard(
+                                      child: _InlineFullCalendarCard(
                                   month: _calendarMonth,
                                   selectedDay: _selectedDay,
                                   taskDaysForMonth: _taskDaysInMonth,
@@ -874,11 +1141,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   onPrevMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
                                   onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
                                   onPick: _onFullCalendarPick,
+                                      ),
                                      ),
-                                   ]),
-                                 ),
-                              )
-                             : const SizedBox.shrink(),
+                                  ),
+                               ),
                       ),
                const SizedBox(height: 8),
 
@@ -911,6 +1177,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   beginOffset: const Offset(0, 20),
                   child: _SectionLabel(
                     title: "Active Assignments",
+                    titleAction: TaskSyncIndicator(
+                      key: const ValueKey('task-sync-indicator'),
+                      phase: _taskRefreshPhase,
+                      hasSavedTasks: _allTasks.isNotEmpty,
+                      lastChecked: _lastTaskRefreshAt,
+                      onRetry: _retryTaskRefresh,
+                    ),
                     trailing: _SectionActionButton(label: 'See All', onTap: _goToTasksTab),
                   ),
                 ),
@@ -924,19 +1197,31 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 child: _isLoadingTasks
                     ? const Center(child: ImapsLoadingIndicator(size: 50))
                     : _upcomingTasks.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.assignment_outlined, size: 36, color: InsightTheme.ink3),
-                                const SizedBox(height: 10),
-                                Text(
-                                  'No active assignments.',
-                                  style: InsightTheme.openSans(13, c: InsightTheme.ink2),
+                        ? (_savedDataNotice != null
+                            // Never claim emptiness when the refresh failed:
+                            // "nothing" is only ever stated once it is known.
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 36),
+                                  child: SavedDataNotice(
+                                    message: _savedDataNotice!,
+                                    onRetry: _noticeRetry,
+                                  ),
                                 ),
-                              ],
-                            ),
-                          )
+                              )
+                            : Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.assignment_outlined, size: 36, color: InsightTheme.ink3),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'No active assignments.',
+                                      style: InsightTheme.openSans(13, c: InsightTheme.ink2),
+                                    ),
+                                  ],
+                                ),
+                              ))
                         : PageView.builder(
                             controller: _pageController,
                             // Reuses the same controller; only the visible
@@ -1001,12 +1286,22 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                           _upcomingTasks[index].lifecycleCategory,
                                       pendingSection:
                                           _upcomingTasks[index].pendingSection,
-                                      onTap: () => Navigator.of(context).push(
-                                          MaterialPageRoute(builder: (_) => ParcelDetailScreen(
-                                            task: _upcomingTasks[index],
-                                            fetchedJob: _entryJobs[_upcomingTasks[index].id],
-                                            relatedRounds: _allTasks.where(_upcomingTasks[index].sameApplicationAs).toList(),
-                                          ))),
+                                      onTap: () {
+                                        // A callback bound before an account
+                                        // change must not open another
+                                        // inspector's task from this page.
+                                        final current = DBHelper.currentInspectorId;
+                                        if (!mounted || current == null || current != _tasksOwner) {
+                                          _retireIfOwnerChanged();
+                                          return;
+                                        }
+                                        Navigator.of(context).push(
+                                            MaterialPageRoute(builder: (_) => ParcelDetailScreen(
+                                              task: _upcomingTasks[index],
+                                              fetchedJob: _entryJobs[_upcomingTasks[index].id],
+                                              relatedRounds: _allTasks.where(_upcomingTasks[index].sameApplicationAs).toList(),
+                                            )));
+                                      },
                                     ),
                                   ),
                                 ),
@@ -1060,17 +1355,18 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 child: SpringSlide(
                   animation: springFor(4),
                   beginOffset: const Offset(0, 24),
-                  // Group container (Pattern A) — the ring chart previously
-                  // sat directly on the page background; giving it its own
-                  // card lets the shape actually register as a unit.
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: InsightTheme.surface,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: _isLoadingTasks
+                    // 8px inset keeps the white card reading as a card around
+                    // the tiles. With zero padding the four tiles ran edge to
+                    // edge and buried the container they sit in.
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: _isLoadingTasks
                         ? const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: ImapsLoadingIndicator(size: 40)))
                         : _allTasks.isEmpty
                             ? Text('No tasks yet.', style: InsightTheme.inter(12, c: InsightTheme.ink2))
@@ -1096,6 +1392,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       overdueCount: overdueCount,
                                 );
                               }),
+                    ),
                   ),
               ),
               ),
@@ -1113,98 +1410,55 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 ),
               ),
               const SizedBox(height: 10),
-              // Intentionally no parent card or visible scrollbar. The tabs
-              // may extend beyond the right page gutter and swipe horizontally.
-              Padding(
-                padding: const EdgeInsets.only(left: 20),
-                child: ScrollConfiguration(
-                  behavior: ScrollConfiguration.of(context).copyWith(
-                    scrollbars: false,
-                  ),
-                  child: SingleChildScrollView(
-                    key: const ValueKey('activity_filters'),
-                    controller: _activityFilterController,
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(right: 20),
-                    child: Row(
-                      children: [
-                        _ActivityFilterChip(
-                          label: 'All',
-                          selected: _activityFilter == 'all',
-                          onTap: () => _selectActivityFilter('all'),
-                        ),
-                        const SizedBox(width: 8),
-                        _ActivityFilterChip(
-                          label: 'Tasks',
-                          selected: _activityFilter == 'tasks',
-                          onTap: () => _selectActivityFilter('tasks'),
-                        ),
-                        const SizedBox(width: 8),
-                        _ActivityFilterChip(
-                          label: 'Sync',
-                          selected: _activityFilter == 'sync',
-                          onTap: () => _selectActivityFilter('sync'),
-                        ),
-                        const SizedBox(width: 8),
-                        _ActivityFilterChip(
-                          label: ActivityEventCategory.labelFor(
-                              ActivityEventCategory.reports),
-                          selected: _activityFilter == ActivityEventCategory.reports,
-                          onTap: () => _selectActivityFilter(ActivityEventCategory.reports),
-                        ),
-                        const SizedBox(width: 8),
-                        _ActivityFilterChip(
-                          label: 'Profile',
-                          selected: _activityFilter == 'profile',
-                          onTap: () => _selectActivityFilter('profile'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _isLoadingActivity
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 18),
-                        child: Center(child: ImapsLoadingIndicator(size: 40)),
+                child: RecentActivityFolder(
+                  key: const ValueKey('recent_activity_folder'),
+                  categories: [for (final key in _activityShortcuts) (key: key, label: _activityLabel(key))],
+                  selectedCategory: previewCategory,
+                  onCategorySelected: (category) => setState(() => _activityPreviewCategory = category),
+                  child: _isLoadingActivity
+                    ? Semantics(
+                        key: const ValueKey('activity_folder_loading'),
+                        label: 'Loading recent activity',
+                        liveRegion: true,
+                        child: const SizedBox(
+                          height: 112,
+                          child: Center(child: ImapsLoadingIndicator(size: 32)),
+                        ),
                       )
                     : AnimatedSwitcher(
                         duration: MediaQuery.disableAnimationsOf(context)
                             ? Duration.zero
                             : const Duration(milliseconds: 220),
-                        child: filteredActivity.isEmpty
-                            ? Padding(
-                                key: ValueKey('empty_$_activityFilter'),
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                child: Text(
-                                  _activityFilter == 'all'
-                                      ? 'No recent activity yet.'
-                                      : 'No ${ActivityEventCategory.labelFor(_activityFilter).toLowerCase()} activity yet.',
-                                  style: InsightTheme.inter(12, c: InsightTheme.ink2),
-                                ),
+                        child: latestActivity == null
+                            ? ActivityFolderPreview(
+                                key: ValueKey('empty_recent_$previewCategory'),
+                                icon: Icons.inbox_outlined,
+                                color: InsightTheme.inkMuted,
+                                title: 'No ${_activityLabel(previewCategory).toLowerCase()} activity yet.',
+                                subtitle: '', time: '', historyCount: 0,
+                                onOpenHistory: () => _showActivityHistory(initialFilter: previewCategory),
                               )
                             : Builder(builder: (context) {
-                                final activity = filteredActivity.first;
+                                final activity = latestActivity;
                                 final themeInfo = _eventTheme(
                                     activity['event_type'] as String? ?? '');
-                                return _TimelineActivityTile(
-                                  key: ValueKey('preview_${_activityFilter}_${activity['id'] ?? ''}'),
+                                return ActivityFolderPreview(
+                                  key: ValueKey(
+                                      'preview_${previewCategory}_${activity['id'] ?? ''}'),
                                   icon: themeInfo['icon'],
                                   color: themeInfo['color'],
-                                  categoryLabel: _eventCategoryLabel(
-                                      activity['event_type'] as String? ?? ''),
                                   title: activity['title'] as String? ?? 'Update',
                                   subtitle: activity['subtitle'] as String? ?? '',
                                   time: _timeAgo(activity['occurred_at'] as String?),
-                                  occurredAtIso: activity['occurred_at'] as String?,
-                                  onOpenHistory: _showActivityHistory,
-                                  historyCount: filteredActivity.length,
+                                  onOpenHistory: () => _showActivityHistory(
+                                      initialFilter: previewCategory),
+                                  historyCount: previewList.length,
                                 );
                               }),
-                      ),
+                       ),
+                ),
               ),
               const SizedBox(height: 12),
             ],
@@ -1723,10 +1977,30 @@ class _NotificationBtn extends StatelessWidget {
 class _SectionLabel extends StatelessWidget {
   final String title;
   final Widget? trailing;
-  const _SectionLabel({required this.title, this.trailing});
+  final Widget? titleAction;
+  const _SectionLabel({required this.title, this.trailing, this.titleAction});
 
   @override
   Widget build(BuildContext context) {
+    if (titleAction != null) {
+      return LayoutBuilder(builder: (context, constraints) => OverflowBar(
+        alignment: MainAxisAlignment.spaceBetween,
+        overflowAlignment: OverflowBarAlignment.end,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: Semantics(header: true, child: Text(title,
+                  style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink)))),
+              const SizedBox(width: 8),
+              titleAction!,
+            ]),
+          ),
+          ?trailing,
+        ],
+      ));
+    }
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1797,19 +2071,27 @@ class _ActivityFilterChip extends StatelessWidget {
       button: true,
       selected: selected,
       child: Material(
-        color: selected ? InsightTheme.blue1 : InsightTheme.surface2,
+        color: selected ? InsightTheme.blue1 : InsightTheme.surface,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(12),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero : const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             alignment: Alignment.center,
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected ? InsightTheme.blue1 : InsightTheme.line,
+              ),
+            ),
             child: Text(
               label,
+              softWrap: false,
               textAlign: TextAlign.center,
               style: InsightTheme.inter(12, w: FontWeight.w600,
                 c: selected ? Colors.white : InsightTheme.ink2),
@@ -1821,11 +2103,7 @@ class _ActivityFilterChip extends StatelessWidget {
   }
 }
 
-/// Concentric ring chart for Task Completion Flow (replaces the old
-/// stacked progress-bar rows). One ring per category — Scheduled (outer)
-/// through Completed (inner) — each ring's filled arc is that category's
-/// share of the total task count. Categories stay in a compact two-by-two
-/// layout, beside the rings when they fit and below on narrow layouts.
+/// One flip surface: a concentric chart first, four status tiles on the back.
 class _CompletionRingChart extends StatefulWidget {
   final int total;
   final List<String> labels;
@@ -1848,182 +2126,596 @@ class _CompletionRingChart extends StatefulWidget {
 }
 
 class _CompletionRingChartState extends State<_CompletionRingChart> {
-  bool _filled = false;
+  bool _flipped = false;
+  bool _autoFlipEnabled = false;
+  Timer? _autoFlip;
 
   @override
-  void initState() {
-    super.initState();
-    Future.delayed(const Duration(milliseconds: 80), () {
-      if (mounted) setState(() => _filled = true);
-    });
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _autoFlipEnabled = !MediaQuery.disableAnimationsOf(context) &&
+        !MediaQuery.accessibleNavigationOf(context) &&
+        TickerMode.valuesOf(context).enabled && (ModalRoute.isCurrentOf(context) ?? true);
+    _restartAutoFlip();
   }
 
-  static const double _outerSize = 100;
-  static const double _ringStep = 16;
-  static const double _strokeWidth = 8;
+  void _restartAutoFlip() {
+    _autoFlip?.cancel();
+    if (_autoFlipEnabled) {
+      _autoFlip = Timer.periodic(const Duration(seconds: 18), (_) {
+        if (mounted) setState(() => _flipped = !_flipped);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoFlip?.cancel();
+    super.dispose();
+  }
+
+  void _toggleFlip() {
+    setState(() => _flipped = !_flipped);
+    _restartAutoFlip();
+  }
 
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
-    final ringSize = scaler.scale(_outerSize);
-    final rings = SizedBox(
-      width: ringSize,
-      height: ringSize,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          for (int i = 0; i < widget.labels.length; i++)
-            SizedBox(
-              width: ringSize - (scaler.scale(_ringStep) * i),
-              height: ringSize - (scaler.scale(_ringStep) * i),
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0.0, end: _filled ? widget.fractions[i].clamp(0.0, 1.0) : 0.0),
-                duration: const Duration(milliseconds: 750),
-                curve: Curves.easeOutCubic,
-                builder: (context, value, _) => CircularProgressIndicator(
-                  value: value <= 0 ? 0.001 : value,
-                  strokeWidth: scaler.scale(_strokeWidth),
-                  strokeCap: StrokeCap.round,
-                  backgroundColor: widget.colors[i].withValues(alpha: 0.12),
-                  valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
+    final reducedMotion = MediaQuery.disableAnimationsOf(context);
+    Size measure(String text, TextStyle style, {double maxWidth = double.infinity}) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: Directionality.of(context),
+        textScaler: scaler,
+      )..layout(maxWidth: maxWidth);
+      final size = painter.size;
+      painter.dispose();
+      return size;
+    }
+    final labelMeasureStyle = DefaultTextStyle.of(context).style.merge(
+      InsightTheme.inter(14, w: FontWeight.w600, h: 1.2),
+    );
+    final labelWidth = widget.labels.fold<double>(0,
+        (width, label) => max(width, measure(label, labelMeasureStyle).width));
+    final overdueLabel = '${widget.overdueCount} Overdue';
+    final overdueStyle = InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.redInk);
+    final overdueSize = measure(overdueLabel, overdueStyle);
+    // The centre gap is carved out whether or not a task is overdue: the
+    // framework is what carries the shape, and the badge is only a guest in
+    // it. With no badge the reserved slot stays empty instead of the block
+    // silently closing back into a plain 2x2 grid.
+    // Badge plus a small breathing margin; the gap between rows only has to
+    // clear this much, so a shorter badge keeps the tiles full-size.
+    // With no badge the reserved cross is only as wide as the tile gutter
+    // (36 x 10 carves an 18 x 18 cross): wide enough to still read as four
+    // tiles joined by a cross, narrow enough that the block stops looking
+    // like it has a hole punched in it.
+    var notchSize = widget.overdueCount > 0
+        ? Size(overdueSize.width + 20, overdueSize.height + 12)
+        : const Size(36, 10);
+
+    return LayoutBuilder(
+      key: const ValueKey('completion_chart'),
+      builder: (context, constraints) {
+        // The centre gap carries the badge, so it is wider than the tile gutter.
+        // The right-column numbers need room to clear the badge without being
+        // pushed off their own tile's left edge.
+        const gutter = 8.0;
+        final gap = max(gutter, notchSize.width / 2);
+        // The badge lives in the centre gap, so the gap between rows must be
+        // taller than the badge itself — otherwise the top-row number (bottom
+        // of its tile) and the badge share the same pixels. 8 is the floor.
+        final rowGap = max(gutter, notchSize.height + 8);
+        // One scale with the assignment cards: that row is the Home's normal
+        // section height, and a 2x2 block taller than it turns into a hero
+        // card that overpowers everything around it. Fixed (not derived from
+        // width) because height here is a rhythm decision, not a fit one; text
+        // scales with the scaler and the ring takes whatever square it can.
+        const height = 220.0;
+        // The notch is clamped so the badge never eats more than a third of the
+        // block it sits in — at 2x text an unbounded badge swallowed the tiles.
+        if (notchSize.height > height / 3) {
+          notchSize = Size(min(notchSize.width, constraints.maxWidth / 2),
+              height / 3);
+        }
+        final ringSize = min(constraints.maxWidth, height) - 32;
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: height,
+          child: _FlipCard(
+            key: const ValueKey('completion_flip'),
+            flipped: _flipped,
+            onTap: _toggleFlip,
+            back: Stack(
+              alignment: Alignment.center,
+              children: [
+                ClipPath(
+                  clipper: _CompletionNotchClipper(notchSize),
+                  child: Column(
+                    children: [
+                      for (var row = 0; row < 2; row++) ...[
+                        if (row > 0) SizedBox(height: rowGap),
+                        Expanded(child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (var i = row * 2; i < row * 2 + 2; i++) ...[
+                              if (i.isOdd) SizedBox(width: gap),
+                              Expanded(child: _CompletionStatusTile(
+                                index: i,
+                                label: widget.labels[i],
+                                labelWidth: labelWidth,
+                                count: widget.counts[i],
+                                color: widget.colors[i],
+                              )),
+                            ],
+                          ],
+                        )),
+                      ],
+                    ],
+                  ),
+                ),
+                if (widget.overdueCount > 0)
+                  Container(
+                    key: const ValueKey('completion_overdue'),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: InsightTheme.redTint,
+                        borderRadius: BorderRadius.circular(999)),
+                    child: FittedBox(fit: BoxFit.scaleDown, child: Text(overdueLabel, style: overdueStyle)),
+                  ),
+              ],
+            ),
+            front: Center(
+              key: const ValueKey('completion_ring_chart'),
+              child: SizedBox(
+                key: const ValueKey('completion_rings'),
+                width: ringSize,
+                height: ringSize,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    for (var i = 0; i < widget.labels.length; i++)
+                      SizedBox.square(
+                        dimension: ringSize * (1 - 0.14 * i),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0.0, end: widget.fractions[i].clamp(0.0, 1.0)),
+                          duration: reducedMotion ? Duration.zero : const Duration(milliseconds: 750),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, value, _) => CircularProgressIndicator(
+                            value: value,
+                            strokeWidth: ringSize * 0.045,
+                            strokeCap: StrokeCap.round,
+                            backgroundColor: widget.colors[i].withValues(alpha: 0.12),
+                            valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
+                            semanticsLabel: '${widget.labels[i]}: ${widget.counts[i]} of ${widget.total} tasks',
+                          ),
+                        ),
+                      ),
+                    SizedBox.square(
+                      key: const ValueKey('completion_readout'),
+                      dimension: ringSize * 0.48,
+                      child: Center(child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${widget.total}', style: InsightTheme.urbanist(36, w: FontWeight.w800)),
+                            Text('Tasks', style: InsightTheme.inter(14, w: FontWeight.w600)),
+                          ],
+                        ),
+                      )),
+                    ),
+                  ],
                 ),
               ),
             ),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: scaler.scale(44)),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('${widget.total}', style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink)),
-                const SizedBox(height: 2),
-                Text('Tasks', style: InsightTheme.openSans(12, w: FontWeight.w600, c: InsightTheme.ink3)),
-              ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Back-face artwork only; the parent continues to own all tile geometry.
+class _CompletionStatusTile extends StatelessWidget {
+  final int index;
+  final String label;
+  final double labelWidth;
+  final int count;
+  final Color color;
+
+  const _CompletionStatusTile({
+    required this.index,
+    required this.label,
+    required this.labelWidth,
+    required this.count,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = switch (index) {
+      0 => InsightTheme.orangeInk,
+      1 => InsightTheme.blueInk,
+      2 => Colors.white,
+      _ => InsightTheme.greenInk,
+    };
+    final tint = switch (index) {
+      0 => InsightTheme.orangeTint,
+      1 => InsightTheme.blueTint,
+      _ => InsightTheme.greenTint,
+    };
+    final fill = index == 2 ? color : Color.lerp(tint, color, 0.16)!;
+    final labelStyle = DefaultTextStyle.of(context).style.merge(
+      InsightTheme.inter(14, w: FontWeight.w600, c: foreground, h: 1.2),
+    );
+    final countStyle = DefaultTextStyle.of(context).style.merge(
+      InsightTheme.urbanist(30, w: FontWeight.w800, c: foreground, h: 1.2),
+    );
+    final scaler = MediaQuery.textScalerOf(context);
+    final icon = ExcludeSemantics(child: Container(
+      key: ValueKey('completion_icon_$label'),
+      width: 18,
+      height: 18,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withValues(alpha: index == 2 ? 0.18 : 0.7),
+      ),
+      child: CustomPaint(
+        size: const Size.square(14),
+        painter: _CompletionStatusIconPainter(index, foreground),
+      ),
+    ));
+    Widget fittedText(String value, TextStyle style) => FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(value, maxLines: 1, softWrap: false, style: style),
+    );
+    // Measure against the same longest label so narrow tiles keep a unified
+    // type size and baseline instead of enlarging only the shorter words.
+    final caption = FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(constraints: BoxConstraints(minWidth: labelWidth),
+        child: Text(label, maxLines: 1, softWrap: false, style: labelStyle)),
+    );
+
+    return Container(
+      key: ValueKey('completion_$label'),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(14)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            right: -24,
+            bottom: -40,
+            child: Container(
+              width: 112,
+              height: 112,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: foreground.withValues(alpha: 0.06)),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final stackedHeight = 18 + 2 + scaler.scale(14) * 1.2 + 2 + scaler.scale(30) * 1.2;
+              if (stackedHeight <= constraints.maxHeight) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    icon,
+                    const SizedBox(height: 2),
+                    caption,
+                    const SizedBox(height: 2),
+                    fittedText('$count', countStyle),
+                  ],
+                );
+              }
+              if (constraints.maxWidth >= labelWidth + scaler.scale(30) + 8) {
+                return Row(
+                  children: [
+                    Expanded(flex: 3, child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [icon, const SizedBox(height: 4), caption],
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(flex: 2, child: fittedText('$count', countStyle)),
+                  ],
+                );
+              }
+              // Give enlarged labels the full width; the icon moves beside
+              // the count so neither text scaling nor artwork grows the tile.
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.topLeft,
+                        child: Text('$count', maxLines: 1, softWrap: false, style: countStyle),
+                      )),
+                      const SizedBox(width: 4),
+                      icon,
+                    ],
+                  )),
+                  const SizedBox(height: 2),
+                  caption,
+                ],
+              );
+            }),
           ),
         ],
       ),
     );
-    final labelStyle = DefaultTextStyle.of(context).style.merge(
-      InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2),
-    );
-    // White meets AA on the dark blue; lighter status fills use dark ink.
-    final foregroundColors = widget.colors.map((color) =>
-        color.computeLuminance() < 0.18 ? Colors.white : InsightTheme.ink).toList();
-    var labelWidth = 0.0;
-    for (final label in widget.labels) {
-      final painter = TextPainter(
-        text: TextSpan(text: label, style: labelStyle),
-        textDirection: Directionality.of(context),
-        textScaler: scaler,
-      )..layout();
-      if (painter.width > labelWidth) labelWidth = painter.width;
-      painter.dispose();
-    }
-    final legend = Stack(
-      alignment: Alignment.center,
-      children: [
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (int row = 0; row < widget.labels.length; row += 2) ...[
-              if (row == 2) SizedBox(height: scaler.scale(widget.overdueCount > 0 ? 12 : 4)),
-              Table(
-                children: [TableRow(children: [
-                  for (int i = row; i < row + 2; i++)
-                    Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: Container(
-                        key: ValueKey('completion_${widget.labels[i]}'),
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: scaler.scale(4)),
-                        decoration: BoxDecoration(
-                          color: widget.colors[i],
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: widget.colors[i]),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (i < 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
-                            Text('${widget.counts[i]}', style: InsightTheme.urbanist(22, w: FontWeight.w700, c: foregroundColors[i])),
-                            if (i >= 2) Text(widget.labels[i], softWrap: false, style: labelStyle.copyWith(color: foregroundColors[i])),
-                          ],
-                        ),
-                      ),
-                    ),
-                ])],
-              ),
-            ],
-          ],
-        ),
-        if (widget.overdueCount > 0)
-          Container(
-            key: const ValueKey('completion_overdue'),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: InsightTheme.redTint, borderRadius: BorderRadius.circular(999)),
-            child: Text('${widget.overdueCount} Overdue', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.redInk)),
-          ),
-      ],
-    );
-    return LayoutBuilder(key: const ValueKey('completion_chart'), builder: (context, constraints) {
-      // Keep category words intact with the actual font and accessibility size.
-      final legendWidth = (labelWidth + 18) * 2;
-      if (constraints.maxWidth < ringSize + 8 + legendWidth) {
-        return Column(children: [
-          rings,
-          const SizedBox(height: 4),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: constraints.maxWidth.clamp(legendWidth, double.infinity),
-              child: legend,
-            ),
-          ),
-        ]);
-      }
-      return Row(children: [
-        rings,
-        const SizedBox(width: 8),
-        Expanded(child: legend),
-      ]);
-    });
   }
 }
 
-/// Page gutter for the full-month card.
-///
-/// Seven Android-sized day targets need 336px. The standard 20px page margin
-/// is used whenever it fits; on narrower phones it tightens so the targets
-/// stay full size, and it never reaches zero, so the month is never flush
-/// against the phone edge.
-EdgeInsets _kFullCalendarGutter(BuildContext context) {
-  const sevenTargets = 7 * 48.0;
-  final width = MediaQuery.sizeOf(context).width;
-  // Clamp the gutter itself: the narrowest margin that still fits seven 48px
-  // day targets, and never more than the standard 20px page margin.
-  final gutter = ((width - sevenTargets) / 2).clamp(4.0, 20.0);
-  return EdgeInsets.symmetric(horizontal: gutter);
-}
-
-/// Decorative lanyard from the existing Calendar toggle to its separate card.
-class _CalendarTetherPainter extends CustomPainter {
-  const _CalendarTetherPainter();
+/// Original flat glyphs on a shared 24-unit grid, with one rounded stroke.
+class _CompletionStatusIconPainter extends CustomPainter {
+  final int index;
+  final Color color;
+  const _CompletionStatusIconPainter(this.index, this.color);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = InsightTheme.blue1.withValues(alpha: 0.45)
+    canvas.scale(size.width / 24, size.height / 24);
+    final stroke = Paint()
+      ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    for (final direction in [-1.0, 1.0]) {
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    if (index == 0) {
+      canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTRB(4, 6, 20, 21), const Radius.circular(2)), stroke);
       canvas.drawPath(Path()
-        ..moveTo(size.width / 2 + direction * 12, 0)
-        ..quadraticBezierTo(size.width / 2 + direction * 16, size.height / 2,
-            size.width / 2 + direction * 64, size.height), paint);
+        ..moveTo(8, 3)..lineTo(8, 8)
+        ..moveTo(16, 3)..lineTo(16, 8)
+        ..moveTo(4, 11)..lineTo(20, 11)
+        ..moveTo(8, 15)..lineTo(12, 15)
+        ..moveTo(8, 18)..lineTo(15, 18), stroke);
+      return;
+    }
+    canvas.drawCircle(const Offset(12, 12), 9, stroke);
+    switch (index) {
+      case 1:
+        canvas.drawPath(Path()..moveTo(12, 7)..lineTo(12, 12)..lineTo(16, 14), stroke);
+      case 2:
+        canvas.drawPath(Path()..moveTo(10, 8)..lineTo(16, 12)..lineTo(10, 16)..close(), Paint()..color = color);
+      default:
+        canvas.drawPath(Path()..moveTo(8, 12)..lineTo(11, 15)..lineTo(16, 9), stroke);
     }
   }
 
   @override
-  bool shouldRepaint(_CalendarTetherPainter oldDelegate) => false;
+  bool shouldRepaint(_CompletionStatusIconPainter oldDelegate) =>
+      index != oldDelegate.index || color != oldDelegate.color;
+}
+
+/// A shared capsule cutout creates the four inward-curved central corners.
+class _CompletionNotchClipper extends CustomClipper<Path> {
+  final Size notch;
+  const _CompletionNotchClipper(this.notch);
+
+  @override
+  Path getClip(Size size) => Path()
+    ..fillType = PathFillType.evenOdd
+    ..addRect(Offset.zero & size)
+    ..addRRect(RRect.fromRectAndRadius(
+      Rect.fromCenter(center: size.center(Offset.zero), width: notch.width, height: notch.height),
+      Radius.circular(notch.height / 2),
+    ));
+
+  @override
+  bool shouldReclip(_CompletionNotchClipper oldClipper) => oldClipper.notch != notch;
+}
+
+/// The whole block turns together; the reverse is counter-rotated for legibility.
+class _FlipCard extends StatelessWidget {
+  final Widget front;
+  final Widget back;
+  final bool flipped;
+
+  final VoidCallback onTap;
+
+  const _FlipCard({
+    super.key,
+    required this.front,
+    required this.back,
+    required this.flipped,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      toggled: flipped,
+      label: 'Flip task completion card',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: flipped ? 1.0 : 0.0),
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero : const Duration(milliseconds: 620),
+          curve: Curves.easeInOutCubic,
+          builder: (context, t, _) {
+            final onBack = t >= 0.5;
+            final face = onBack ? back : front;
+            return Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.identity()
+                ..setEntry(3, 2, 0.0015)
+                ..rotateY(t * pi),
+              // Counter-rotate the back face so its text reads normally.
+              child: onBack
+                  ? Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.identity()..rotateY(pi),
+                      child: face,
+                    )
+                  : face,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// One shared hanging pivot for the strap and the month card it carries.
+const double _kCalendarSwingRadians = 0.0349; // 2 degrees
+
+/// Reveals the month card hanging from its lanyard, and replays the same
+/// motion in reverse when it closes.
+///
+/// One controller owns the whole reveal, so the strap, the card and the pivot
+/// always move as a single suspended piece instead of three decorations that
+/// happen to animate together.
+class _SuspendedMonthCalendar extends StatefulWidget {
+  const _SuspendedMonthCalendar({required this.visible, required this.child});
+
+  final bool visible;
+  final Widget child;
+
+  @override
+  State<_SuspendedMonthCalendar> createState() =>
+      _SuspendedMonthCalendarState();
+}
+
+class _SuspendedMonthCalendarState extends State<_SuspendedMonthCalendar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _swing = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+    value: widget.visible ? 1 : 0,
+  );
+
+  @override
+  void didUpdateWidget(_SuspendedMonthCalendar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.visible == widget.visible) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _swing.value = widget.visible ? 1 : 0;
+      return;
+    }
+    _swing.animateTo(
+      widget.visible ? 1 : 0,
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  void dispose() {
+    _swing.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _swing,
+    child: widget.child,
+    builder: (context, child) {
+      if (_swing.value <= 0) return const SizedBox.shrink();
+      return Transform.rotate(
+        angle: (1 - _swing.value) * _kCalendarSwingRadians,
+        alignment: Alignment.topCenter,
+        child: SizeTransition(
+          sizeFactor: _swing,
+          alignment: Alignment.topCenter,
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+/// The visible strap the month card actually hangs from.
+///
+/// The ribbon converges onto a real clip at the card's top-centre slot, so the
+/// lanyard reads as attached hardware rather than decoration floating between
+/// the toggle and the card.
+class _CalendarLanyard extends StatelessWidget {
+  const _CalendarLanyard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.topCenter,
+      children: [
+        Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(
+            key: ValueKey('calendar_lanyard'),
+            height: 30,
+            width: double.infinity,
+            child: ExcludeSemantics(child: CustomPaint(painter: _CalendarLanyardPainter())),
+          ),
+          child,
+        ]),
+        // Paint the hardware after the card: geometric overlap otherwise gets
+        // hidden by the card's opaque background.
+        Positioned(
+          top: 19,
+          child: ExcludeSemantics(child: Container(
+            key: const ValueKey('calendar_lanyard_clip'),
+            width: 12,
+            height: 16,
+            decoration: BoxDecoration(
+              color: InsightTheme.ink3,
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: Center(child: Container(width: 12, height: 2, color: InsightTheme.surface)),
+          )),
+        ),
+      ],
+    );
+}
+
+class _CalendarLanyardPainter extends CustomPainter {
+  const _CalendarLanyardPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final ribbon = Paint()
+      ..color = InsightTheme.blue1.withValues(alpha: 0.62);
+    final seam = Paint()
+      ..color = InsightTheme.blueInk.withValues(alpha: 0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    final centre = size.width / 2;
+    final clipTop = size.height - 6;
+    // Two ribbons hang from the toggle and converge onto the clip, so the card
+    // reads as carried hardware rather than sitting under loose lines.
+    for (final direction in [-1.0, 1.0]) {
+      final outer = centre + direction * 26;
+      final inner = centre + direction * 8;
+      canvas.drawPath(
+        Path()
+          ..moveTo(outer - direction * 5, 0)
+          ..lineTo(outer + direction * 5, 0)
+          ..lineTo(inner + direction * 3, clipTop)
+          ..lineTo(inner - direction * 3, clipTop)
+          ..close(),
+        ribbon,
+      );
+      canvas.drawPath(
+        Path()
+          ..moveTo(outer, 1)
+          ..lineTo(inner, clipTop - 1),
+        seam,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_CalendarLanyardPainter oldDelegate) => false;
 }
 
 /// A separate full-month card sharing the strip's real selection/task sources.
@@ -2063,12 +2755,11 @@ class _InlineFullCalendarCard extends StatelessWidget {
 
     final clampedDay = selectedDay.clamp(1, daysInMonth);
     final selectedDate = DateTime(month.year, month.month, clampedDay);
-    final headerLabel =
-        '$clampedDay ${_monthAbbr[month.month - 1]} ${(month.year % 100).toString().padLeft(2, '0')}, ${_fullWeekdayNames[selectedDate.weekday - 1]}';
     final selectedTasks = tasksByDayInMonth[clampedDay] ?? const <TaskItem>[];
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      key: const ValueKey('calendar_month_card'),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
         borderRadius: InsightTheme.roundedMd,
@@ -2083,7 +2774,22 @@ class _InlineFullCalendarCard extends StatelessWidget {
             child: Row(
             children: [
               Expanded(
-                child: Text(headerLabel, style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_monthAbbr[month.month - 1]} ${month.year}',
+                        style: InsightTheme.urbanist(15, w: FontWeight.w700, c: InsightTheme.ink)),
+                    const SizedBox(height: 2),
+                    // The selected date rides in the header instead of a
+                    // separate caption row, so the month stays compact.
+                    Text(
+                      key: const ValueKey('calendar_selected_date'),
+                      '${_fullWeekdayNames[selectedDate.weekday - 1].substring(0, 3)} $clampedDay ${_monthAbbr[month.month - 1]}',
+                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                    ),
+                  ],
+                ),
               ),
               IconButton(
                 tooltip: 'Previous month',
@@ -2099,102 +2805,127 @@ class _InlineFullCalendarCard extends StatelessWidget {
             ],
             ),
           ),
-          const SizedBox(height: 8),
           LayoutBuilder(builder: (context, constraints) {
             final dayStyle = InsightTheme.inter(12.5, w: FontWeight.w700);
-            var columnWidth = 48.0;
-            var rowHeight = 48.0;
-            for (final label in [..._weekdayAbbrSunStart, '88']) {
+            final weekdayStyle = InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3);
+            final columnWidth = constraints.maxWidth / 7;
+            Size measure(String label, TextStyle style) {
               final painter = TextPainter(
-                text: TextSpan(text: label, style: DefaultTextStyle.of(context).style.merge(dayStyle)),
+                text: TextSpan(text: label, style: DefaultTextStyle.of(context).style.merge(style)),
                 textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
               )..layout();
-              if (painter.width + 12 > columnWidth) columnWidth = painter.width + 12;
-              if (painter.height + 24 > rowHeight) rowHeight = painter.height + 24;
+              final size = painter.size;
               painter.dispose();
+              return size;
             }
-            final gridWidth = constraints.maxWidth.clamp(columnWidth * 7, double.infinity).toDouble();
-            final calendar = SizedBox(width: gridWidth, child: Column(children: [
+
+            // Adapt the heading, not the user's text size or the grid width.
+            var weekdayLength = 3;
+            while (weekdayLength > 1 && _weekdayAbbrSunStart.any((label) =>
+                measure(label.substring(0, weekdayLength), weekdayStyle).width + 4 > columnWidth)) {
+              weekdayLength--;
+            }
+            var plateWidth = 32.0;
+            var plateHeight = 32.0;
+            for (var day = 1; day <= daysInMonth; day++) {
+              final size = measure('$day', dayStyle);
+              if (size.width + 8 > plateWidth) plateWidth = size.width + 8;
+              if (size.height + 8 > plateHeight) plateHeight = size.height + 8;
+            }
+            plateWidth = plateWidth.clamp(0.0, columnWidth).toDouble();
+            // Number plate, 2dp separation, 4dp task track, 4dp breathing room.
+            // The approved compact Calendar uses the full cell as its target.
+            final rowHeight = (plateHeight + 2 + 4 + 4).clamp(44.0, double.infinity).toDouble();
+            return Column(children: [
               Row(children: [
-                for (var index = 0; index < _weekdayAbbrSunStart.length; index++) ...[
-                  Expanded(child: Center(child: Text(_weekdayAbbrSunStart[index],
-                      style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)))),
-                ],
+                for (var index = 0; index < _weekdayAbbrSunStart.length; index++)
+                  Expanded(child: Semantics(
+                    key: ValueKey('calendar_weekday_$index'),
+                    label: _fullWeekdayNames[(index + 6) % 7],
+                    excludeSemantics: true,
+                    child: Center(child: Text(_weekdayAbbrSunStart[index].substring(0, weekdayLength),
+                        style: weekdayStyle)),
+                  )),
               ]),
-              const SizedBox(height: 6),
+              const SizedBox(height: 2),
               GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(bottom: 4),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              mainAxisSpacing: 4,
-               crossAxisSpacing: 0,
-              mainAxisExtent: rowHeight,
-            ),
-            itemCount: daysInMonth + leadingBlanks,
-            itemBuilder: (context, i) {
-              if (i < leadingBlanks) return const SizedBox.shrink();
-              final day = i - leadingBlanks + 1;
-              final isSelected = day == clampedDay;
-              final hasTask = taskDays.contains(day);
-              final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
-              final dotColors = dayTasks
-                  .map(dotColorForTask)
-                  .toSet()
-                  .toList();
-              return InkWell(
-                key: ValueKey('calendar_day_$day'),
-                onTap: () => onPick(month, day),
-                borderRadius: BorderRadius.circular(24),
-                child: Center(
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: 48),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: isSelected ? InsightTheme.blue1 : Colors.transparent,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('$day', style: InsightTheme.inter(12.5, w: FontWeight.w700, c: isSelected ? Colors.white : InsightTheme.ink)),
-                        if (hasTask)
-                          Row(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  mainAxisSpacing: 0,
+                  crossAxisSpacing: 0,
+                  mainAxisExtent: rowHeight,
+                ),
+                itemCount: daysInMonth + leadingBlanks,
+                itemBuilder: (context, i) {
+                  if (i < leadingBlanks) return const SizedBox.shrink();
+                  final day = i - leadingBlanks + 1;
+                  final isSelected = day == clampedDay;
+                  final hasTask = taskDays.contains(day);
+                  final dayTasks = tasksByDayInMonth[day] ?? const <TaskItem>[];
+                  final dotColors = dayTasks.map(dotColorForTask).toSet().toList();
+                  return Semantics(
+                    key: ValueKey('calendar_day_$day'),
+                    container: true,
+                    button: true,
+                    selected: isSelected,
+                    label: '${_fullWeekdayNames[DateTime(month.year, month.month, day).weekday - 1]}, '
+                        '${_HomeDashboardScreenState._fullMonthNames[month.month - 1]} $day, ${month.year}, '
+                        '${dayTasks.length} ${dayTasks.length == 1 ? 'task' : 'tasks'}',
+                    onTap: () => onPick(month, day),
+                    excludeSemantics: true,
+                    child: InkWell(
+                      onTap: () => onPick(month, day),
+                      borderRadius: BorderRadius.circular(24),
+                      child: Center(child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            key: ValueKey('calendar_day_plate_$day'),
+                            width: plateWidth,
+                            height: plateHeight,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelected ? InsightTheme.blue1 : Colors.transparent,
+                              // A circle at normal text; a content-sized capsule when
+                              // large digits need more height than a narrow column.
+                              borderRadius: BorderRadius.circular(plateHeight / 2),
+                            ),
+                            child: Text('$day', style: dayStyle.copyWith(
+                                color: isSelected ? Colors.white : InsightTheme.ink)),
+                          ),
+                          const SizedBox(height: 2),
+                          SizedBox(height: 4, child: Row(
                             mainAxisSize: MainAxisSize.min,
-                            children: dotColors.take(3).map((dotColor) {
-                              return Container(
+                            children: (hasTask ? dotColors : const <Color>[]).take(3).map((dotColor) =>
+                              Container(
                                 margin: const EdgeInsets.symmetric(horizontal: 1),
                                 width: 4,
                                 height: 4,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isSelected ? Colors.white : dotColor,
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                      ],
+                                decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor),
+                              ),
+                            ).toList(),
+                          )),
+                        ],
+                      )),
                     ),
-                  ),
-                ),
-              );
-            },
+                  );
+                },
               ),
-            ]));
-            return gridWidth > constraints.maxWidth
-                ? SingleChildScrollView(scrollDirection: Axis.horizontal, child: calendar) : calendar;
+            ]);
           }),
           if (selectedTasks.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: InsightTheme.surface2,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2230,13 +2961,12 @@ class _TimelineActivityTile extends StatefulWidget {
   final String subtitle;
   final String time;
   final String? occurredAtIso;
-  final VoidCallback? onOpenHistory;
-  final int? historyCount;
 
   const _TimelineActivityTile({
+    super.key,
     required this.icon, required this.color, required this.categoryLabel,
     required this.title, required this.subtitle, required this.time,
-    this.occurredAtIso, this.onOpenHistory, this.historyCount,
+    this.occurredAtIso,
   });
 
   @override
@@ -2263,37 +2993,35 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: EdgeInsets.only(bottom: widget.onOpenHistory == null ? 10 : 0),
+      margin: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (widget.onOpenHistory == null) ...[
-            // Timeline node remains within the scrollable modal.
-            Container(
-              width: 34,
-              alignment: Alignment.topCenter,
-              padding: const EdgeInsets.only(top: 12),
-              child: Container(
-                width: 8, height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: widget.color,
-                  border: Border.all(color: Colors.white, width: 2),
-                ),
+          // Timeline node remains within the scrollable modal.
+          Container(
+            width: 34,
+            alignment: Alignment.topCenter,
+            padding: const EdgeInsets.only(top: 12),
+            child: Container(
+              width: 8, height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.color,
+                border: Border.all(color: Colors.white, width: 2),
               ),
             ),
-            const SizedBox(width: 6),
-          ],
+          ),
+          const SizedBox(width: 6),
 
           // Activity card — tappable, animates open/closed for the exact
           // timestamp. Tinted fill instead of a white card + border.
           Expanded(
             child: Semantics(
               button: true,
-              expanded: widget.onOpenHistory == null && _expanded,
+              expanded: _expanded,
               child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: widget.onOpenHistory ?? () => setState(() => _expanded = !_expanded),
+              onTap: () => setState(() => _expanded = !_expanded),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOutCubic,
@@ -2346,22 +3074,6 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
                       if (widget.subtitle.isNotEmpty) ...[
                         const SizedBox(height: 6),
                         Text(widget.subtitle, style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2)),
-                      ],
-                      if (widget.onOpenHistory != null) ...[
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Text(
-                              'View ${widget.historyCount} ${widget.historyCount == 1 ? 'activity' : 'activities'}',
-                              style: InsightTheme.inter(12, w: FontWeight.w700,
-                                  c: InsightTheme.blueInk),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(Icons.arrow_forward_rounded,
-                                size: 16, color: InsightTheme.blueInk),
-                          ],
-                        ),
                       ],
                       if (_expanded && _exactTimestamp.isNotEmpty) ...[
                         const SizedBox(height: 8),

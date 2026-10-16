@@ -11,6 +11,11 @@ void main() {
   late Database db;
   late String path;
 
+  /// Fictional authenticated owner. Production never falls back to a preference,
+  /// assignment, name or legacy NULL owner (db_helper.dart:18-26), so every
+  /// owner-scoped cache test must supply one explicitly.
+  const loop3Owner = '00000000-0000-4000-8000-000000000003';
+
   Future<void> createProductionSchema() async {
     final source = await File('lib/core/services/db_helper.dart').readAsString();
     for (final match in RegExp(
@@ -33,9 +38,11 @@ void main() {
     db = await databaseFactoryFfi.openDatabase(path);
     await createProductionSchema();
     DBHelper.useDatabaseForTesting(db);
+    DBHelper.inspectorIdForTesting = loop3Owner;
   });
 
   tearDown(() async {
+    DBHelper.inspectorIdForTesting = null;
     DBHelper.useDatabaseForTesting(null);
     await db.close();
     await tempDir.delete(recursive: true);
@@ -180,5 +187,47 @@ void main() {
     expect(cached['assignment_instructions'], 'Review parcel corner markers');
     expect(cached['assigned_by_imaps_user_id'], '99');
     expect(cached['assigned_by_name'], 'Planner 99');
+  });
+
+  // Contract: with no authenticated owner the cache must neither persist
+  // owner-less rows nor expose them. If cacheJobs() ever falls back to a legacy
+  // NULL or inferred owner, this fails instead of silently writing local work
+  // that cannot be attributed to an inspector.
+  test('owner-less cache neither writes nor exposes rows', () async {
+    DBHelper.inspectorIdForTesting = null;
+    await DBHelper.cacheJobs([
+      {
+        'id': 'loop3-job-ownerless',
+        'local_inspection_id': 10,
+        'status': 'assigned',
+        'scheduled_date': '2026-10-04',
+        'is_self_scheduled': false,
+        'supabase_parcel_id': 'parcel-0',
+        'assignment_instructions': 'Ownerless instruction',
+        'assigned_by_imaps_user_id': '0',
+        'assigned_by_name': 'Officer None',
+        'supabase_zoning_applications': {
+          'applicant_name': 'Ownerless Applicant',
+          'barangay': 'Nowhere',
+          'reference_number': 'REF-0',
+          'application_type': 'Residential',
+        },
+        'supabase_parcels': {
+          'lot_area_sqm': 1.0,
+          'declared_land_use': 'Residential',
+          'latitude': null,
+          'longitude': null,
+        },
+        'updated_at': '2026-09-18T00:00:00Z',
+        'rework_started_at': null,
+      },
+    ]);
+    expect(
+      await db.query('local_jobs'),
+      isEmpty,
+      reason: 'no owner-less row may be persisted to local_jobs',
+    );
+    expect(await DBHelper.getCachedJobs(), isEmpty);
+    DBHelper.inspectorIdForTesting = loop3Owner;
   });
 }

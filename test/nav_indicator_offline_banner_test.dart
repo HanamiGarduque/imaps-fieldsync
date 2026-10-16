@@ -51,10 +51,14 @@ void main() {
     }
   }
 
+  /// Seeds one cached assignment owned by the signed-in inspector, exactly as
+  /// `cacheJobs` writes it. Seed the row owner-less and the owner-scoped read
+  /// below cannot see it.
   Future<void> seedJob(String id, String status) => db.insert('local_jobs', {
         'id': id,
         'status': status,
         'scheduled_date': '2026-10-01',
+        'inspector_id': DBHelper.inspectorIdForTesting,
       });
 
   Future<void> removeJob(String id) =>
@@ -105,11 +109,17 @@ void main() {
     db = await databaseFactoryFfi.openDatabase('${tempDir.path}/nav.db');
     await createProductionSchema();
     DBHelper.useDatabaseForTesting(db);
+    // The cache is owner-scoped: `getCachedJobs` reads only the signed-in
+    // inspector's rows, so without an authenticated owner every read matches
+    // `inspector_id = NULL` - which is no row at all, and the dot could never
+    // turn on for a seeded assignment.
+    DBHelper.inspectorIdForTesting = inspectorA;
     // Fresh keystore per test: the persisted store must not leak between them.
     SecurePrefsService.useStorageForTesting({});
   });
 
   tearDown(() async {
+    DBHelper.inspectorIdForTesting = null;
     SecurePrefsService.useStorageForTesting(null);
     DBHelper.useDatabaseForTesting(null);
     await db.close();

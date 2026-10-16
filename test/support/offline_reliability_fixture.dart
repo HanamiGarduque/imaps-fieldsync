@@ -56,6 +56,12 @@ class OfflineReliabilityFixture {
   String mode = 'transport';
   Completer<List<String>>? connectivityReply;
   int remoteWrites = 0;
+  /// Fictional remote rows a held or resolved `field_jobs` GET answers with.
+  /// Used only by the `jobs-hold` mode; empty in every other mode.
+  List<Map<String, dynamic>> jobsRows = [];
+
+  /// Optional isolated HTTP boundary; null keeps every existing fixture mode.
+  Future<http.Response?> Function(http.Request)? requestOverride;
 
   SupabaseClient get client => Supabase.instance.client;
   String get databasePath => '${directory.path}/fixture.db';
@@ -100,11 +106,20 @@ class OfflineReliabilityFixture {
       if (asset.startsWith('assets/')) {
         return ByteData.sublistView(File(asset).readAsBytesSync());
       }
-      if (asset.endsWith('.ttf')) return ByteData.sublistView(fallback);
+      if (asset.endsWith('.ttf')) {
+        final realFonts = Platform.environment['IMAPS_LAYOUT_FONT_DIR'];
+        return ByteData.sublistView(realFonts == null
+            ? fallback
+            : File('$realFonts/${asset.split('-').first}.ttf').readAsBytesSync());
+      }
       return null;
     });
     await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(
       File('${fonts.path}/MaterialIcons-Regular.otf').readAsBytesSync())))).load();
+    // Material controls use Roboto; load the SDK font for readable status
+    // explanations rather than the widget-test Ahem placeholder.
+    await (FontLoader('Roboto')..addFont(Future.value(ByteData.sublistView(
+      File('${fonts.path}/Roboto-Regular.ttf').readAsBytesSync())))).load();
     messenger.setMockMethodCallHandler(
       const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
       (call) async {
@@ -144,6 +159,8 @@ class OfflineReliabilityFixture {
           throw StateError('External requests are forbidden by this fixture');
         }
         requests.add(request);
+        final overridden = await requestOverride?.call(request);
+        if (overridden != null) return overridden;
         final path = request.url.path;
         final stage = path.contains('/token') ? 'refresh'
             : path.contains('/profiles') ? 'profile' : 'other';
@@ -157,6 +174,14 @@ class OfflineReliabilityFixture {
             (mode == 'refresh-hang' && stage == 'refresh')) {
           final response = Completer<http.Response>();
           held.add((stage: stage, request: request, response: response));
+          return response.future;
+        }
+        // Holds the inspector-scoped assignment read so a test can decide when
+        // (or whether) the refresh answers, without any real transport.
+        if (mode == 'jobs-hold' && stage == 'other' &&
+            (request.method == 'GET' || request.method == 'HEAD')) {
+          final response = Completer<http.Response>();
+          held.add((stage: 'jobs', request: request, response: response));
           return response.future;
         }
         if (mode == 'refresh-reject' && stage == 'refresh') {
@@ -186,6 +211,8 @@ class OfflineReliabilityFixture {
   Future<void> reset({bool expired = false}) async {
     secure.clear(); storageReplies.clear(); requests.clear(); held.clear();
     online = false; mode = 'transport'; connectivityReply = null; remoteWrites = 0;
+    jobsRows = [];
+    requestOverride = null;
     secure['sp_cached_profile'] = jsonEncode(offlineProfile);
     secure['sp_bio_require_on_open'] = 'false';
     await client.auth.setInitialSession(jsonEncode(session(expired: expired)));
@@ -222,9 +249,14 @@ class OfflineReliabilityFixture {
   void resolveHeld({bool rejectRefresh = false}) {
     for (final item in held.where((item) => !item.response.isCompleted)) {
       final rejection = rejectRefresh && item.stage == 'refresh';
-      item.response.complete(http.Response(jsonEncode(rejection
-        ? {'code': 'refresh_token_not_found', 'msg': 'Isolated server refusal'}
-        : item.stage == 'profile' ? offlineProfile : session()),
+      // `jobs` answers the held assignment read; every other stage keeps its
+      // original auth payload.
+      final Object body = rejection
+          ? {'code': 'refresh_token_not_found', 'msg': 'Isolated server refusal'}
+          : item.stage == 'profile'
+              ? offlineProfile
+              : item.stage == 'jobs' ? jobsRows : session();
+      item.response.complete(http.Response(jsonEncode(body),
         rejection ? 400 : 200, request: item.request,
         headers: {'x-supabase-api-version': '2024-01-01'}));
     }

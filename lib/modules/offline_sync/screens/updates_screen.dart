@@ -14,6 +14,7 @@ import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/app_feedback.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../profile_settings/screens/notifications_screen.dart';
@@ -69,20 +70,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   Timer? _pollTimer;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
 
-  // --- Floating toast (matches the provided design reference) ---
-  String? _toastMessage;
-  Color _toastColor = InsightTheme.greenInk;
-  Timer? _toastTimer;
-
   void _showToast(String message, {Color color = InsightTheme.greenInk}) {
-    _toastTimer?.cancel();
-    setState(() {
-      _toastMessage = message;
-      _toastColor = color;
-    });
-    _toastTimer = Timer(const Duration(milliseconds: 3500), () {
-      if (mounted) setState(() => _toastMessage = null);
-    });
+    if (!mounted) return;
+    AppFeedback.show(context, message: message, color: color);
   }
 
   Widget _sectionHelpButton({required String title, required String message}) {
@@ -144,7 +134,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     SyncOutboxService.drainCompleted.removeListener(_onDrainCompleted);
     _pollTimer?.cancel();
     _connSub?.cancel();
-    _toastTimer?.cancel();
     disposeSpringEntrance();
     super.dispose();
   }
@@ -1460,52 +1449,6 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                   ],
                 ),
           ),
-
-          // --- Floating toast (matches design reference) ---
-          if (_toastMessage != null)
-            Positioned(
-              top: 16,
-              left: 16,
-              right: 16,
-              child: SafeArea(
-                bottom: false,
-                child: Material(
-                  color: Colors.transparent,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: _toastColor,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: const [
-                        BoxShadow(color: Color(0x33000000), blurRadius: 16, offset: Offset(0, 6)),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline_rounded, size: 17, color: Colors.white),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _toastMessage!,
-                            style: InsightTheme.openSans(13, w: FontWeight.w600, c: Colors.white),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            _toastTimer?.cancel();
-                            setState(() => _toastMessage = null);
-                          },
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
-                            child: Icon(Icons.close_rounded, size: 16, color: Colors.white70),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
 
         ],
       ),
