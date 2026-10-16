@@ -570,12 +570,13 @@ class SyncOutboxService {
         final id = action['id'] as String;
         final type = action['type'] as String;
         final jobId = action['job_id'] as String;
+        await DBHelper.markActionSyncing(id);
+        // Observers read durable state, so publish only after the claim lands.
         progress.value = SyncProgress(
           actionIndex: i + 1,
           actionTotal: total,
           actionType: type,
         );
-        await DBHelper.markActionSyncing(id);
         await DBHelper.logSyncEvent(
           eventType: 'upload_started',
           result: 'info',

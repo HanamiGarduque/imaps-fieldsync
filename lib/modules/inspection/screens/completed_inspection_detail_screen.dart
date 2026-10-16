@@ -1,10 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../tasks/screens/tasks_screen.dart'; // TaskItem
+import '../../../core/models/task_submission.dart';
+import '../../../core/services/db_helper.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/services/sync_outbox_service.dart';
+import '../../../core/widgets/offline_banner.dart';
 import '../providers/inspection_provider.dart';
 import 'inspection_progress.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -30,7 +37,8 @@ CompletedDetailFetcher? completedDetailFetcherOverride;
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
   final bool historicalReadOnly;
-  const CompletedInspectionDetailScreen({super.key, required this.task, this.historicalReadOnly = false});
+  final TaskSubmission? submission;
+  const CompletedInspectionDetailScreen({super.key, required this.task, this.historicalReadOnly = false, this.submission});
 
   @override
   State<CompletedInspectionDetailScreen> createState() =>
@@ -41,7 +49,13 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   TaskItem? _fullTask;
   bool _isLoading = true;
   String? _error;
-  bool get _readOnly => widget.historicalReadOnly ||
+  TaskSubmission? _submission;
+  StreamSubscription<AuthState>? _authSubscription;
+  int _detailRequestId = 0;
+  bool _retired = false;
+  bool get _savedSubmissionMode => widget.submission != null;
+  bool get _awaitingAcceptance => _submission?.isSynced == false || _fullTask?.category != 'Completed';
+  bool get _readOnly => _savedSubmissionMode || widget.historicalReadOnly ||
       widget.task.planningReview?.decision == 'Requires Reinspection' ||
       _fullTask?.planningReview?.decision == 'Requires Reinspection';
 
@@ -59,10 +73,72 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   @override
   void initState() {
     super.initState();
+    if (_savedSubmissionMode) {
+      _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen(
+        (_) => _retireIfOwnerChanged(), onError: (Object _) => _retireIfOwnerChanged());
+      SyncOutboxService.drainCompleted.addListener(_loadFullDetail);
+      SyncOutboxService.progress.addListener(_loadFullDetail);
+    }
     _loadFullDetail();
   }
 
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    SyncOutboxService.drainCompleted.removeListener(_loadFullDetail);
+    SyncOutboxService.progress.removeListener(_loadFullDetail);
+    super.dispose();
+  }
+
+  bool _retireIfOwnerChanged() {
+    if (!_savedSubmissionMode) return false;
+    if (!_retired && DBHelper.currentInspectorId == widget.submission!.inspectorId) return false;
+    if (mounted) {
+      setState(() {
+        _retired = true;
+        _fullTask = null;
+        _submission = null;
+        _isLoading = false;
+        _error = SavedDataNotice.ownerChanged;
+      });
+    }
+    return true;
+  }
+
+  /// A pending final submission is an immutable saved snapshot, not a rework
+  /// session. Re-read SQLite so a stale route/provider/remote response cannot
+  /// substitute different evidence or manufacture acceptance.
+  Future<void> _loadSavedSubmission() async {
+    final requestId = ++_detailRequestId;
+    if (_retireIfOwnerChanged()) return;
+    try {
+      final snapshot = await DBHelper.getTaskPresentationSnapshot();
+      final row = snapshot.jobs.singleWhere((r) => r['id'] == widget.task.id);
+      final actions = snapshot.submissions.where((r) => r['job_id'] == widget.task.id);
+      final submission = actions.isEmpty ? null : TaskSubmission.fromRow(actions.first);
+      final task = TaskItem.fromCachedJob({...row, ...?submission?.evidenceFields});
+      if (submission == null && task.category != 'Completed') {
+        throw StateError('Saved final submission is unavailable');
+      }
+      if (!mounted || requestId != _detailRequestId || _retireIfOwnerChanged()) return;
+      setState(() {
+        _fullTask = task;
+        _submission = submission;
+        _isLoading = false;
+        _error = null;
+      });
+    } catch (_) {
+      if (!mounted || requestId != _detailRequestId || _retireIfOwnerChanged()) return;
+      setState(() {
+        _fullTask = null;
+        _isLoading = false;
+        _error = 'Could not read the saved submission. Try again from My Tasks.';
+      });
+    }
+  }
+
   Future<void> _loadFullDetail() async {
+    if (_savedSubmissionMode) return _loadSavedSubmission();
     Map<String, dynamic>? job;
     Object? failure;
 
@@ -273,7 +349,25 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
       children: [
-        if (_readOnly) ...[
+        if (_savedSubmissionMode) ...[
+          Text('Saved submission — Read only', style: InsightTheme.inter(13, w: FontWeight.w700)),
+          const SizedBox(height: 8),
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: InsightTheme.surface2,
+              border: Border.all(color: InsightTheme.line), borderRadius: BorderRadius.circular(8)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(_submission?.badge(canonicalCompleted: task.category == 'Completed') ?? 'Completed — Synced',
+                style: InsightTheme.inter(13, w: FontWeight.w700,
+                  c: _awaitingAcceptance ? InsightTheme.orangeInk : InsightTheme.green)),
+              const SizedBox(height: 8),
+              Text(_awaitingAcceptance
+                ? 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
+                : 'The server has confirmed this inspection.', style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+            ]),
+          ),
+        ] else if (_readOnly) ...[
           Text('Historical inspection — Read only', style: InsightTheme.inter(13, w: FontWeight.w700)),
           const SizedBox(height: 12),
         ],
@@ -417,7 +511,9 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           content: _buildDetailRows({
             'Result': task.inspectionResult ?? '—',
             'Compliant': task.isCompliant == null ? '—' : (task.isCompliant! ? 'Yes' : 'No (Discrepancy Found)'),
-            'Submitted at': task.submittedAt ?? '—',
+            if (_savedSubmissionMode && _awaitingAcceptance)
+              'Saved on device at': _submission?.savedAt ?? '—'
+            else 'Submitted at': task.submittedAt ?? '—',
           }),
         ),
         // Loop 8 — read-only Planning Review metadata for THIS exact round.
@@ -534,10 +630,11 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: InsightTheme.greenTint,
+              color: _savedSubmissionMode && _awaitingAcceptance ? InsightTheme.orangeTint : InsightTheme.greenTint,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.check_circle_rounded, color: InsightTheme.green, size: 24),
+            child: Icon(_savedSubmissionMode && _awaitingAcceptance ? Icons.cloud_upload_outlined : Icons.check_circle_rounded,
+              color: _savedSubmissionMode && _awaitingAcceptance ? InsightTheme.orangeInk : InsightTheme.green, size: 24),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -597,7 +694,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                 // so it reflects rework edits too) and falls back to
                 // submitted_at for older rows fetched before this field
                 // existed on the client.
-                if ((task.updatedAt ?? task.submittedAt) != null) ...[
+                if (!_savedSubmissionMode && (task.updatedAt ?? task.submittedAt) != null) ...[
                   const SizedBox(height: 6),
                   Text(
                     'Last saved: ${_formatTimestamp(task.updatedAt ?? task.submittedAt)}',
@@ -636,6 +733,7 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   /// actually persisted. The task-level Modified badge is what tells the
   /// inspector this text is not on file yet.
   Map<String, String> _draftFindings(TaskItem task) {
+    if (_savedSubmissionMode) return const {};
     // Read defensively: this screen is also rendered in read-only/historical
     // contexts, where no live InspectionProvider exists and there is no draft
     // by definition — the persisted row is the only truth to show.

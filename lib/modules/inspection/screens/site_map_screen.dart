@@ -44,11 +44,9 @@ MapOptions siteMapOptions({
   ),
 );
 
-/// Site Verification (Step 1): task-bound GPS, cached/live real road geometry
-/// and the existing inspection callbacks, with orientation-aware presentation.
-/// The mapped geometry is a point: direct distance is calculated locally.
-/// Real roads and schematic dotted links are guidance, not verified access.
-/// Step 2 independently owns its existing server/offline 30m confirmation rule.
+/// Step 1: full-bleed map, floating details and glass controls. Direct mapped-
+/// point distance, real roads and unverified links are orientation only;
+/// Step 2 independently owns its inclusive 30m confirmation rule.
 class SiteMapScreen extends StatefulWidget {
   final TaskItem task;
   const SiteMapScreen({super.key, required this.task});
@@ -70,14 +68,13 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   bool _approachEpisode = false;
   Timer? _fixExpiry;
   bool _retryingDeviceLocation = false;
-  // Real road route only. Routing failure never supplies fabricated geometry.
+  // Real road geometry only; failures preserve the last successful road.
   List<ll.LatLng>? _routePoints;
-  // Cache provenance is independent of the current connectivity state.
+  // Cache provenance is independent of current connectivity.
   bool _routeFromCache = false;
   double? _routeDistanceMeters;
   double? _routeDurationSeconds;
-  // The true marker and direct-point estimate use the SAME shared GPS stream
-  // as Step 2. Step 2 independently owns authoritative confirmation.
+  // Unsnapped marker and direct mapped-point distance share Step 2's GPS stream.
   StreamSubscription<Position>? _positionSub;
   bool _trackingActive = false;
   ll.LatLng? _routeOrigin;
@@ -92,8 +89,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   bool _routeRefreshPending = false;
   bool _routeRefreshFailed = false;
   int _routeFailures = 0;
-  // All Step 1 instances share the demo provider's maximum 1 request/sec.
-  // The 15s screen budget is stricter; this also covers fast screen reopening.
+  // Per-screen 15s dispatch budget, shared provider ceiling of 1 request/sec.
   static Timer? _providerCooldown;
   static const _routeRefreshCooldown = Duration(seconds: 15);
   final MapController _mapController = MapController();
@@ -104,8 +100,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   // state — see MapConnectivityRecovery.
   final MapConnectivityRecovery _recovery = MapConnectivityRecovery();
 
-  /// Historical <=30m indicator, now explicitly an informational point estimate.
-  /// This and the optional 100m notice never authorize or gate any step.
+  /// Informational mapped-point proximity; Step 2 independently verifies it.
   bool get _arrived =>
       _distanceMeters != null &&
       _distanceMeters! <= siteVerificationDistanceThresholdMeters;
@@ -134,7 +129,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
   /// Network is back: drop the grey OSM tiles so they refetch, and retry the
   /// road route once for the current device position + target. A failed retry
-  /// leaves the existing real geometry untouched.
+  /// leaves existing real-road geometry untouched.
   Future<void> _onConnectivityRecovered() async {
     if (!mounted) return;
     _recovery.resetTiles();
@@ -263,7 +258,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
       // Route Guidance: fetch the road route AFTER the map is usable -
       // OSRM latency must never delay opening Step 1. Best-effort only:
-      // on any failure the last real route and separate site distance remain.
+      // failures preserve cached geometry and direct mapped-point distance.
       unawaited(_fetchRouteAndUpdate(online: online));
     } catch (e) {
       if (!mounted) return;
@@ -308,8 +303,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     );
   }
 
-  /// Update the true GPS point and direct distance locally on each valid fix.
-  /// The road request has its own budget; GPS ticks never call a distance RPC.
+  /// True GPS and mapped-point distance update locally; no distance RPC.
   Future<void> _onPositionUpdate(Position pos) async {
     if (!mounted || _parcelLatLng == null) return;
     if (!_acceptFix(pos)) return;
@@ -339,8 +333,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
       timestamp: pos.timestamp,
       now: now,
     );
-    if (_gpsReliable &&
-        _routeRequestInFlight &&
+    if (_gpsReliable && _routeRequestInFlight &&
         _routeRequestedFrom != null &&
         sitePointDistance(_routeRequestedFrom!, newPos) > 50) {
       _routeRequestVersion++;
@@ -374,8 +367,9 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         : connectivityResult != ConnectivityResult.none;
   }
 
-  /// Every entry point goes through the same request budget. A recovery or retry
-  /// can request a refresh, but cannot bypass cooldown, GPS quality or backoff.
+  /// Post-paint route request (initial open, location retries, and controlled
+  /// movement refreshes). Road-route distance/ETA are navigation/orientation
+  /// aids only, independent of direct mapped-point distance and Step 2.
   Future<void> _fetchRouteAndUpdate({required bool online}) async {
     if (!online || _deviceLatLng == null || _parcelLatLng == null) return;
     await _fetchRoute(start: _deviceLatLng!, online: online);
@@ -401,6 +395,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         )) {
       return;
     }
+
     await _fetchRoute(start: currentPosition);
     if (!mounted) return;
     setState(() {});
@@ -436,9 +431,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         failed: false,
       );
 
-  /// One in flight, >=15s between attempts; failures back off 30/60/120s.
-  /// Disposed screens and responses overtaken by >50m of reliable movement
-  /// cannot replace either the current real geometry or its cached copy.
+  /// All entry points share guarded dispatch and 30/60/120s failure backoff.
   Future<void> _fetchRoute({required ll.LatLng start, bool? online}) async {
     if (!mounted || _parcelLatLng == null) return;
     if (!_gpsReliable || _routeRequestInFlight || _routeCooldown != null) {
@@ -465,7 +458,6 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         _providerCooldown = null;
       });
       _lastRouteAttempt = start;
-      // Connectivity/provider waits must not spend the HTTP dispatch budget.
       _deferRoute(_routeRefreshCooldown);
       final result = await RouteService.fetchDrivingRoute(
         start: start,
@@ -484,8 +476,8 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         _deferRoute(Duration(seconds: 30 * (1 << (_routeFailures - 1))));
         return;
       }
-      // Provider failures still consume backoff when their origin/fix becomes
-      // obsolete. Eligibility only gates acceptance of successful geometry.
+      // Failed obsolete attempts still back off; only successful acceptance
+      // depends on the latest origin and fix.
       if (requestVersion != _routeRequestVersion || !_gpsReliable) {
         _routeRefreshPending = true;
         return;
@@ -504,8 +496,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         if (mounted) setState(() => _routeEstimateExpired = true);
       });
       setState(() {});
-      // Serialize persistence with this request; a late cache write cannot
-      // overtake a later successful refresh. The already-painted map stays usable.
+      // Serialize writes so older persistence cannot overwrite newer geometry.
       await _persistRoute(result, start);
     } finally {
       _routeRequestInFlight = false;
@@ -541,8 +532,10 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
   /// Restores this task's previously cached real road route.
   ///
-  /// Read starts on open, but may finish after HTTP. A late read must never
-  /// replace a live route that was already accepted during this screen session.
+  /// Runs on every open, offline or not, BEFORE any network fetch. A fresh
+  /// online route fetched later simply overwrites both the displayed geometry
+  /// and the cache, so showing the cached copy first costs nothing and means an
+  /// offline open still draws genuine road geometry.
   Future<void> _restoreCachedRoute() async {
     try {
       final cached = await DBHelper.getRouteCache(widget.task.id);
@@ -568,6 +561,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     return SensitiveScreen(
       child: Scaffold(
         backgroundColor: InsightTheme.bg,
+        extendBodyBehindAppBar: true,
         body: SiteVerificationView(
           location: widget.task.location,
           ready: !_loading && _error == null,
@@ -579,7 +573,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
           routeDistanceMeters: _routeDistanceMeters,
           routeDurationSeconds: _routeDurationSeconds,
           routeEstimateStale: _routeEstimateStale,
-          nearSite: _arrived,
+          nearSite: _arrived && _gpsReliable,
           approachNotice: _approachEpisode && _gpsReliable,
           gpsReliable: _gpsReliable,
           hasDirectLinks: _directLinks.isNotEmpty,
@@ -612,9 +606,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
     InspectionProgress.instance.markStepComplete(1);
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => GpsVerificationScreen(task: widget.task),
-      ),
+      MaterialPageRoute(builder: (_) => GpsVerificationScreen(task: widget.task)),
     );
   }
 
@@ -629,121 +621,93 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         );
 
   Widget _buildMap() => FlutterMap(
-    mapController: _mapController,
-    options: siteMapOptions(
-      parcel: _parcelLatLng!,
-      device: _deviceLatLng,
-      route: _routePoints ?? const [],
-      padding: _mapPadding,
-    ),
-    children: [
-      TileLayer(
-        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        userAgentPackageName: 'com.imaps.fieldsync',
-        // Lets a recovered network evict the tiles that failed
-        // while offline and refetch them (see MapConnectivityRecovery).
-        reset: _recovery.tileResetStream,
-        evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
-      ),
-      const RosarioBoundaryOverlay(),
-      // Only ever real road geometry: a live OSRM route, or the
-      // same route restored from local cache while offline. There
-      // is deliberately NO synthetic fallback — a made-up line
-      // must not be drawn as if it were a road.
-      if (_routePoints != null)
-        Builder(
-          builder: (context) => IgnorePointer(
-            child: PolylineLayer(
-              polylines: [
-                Polyline(
-                  points: _routePoints!,
-                  strokeWidth: MapCamera.of(context).zoom < 16 ? 6 : 8,
-                  color: InsightTheme.blue1,
-                  borderStrokeWidth: 2,
-                  borderColor: Colors.white,
-                ),
-                for (final link in _directLinks)
-                  Polyline(
-                    points: link,
-                    pattern: const StrokePattern.dotted(spacingFactor: 1.8),
-                    strokeWidth: _approachEpisode && _gpsReliable ? 5 : 4,
-                    color: link.last == _parcelLatLng
-                        ? InsightTheme.red
-                        : InsightTheme.blueInk,
-                    borderStrokeWidth: 1,
-                    borderColor: Colors.white,
+                mapController: _mapController,
+                options: siteMapOptions(parcel: _parcelLatLng!, device: _deviceLatLng,
+                  route: _routePoints ?? const [], padding: _mapPadding),
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.imaps.fieldsync',
+                    // Lets a recovered network evict the tiles that failed
+                    // while offline and refetch them (see MapConnectivityRecovery).
+                    reset: _recovery.tileResetStream,
+                    evictErrorTileStrategy:
+                        EvictErrorTileStrategy.notVisibleRespectMargin,
                   ),
-              ],
-            ),
-          ),
-        ),
-      MarkerLayer(
-        markers: [
-          Marker(
-            point: _parcelLatLng!,
-            width: 32,
-            height: 32,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: InsightTheme.red,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 3),
-                    boxShadow: [
-                      BoxShadow(
-                        color: InsightTheme.red.withValues(alpha: 0.4),
-                        blurRadius: 8,
+                  const RosarioBoundaryOverlay(),
+                  // Only ever real road geometry: a live OSRM route, or the
+                  // same route restored from local cache while offline. There
+                  // is deliberately NO synthetic fallback — a made-up line
+                  // must not be drawn as if it were a road.
+                  if (_routePoints != null)
+                    Builder(builder: (context) => IgnorePointer(child: PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: _routePoints!,
+                          strokeWidth: MapCamera.of(context).zoom < 16 ? 6 : 8,
+                          color: InsightTheme.blue1,
+                          borderStrokeWidth: 2,
+                          borderColor: Colors.white,
+                        ),
+                        for (final link in _directLinks)
+                          Polyline(points: link,
+                            pattern: const StrokePattern.dotted(spacingFactor: 1.8),
+                            strokeWidth: _approachEpisode && _gpsReliable ? 5 : 4,
+                            color: link.last == _parcelLatLng ? InsightTheme.red : InsightTheme.blueInk,
+                            borderStrokeWidth: 1, borderColor: Colors.white),
+                      ],
+                    ))),
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: _parcelLatLng!,
+                        width: 32,
+                        height: 32,
+                        child: Stack(clipBehavior: Clip.none, children: [Container(
+                          decoration: BoxDecoration(
+                            color: InsightTheme.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                            boxShadow: [
+                              BoxShadow(
+                                color: InsightTheme.red.withValues(alpha: 0.4),
+                                blurRadius: 8,
+                              ),
+                            ],
+                          ),
+                        ), const Positioned(left: 38, top: 0,
+                          child: _MapMarkerLabel('Target site'))]),
                       ),
+                      if (_deviceLatLng != null)
+                        Marker(
+                          point: _deviceLatLng!,
+                          width: 34,
+                          height: 34,
+                          child: Stack(clipBehavior: Clip.none, children: [Container(
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blue1,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 3),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: InsightTheme.blue1.withValues(
+                                    alpha: 0.4,
+                                  ),
+                                  blurRadius: 10,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                          ), const Positioned(left: 17, bottom: 36,
+                            child: FractionalTranslation(translation: Offset(-0.5, 0),
+                              child: _MapMarkerLabel('You')))]),
+                        ),
                     ],
                   ),
-                ),
-                const Positioned(
-                  left: 38,
-                  top: 0,
-                  child: _MapMarkerLabel('Target site'),
-                ),
-              ],
-            ),
-          ),
-          if (_deviceLatLng != null)
-            Marker(
-              point: _deviceLatLng!,
-              width: 34,
-              height: 34,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: InsightTheme.blue1,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
-                      boxShadow: [
-                        BoxShadow(
-                          color: InsightTheme.blue1.withValues(alpha: 0.4),
-                          blurRadius: 10,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Positioned(
-                    left: 17,
-                    bottom: 36,
-                    child: FractionalTranslation(
-                      translation: Offset(-0.5, 0),
-                      child: _MapMarkerLabel('You'),
-                    ),
-                  ),
+                  // SiteVerificationView pins attribution above its one panel.
                 ],
-              ),
-            ),
-        ],
-      ),
-    ],
-  );
+               );
 }
 
 class _MapMarkerLabel extends StatelessWidget {
@@ -751,20 +715,22 @@ class _MapMarkerLabel extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) => IgnorePointer(
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: InsightTheme.line),
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: InsightTheme.line),
+        ),
+        child: Text(
+          label,
+          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink),
+        ),
       ),
-      child: Text(
-        label,
-        style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink),
-      ),
-    ),
-  );
+    );
+  }
 }
 
 class _ErrorState extends StatelessWidget {

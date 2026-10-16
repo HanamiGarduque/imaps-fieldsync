@@ -13,6 +13,12 @@ import 'supabase_service.dart';
 
 enum LocalOwnershipResult { current, foreign, legacyUnknown, mixed }
 
+typedef JobCacheRefresh = ({String owner, int sequence});
+typedef TaskPresentationSnapshot = ({
+  List<Map<String, dynamic>> jobs,
+  List<Map<String, dynamic>> submissions,
+});
+
 class DBHelper {
   static const inspectionDraftFindingsKey = '_draft_findings';
   /// Local-only fixtures explicitly supply an authenticated identity. Production
@@ -646,6 +652,14 @@ class DBHelper {
 
   // --- LOCAL JOBS CACHING ---
 
+  // Runtime-only ordering: no in-flight HTTP request survives a process restart.
+  static int _jobsRefreshSequence = 0;
+  static final Map<String, int> _appliedJobsRefresh = {};
+
+  /// Capture BEFORE starting the remote reads, across every cache consumer.
+  static JobCacheRefresh beginJobsRefresh() =>
+      (owner: requireInspector(), sequence: ++_jobsRefreshSequence);
+
   static Future<Set<String>> _pendingCompletionJobIds(
     DatabaseExecutor db,
   ) async {
@@ -823,11 +837,29 @@ class DBHelper {
     });
   }
 
-  static Future<void> cacheJobs(List<Map<String, dynamic>> jobs) async {
+  static Future<bool> cacheJobs(List<Map<String, dynamic>> jobs, {
+    JobCacheRefresh? refresh,
+  }) async {
     final uid = currentInspectorId;
-    if (uid == null || uid.isEmpty) return;
+    if (uid == null || uid.isEmpty) return false;
+    return _replaceCachedJobs(jobs, refresh ?? beginJobsRefresh());
+  }
+
+  static Future<bool> _replaceCachedJobs(
+    List<Map<String, dynamic>> jobs, JobCacheRefresh refresh,
+  ) async {
+    final uid = refresh.owner;
+    if (currentInspectorId != uid) return false;
     final db = await database;
-    await db.transaction((txn) async {
+    return db.transaction((txn) async {
+      // The database's own transaction lock serializes every commit, so the
+      // sequence comparison below and its success marker are one atomic turn:
+      // a failed or already-superseded snapshot can never advance ordering,
+      // and an older snapshot can never overwrite a newer successful one.
+      if (currentInspectorId != uid ||
+          refresh.sequence <= (_appliedJobsRefresh[uid] ?? 0)) {
+        return false;
+      }
       requireSameInspector(uid);
       final protectedIds = await _pendingCompletionJobIds(txn);
       final effectiveJobs = _projectPendingCompletions(jobs, protectedIds);
@@ -892,12 +924,43 @@ class DBHelper {
       }
       await batch.commit(noResult: true);
       requireSameInspector(uid);
+      // Only a commit that actually reached the store advances ordering.
+      _appliedJobsRefresh[uid] = refresh.sequence;
+      return true;
     });
   }
 
   static Future<List<Map<String, dynamic>>> getCachedJobs() async {
+    final uid = currentInspectorId;
+    if (uid == null || uid.isEmpty) return [];
     final db = await database;
-    return await db.query('local_jobs', where: 'inspector_id = ?', whereArgs: [currentInspectorId]);
+    requireSameInspector(uid);
+    final rows = await db.query('local_jobs', where: 'inspector_id = ?', whereArgs: [uid]);
+    requireSameInspector(uid);
+    return rows;
+  }
+
+  /// Read-only My Tasks projection input. Jobs and final intent must be from
+  /// one SQLite snapshot, so a concurrent acknowledgement cannot briefly move
+  /// a submitted round back to Ongoing. No lifecycle/evidence row is written.
+  static Future<TaskPresentationSnapshot> getTaskPresentationSnapshot() async {
+    final uid = currentInspectorId;
+    if (uid == null || uid.isEmpty) {
+      return (jobs: <Map<String, dynamic>>[], submissions: <Map<String, dynamic>>[]);
+    }
+    final db = await database;
+    return db.transaction((txn) async {
+      requireSameInspector(uid);
+      final jobs = await txn.query('local_jobs',
+          where: 'inspector_id = ?', whereArgs: [uid]);
+      final submissions = await txn.query('pending_actions',
+          where: "type = 'submit_inspection' AND inspector_id = ?",
+          whereArgs: [uid],
+          // Any unacknowledged legacy duplicate takes precedence over a receipt.
+          orderBy: "CASE WHEN status = 'synced' THEN 1 ELSE 0 END, created_at DESC, rowid DESC");
+      requireSameInspector(uid);
+      return (jobs: jobs, submissions: submissions);
+    });
   }
 
   // --- ROAD-ROUTE CACHE (local navigation support; never synced) ---------

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>Assignment refresh needs attention</title>
+  <path d="M6.5 18C3.7 18 2 16.2 2 13.8C2 11.5 3.6 9.7 5.8 9.4C6.5 6.2 9.2 4 12.4 4C16 4 18.8 6.6 19.1 10.1C20.9 10.6 22 12.1 22 14C22 16.2 20.2 18 18 18Z" fill="#92400E" fill-opacity=".08" stroke="#92400E" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="17.5" cy="17.5" r="5.5" fill="#FFF"/>
+  <circle cx="17.5" cy="17.5" r="4.5" stroke="#92400E" stroke-width="1.7"/>
+  <path d="M17.5 15.3V17.8" stroke="#92400E" stroke-width="1.7" stroke-linecap="round"/>
+  <circle cx="17.5" cy="19.7" r=".8" fill="#92400E"/>
+</svg>

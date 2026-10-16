@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 import 'package:url_launcher/url_launcher.dart'; 
 
 import '../../../core/models/user_profile.dart';
+import '../../../core/models/task_submission.dart';
 import '../../../core/models/planning_review_metadata.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
+import '../../../core/services/sync_outbox_service.dart';
 
 import '../../../core/navigation/parcel_detail_screen.dart';
 import '../../inspection/screens/completed_inspection_detail_screen.dart';
@@ -15,6 +20,9 @@ import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/offline_banner.dart';
+import '../../../core/widgets/app_feedback.dart';
+import '../../../core/widgets/task_sync_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 
@@ -464,9 +472,40 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   bool _pendingScrollToScheduled = false;
 
   List<TaskItem> _allTasks = [];
+  Map<String, TaskSubmission> _submissions = {};
+  Map<String, Map<String, dynamic>> _remoteJobs = {};
   final Set<String> _diagnosedUnknownTaskIds = <String>{};
   bool _isLoading = true;
   String? _errorMessage;
+
+  /// Only the newest load may write to this screen. A superseded request (or a
+  /// late answer to one) is discarded instead of overwriting newer state.
+  int _loadRequestId = 0;
+
+  /// Set while locally saved tasks are on screen and the remote refresh did
+  /// not complete, so the screen says what it is showing.
+  String? _savedDataNotice;
+  TaskRefreshPhase _taskRefreshPhase = TaskRefreshPhase.checking;
+  DateTime? _lastTaskRefreshAt;
+
+  /// The authenticated owner whose rows this page is currently showing.
+  ///
+  /// A genuine account change retires them instead of repurposing this
+  /// still-mounted page for the next inspector; the previous owner's durable
+  /// local evidence is never deleted by that.
+  String? _tasksOwner;
+
+  StreamSubscription<AuthState>? _authSubscription;
+
+  /// Bounded remote refresh: long enough for a slow but real network, short
+  /// enough that a dead one cannot hold the screen. Matches the service
+  /// layer's own 10 s bound.
+  static const Duration _refreshTimeout = Duration(seconds: 10);
+
+  /// Honest terminal messages for the case where nothing is known locally and
+  /// no refresh succeeded. A raw exception is never shown, and "nothing yet"
+  /// is never presented as "no work". The shared notice constants own the
+  /// wording so Home and My Tasks cannot drift apart.
 
   @override
   void initState() {
@@ -474,6 +513,11 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     _currentTabIndex = widget.scrollToScheduled ? TasksScreen.tabPending : widget.initialTabIndex;
     PaintingBinding.instance.systemFonts.addListener(_onFontsChanged);
     _pendingScrollToScheduled = widget.scrollToScheduled;
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange
+        .listen((_) => _retireIfOwnerChanged(),
+            onError: (Object _) => _retireIfOwnerChanged());
+    SyncOutboxService.drainCompleted.addListener(_refreshSubmissionState);
+    SyncOutboxService.progress.addListener(_refreshSubmissionState);
     _loadTasks();
     _searchController.addListener(() {
       setState(() {
@@ -484,13 +528,99 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
 
   @override
   void dispose() {
+    SyncOutboxService.drainCompleted.removeListener(_refreshSubmissionState);
+    SyncOutboxService.progress.removeListener(_refreshSubmissionState);
+    _authSubscription?.cancel();
     _searchController.dispose();
     PaintingBinding.instance.systemFonts.removeListener(_onFontsChanged);
     disposeSpringEntrance();
     super.dispose();
   }
 
+  /// A real account change invalidates what this mounted page is showing: the
+  /// previous inspector's rows are retired from the display (their durable
+  /// local rows are left exactly as they are) and any navigation bound before
+  /// the change is refused instead of opening another inspector's task.
+  void _retireIfOwnerChanged() {
+    if (!mounted) return;
+    final current = DBHelper.currentInspectorId;
+    if (current != null && current == _tasksOwner) return;
+    if (_tasksOwner == null && _allTasks.isEmpty && _savedDataNotice == null) {
+      return;
+    }
+    setState(() {
+      _loadRequestId++; // Retire every pending UI result with its owner.
+      _tasksOwner = null;
+      _allTasks = [];
+      _submissions = {};
+      _remoteJobs = {};
+      _isLoading = false;
+      _errorMessage = null;
+      _savedDataNotice = SavedDataNotice.ownerChanged;
+      _taskRefreshPhase = TaskRefreshPhase.ownerChanged;
+      _lastTaskRefreshAt = null;
+    });
+    ScaffoldMessenger.maybeOf(context)?.removeCurrentSnackBar();
+    AppFeedback.dismiss();
+  }
+
   void _onFontsChanged() { if (mounted) setState(() {}); }
+
+  String _displayCategory(TaskItem task) => _submissions.containsKey(task.id)
+      ? 'Completed' : task.category;
+
+  Map<String, TaskSubmission> _parseSubmissions(TaskPresentationSnapshot snapshot) {
+    final result = <String, TaskSubmission>{};
+    final jobs = {for (final row in snapshot.jobs) row['id']: row};
+    for (final row in snapshot.submissions) {
+      final job = jobs[row['job_id']];
+      if (job == null || result.containsKey(row['job_id'])) continue;
+      // Accepted lifecycle survives capped/obsolete delivery history. Only an
+      // outstanding submission (including rework) needs a separate projection.
+      if (row['status'] == 'synced' &&
+          mapTaskStatusToLifecycle(job['status'] as String?) == TaskLifecycleCategory.completed) {
+        continue;
+      }
+      final submission = TaskSubmission.fromRow(row);
+      result[submission.jobId] = submission;
+    }
+    return result;
+  }
+
+  List<TaskItem> _snapshotTasks(TaskPresentationSnapshot snapshot) => [
+    for (final row in snapshot.jobs)
+      if (_remoteJobs[row['id']] case final remote?)
+        TaskItem.fromJob({...remote, 'status': row['status']})
+      else TaskItem.fromCachedJob(row),
+  ];
+
+  /// Sync notifications refresh SQLite presentation only, never start another
+  /// HTTP refresh or infer success from an in-memory progress notification.
+  Future<void> _refreshSubmissionState() async {
+    final owner = _tasksOwner;
+    final requestId = _loadRequestId;
+    if (owner == null || owner != DBHelper.currentInspectorId) return;
+    try {
+      final snapshot = await DBHelper.getTaskPresentationSnapshot();
+      final submissions = _parseSubmissions(snapshot);
+      if (!mounted || requestId != _loadRequestId) return;
+      if (owner != DBHelper.currentInspectorId) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      setState(() {
+        _allTasks = _snapshotTasks(snapshot);
+        _submissions = submissions;
+      });
+    } catch (_) {
+      if (mounted && requestId == _loadRequestId && owner == DBHelper.currentInspectorId) {
+        setState(() {
+          _savedDataNotice = SavedDataNotice.cacheReadFailed;
+          _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+        });
+      }
+    }
+  }
 
   /// Runs once after the first frame where the Scheduled section actually
   /// has content to scroll to — skips silently (and un-arms itself) if the
@@ -522,10 +652,11 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         padding: const EdgeInsets.only(bottom: 8),
         child: UpdatingTile(
           itemKey: task.id,
-          signature: Object.hash(task.status, task.scheduledDate, task.deadlineDate),
+          signature: Object.hash(task.status, task.scheduledDate, task.deadlineDate, _submissions[task.id]?.state),
           child: _CompactTaskCard(
             key: ValueKey(task.id),
             task: task,
+            submission: _submissions[task.id],
             onTapDetail: () => _openTask(context, task),
             onScheduled: _loadTasks,
           ),
@@ -534,54 +665,221 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     );
   }
 
-  Future<void> _loadTasks() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  /// Connectivity is advisory only: it chooses the wording of the notice and
+  /// never decides what is rendered. The read is bounded, so a hanging
+  /// platform call cannot hold the screen, and an unknown answer counts as
+  /// not-online so a real backend failure is never relabelled as offline.
+  Future<bool> _hasConnectivity() async {
     try {
-      final dynamic connectivityResult = await Connectivity().checkConnectivity();
-      final bool hasConnection = (connectivityResult is ConnectivityResult) 
-          ? connectivityResult != ConnectivityResult.none
-          : (connectivityResult as List).any((status) => status != ConnectivityResult.none);
-
-      if (hasConnection) {
-        final jobs = await SupabaseService.fetchMyJobs();
-        await DBHelper.cacheJobs(jobs);
-        if (mounted) {
-          setState(() {
-            _allTasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
-            _isLoading = false;
-          });
-          _maybeScrollToScheduledSection();
-        }
-      } else {
-        final localJobs = await DBHelper.getCachedJobs();
-        if (mounted) {
-          setState(() {
-            _allTasks = localJobs.map(TaskItem.fromCachedJob).toList();
-            _isLoading = false;
-          });
-          _maybeScrollToScheduledSection();
-        }
+      final dynamic result = await Connectivity()
+          .checkConnectivity()
+          .timeout(const Duration(milliseconds: 500));
+      if (result is ConnectivityResult) {
+        return result != ConnectivityResult.none;
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Failed to load tasks: $e';
-          _isLoading = false;
-        });
+      if (result is List) {
+        return result.any((status) => status != ConnectivityResult.none);
       }
+      return false;
+    } catch (_) {
+      return false;
     }
   }
 
+  /// Cache first, refresh second.
+  ///
+  /// 1. The owner-scoped cache is rendered immediately and is never gated on a
+  ///    connectivity indication, so a weak, captive or dead network cannot turn
+  ///    into an indefinite spinner while legitimate work sits unread. The moment
+  ///    saved rows are shown they are identified as saved data.
+  /// 2. The remote refresh is bounded, its commit is ordered per owner across
+  ///    every screen, and no failed, timed-out or superseded answer can erase
+  ///    valid cached work.
+  /// 3. Reading the local store is as fallible as any other platform call: a
+  ///    damaged or unavailable store reaches a recoverable screen state instead
+  ///    of an unhandled future or a stuck spinner, and never deletes the row.
+  Future<void> _loadTasks() async {
+    final requestId = ++_loadRequestId;
+    final owner = DBHelper.currentInspectorId;
+    setState(() => _taskRefreshPhase = TaskRefreshPhase.checking);
+
+    List<Map<String, dynamic>> cached = const [];
+    Map<String, TaskSubmission> submissions = {};
+    var cacheFailed = false;
+    if (owner != null && owner.isNotEmpty) {
+      try {
+        final snapshot = await DBHelper.getTaskPresentationSnapshot();
+        submissions = _parseSubmissions(snapshot);
+        cached = snapshot.jobs;
+      } catch (e) {
+        debugPrint('[TASKS] saved task read failed (${e.runtimeType}).');
+        cacheFailed = true;
+      }
+    }
+    List<TaskItem>? parsed;
+    if (cached.isNotEmpty) {
+      try {
+        parsed = cached.map(TaskItem.fromCachedJob).toList();
+      } catch (e) {
+        debugPrint('[TASKS] saved task rows unreadable: $e');
+        cacheFailed = true;
+      }
+    }
+    if (!mounted || requestId != _loadRequestId) return;
+
+    setState(() {
+      if (parsed != null) {
+        _allTasks = parsed;
+        _submissions = submissions;
+        _isLoading = false;
+        _errorMessage = null;
+        // Identified as saved from the first frame it is shown, not only once
+        // the refresh has finished or failed.
+        _savedDataNotice = SavedDataNotice.refreshing;
+      } else if (cacheFailed) {
+        _isLoading = false;
+        _errorMessage = SavedDataNotice.cacheReadFailed;
+        _savedDataNotice = null;
+        _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+      } else if (_allTasks.isEmpty) {
+        // Nothing is known yet, so "loading" is the only honest state.
+        _isLoading = true;
+        _errorMessage = null;
+      }
+    });
+    if (parsed != null) _maybeScrollToScheduledSection();
+
+    // The owner is recorded before any read: rows rendered from the cache
+    // while offline still belong to this inspector and stay openable.
+    if (owner != null && owner.isNotEmpty) {
+      _tasksOwner = owner;
+    }
+
+    if (!await _hasConnectivity()) {
+      if (!mounted || requestId != _loadRequestId) return;
+      setState(() {
+        _isLoading = false;
+        _taskRefreshPhase = cacheFailed && parsed == null
+            ? TaskRefreshPhase.cacheUnavailable : TaskRefreshPhase.offline;
+        if (parsed != null) {
+          _savedDataNotice = SavedDataNotice.offline;
+        } else if (cacheFailed) {
+          _savedDataNotice = null;
+          _errorMessage = SavedDataNotice.cacheReadFailed;
+        } else if (_allTasks.isEmpty) {
+          _savedDataNotice = null;
+          _errorMessage = SavedDataNotice.noCacheOffline;
+        }
+      });
+      return;
+    }
+
+    if (owner == null || owner.isEmpty) {
+      // No authenticated owner: nothing may be fetched, written, or shown.
+      if (!mounted || requestId != _loadRequestId) return;
+      setState(() {
+        _isLoading = false;
+        _allTasks = [];
+        _errorMessage = null;
+        _savedDataNotice = SavedDataNotice.ownerChanged;
+        _taskRefreshPhase = TaskRefreshPhase.ownerChanged;
+        _lastTaskRefreshAt = null;
+      });
+      return;
+    }
+    // Captured before the remote read, so the shared commit boundary can reject
+    // a snapshot that another screen or a later load has already superseded.
+    final refresh = DBHelper.beginJobsRefresh();
+    try {
+      final jobs =
+          await SupabaseService.fetchMyJobs().timeout(_refreshTimeout);
+      if (!mounted || requestId != _loadRequestId) return;
+      // An answer that arrives after the device changed accounts belongs to
+      // the previous account: it is never rendered and never cached.
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      final applied = await DBHelper.cacheJobs(jobs, refresh: refresh);
+      if (!mounted || requestId != _loadRequestId) return;
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      if (!applied) {
+        // A newer snapshot already reached this device, so this answer is
+        // never presented as the current picture.
+        setState(() {
+          _savedDataNotice = SavedDataNotice.saved;
+          _taskRefreshPhase = TaskRefreshPhase.saved;
+          _isLoading = false;
+        });
+        return;
+      }
+      final snapshot = await DBHelper.getTaskPresentationSnapshot();
+      final refreshedSubmissions = _parseSubmissions(snapshot);
+      if (!mounted || requestId != _loadRequestId) return;
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      setState(() {
+        _remoteJobs = {for (final job in jobs) job['id'] as String: job};
+        _allTasks = _snapshotTasks(snapshot);
+        _submissions = refreshedSubmissions;
+        _isLoading = false;
+        _errorMessage = null;
+        _savedDataNotice = null;
+        _taskRefreshPhase = TaskRefreshPhase.fresh;
+        _lastTaskRefreshAt = DateTime.now();
+      });
+      _maybeScrollToScheduledSection();
+    } catch (e) {
+      // Diagnostics stay in the log; the inspector gets a plain state.
+      debugPrint('[TASKS] assignment refresh failed: $e');
+      if (!mounted || requestId != _loadRequestId) return;
+      setState(() {
+        _isLoading = false;
+        _taskRefreshPhase = cacheFailed && parsed == null
+            ? TaskRefreshPhase.cacheUnavailable : TaskRefreshPhase.failed;
+        if (parsed != null || _allTasks.isNotEmpty) {
+          _savedDataNotice = SavedDataNotice.refreshFailed;
+        } else {
+          _savedDataNotice = null;
+          _errorMessage = cacheFailed
+              ? SavedDataNotice.cacheReadFailed
+              : SavedDataNotice.noCacheFailure;
+        }
+      });
+    }
+  }
+
+  void _retryTaskRefresh() {
+    if (!mounted) return;
+    if (_tasksOwner == null || _tasksOwner != DBHelper.currentInspectorId) {
+      _retireIfOwnerChanged();
+      return;
+    }
+    _loadTasks();
+  }
+
   void _openTask(BuildContext context, TaskItem task) async {
+    // A callback bound before an account change must not open another
+    // inspector's task from this page.
+    final current = DBHelper.currentInspectorId;
+    if (!mounted || current == null || current != _tasksOwner) {
+      _retireIfOwnerChanged();
+      return;
+    }
     HapticFeedback.selectionClick();
-    if (task.category == 'Completed') {
+    if (_displayCategory(task) == 'Completed') {
       final historical = task.planningReview?.decision == 'Requires Reinspection' ||
           _allTasks.any((round) => task.sameApplicationAs(round) &&
             round.previousSiteInspectionId == task.localInspectionId && task.localInspectionId != null);
-      await Navigator.push(context, MaterialPageRoute(builder: (_) => CompletedInspectionDetailScreen(task: task, historicalReadOnly: historical)));
+      final submission = _submissions[task.id];
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => CompletedInspectionDetailScreen(
+        task: task, historicalReadOnly: historical,
+        submission: submission?.isSynced == true && task.category == 'Completed' ? null : submission)));
     } else {
       await Navigator.push(context, MaterialPageRoute(builder: (_) => ParcelDetailScreen(task: task,
         relatedRounds: _allTasks.where(task.sameApplicationAs).toList())));
@@ -969,7 +1267,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         if (!task.location.toLowerCase().contains(_selectedBarangay.toLowerCase())) continue;
       }
       if (_urgencyFilter != 'All') {
-        final bool isCompleted = task.category == 'Completed';
+        final bool isCompleted = _displayCategory(task) == 'Completed';
         bool matches;
         switch (_urgencyFilter) {
           case 'Urgent':
@@ -1000,7 +1298,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
           }
         } catch (_) {}
       }
-      map[task.category]!.add(task);
+      map[_displayCategory(task)]!.add(task);
     }
 
     for (final category in map.keys) {
@@ -1048,7 +1346,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
               borderRadius: BorderRadius.circular(14),
             ),
             child: LayoutBuilder(builder: (context, constraints) {
-              return SingleChildScrollView(scrollDirection: Axis.horizontal, child: ConstrainedBox(
+              return SingleChildScrollView(scrollDirection: Axis.horizontal,
+                reverse: _currentTabIndex == TasksScreen.tabCompleted, child: ConstrainedBox(
                 constraints: BoxConstraints(minWidth: constraints.maxWidth),
                 child: IntrinsicWidth(child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1106,9 +1405,11 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     final counterWidth = countSize.width.clamp(assignedSize.width, double.infinity) + 32;
     final availableWidth = MediaQuery.sizeOf(context).width - MediaQuery.paddingOf(context).horizontal - 40;
     final naturalTitleWidth = measureHeader('My Tasks', titleStyle).width;
-    final stackedHeader = naturalTitleWidth + counterWidth + 12 > availableWidth;
+    const statusWidth = 48.0 + 8;
+    final stackedHeader = naturalTitleWidth + statusWidth + counterWidth + 12 > availableWidth;
     final titleWidth = stackedHeader ? availableWidth : availableWidth - counterWidth - 12;
-    final titleHeight = measureHeader('My Tasks', titleStyle, width: titleWidth).height;
+    final titleHeight = measureHeader('My Tasks', titleStyle, width: titleWidth - statusWidth)
+        .height.clamp(48.0, double.infinity);
     final counterHeight = countSize.height + assignedSize.height + 22;
     final headerHeight = (12 + (stackedHeader ? titleHeight + counterHeight + 8
         : titleHeight.clamp(counterHeight, double.infinity))).ceilToDouble().clamp(kToolbarHeight, double.infinity);
@@ -1159,7 +1460,17 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: stackedHeader ? CrossAxisAlignment.start : CrossAxisAlignment.center,
             children: [
-              SizedBox(width: titleWidth, child: Text('My Tasks', style: titleStyle)),
+              SizedBox(width: titleWidth, child: Row(children: [
+                Flexible(child: Text('My Tasks', style: titleStyle)),
+                const SizedBox(width: 8),
+                TaskSyncIndicator(
+                  key: const ValueKey('task-sync-indicator'),
+                  phase: _taskRefreshPhase,
+                  hasSavedTasks: _allTasks.isNotEmpty,
+                  lastChecked: _lastTaskRefreshAt,
+                  onRetry: _retryTaskRefresh,
+                ),
+              ])),
               SizedBox(width: stackedHeader ? 0 : 12, height: stackedHeader ? 8 : 0),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1199,7 +1510,18 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
-                      child: Text(_errorMessage!, textAlign: TextAlign.center, style: InsightTheme.inter(14)),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_errorMessage!, textAlign: TextAlign.center, style: InsightTheme.inter(14)),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: _loadTasks,
+                            style: TextButton.styleFrom(minimumSize: const Size(88, 44)),
+                            child: Text('Retry', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.blue1)),
+                          ),
+                        ],
+                      ),
                     ),
                   )
                 : RefreshIndicator(
@@ -1215,6 +1537,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                // Session recovery is not a saved-task banner.
+                                if (_savedDataNotice == SavedDataNotice.ownerChanged)
+                                  SavedDataNotice(message: _savedDataNotice!),
                                 // SEARCH & FILTER COMPONENT
                                 SpringSlide(
                                   animation: springFor(1),
@@ -1603,10 +1928,11 @@ class _SegmentTab extends StatelessWidget {
 
 class _CompactTaskCard extends StatefulWidget {
   final TaskItem task;
+  final TaskSubmission? submission;
   final VoidCallback onTapDetail;
   final VoidCallback? onScheduled;
 
-  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled});
+  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled, this.submission});
 
   @override
   State<_CompactTaskCard> createState() => _CompactTaskCardState();
@@ -1614,6 +1940,9 @@ class _CompactTaskCard extends StatefulWidget {
 
 class _CompactTaskCardState extends State<_CompactTaskCard> {
   bool _isExpanded = false;
+  String get _displayCategory => widget.submission != null ? 'Completed' : widget.task.category;
+  bool get _awaitingAcceptance => widget.submission != null &&
+      (!widget.submission!.isSynced || widget.task.category != 'Completed');
 
   String _getInitials(String name) {
     List<String> parts = name.trim().split(RegExp(r'\s+'));
@@ -1623,7 +1952,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   }
   
   Color _getStatusColor() {
-    final cat = widget.task.category;
+    final cat = _displayCategory;
+    if (_awaitingAcceptance) return InsightTheme.orangeInk;
     if (cat == 'Completed') return InsightTheme.green;
     if (widget.task.pendingSection == PendingTaskSection.scheduled) {
       final scheduledDate = widget.task.scheduledDate;
@@ -1645,7 +1975,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Future<void> _showContextualInfo() async {
     final task = widget.task;
     final indicators = <MapEntry<String, String>>[];
-    final isCompleted = task.category == 'Completed';
+    final isCompleted = _displayCategory == 'Completed';
     final isScheduled =
         task.pendingSection == PendingTaskSection.scheduled;
     final visitRowVisible = isScheduled && task.scheduledDate.isNotEmpty;
@@ -1674,7 +2004,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         visitDiff <= 3;
 
     if (isCompleted) {
-      indicators.add(const MapEntry('Completed', 'This inspection has been finished and submitted. No further action is normally required.'));
+      indicators.add(_awaitingAcceptance
+          ? const MapEntry('Completed on Device', 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.')
+          : const MapEntry('Completed — Synced', 'The server has confirmed this inspection.'));
       if (task.reworkStartedAt != null) {
         indicators.add(const MapEntry('Modified', 'This completed inspection was changed after it was submitted. The Modified label lets you know that the original submitted information was edited.'));
       }
@@ -1777,8 +2109,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   // with a clipboard fallback if no app is available to handle it at all.
   Future<void> _missingContact(String what) async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('No $what on file for this applicant.')),
+    AppFeedback.show(
+      context,
+      message: 'No $what on file for this applicant.',
     );
   }
 
@@ -1791,8 +2124,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       if (!mounted) return;
       await Clipboard.setData(ClipboardData(text: value));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No $label app found — $value copied to clipboard.')),
+      AppFeedback.show(
+        context,
+        message: 'No $label app found — $value copied to clipboard.',
+        icon: Icons.content_copy_rounded,
       );
 
     }
@@ -1987,22 +2322,22 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
 
   @override
   Widget build(BuildContext context) {
-    final String taskCategory = widget.task.category;
+    final String taskCategory = _displayCategory;
     final bool isOverdue = taskCategory != 'Completed' && widget.task.scheduleUrgency == 'Overdue';
     final statusColor = isOverdue ? InsightTheme.red : _getStatusColor();
     final bool showInProgress =
         widget.task.pendingSection == PendingTaskSection.scheduled &&
         widget.task.currentStep >= 1 &&
         widget.task.currentStep <= 5;
-    final int stepValue = (widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
+    final int stepValue = (taskCategory == 'Completed' ? 6 : widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
         .clamp(0, InspectionProgress.totalSteps);
-    final bool canSchedule = widget.task.category != 'Completed';
+    final bool canSchedule = taskCategory != 'Completed';
 
     Color borderColor;
     if (isOverdue) {
       borderColor = InsightTheme.red;
     } else if (taskCategory == 'Completed') {
-      borderColor = InsightTheme.green;
+      borderColor = statusColor;
     } else if (widget.task.pendingSection == PendingTaskSection.scheduled) {
       if (widget.task.isUrgentDeadline) {
         borderColor = InsightTheme.red;
@@ -2073,7 +2408,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           ),
                           child: Text(_getInitials(widget.task.name), style: InsightTheme.poppins(13, w: FontWeight.w800, c: statusColor)),
                         ),
-                        if (widget.task.category == 'Ongoing')
+                        if (taskCategory == 'Ongoing')
                           Positioned(
                             top: -2, right: -2,
                             child: Container(
@@ -2156,7 +2491,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           // subsection of Pending. Ongoing and Completed tasks
                           // may retain schedule metadata, but scheduling never
                           // overrides their lifecycle category.
-                          if (widget.task.pendingSection ==
+                          if (taskCategory == 'Pending' && widget.task.pendingSection ==
                                   PendingTaskSection.scheduled &&
                               widget.task.scheduledDate.isNotEmpty) ...[
                             const SizedBox(height: 5),
@@ -2174,7 +2509,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               ],
                             ),
                           ],
-                          if (widget.task.category != 'Completed' && widget.task.deadlineDate != null && widget.task.deadlineDate!.isNotEmpty) ...[
+                          if (taskCategory != 'Completed' && widget.task.deadlineDate != null && widget.task.deadlineDate!.isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Row(
                               children: [
@@ -2222,6 +2557,13 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             spacing: 6,
                             runSpacing: 6,
                             children: [
+                              if (taskCategory == 'Completed')
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                  decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                                  child: Text(widget.submission?.badge(canonicalCompleted: widget.task.category == 'Completed') ?? 'Completed — Synced',
+                                    style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor)),
+                                ),
                               // NOTE: no standalone "Scheduled" pill — it was
                               // redundant inside the Pending tab's Scheduled
                               // section (the section header + orange border +
@@ -2300,7 +2642,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // read as a rendering bug. Non-identical
                               // labels ("Due today" vs "Deadline tomorrow")
                               // still both render.
-                              if (widget.task.category != 'Completed' &&
+                              if (taskCategory != 'Completed' &&
                                   widget.task.scheduleUrgency != null &&
                                   widget.task.scheduleUrgency != 'Overdue' &&
                                   widget.task.forReschedule == null)
@@ -2322,7 +2664,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                     ],
                                   ),
                                 ),
-                              if (widget.task.category != 'Completed' && widget.task.scheduleUrgency == 'Overdue')
+                              if (taskCategory != 'Completed' && widget.task.scheduleUrgency == 'Overdue')
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(

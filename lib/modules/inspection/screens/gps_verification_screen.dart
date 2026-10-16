@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 
 import '../services/location_service.dart';
+import '../services/site_route_guidance.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../providers/inspection_provider.dart';
@@ -24,6 +26,7 @@ import '../inspection_constants.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/field_form_widgets.dart';
+import '../../../core/widgets/app_feedback.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// Vertical room the alignment tip needs below the dial: the 14px gap plus its
@@ -52,15 +55,34 @@ double fitCompassDiameter({
       .toDouble();
 }
 
+/// How long Step 2 waits for its first fix before surfacing the Retry state.
+const Duration kGpsInitialFixTimeout = Duration(seconds: 15);
+
+/// Bounded live-tracking recovery: at most this many re-subscribes (with a
+/// 3/6/12 s backoff), never endless polling. Foregrounding the app or
+/// tapping Reconnect GPS re-arms the budget.
+const int kGpsStreamRestartLimit = 3;
+
+/// Allow a short grace period beyond fix expiry before restarting a silent stream.
+const Duration kGpsStreamSilenceTimeout = Duration(seconds: 20);
+
+/// Cadence for re-evaluating the freshness gate while a fix ages in place.
+const Duration kGpsStaleTickerInterval = Duration(seconds: 1);
+
 class GpsVerificationScreen extends StatefulWidget {
   final TaskItem task;
-  const GpsVerificationScreen({super.key, required this.task});
+
+  /// Test seam: overrides the freshness clock. Defaults to [DateTime.now].
+  final DateTime Function()? clock;
+
+  const GpsVerificationScreen({super.key, required this.task, this.clock});
 
   @override
   State<GpsVerificationScreen> createState() => _GpsVerificationScreenState();
 }
 
-class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
+class _GpsVerificationScreenState extends State<GpsVerificationScreen>
+    with WidgetsBindingObserver {
   bool _loading = true;
   bool _submitting = false;
   String? _error;
@@ -74,14 +96,65 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   bool _isLive = false;
   bool _recomputing = false;
   bool _distanceIsLocal = false;
+  DateTime? _fixAt;
+
+  Timer? _staleTicker;
+  Timer? _streamRetryTimer;
+  Timer? _streamWatchdog;
+  int _streamRestarts = 0;
+  bool _trackingStopped = false;
+  bool _errorIsLocation = false;
+  bool _foreground = true;
+  bool _routeCovered = false;
 
   StreamSubscription<CompassEvent>? _compassSub;
   double? _heading;
   bool _compassUnavailable = false;
 
+  DateTime _now() => (widget.clock ?? DateTime.now)();
+
+  bool get _hasFix =>
+      _latitude != null && _longitude != null && _accuracy != null && _fixAt != null;
+
+  Duration get _fixAge =>
+      _fixAt == null ? Duration.zero : _now().difference(_fixAt!);
+
+  bool get _accuracyWithinGate =>
+      _accuracy != null &&
+      _accuracy!.isFinite &&
+      _accuracy! > 0 &&
+      _accuracy! <= kReliableFixMaxAccuracyMeters;
+
+  bool get _fixAgeAccepted =>
+      _fixAt != null &&
+      _fixAge >= -kReliableFixFutureSkew &&
+      _fixAge <= kReliableFixMaxAge;
+
+  /// Confirm-readiness: one accepted fix, accurate to ≤ 25 m, at most 15 s
+  /// old, inside the preserved inclusive ≤ 30 m site distance.
   bool get _verified =>
       _distance != null &&
-      _distance! <= siteVerificationDistanceThresholdMeters;
+      _distance! <= siteVerificationDistanceThresholdMeters &&
+      _hasFix &&
+      reliableSiteFix(accuracyMeters: _accuracy!, timestamp: _fixAt!, now: _now());
+
+  /// The visible GPS state. 'Unavailable' also covers live tracking that
+  /// stopped without leaving a usable fix behind.
+  String get _gpsStatusText {
+    if (!_hasFix) return _trackingStopped ? 'Unavailable' : 'Acquiring';
+    if (!_accuracyWithinGate) return 'Inaccurate';
+    if (!_fixAgeAccepted) return 'Outdated';
+    if (!_verified) return 'Outside zone';
+    return 'Ready to confirm';
+  }
+
+  String get _confirmHelperText {
+    if (_trackingStopped) return 'GPS updates stopped. Reconnect to continue.';
+    if (!_hasFix) return 'Acquiring a GPS fix...';
+    if (!_accuracyWithinGate) return 'Move to an open area — accuracy must be ≤ 25 m.';
+    if (!_fixAgeAccepted) return 'Waiting for a fresh GPS fix...';
+    return 'Move within 30 m of the site to confirm.';
+  }
 
   static const _cardinals = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
   String get _headingCardinal {
@@ -92,15 +165,47 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkLocation();
     _startCompass();
+    _startStaleTicker();
+  }
+
+  void _startStaleTicker() {
+    _staleTicker?.cancel();
+    if (!_foreground || _routeCovered) return;
+    _staleTicker = Timer.periodic(kGpsStaleTickerInterval, (_) {
+      if (!mounted || _latitude == null) return;
+      setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _staleTicker?.cancel();
+    _streamRetryTimer?.cancel();
+    _streamWatchdog?.cancel();
     _positionSub?.cancel();
     _compassSub?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (!_foreground) {
+      _staleTicker?.cancel();
+      _streamRetryTimer?.cancel();
+      _streamRetryTimer = null;
+      _stopLiveTracking();
+      return;
+    }
+    _startStaleTicker();
+    // A subscription can appear live after Android suspended its deliveries.
+    // Replace it once on resume rather than waiting for a platform error.
+    _stopLiveTracking();
+    if (!_loading && !_routeCovered) _reconnectGps();
   }
 
   void _startCompass() {
@@ -116,22 +221,25 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
   }
 
   Future<void> _checkLocation() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _errorIsLocation = false; });
     try {
       if (widget.task.parcelId == null) throw Exception('No parcel linked.');
-      final pos = await LocationService.getCurrentLocation();
+      final pos = await _acquireInitialFix();
+      // A rejected delivery is never shown and never measured: distance,
+      // bearing and readouts below all come from this one accepted fix.
+      final accepted = _acceptFix(pos);
       final connectivityResult = await Connectivity().checkConnectivity();
       final online = connectivityResult.any((r) => r != ConnectivityResult.none);
       double? dist;
       double? parcelLat;
       double? parcelLng;
 
-      if (online) {
+      if (accepted && online) {
         dist = await SupabaseService.getDistanceToParcelBoundary(parcelId: widget.task.parcelId!, latitude: pos.latitude, longitude: pos.longitude);
         final parcel = await SupabaseService.fetchParcelDetails(widget.task.parcelId!);
         parcelLat = (parcel?['latitude'] as num?)?.toDouble();
         parcelLng = (parcel?['longitude'] as num?)?.toDouble();
-      } else {
+      } else if (accepted) {
         final cached = await DBHelper.getCachedJobs();
         final match = cached.where((j) => j['id'] == widget.task.id).toList();
         if (match.isNotEmpty) {
@@ -144,33 +252,130 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
       }
 
       double? bearing;
-      if (parcelLat != null && parcelLng != null) {
+      if (accepted && parcelLat != null && parcelLng != null) {
         bearing = _bearingBetween(pos.latitude, pos.longitude, parcelLat, parcelLng);
       }
       if (!mounted) return;
-      setState(() { _latitude = pos.latitude; _longitude = pos.longitude; _accuracy = pos.accuracy; _distance = dist; _bearingToParcel = bearing; _distanceIsLocal = !online; _loading = false; });
+      setState(() {
+        if (accepted) {
+          _latitude = pos.latitude;
+          _longitude = pos.longitude;
+          _accuracy = pos.accuracy;
+          _fixAt = pos.timestamp;
+          _distance = dist;
+          _bearingToParcel = bearing;
+          _distanceIsLocal = !online;
+        }
+        _trackingStopped = false;
+        _loading = false;
+      });
+      _streamRestarts = 0;
       _startLiveTracking();
+    } on _LocationUnavailable catch (e) {
+      if (!mounted) return;
+      setState(() { _error = e.message; _errorIsLocation = true; _loading = false; });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _loading = false; });
+      setState(() { _error = e.toString().replaceFirst('Exception: ', ''); _errorIsLocation = false; _loading = false; });
+    }
+  }
+
+  /// Bounded first-fix acquisition: permission/service failures and the
+  /// [kGpsInitialFixTimeout] elapsing both become one recoverable
+  /// "Location unavailable" state.
+  Future<Position> _acquireInitialFix() async {
+    try {
+      return await LocationService.getCurrentLocation(timeout: kGpsInitialFixTimeout);
+    } on TimeoutException {
+      throw const _LocationUnavailable('No GPS fix yet. Move to an open area and try again.');
+    } catch (e) {
+      throw _LocationUnavailable(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
   void _startLiveTracking() {
-    if (_isLive) return;
+    if (!mounted || !_foreground || _routeCovered || _isLive) return;
     _isLive = true;
-    _positionSub = LocationService.getPositionStream().listen(
+    _trackingStopped = false;
+    _armStreamWatchdog();
+    // Freshness matters even when the inspector is standing still.
+    _positionSub = LocationService.getPositionStream(distanceFilter: 0).listen(
       _onPositionUpdate,
       onError: (Object e) {
         if (!mounted) return;
+        _streamWatchdog?.cancel();
         setState(() => _isLive = false);
+        _scheduleStreamRestart();
+      },
+      onDone: () {
+        // A closed stream is an interruption too: re-arm through the same
+        // bounded backoff instead of leaving tracking silently dead.
+        if (!mounted || !_isLive) return;
+        _streamWatchdog?.cancel();
+        setState(() => _isLive = false);
+        _scheduleStreamRestart();
       },
       cancelOnError: true,
     );
   }
 
+  void _stopLiveTracking() {
+    _streamWatchdog?.cancel();
+    _isLive = false;
+    _positionSub?.cancel();
+    _positionSub = null;
+  }
+
+  void _armStreamWatchdog() {
+    _streamWatchdog?.cancel();
+    _streamWatchdog = Timer(kGpsStreamSilenceTimeout, () {
+      if (!mounted || !_foreground) return;
+      _stopLiveTracking();
+      _scheduleStreamRestart();
+    });
+  }
+
+  /// Bounded, lifecycle-aware recovery: re-subscribes at most
+  /// [kGpsStreamRestartLimit] times (3/6/12 s backoff) instead of polling
+  /// forever. Foregrounding the app or tapping Reconnect GPS re-arms it.
+  void _scheduleStreamRestart() {
+    if (!mounted || !_foreground || _routeCovered || _streamRetryTimer != null || _isLive) return;
+    if (_streamRestarts >= kGpsStreamRestartLimit) {
+      setState(() => _trackingStopped = true);
+      return;
+    }
+    _streamRestarts += 1;
+    _streamRetryTimer = Timer(Duration(seconds: 3 * (1 << (_streamRestarts - 1))), () {
+      _streamRetryTimer = null;
+      if (!mounted || !_foreground || _isLive) return;
+      _startLiveTracking();
+    });
+  }
+
+  void _reconnectGps() {
+    _streamRetryTimer?.cancel();
+    _streamRetryTimer = null;
+    _streamRestarts = 0;
+    if (mounted) setState(() => _trackingStopped = false);
+    if (!_isLive) _startLiveTracking();
+  }
+
+  /// A delivery is rejected outright — never displayed, never confirmed —
+  /// when the position is malformed, its accuracy unusable, or it is stale
+  /// on arrival or significantly future-dated. Distance, accuracy readout
+  /// and saved evidence therefore always come from one accepted fix.
+  bool _acceptFix(Position pos) {
+    if (!validSiteMapPoint(LatLng(pos.latitude, pos.longitude))) return false;
+    if (!pos.accuracy.isFinite || pos.accuracy <= 0) return false;
+    final age = _now().difference(pos.timestamp);
+    return age >= -kReliableFixFutureSkew && age <= kReliableFixMaxAge;
+  }
+
   Future<void> _onPositionUpdate(Position pos) async {
-    if (widget.task.parcelId == null || _recomputing) return;
+    if (!mounted || !_foreground || _routeCovered || widget.task.parcelId == null || !_acceptFix(pos)) return;
+    _streamRestarts = 0; // Usable deliveries reset the bounded recovery budget.
+    _armStreamWatchdog();
+    if (_recomputing) return;
     _recomputing = true;
     try {
       // Phase 1 audit fix (item #2 — Offline Inspection Audit): this used
@@ -215,6 +420,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
         _latitude = pos.latitude;
         _longitude = pos.longitude;
         _accuracy = pos.accuracy;
+        _fixAt = pos.timestamp;
         _distance = dist;
         _bearingToParcel = bearing;
         _distanceIsLocal = !online;
@@ -270,18 +476,24 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
 
   Future<void> _startInspection() async {
     if (!_verified || _latitude == null || _submitting) return;
+    // Keep the online attempt, outbox fallback and recorded distance tied to
+    // the same accepted fix, even while live GPS changes during the await.
+    final latitude = _latitude!;
+    final longitude = _longitude!;
+    final accuracy = _accuracy!;
+    final distance = _distance!;
     setState(() => _submitting = true);
 
     bool queuedOffline = false;
     try {
-      await SupabaseService.confirmGpsOnSite(jobId: widget.task.id, latitude: _latitude!, longitude: _longitude!, accuracyMeters: _accuracy ?? 0, locationLabel: widget.task.location);
+      await SupabaseService.confirmGpsOnSite(jobId: widget.task.id, latitude: latitude, longitude: longitude, accuracyMeters: accuracy, locationLabel: widget.task.location);
     } catch (e) {
       try {
         await SyncOutboxService.enqueueGpsConfirm(
           jobId: widget.task.id,
-          latitude: _latitude!,
-          longitude: _longitude!,
-          accuracyMeters: _accuracy ?? 0,
+          latitude: latitude,
+          longitude: longitude,
+          accuracyMeters: accuracy,
           locationLabel: widget.task.location,
         );
         queuedOffline = true;
@@ -295,11 +507,14 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
 
     if (!mounted) return;
     if (queuedOffline) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No signal — GPS check-in saved offline, will sync automatically.')),
+      AppFeedback.show(
+        context,
+        message: 'No signal — GPS check-in saved offline, will sync automatically.',
+        color: InsightTheme.amberInk,
+        icon: Icons.cloud_off_rounded,
       );
     }
-    context.read<InspectionProvider>().recordGpsVerification(distanceMeters: _distance ?? 0);
+    context.read<InspectionProvider>().recordGpsVerification(distanceMeters: distance);
     HapticFeedback.selectionClick();
     setState(() => _submitting = false);
     // Issue 2 fix (Completed Category enhancement): this screen never
@@ -314,7 +529,18 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
       return;
     }
     InspectionProgress.instance.markStepComplete(2);
-    Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));
+    _routeCovered = true;
+    _staleTicker?.cancel();
+    _streamRetryTimer?.cancel();
+    _streamRetryTimer = null;
+    _stopLiveTracking();
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => CapturePhotoScreen(task: widget.task)));
+    if (!mounted) return;
+    _routeCovered = false;
+    if (_foreground) {
+      _startStaleTicker();
+      _reconnectGps();
+    }
   }
 
   // Fullscreen mode: hides the header block (back / title / step progress)
@@ -350,7 +576,11 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
     if (_loading) return const Center(child: _LoadingState());
     if (_error != null) {
       return Center(
-        child: _ErrorState(message: _error!, onRetry: _checkLocation),
+        child: _ErrorState(
+          message: _error!,
+          locationUnavailable: _errorIsLocation,
+          onRetry: _checkLocation,
+        ),
       );
     }
     return LayoutBuilder(
@@ -433,6 +663,10 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen> {
       location: widget.task.location,
       submitting: _submitting,
       isReworkMode: context.read<InspectionProvider>().isReworkMode,
+      statusText: _gpsStatusText,
+      helperText: _confirmHelperText,
+      trackingStopped: _trackingStopped,
+      onReconnect: _reconnectGps,
       onConfirm: _startInspection,
     );
     return card;
@@ -1021,6 +1255,10 @@ class _VerificationCard extends StatelessWidget {
   final String location;
   final bool submitting;
   final bool isReworkMode;
+  final String statusText;
+  final String helperText;
+  final bool trackingStopped;
+  final VoidCallback onReconnect;
   final VoidCallback onConfirm;
 
   const _VerificationCard({
@@ -1035,6 +1273,10 @@ class _VerificationCard extends StatelessWidget {
     required this.location,
     required this.submitting,
     required this.isReworkMode,
+    required this.statusText,
+    required this.helperText,
+    required this.trackingStopped,
+    required this.onReconnect,
     required this.onConfirm,
   });
 
@@ -1064,7 +1306,7 @@ class _VerificationCard extends StatelessWidget {
               Flexible(child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(color: verified ? InsightTheme.greenTint : InsightTheme.amberTint,
                   borderRadius: BorderRadius.circular(10)),
-                child: Text(coords == null ? 'Waiting' : verified ? 'In zone' : 'Outside zone',
+                child: Text(statusText,
                   style: InsightTheme.inter(12, w: FontWeight.w600,
                     c: verified ? InsightTheme.greenInk : accentInk)))),
             ],
@@ -1100,7 +1342,15 @@ class _VerificationCard extends StatelessWidget {
           FieldPrimaryButton(label: isReworkMode ? 'Save' : 'Confirm GPS', busy: submitting,
             onPressed: verified && !submitting ? onConfirm : null),
           if (!verified) Padding(padding: const EdgeInsets.only(top: 8),
-            child: Text('Move within 30 m of the site to confirm.', style: InsightTheme.inter(12))),
+            child: Text(helperText, style: InsightTheme.inter(12))),
+          if (trackingStopped) Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: TextButton(
+              onPressed: onReconnect,
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              child: const Text('Reconnect GPS'),
+            ),
+          ),
         ],
       ),
     );
@@ -1205,10 +1455,25 @@ class _LoadingState extends StatelessWidget {
   }
 }
 
+/// Location acquisition failure (services off, permission denied, or the
+/// bounded first-fix wait elapsing) — distinct from data errors so the pane
+/// can name it "Location unavailable".
+class _LocationUnavailable implements Exception {
+  final String message;
+  const _LocationUnavailable(this.message);
+  @override
+  String toString() => message;
+}
+
 class _ErrorState extends StatelessWidget {
   final String message;
+  final bool locationUnavailable;
   final VoidCallback onRetry;
-  const _ErrorState({required this.message, required this.onRetry});
+  const _ErrorState({
+    required this.message,
+    required this.onRetry,
+    this.locationUnavailable = false,
+  });
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1216,6 +1481,10 @@ class _ErrorState extends StatelessWidget {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Icon(Icons.location_off_rounded, size: 40, color: InsightTheme.ink3),
         const SizedBox(height: 12),
+        if (locationUnavailable) ...[
+          Text('Location unavailable', style: InsightTheme.urbanist(16, w: FontWeight.w700)),
+          const SizedBox(height: 6),
+        ],
         Text(message, textAlign: TextAlign.center, softWrap: true, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
         const SizedBox(height: 16),
         OutlinedButton(onPressed: onRetry, child: const Text('Try again')),

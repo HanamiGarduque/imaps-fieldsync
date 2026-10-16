@@ -20,7 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'offline_completion_persistence_test.dart' show submitFixture;
-import 'inspector_reassignment_test.dart' show signInInspector, inspectorA;
+import 'inspector_reassignment_test.dart' show signInInspector, inspectorA, inspectorB;
 
 const jobA = '11111111-1111-4111-8111-111111111111';
 const jobB = '22222222-2222-4222-8222-222222222222';
@@ -194,11 +194,20 @@ void main() {
     });
   }
 
-  test('Dashboard forwards actual payload without passive caching; rework excluded', () async {
+  // Superseded: this test used to forbid the Dashboard from caching its payload
+  // at all, by source text. FS-04 requires that caching, and the protection now
+  // lives at the shared commit boundary: owner-bound snapshot ordering, retained
+  // evidence protection, and pending-completion projection. The prohibition is
+  // therefore replaced by the behavioral group below, which drives exactly the
+  // two calls HomeDashboardScreen makes (beginJobsRefresh before the remote
+  // read, cacheJobs(..., refresh:) after it). The mounted-screen end-to-end
+  // proof of the same ordering rule is
+  // test/offline_first_review_regression_test.dart: "review: older Home response
+  // cannot erase newer Tasks cache".
+  test('Dashboard forwards actual payload with owner-scoped passive caching; rework excluded', () async {
     final home = await File('lib/modules/analytics_dashboard/screens/home_dashboard_screen.dart').readAsString();
     expect(home, contains("job['id'] as String: job"));
     expect(home, contains('fetchedJob: _entryJobs[_upcomingTasks[index].id]'));
-    expect(home, isNot(contains('DBHelper.cacheJobs(')));
     final completed = await File('lib/modules/inspection/screens/completed_inspection_detail_screen.dart').readAsString();
     final provider = await File('lib/modules/inspection/providers/inspection_provider.dart').readAsString();
     expect(completed, isNot(contains('retainInspectionJob')));
@@ -206,6 +215,130 @@ void main() {
     final review = await File('lib/modules/inspection/screens/review_submit_screen.dart').readAsString();
     expect(review, contains('if (!queuedOffline && !provider.isReworkMode)'));
     expect(review.indexOf('finalizeAcceptedOnlineInspection'), greaterThan(review.indexOf('queuedOffline = true')));
+  });
+
+  // The Dashboard refresh now shares one commit boundary with every other cache
+  // consumer: the ticket is captured before the remote read
+  // (DBHelper.beginJobsRefresh) and the answer lands through
+  // DBHelper.cacheJobs(..., refresh:). These tests drive that boundary against
+  // real SQLite and prove, behaviorally, the four things the removed source-text
+  // prohibition used to stand for.
+  group('dashboard cache refresh cannot damage retention, ownership, or canonical status', () {
+    test('dashboard refresh cannot delete retained inspection evidence', () async {
+      await DBHelper.cacheJobs([fetchedJob(jobA), fetchedJob(jobB)]);
+      await DBHelper.retainInspectionJob(jobA);
+      final retainedBefore = (await db.query('inspection_job_retention')).single;
+      final cachedBefore = (await DBHelper.getCachedJobs())
+          .firstWhere((job) => job['id'] == jobA);
+
+      // The remote answer no longer lists the retained unfinished round.
+      final dashboardRefresh = DBHelper.beginJobsRefresh();
+      await DBHelper.cacheJobs([fetchedJob(jobB)], refresh: dashboardRefresh);
+
+      // Retention and the unfinished cached round survive exactly as they were.
+      expect((await db.query('inspection_job_retention')).single, retainedBefore);
+      expect(
+        (await DBHelper.getCachedJobs()).firstWhere((job) => job['id'] == jobA),
+        cachedBefore,
+      );
+    });
+
+    test('dashboard refresh cannot overwrite a newer owner-scoped snapshot', () async {
+      // Captured before the Dashboard's remote read, answered only afterwards.
+      final dashboardRefresh = DBHelper.beginJobsRefresh();
+      final newer = DBHelper.beginJobsRefresh();
+      expect(
+        await DBHelper.cacheJobs([
+          fetchedJob(jobA)..['deadline_date'] = '2026-10-01',
+        ], refresh: newer),
+        isTrue,
+      );
+      expect(
+        await DBHelper.cacheJobs([
+          fetchedJob(jobA)..['deadline_date'] = '2026-11-11',
+        ], refresh: dashboardRefresh),
+        isFalse,
+      );
+      expect((await DBHelper.getCachedJobs()).single['deadline_date'], '2026-10-01');
+
+      // A rejected answer never wedges the boundary: the next real snapshot lands.
+      expect(
+        await DBHelper.cacheJobs([
+          fetchedJob(jobA)..['deadline_date'] = '2026-12-12',
+        ], refresh: DBHelper.beginJobsRefresh()),
+        isTrue,
+      );
+      expect((await DBHelper.getCachedJobs()).single['deadline_date'], '2026-12-12');
+    });
+
+    test('dashboard refresh cannot mix inspector data', () async {
+      await DBHelper.cacheJobs([fetchedJob(jobA)]);
+      final inspectorARow = (await db.query('local_jobs')).single;
+
+      // The Dashboard ticket belongs to A, but the device changed accounts
+      // before its answer arrived: the answer must change nothing.
+      final dashboardRefresh = DBHelper.beginJobsRefresh();
+      addTearDown(() => signInInspector(inspectorA));
+      await signInInspector(inspectorB);
+      expect(
+        await DBHelper.cacheJobs([fetchedJob(jobB)], refresh: dashboardRefresh),
+        isFalse,
+      );
+      expect(await DBHelper.getCachedJobs(), isEmpty);
+
+      // Even a payload that reuses A's job id cannot hijack A's cached row.
+      expect(
+        await DBHelper.cacheJobs([fetchedJob(jobA)],
+            refresh: DBHelper.beginJobsRefresh()),
+        isTrue,
+      );
+      expect(await DBHelper.getCachedJobs(), isEmpty);
+      expect((await db.query('local_jobs')).single, inspectorARow);
+
+      // Each account keeps its own rows; neither read returns the other's.
+      expect(
+        await DBHelper.cacheJobs([fetchedJob(jobB)],
+            refresh: DBHelper.beginJobsRefresh()),
+        isTrue,
+      );
+      expect((await DBHelper.getCachedJobs()).single['id'], jobB);
+      await signInInspector(inspectorA);
+      expect((await DBHelper.getCachedJobs()).single, inspectorARow);
+      expect(
+        (await db.query('local_jobs')).map((row) => row['inspector_id']).toSet(),
+        {inspectorA, inspectorB},
+      );
+    });
+
+    test('dashboard refresh cannot change canonical completion status', () async {
+      await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
+      await submitFixture(jobA);
+      // Unproven submission: preserved intent, unfinished lifecycle.
+      expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
+      final action = (await DBHelper.getActionableActions()).single;
+      expect(action['type'], 'submit_inspection');
+
+      // Only proven acceptance completes the round and releases retention.
+      expect(
+        await DBHelper.finalizeAcceptedOnlineInspection(jobA,
+            remoteResult: InspectionAuthorityResult.authorized),
+        isTrue,
+      );
+      expect((await DBHelper.getCachedJobs()).single['status'], 'completed');
+      expect(await db.query('inspection_job_retention'), isEmpty);
+
+      // A stale Dashboard answer still calling it unfinished must not downgrade
+      // the canonically completed round or drop its unacknowledged intent.
+      final dashboardRefresh = DBHelper.beginJobsRefresh();
+      expect(
+        await DBHelper.cacheJobs([fetchedJob(jobA, status: 'in_progress')],
+            refresh: dashboardRefresh),
+        isTrue,
+      );
+      expect((await DBHelper.getCachedJobs()).single['status'], 'completed');
+      expect((await DBHelper.getActionableActions()).single['id'], action['id']);
+      expect(await db.query('inspection_job_retention'), isEmpty);
+    });
   });
 
   test('fresh schema and version 9->12 upgrade preserve all prior rows and current metadata', () async {

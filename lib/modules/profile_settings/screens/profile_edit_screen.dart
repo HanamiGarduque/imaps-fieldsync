@@ -10,6 +10,7 @@ import '../../auth_startup/services/secure_prefs_service.dart';
 
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/widgets/field_form_widgets.dart';
+import '../../../core/widgets/app_feedback.dart';
 
 /// Preserve internal spaces and the existing supported name characters.
 String normalizeProfileFullName(String value) => value.trim();
@@ -257,15 +258,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Profile updated successfully',
-              style: InsightTheme.inter(13, c: Colors.white),
-            ),
-            backgroundColor: const Color(0xFF10B981),
-            behavior: SnackBarBehavior.floating,
-          ),
+        AppFeedback.show(
+          context,
+          message: 'Profile updated successfully',
+          color: InsightTheme.greenInk,
+          icon: Icons.check_circle_outline_rounded,
         );
         Navigator.pop(context, updatedProfile);
       }

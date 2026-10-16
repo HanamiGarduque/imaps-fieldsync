@@ -42,8 +42,8 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen>
     with TickerProviderStateMixin, SpringEntrance {
   late int _mode; // 0 = Activity, 1 = Sync — top-level switch (Phase 6)
-  int _currentTabIndex = 0; // 0 = All, 1 = Unread — only used within Activity mode
-  bool _syncUnreadOnly = false;
+  bool _activityUnreadOnly = false; // Unread filter — Activity mode
+  bool _syncUnreadOnly = false; // Unread filter — Sync mode
   bool _isLoading = true;
   String? _error;
   List<Map<String, dynamic>> _activity = [];
@@ -139,7 +139,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   int get _syncUnreadCount => _syncLogs.where((entry) => entry['is_read'] != true).length;
 
   List<Map<String, dynamic>> get _visibleActivity =>
-      _currentTabIndex == 1 ? _activity.where((a) => a['is_read'] != true).toList() : _activity;
+      _activityUnreadOnly ? _activity.where((a) => a['is_read'] != true).toList() : _activity;
 
   List<Map<String, dynamic>> get _visibleSyncLogs =>
       _syncUnreadOnly ? _syncLogs.where((entry) => entry['is_read'] != true).toList() : _syncLogs;
@@ -378,6 +378,45 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
+  /// Time bucket for a notification: Today / Yesterday / This week (2–7
+  /// days) / Earlier. Only these four labels exist; a bucket with no items
+  /// never renders a header.
+  String _sectionLabel(String? isoTimestamp) {
+    final when = isoTimestamp == null ? null : DateTime.tryParse(isoTimestamp)?.toLocal();
+    if (when == null) return 'Earlier';
+    final now = DateTime.now();
+    final days = DateTime(now.year, now.month, now.day)
+        .difference(DateTime(when.year, when.month, when.day))
+        .inDays;
+    if (days <= 0) return 'Today';
+    if (days == 1) return 'Yesterday';
+    if (days <= 7) return 'This week';
+    return 'Earlier';
+  }
+
+  /// Flattens newest-first items into `String` section labels interleaved
+  /// with their rows. Labels come out in fixed time order, and a label is
+  /// only emitted when at least one item belongs to it.
+  List<Object> _withSectionHeaders(
+    List<Map<String, dynamic>> items,
+    String timeKey,
+  ) {
+    final buckets = <String, List<Map<String, dynamic>>>{};
+    for (final item in items) {
+      buckets
+          .putIfAbsent(_sectionLabel(item[timeKey] as String?), () => <Map<String, dynamic>>[])
+          .add(item);
+    }
+    final rows = <Object>[];
+    for (final label in const ['Today', 'Yesterday', 'This week', 'Earlier']) {
+      final bucket = buckets[label];
+      if (bucket == null) continue;
+      rows.add(label);
+      rows.addAll(bucket);
+    }
+    return rows;
+  }
+
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
@@ -414,14 +453,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                             style: TextButton.styleFrom(
                               minimumSize: const Size(48, 48),
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                              backgroundColor: InsightTheme.redTint,
                               foregroundColor: InsightTheme.redInk,
                               shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
                             ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.delete_outline_rounded, size: 16, color: InsightTheme.redInk),
+                                  const Icon(Icons.delete_outline_rounded, size: 16),
                                   const SizedBox(width: 4),
                                   Text(
                                     'Clear All',
@@ -438,52 +476,54 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   ),
                 ),
 
-                // ── Phase 6: Activity / Sync mode switch ──
-                // Kept logically separate from the All/Unread pills below
-                // — this is a different axis (WHICH log you're viewing),
-                // not a filter within one log.
+                // ── Controls row: Activity/Sync mode switch (left) and the
+                // Unread filter toggle (right). Both groups share one row
+                // to keep the page light, and the row scrolls instead of
+                // overflowing when width + text scale leave no room.
                 SpringSlide(
                   animation: springFor(1),
                   beginOffset: const Offset(0, 16),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Row(
-                      children: [
-                        _TabPill(text: "Activity", isActive: _mode == 0, onTap: () => setState(() => _mode = 0)),
-                        const SizedBox(width: 8),
-                        _TabPill(text: "Sync", isActive: _mode == 1, onTap: () => setState(() => _mode = 1)),
-                      ],
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minWidth: (constraints.maxWidth - 40).clamp(0.0, double.infinity),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _TabPill(text: "Activity", isActive: _mode == 0, onTap: () => setState(() => _mode = 0)),
+                                const SizedBox(width: 8),
+                                _TabPill(text: "Sync", isActive: _mode == 1, onTap: () => setState(() => _mode = 1)),
+                              ],
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 16),
+                              child: _TabPill(
+                                text: _mode == 0 ? "Unread · $_unreadCount" : "Unread · $_syncUnreadCount",
+                                isActive: _mode == 0 ? _activityUnreadOnly : _syncUnreadOnly,
+                                onTap: () => setState(() {
+                                  if (_mode == 0) {
+                                    _activityUnreadOnly = !_activityUnreadOnly;
+                                  } else {
+                                    _syncUnreadOnly = !_syncUnreadOnly;
+                                  }
+                                }),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-
-                // ── All/Unread pills — meaningful for both Activity and Sync logs ──
-                if (_mode == 0 || _mode == 1)
-                SpringSlide(
-                  animation: springFor(2),
-                  beginOffset: const Offset(0, 20),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Row(
-                      children: [
-                        _TabPill(
-                          text: _mode == 0 ? "All · ${_activity.length}" : "All · ${_syncLogs.length}",
-                          isActive: _mode == 0 ? _currentTabIndex == 0 : !_syncUnreadOnly,
-                          onTap: () => _mode == 0 ? setState(() => _currentTabIndex = 0) : setState(() => _syncUnreadOnly = false),
-                        ),
-                        const SizedBox(width: 8),
-                        _TabPill(
-                          text: _mode == 0 ? "Unread · $_unreadCount" : "Unread · $_syncUnreadCount",
-                          isActive: _mode == 0 ? _currentTabIndex == 1 : _syncUnreadOnly,
-                          onTap: () => _mode == 0 ? setState(() => _currentTabIndex = 1) : setState(() => _syncUnreadOnly = true),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
 
                 // ── List — Activity feed or Sync log, per _mode ──
                 Expanded(
@@ -498,6 +538,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Widget _buildActivityList(List<Map<String, dynamic>> visible) {
+    final rows = _withSectionHeaders(visible, 'occurred_at');
     return _isLoading
                       ? const Center(child: ImapsLoadingIndicator(size: 60))
                       : _error != null
@@ -522,7 +563,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                       const Icon(Icons.notifications_none_rounded, size: 40, color: InsightTheme.ink3),
                                       const SizedBox(height: 12),
                                       Text(
-                                        _currentTabIndex == 1 ? 'No unread notifications.' : 'No notifications yet.',
+                                        _activityUnreadOnly ? 'No unread notifications.' : 'No notifications yet.',
                                         style: InsightTheme.inter(13, c: InsightTheme.ink2),
                                       ),
                                     ],
@@ -533,9 +574,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                   child: ListView.builder(
                                     padding: const EdgeInsets.symmetric(horizontal: 20),
                                     physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                                    itemCount: visible.length,
+                                    itemCount: rows.length,
                                     itemBuilder: (context, i) {
-                                      final item = visible[i];
+                                      final row = rows[i];
+                                      if (row is String) {
+                                        return _SectionHeader(label: row, isFirst: i == 0);
+                                      }
+                                      final item = row as Map<String, dynamic>;
                                       final theme = _eventTheme(item['event_type'] as String? ?? '');
                                       return SpringSlide(
                                         animation: springForKey(
@@ -572,7 +617,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                             subtitle: item['subtitle'] as String? ?? '',
                                             time: _timeAgo(item['occurred_at'] as String?),
                                             isUnread: item['is_read'] != true,
-                                            isLast: i == visible.length - 1,
+                                            isLast: i == rows.length - 1,
                                             onTap: () => _openNotificationDetail(item),
                                           ),
                                         ),
@@ -602,6 +647,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       );
     }
     final visibleSyncLogs = _visibleSyncLogs;
+    final rows = _withSectionHeaders(visibleSyncLogs, 'created_at');
     return RefreshIndicator(
       onRefresh: () => _loadSyncLogs(reset: true),
       child: visibleSyncLogs.isEmpty
@@ -621,9 +667,9 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           : ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-              itemCount: visibleSyncLogs.length + (_syncLogHasMore ? 1 : 0),
+              itemCount: rows.length + (_syncLogHasMore ? 1 : 0),
               itemBuilder: (context, i) {
-          if (i == visibleSyncLogs.length) {
+          if (i == rows.length) {
             // "Load more" footer — keeps this screen fast to open even
             // with thousands of historical entries (Performance
             // requirement from the Phase 6 spec).
@@ -637,7 +683,9 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               ),
             );
           }
-          final entry = visibleSyncLogs[i];
+          final row = rows[i];
+          if (row is String) return _SectionHeader(label: row, isFirst: i == 0);
+          final entry = row as Map<String, dynamic>;
           final theme = _syncResultTheme(entry['result'] as String? ?? 'info');
           final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
           final isEntryUnread = entry['is_read'] != true;
@@ -645,7 +693,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: Container(
               decoration: BoxDecoration(
-                border: (i == visibleSyncLogs.length - 1 && !_syncLogHasMore)
+                border: (i == rows.length - 1 && !_syncLogHasMore)
                     ? null
                     : const Border(bottom: BorderSide(color: InsightTheme.line)),
               ),
@@ -827,6 +875,26 @@ class _TabPill extends StatelessWidget {
           text,
           style: InsightTheme.inter(12, w: FontWeight.w600, c: isActive ? Colors.white : InsightTheme.ink2),
         ),
+      ),
+    );
+  }
+}
+
+/// Uppercase time-bucket label ("TODAY", "YESTERDAY", ...) that opens each
+/// non-empty section in both the Activity and Sync lists.
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  final bool isFirst;
+
+  const _SectionHeader({required this.label, this.isFirst = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(4, isFirst ? 4 : 18, 4, 6),
+      child: Text(
+        label.toUpperCase(),
+        style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.8),
       ),
     );
   }

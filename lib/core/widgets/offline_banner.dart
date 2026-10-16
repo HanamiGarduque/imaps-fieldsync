@@ -88,3 +88,64 @@ class PageUnderOfflineBanner extends StatelessWidget {
     );
   }
 }
+
+/// One non-blocking row explaining that what is on screen is locally saved
+/// data and whether the remote refresh has completed.
+class SavedDataNotice extends StatelessWidget {
+  const SavedDataNotice({super.key, required this.message, this.onRetry});
+
+  static const saved = 'Showing saved task data.';
+  static const refreshing = 'Showing saved task data. Checking for updates…';
+  static const noCacheOffline =
+      'You are offline and no saved tasks are on this device yet. Connect to the internet to load your assignments.';
+  static const noCacheFailure =
+      'Could not load your tasks. Check your connection and try again.';
+  static const cacheReadFailed =
+      'Could not read saved tasks on this device. Retry to load your assignments.';
+  static const ownerChanged =
+      'Inspector session changed. Reopen this screen from your current account.';
+
+  /// No usable connection, so no refresh was possible.
+  static const offline =
+      'Offline. Showing saved task data. Some details are not available.';
+
+  /// A refresh was attempted and failed while the device still had a
+  /// connection. A genuine backend problem is never hidden as normal offline.
+  static const refreshFailed =
+      'Could not refresh from the server. Showing saved task data.';
+
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: InsightTheme.line),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.cloud_off_rounded, size: 16, color: InsightTheme.ink3),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: InsightTheme.inter(12, c: InsightTheme.ink2),
+            ),
+          ),
+          if (onRetry != null)
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(minimumSize: const Size(64, 44)),
+              child: const Text('Retry'),
+            ),
+        ],
+      ),
+    );
+  }
+}
