@@ -9,6 +9,7 @@ import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/widgets/field_form_widgets.dart';
+import '../../../core/widgets/app_feedback.dart';
 
 typedef _Colors = InsightTheme;
 
@@ -77,9 +78,9 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           eventType: 'security_updated',
           title: 'Biometric login enabled',
         );
-        _showSnack('$_biometricLabel login enabled successfully');
+        _showFeedback('$_biometricLabel login enabled successfully');
       } else {
-        _showSnack('Authentication failed. Biometric login not enabled.');
+        _showFeedback('Authentication failed. Biometric login not enabled.', success: false);
       }
     } else {
       // Disable biometric
@@ -92,7 +93,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         eventType: 'security_updated',
         title: 'Biometric login disabled',
       );
-      _showSnack('$_biometricLabel login disabled');
+      _showFeedback('$_biometricLabel login disabled');
     }
   }
 
@@ -101,24 +102,19 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       reason: 'Testing biometric authentication',
     );
     if (ok) {
-      _showSnack('Biometric scan verified successfully! ✨');
+      _showFeedback('Biometric scan verified successfully! ✨');
     } else {
-      _showSnack('Biometric scan failed or canceled.');
+      _showFeedback('Biometric scan failed or canceled.', success: false);
     }
   }
 
-  void _showSnack(String msg) {
+  void _showFeedback(String msg, {bool success = true}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          msg,
-          style: InsightTheme.inter(13, c: Colors.white),
-        ),
-        backgroundColor: _Colors.ink,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
+    AppFeedback.show(
+      context,
+      message: msg,
+      color: success ? InsightTheme.greenInk : InsightTheme.amberInk,
+      icon: success ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
     );
   }
 

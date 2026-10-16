@@ -80,6 +80,35 @@ void main() {
     );
   });
 
+  for (final gap in [0, 20, 50, 100]) {
+    test('both connector ends with a ${gap}m gap and 25m GPS accuracy', () {
+      const straightRoad = [LatLng(0, 0), LatLng(0.01, 0)];
+      // At the equator, a longitude degree is about 111,195 m.
+      final longitude = gap / 111195;
+      final fix = LatLng(0.005, longitude);
+      final destination = LatLng(0.01, longitude);
+      final links = siteDirectLinks(
+        road: straightRoad,
+        target: destination,
+        device: fix,
+        accuracyMeters: 25,
+        reliable: true,
+      );
+      expect(
+        links,
+        hasLength(switch (gap) {
+          0 => 0,
+          20 => 1,
+          _ => 2,
+        }),
+      );
+      if (gap >= 50) {
+        expect(links.first, [fix, const LatLng(0.005, 0)]);
+      }
+      if (gap > 0) expect(links.last, [straightRoad.last, destination]);
+    });
+  }
+
   final now = DateTime.utc(2026, 10, 14, 12);
   for (final sample in [
     (accuracy: 25.0, ageSeconds: 15, reliable: true),

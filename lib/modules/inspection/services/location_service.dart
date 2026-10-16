@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geolocator/geolocator.dart';
 
 class LocationService {
@@ -22,21 +24,56 @@ class LocationService {
     }
   }
 
-  static Future<Position> getCurrentLocation() async {
+  /// [timeout] bounds the wait for a first fix (opted into by Step 2). The
+  /// same limit is handed to the native settings and enforced Dart-side so a
+  /// non-responsive platform cannot hang the caller.
+  static Future<Position> getCurrentLocation({Duration? timeout}) async {
     await _ensureReady();
-    return await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    final request = Geolocator.getCurrentPosition(
+      locationSettings: LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: timeout,
+      ),
     );
+    return timeout == null ? request : request.timeout(timeout);
   }
 
 
-  static Stream<Position> getPositionStream({int distanceFilter = 4}) async* {
-    await _ensureReady();
-    yield* Geolocator.getPositionStream(
-      locationSettings: LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: distanceFilter,
-      ),
+  /// Live position updates, gated on permission/service readiness.
+  ///
+  /// Forward errors explicitly so cancel-on-error listeners can recover
+  /// without waiting on the native subscription's asynchronous cancellation.
+  static Stream<Position> getPositionStream({int distanceFilter = 4}) {
+    late StreamController<Position> controller;
+    StreamSubscription<Position>? sub;
+    var cancelled = false;
+    controller = StreamController<Position>(
+      onListen: () async {
+        try {
+          await _ensureReady();
+          // The listener may cancel while the readiness gate awaits.
+          if (cancelled) return;
+          sub = Geolocator.getPositionStream(
+            locationSettings: LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: distanceFilter,
+            ),
+          ).listen(
+            controller.add,
+            onError: (Object e, StackTrace s) => controller.addError(e, s),
+            onDone: () => controller.close(),
+          );
+        } catch (e, s) {
+          if (cancelled) return;
+          controller.addError(e, s);
+          controller.close();
+        }
+      },
+      onCancel: () {
+        cancelled = true;
+        sub?.cancel();
+      },
     );
+    return controller.stream;
   }
 }

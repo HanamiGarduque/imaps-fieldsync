@@ -155,6 +155,7 @@ class ReportableTasks {
     if (!await _hasNetwork()) return cached;
 
     try {
+      final refresh = DBHelper.beginJobsRefresh();
       final assigned = assignedJobsOverride != null
           ? await assignedJobsOverride!()
           : await SupabaseService.fetchMyJobs();
@@ -168,7 +169,7 @@ class ReportableTasks {
       if (combined.isNotEmpty) {
         // The EXISTING cache path, so the identities this report needs are also
         // available offline afterwards.
-        await DBHelper.cacheJobs(combined.values.toList());
+        await DBHelper.cacheJobs(combined.values.toList(), refresh: refresh);
         return await _fromCache();
       }
     } catch (e) {

@@ -7,18 +7,24 @@ void main() {
   String source(String path) => File(path).readAsStringSync();
 
   test(
-    'scheduling writes metadata only and never changes lifecycle or remarks',
+    'scheduling writes only scheduling metadata and the reviewed pending status',
     () {
       final service = source('lib/core/services/supabase_service.dart');
       final method = RegExp(
-        r'static Future<void> scheduleJob\([\s\S]*?(?=\n  // ─)',
+        r'static Future<InspectionAuthorityResult> scheduleJob\([\s\S]*?(?=\n  // ─)',
       ).firstMatch(service)?.group(0);
 
       expect(method, isNotNull);
       expect(method, contains("'scheduled_date': dateStr"));
       expect(method, contains("'is_self_scheduled': true"));
       expect(method, isNot(contains("'remarks'")));
-      expect(method, isNot(contains("'status'")));
+      // The reviewed transition (pinned by ongoing_task_reschedule_test.dart):
+      // an owned assigned/in_progress job returns to `pending`. That is the
+      // only lifecycle value scheduling may write - it can never complete a
+      // round, and it can never resurrect one.
+      expect(method, contains("'status': 'pending'"));
+      expect(method, isNot(contains("'status': 'completed'")));
+      expect(method, isNot(contains("'status': 'in_progress'")));
     },
   );
 

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../screens/inspection_progress.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/app_feedback.dart';
+import '../../../core/theme/insight_theme.dart';
 /// BUG FIX #2 — Defective Tab Lifecycle State Machine & Missing Exit
 /// Confirmation Gate.
 ///
@@ -51,8 +53,11 @@ Future<void> handleInspectionExit(
     }
     if (!context.mounted) return;
     if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Saved offline — will sync when back online.')),
+      AppFeedback.show(
+        context,
+        message: 'Saved offline — will sync when back online.',
+        color: InsightTheme.amberInk,
+        icon: Icons.cloud_off_rounded,
       );
     }
     if (!context.mounted) return;
@@ -106,14 +111,13 @@ Future<void> handleInspectionExit(
   Navigator.pop(context); // close the loading spinner
 
   if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(
-        ok
-            ? 'Progress saved. Task moved to Ongoing.'
-            : 'Saved offline — will sync when back online.',
-      ),
-    ),
+  AppFeedback.show(
+    context,
+    message: ok
+        ? 'Progress saved. Task moved to Ongoing.'
+        : 'Saved offline — will sync when back online.',
+    color: ok ? InsightTheme.greenInk : InsightTheme.amberInk,
+    icon: ok ? Icons.check_circle_outline_rounded : Icons.cloud_off_rounded,
   );
 
   if (!context.mounted) return;

@@ -15,6 +15,7 @@ import '../services/secure_prefs_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../services/local_data_guard_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/app_feedback.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
 import '../../../core/navigation/main_shell_screen.dart';
@@ -23,39 +24,6 @@ import '../../../core/layout/responsive_layout.dart';
 import '../../../core/services/app_info_service.dart';
 import '../../profile_settings/screens/terms_privacy_screen.dart';
 
-
-/// ==================================================================
-/// EXACT MATCH DESIGN TOKENS (Canonical Urbanist + Inter)
-/// ==================================================================
-class AppColors {
-  static const bg = InsightTheme.bg;
-  static const surface = InsightTheme.surface;
-  
-  static const ink = InsightTheme.ink;
-  static const ink2 = InsightTheme.ink2;
-  static const ink3 = InsightTheme.ink3;
-  static const inkMuted = InsightTheme.inkMuted;
-  
-  static const blue1 = InsightTheme.blue1;
-  static const blue2 = InsightTheme.blue2;
-  static const blueInk = InsightTheme.blueInk;
-  
-  static const amber = InsightTheme.amber;
-  
-  static const line = InsightTheme.line;
-  static const lineStrong = InsightTheme.lineStrong;
-}
-
-class AppText {
-  static TextStyle poppins(double size, {FontWeight w = FontWeight.w700, Color? c, double? ls}) => 
-      InsightTheme.urbanist(size < 12.0 ? 12.0 : size, w: w, c: c ?? AppColors.ink, ls: ls);
-      
-  static TextStyle inter(double size, {FontWeight w = FontWeight.w600, Color? c, double? ls, double? lh}) => 
-      InsightTheme.inter(size < 12.0 ? 12.0 : size, w: w, c: c ?? AppColors.ink, ls: ls, h: lh);
-      
-  static TextStyle mono(double size, {FontWeight w = FontWeight.w500, Color? c, double? ls}) => 
-      InsightTheme.mono(size < 12.0 ? 12.0 : size, w: w, c: c ?? AppColors.ink3, ls: ls);
-}
 
 /// ==================================================================
 /// SCREEN 1 — SPLASH
@@ -160,11 +128,11 @@ class _SplashScreenState extends State<SplashScreen> {
           child: Image.asset('assets/icon/app_icon.png', width: 80, height: 80,
             excludeFromSemantics: true, fit: BoxFit.contain)),
         const SizedBox(height: 24),
-        Text('iMAPS', style: AppText.inter(16, c: Colors.white)),
+        Text('iMAPS', style: InsightTheme.inter(16, w: FontWeight.w600, c: Colors.white)),
         Semantics(label: 'FieldSync', header: true, excludeSemantics: true,
           child: Wrap(children: [
-            Text('Field', style: AppText.poppins(44, w: FontWeight.w800, c: Colors.white)),
-            Text('Sync', style: AppText.poppins(44, w: FontWeight.w800, c: Colors.white)),
+            Text('Field', style: InsightTheme.urbanist(44, w: FontWeight.w800, c: Colors.white)),
+            Text('Sync', style: InsightTheme.urbanist(44, w: FontWeight.w800, c: Colors.white)),
           ])),
       ]),
     ));
@@ -172,21 +140,21 @@ class _SplashScreenState extends State<SplashScreen> {
       key: const ValueKey('splash-status'),
       width: double.infinity,
       padding: const EdgeInsets.all(28),
-      decoration: const BoxDecoration(color: AppColors.surface,
+      decoration: const BoxDecoration(color: InsightTheme.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const ImapsLoadingIndicator(size: 24),
           const SizedBox(width: 12),
-          Expanded(child: Text('Initializing field unit…', style: AppText.inter(13, c: AppColors.blueInk))),
+          Expanded(child: Text('Initializing field unit…', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk))),
         ]),
         const SizedBox(height: 20),
-        Text('Municipal Planning & Zoning Office', style: AppText.inter(12, c: AppColors.ink2)),
+        Text('Municipal Planning & Zoning Office', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2)),
         const SizedBox(height: 6),
-        Text(AppInfoService.fullVersionString, style: AppText.inter(12, c: AppColors.ink3)),
+        Text(AppInfoService.fullVersionString, style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3)),
       ]),
     );
-    return Scaffold(backgroundColor: AppColors.blue2,
+    return Scaffold(backgroundColor: InsightTheme.blue2,
       body: SafeArea(child: LayoutBuilder(builder: (context, constraints) {
         if (context.responsive.canSplitTwoPane) {
           return Row(children: [
@@ -801,21 +769,66 @@ class _LoginScreenState extends State<LoginScreen> {
       
       if (mounted) {
         setState(() => _errorMessage = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Admin email copied to clipboard!',
-              style: AppText.inter(13, c: Colors.white),
-            ),
-            backgroundColor: AppColors.ink,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            duration: const Duration(seconds: 4),
-          ),
+        AppFeedback.show(
+          context,
+          message: 'Admin email copied to clipboard!',
+          icon: Icons.content_copy_rounded,
         );
       }
     }
   }
+
+  /// Pinned identity: app mark, wordmark and connectivity.
+  ///
+  /// It sits OUTSIDE the scroll view, so it is not part of the scrollable
+  /// column and nothing can push it: opening the keyboard, tapping between the
+  /// two fields, or the auto-scroll that focus triggers all move the form
+  /// underneath it while the brand stays exactly where it is.
+  Widget _brandBlock() => Padding(
+    padding: const EdgeInsets.fromLTRB(28, 16, 28, 0),
+    child: Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            ClipRRect(
+              borderRadius: InsightTheme.roundedMd,
+              child: Image.asset('assets/icon/app_icon.png',
+                width: 56, height: 56, excludeFromSemantics: true,
+                fit: BoxFit.contain, filterQuality: FilterQuality.high),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('iMAPS', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink3)),
+                Text('FieldSync', style: InsightTheme.urbanist(28, w: FontWeight.w800, c: InsightTheme.blue1)),
+              ],
+            ),
+          ],
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(color: InsightTheme.surface,
+            borderRadius: BorderRadius.circular(24), boxShadow: InsightTheme.cardShadow),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 6, height: 6, decoration: BoxDecoration(
+              color: _isOnline ? InsightTheme.green : InsightTheme.red,
+              shape: BoxShape.circle)),
+            const SizedBox(width: 8),
+            Text(_isOnline ? 'Online' : 'Offline', style: InsightTheme.inter(12,
+              w: FontWeight.w600, c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk)),
+          ]),
+        ),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -823,92 +836,44 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return SensitiveScreen(
       child: Scaffold(
-        backgroundColor: AppColors.bg,
-        body: DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [AppColors.surface, InsightTheme.blueTint],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: CustomPaint(
-            painter: const _LoginContourPainter(),
-            child: SafeArea(
-              child: ConstrainedContent(
-                maxWidth: 480,
-                // The whole composition scrolls above the keyboard/short windows.
-                child: LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                  physics: const BouncingScrollPhysics(),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: max(0, constraints.maxHeight - 40)),
-                    child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Wrap(
-                          alignment: WrapAlignment.spaceBetween,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 8,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: Image.asset('assets/icon/app_icon.png',
-                                    width: 56, height: 56, excludeFromSemantics: true,
-                                    fit: BoxFit.contain, filterQuality: FilterQuality.high),
-                                ),
-                                Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text('iMAPS', style: AppText.inter(13, w: FontWeight.w600, c: AppColors.ink3)),
-                                      Text('FieldSync', style: AppText.poppins(28, w: FontWeight.w800, c: AppColors.blue1)),
-                                    ],
-                                ),
-                              ],
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(24), boxShadow: InsightTheme.cardShadow),
-                              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                Container(width: 6, height: 6, decoration: BoxDecoration(
-                                  color: _isOnline ? InsightTheme.green : InsightTheme.red,
-                                  shape: BoxShape.circle)),
-                                const SizedBox(width: 8),
-                                Text(_isOnline ? 'Online' : 'Offline', style: AppText.inter(12,
-                                  w: FontWeight.w600, c: _isOnline ? InsightTheme.greenInk : InsightTheme.redInk)),
-                              ]),
-                            ),
-                          ],
+        backgroundColor: InsightTheme.bg,
+        body: SafeArea(
+          child: ConstrainedContent(
+            maxWidth: 480,
+            child: Column(
+              children: [
+                _brandBlock(),
+                Expanded(
+                  // Only the heading and the form scroll. At rest the pair stays
+                  // bottom-anchored so the primary action lands in the thumb
+                  // zone; once the keyboard claims the lower half this column is
+                  // simply taller than its viewport and reads from the top.
+                  child: LayoutBuilder(builder: (context, constraints) => SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+                    physics: const BouncingScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: max(0, constraints.maxHeight - 24)),
+                      child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Semantics(header: true, child: Text('Sign in',
+                              style: InsightTheme.urbanist(28, w: FontWeight.w800))),
+                            const SizedBox(height: 4),
+                            Text('Access your workspace', style: InsightTheme.inter(14, w: FontWeight.w500, c: InsightTheme.ink3)),
+                          ]),
                         ),
-                      ),
-                      const SizedBox(height: 32),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Semantics(header: true, child: Text('Sign in',
-                            style: AppText.poppins(28, w: FontWeight.w800))),
-                          const SizedBox(height: 4),
-                          Text('Access your workspace', style: AppText.inter(14, c: AppColors.ink3)),
-                        ]),
-                      ),
-                      const SizedBox(height: 24),
-                      Container(
+                        const SizedBox(height: 16),
+                        Container(
                         key: const ValueKey('login-form-card'),
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: AppColors.surface,
-                          borderRadius: InsightTheme.roundedLg, boxShadow: InsightTheme.cardShadow),
+                        decoration: BoxDecoration(color: InsightTheme.surface,
+                          borderRadius: InsightTheme.roundedLg,
+                          boxShadow: InsightTheme.cardShadow),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                           if (!_isOnline) ...[
                             Container(
@@ -916,7 +881,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               decoration: BoxDecoration(color: InsightTheme.redTint,
                                 borderRadius: InsightTheme.roundedSm),
                               child: Text('Offline. You can still sign in if you\'ve logged in before on this device.',
-                                style: AppText.inter(12, w: FontWeight.w500, c: InsightTheme.redInk, lh: 1.35)),
+                                style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.redInk, h: 1.35)),
                             ),
                             const SizedBox(height: 12),
                           ],
@@ -959,8 +924,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               onPressed: _isLoading ? null : _handleForgotPasscode,
                               style: TextButton.styleFrom(minimumSize: const Size(48, 48),
                                 padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4)),
-                              child: Text('Forgot passcode?', style: AppText.inter(13,
-                                w: FontWeight.w600, c: AppColors.blueInk)),
+                              child: Text('Forgot passcode?', style: InsightTheme.inter(13,
+                                w: FontWeight.w600, c: InsightTheme.blueInk)),
                             ),
                           ),
                           if (_errorMessage != null) ...[
@@ -971,7 +936,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: Row(children: [
                                 const Icon(Icons.error_outline_rounded, color: InsightTheme.redInk, size: 18),
                                 const SizedBox(width: 8),
-                                Expanded(child: Text(_errorMessage!, style: AppText.inter(12,
+                                Expanded(child: Text(_errorMessage!, style: InsightTheme.inter(12,
                                   w: FontWeight.w600, c: InsightTheme.redInk))),
                               ]),
                             ),
@@ -980,9 +945,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           ElevatedButton(
                             onPressed: (_isLoading || _cooldownSecondsRemaining > 0) ? null : _handleLogin,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.blue1, foregroundColor: Colors.white,
+                              backgroundColor: InsightTheme.blue1, foregroundColor: Colors.white,
                               disabledBackgroundColor: InsightTheme.blueTint,
-                              disabledForegroundColor: AppColors.blueInk,
+                              disabledForegroundColor: InsightTheme.blueInk,
                               elevation: 0, minimumSize: const Size(48, 48),
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                               shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm)),
@@ -991,12 +956,12 @@ class _LoginScreenState extends State<LoginScreen> {
                               children: [
                                 if (_isLoading) const SizedBox(width: 18, height: 18,
                                   child: CircularProgressIndicator(strokeWidth: 2,
-                                    color: AppColors.blueInk)),
+                                    color: InsightTheme.blueInk)),
                                 Text(_isLoading ? 'Signing in…' : _cooldownSecondsRemaining > 0
                                   ? 'Try again in ${_cooldownSecondsRemaining}s' : 'Sign in',
-                                  textAlign: TextAlign.center, style: AppText.inter(16,
+                                  textAlign: TextAlign.center, style: InsightTheme.inter(16,
                                     w: FontWeight.w600, c: (_isLoading || _cooldownSecondsRemaining > 0)
-                                      ? AppColors.blueInk : Colors.white)),
+                                      ? InsightTheme.blueInk : Colors.white)),
                               ]),
                           ),
                           // Eligibility and callback remain the existing device-auth policy.
@@ -1006,12 +971,12 @@ class _LoginScreenState extends State<LoginScreen> {
                               onPressed: _isLoading ? null : _handleBiometricLogin,
                               icon: const Icon(Icons.fingerprint_rounded, size: 22),
                               label: Text('Sign in with $_biometricLabel', textAlign: TextAlign.center,
-                                style: AppText.inter(14, w: FontWeight.w600, c: AppColors.blueInk)),
+                                style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.blueInk)),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: AppColors.blueInk,
+                                foregroundColor: InsightTheme.blueInk,
                                 backgroundColor: InsightTheme.blueTint,
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                side: BorderSide(color: AppColors.blue1.withValues(alpha: 0.7)),
+                                side: BorderSide(color: InsightTheme.blue1.withValues(alpha: 0.7)),
                                 shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
                                 minimumSize: const Size(48, 48)),
                             ),
@@ -1025,18 +990,26 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 )),
               ),
-            ),
+            ],
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildLegalNoticeRichText({bool isCentered = false}) {
-    final linkStyle = AppText.inter(12, w: FontWeight.w600, c: AppColors.blue1)
-        .copyWith(decoration: TextDecoration.underline, decorationColor: AppColors.blue1);
-    // Inline text links keep the sentence together and retain native keyboard focus.
-    // WidgetSpan applies the paragraph scaler to its child, including the label.
+    final linkStyle = InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blue1)
+        .copyWith(decoration: TextDecoration.underline, decorationColor: InsightTheme.blue1);
+    // Inline text links keep the sentence together and retain native keyboard
+    // focus.
+    //
+    // Both `textScaler: TextScaler.noScaling` calls below and the 24px box are
+    // load-bearing and were verified against login_concept_d_layout_test.dart
+    // ("Legal inline links honor text scaling exactly once"). Raising the box to
+    // the 48px accessibility floor makes it the line height and drove the legal
+    // paragraph from 34px to 136px at 200% scale. Do not change either without
+    // running that test.
     final linkButtonStyle = TextButton.styleFrom(
       padding: EdgeInsets.zero,
       minimumSize: const Size(48, 24),
@@ -1064,18 +1037,18 @@ class _LoginScreenState extends State<LoginScreen> {
             const TextSpan(text: '.'),
           ]),
           textAlign: isCentered ? TextAlign.center : TextAlign.start,
-          style: AppText.inter(12, c: AppColors.ink3, lh: 1.3),
+          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3, h: 1.3),
         ),
         const SizedBox(height: 2),
         Text('Authorized MPDO personnel only.',
           textAlign: isCentered ? TextAlign.center : TextAlign.start,
-          style: AppText.inter(12, c: AppColors.ink3, lh: 1.2)),
+          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3, h: 1.2)),
       ],
     );
   }
 
   Widget _buildFieldLabel(String text) {
-    return Text(text, style: AppText.inter(13, w: FontWeight.w600, c: AppColors.ink));
+    return Text(text, style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink));
   }
 
   Widget _buildTextField({
@@ -1100,16 +1073,14 @@ class _LoginScreenState extends State<LoginScreen> {
       autocorrect: autocorrect,
       maxLength: maxLength,
       onChanged: onChanged,
-      style: AppText.inter(14, w: FontWeight.w500, c: AppColors.ink),
-      cursorColor: AppColors.blue1,
+      // 16px / w400 and the shared grey border are what every other input in the
+      // app already uses; login was the only screen still on 14px w500 with a
+      // blue-tinted field border.
+      style: InsightTheme.inter(16, c: InsightTheme.ink),
+      cursorColor: InsightTheme.blue1,
       decoration: InsightTheme.compactFormInput.copyWith(
         hintText: hintText,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        filled: true,
-        fillColor: AppColors.surface,
-        enabledBorder: OutlineInputBorder(borderRadius: InsightTheme.roundedSm,
-          borderSide: BorderSide(color: AppColors.blue1.withValues(alpha: 0.3))),
-        prefixIcon: Icon(icon, color: AppColors.ink3, size: 20),
+        prefixIcon: Icon(icon, color: InsightTheme.ink3, size: 20),
         counterText: '',
         errorText: errorText,
         suffixIcon: isPassword
@@ -1117,7 +1088,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 tooltip: obscureText ? 'Show passcode' : 'Hide passcode',
                 icon: Icon(
                   obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                  color: AppColors.ink3,
+                  color: InsightTheme.ink3,
                   size: 20,
                 ),
                 onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
@@ -1126,39 +1097,4 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
-}
-
-/// Static, screen-owned contour artwork; contains no location or map data.
-class _LoginContourPainter extends CustomPainter {
-  const _LoginContourPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.save();
-    canvas.clipRect(Offset.zero & size);
-    canvas.scale(size.width, size.height);
-    final fill = Paint()..color = AppColors.blue1.withValues(alpha: 0.035);
-    for (var layer = 0; layer < 4; layer++) {
-      final y = 0.36 + layer * 0.07;
-      canvas.drawPath(Path()..moveTo(0, y)
-        ..cubicTo(0.2, y + 0.13, 0.3, y + 0.2, 0.5, y + 0.13)
-        ..cubicTo(0.72, y + 0.04, 0.8, y + 0.05, 1, y - 0.08)
-        ..lineTo(1, 1)..lineTo(0, 1)..close(), fill);
-    }
-    // Normalize stroke width separately to avoid stretching it on short screens.
-    canvas.restore();
-    final line = Paint()..color = AppColors.blue1.withValues(alpha: 0.1)
-      ..style = PaintingStyle.stroke..strokeWidth = 0.8;
-    for (var contour = 0; contour < 4; contour++) {
-      final offset = contour * 0.045;
-      canvas.drawPath(Path()..moveTo(size.width * 1.05, size.height * (0.14 + offset))
-        ..cubicTo(size.width * 0.92, size.height * (0.35 + offset),
-          size.width * 0.7, size.height * (0.2 + offset), size.width * 0.67, size.height * (0.4 + offset))
-        ..cubicTo(size.width * 0.62, size.height * (0.57 + offset),
-          size.width * 0.27, size.height * (0.5 + offset), -size.width * 0.05, size.height * (0.78 + offset)), line);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_LoginContourPainter oldDelegate) => false;
 }

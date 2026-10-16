@@ -335,48 +335,108 @@ class InsightBottomNav extends StatelessWidget {
   }
 }
 
-/// Circular trigger button — opens/closes the Quick Actions sheet. Solid
-/// white, same family as the rail (not glass), matching the reference's
-/// `w-16 h-16 bg-white rounded-[2rem] border shadow-xl`. Now sits above
-/// the rail (right-aligned, over the Profile tab) instead of beside it.
-class _QuickActionsTrigger extends StatelessWidget {
+/// Quick-actions trigger — opens/closes the Quick Actions sheet.
+///
+/// A miniature of the nav rail it floats above: the rail's own solid-white
+/// pill material (1px border, soft lift) holding a 40px blue-gradient core —
+/// the same `_blue1 → _blue2` fill as the ACTIVE tab pill — with a white
+/// bolt glyph. While the sheet is open the core swells to fill the whole
+/// button and the glyph becomes a close mark, so "open" reads as the
+/// button's own active state instead of a separate control.
+class _QuickActionsTrigger extends StatefulWidget {
   final bool isOpen;
   final VoidCallback onTap;
   const _QuickActionsTrigger({required this.isOpen, required this.onTap});
 
   @override
+  State<_QuickActionsTrigger> createState() => _QuickActionsTriggerState();
+}
+
+class _QuickActionsTriggerState extends State<_QuickActionsTrigger> {
+  static const double _coreSize = 40;
+  static const double _coreRadius = 14;
+
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
+    const size = InsightBottomNav._railAndTriggerSize; // 64
+    // Open: fill right up to the inside of the 1px border.
+    final coreSize = widget.isOpen ? size - 2 : _coreSize;
     return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
       onTap: () {
         HapticFeedback.selectionClick();
-        onTap();
+        widget.onTap();
       },
       behavior: HitTestBehavior.opaque,
       child: Semantics(
         label: 'Quick actions',
         button: true,
-        child: AnimatedContainer(
-          duration: InsightBottomNav._transitionDuration,
-          curve: InsightBottomNav._transitionCurve,
-          width: InsightBottomNav._railAndTriggerSize,
-          height: InsightBottomNav._railAndTriggerSize,
-          decoration: BoxDecoration(
-            color: Colors.white, // solid — matches reference
-            borderRadius: BorderRadius.circular(InsightBottomNav._outerCornerRadius),
-            border: Border.all(color: InsightBottomNav._railBorder),
-            boxShadow: const [
-              BoxShadow(color: Color(0x1A0B1440), blurRadius: 24, offset: Offset(0, 10)),
-            ],
-          ),
-          child: Center(
-            child: AnimatedRotation(
-              duration: InsightBottomNav._transitionDuration,
-              curve: InsightBottomNav._transitionCurve,
-              turns: isOpen ? 0.5 : 0,
-              child: Icon(
-                Icons.keyboard_arrow_up_rounded,
-                size: 24, // reference: w-6 h-6
-                color: isOpen ? InsightBottomNav._blue1 : InsightBottomNav._inactiveIcon,
+        child: AnimatedScale(
+          scale: _pressed ? 0.94 : 1,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: InsightBottomNav._transitionDuration,
+            curve: InsightBottomNav._transitionCurve,
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: Colors.white, // solid — same family as the rail
+              borderRadius:
+                  BorderRadius.circular(InsightBottomNav._outerCornerRadius),
+              border: Border.all(color: InsightBottomNav._railBorder),
+              boxShadow: [
+                BoxShadow(
+                  // Open: the active tab pill's blue glow. Idle: the rail's
+                  // own neutral lift.
+                  color: widget.isOpen
+                      ? InsightBottomNav._blue1.withValues(alpha: 0.30)
+                      : const Color(0x1A0B1440),
+                  blurRadius: widget.isOpen ? 14 : 24,
+                  offset: Offset(0, widget.isOpen ? 6 : 10),
+                ),
+              ],
+            ),
+            child: Center(
+              child: AnimatedContainer(
+                duration: InsightBottomNav._transitionDuration,
+                curve: InsightBottomNav._transitionCurve,
+                width: coreSize,
+                height: coreSize,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      InsightBottomNav._blue1,
+                      InsightBottomNav._blue2,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(
+                    widget.isOpen ? coreSize / 2 : _coreRadius,
+                  ),
+                ),
+                child: Center(
+                  child: AnimatedSwitcher(
+                    duration: InsightBottomNav._transitionDuration,
+                    switchInCurve: InsightBottomNav._transitionCurve,
+                    transitionBuilder: (child, animation) => RotationTransition(
+                      turns:
+                          Tween<double>(begin: -0.12, end: 0).animate(animation),
+                      child: FadeTransition(opacity: animation, child: child),
+                    ),
+                    child: Icon(
+                      widget.isOpen ? Icons.close_rounded : Icons.bolt_rounded,
+                      key: ValueKey<bool>(widget.isOpen),
+                      size: widget.isOpen ? 26 : 22,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

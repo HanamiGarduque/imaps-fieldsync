@@ -24,6 +24,13 @@ double sitePointDistance(LatLng a, LatLng b) =>
       b.longitude,
     );
 
+/// Shared reliability gates for a usable GPS fix: at most 25 m of reported
+/// accuracy, no older than 15 s, and no more than 2 s into the future.
+/// Step 1 guidance and Step 2 verification both read these values.
+const double kReliableFixMaxAccuracyMeters = 25;
+const Duration kReliableFixMaxAge = Duration(seconds: 15);
+const Duration kReliableFixFutureSkew = Duration(seconds: 2);
+
 bool reliableSiteFix({
   required double accuracyMeters,
   required DateTime timestamp,
@@ -32,9 +39,9 @@ bool reliableSiteFix({
   final age = now.difference(timestamp);
   return accuracyMeters.isFinite &&
       accuracyMeters > 0 &&
-      accuracyMeters <= 25 &&
-      age >= const Duration(seconds: -2) &&
-      age <= const Duration(seconds: 15);
+      accuracyMeters <= kReliableFixMaxAccuracyMeters &&
+      age >= -kReliableFixFutureSkew &&
+      age <= kReliableFixMaxAge;
 }
 
 /// A poor/expired fix hides the notice without rearming its 100m episode.

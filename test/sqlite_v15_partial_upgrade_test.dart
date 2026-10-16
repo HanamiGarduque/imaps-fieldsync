@@ -183,21 +183,26 @@ void main() {
     );
   }
 
-  Future<void> expectPendingActionsUnchanged(Database db) async {
-    final cols = (await db.rawQuery(
-      'PRAGMA table_info(pending_actions)',
-    )).map((r) => r['name'] as String).toList();
-    expect(cols, [
-      'id',
-      'type',
-      'job_id',
-      'payload',
-      'status',
-      'retry_count',
-      'last_error',
-      'created_at',
-      'updated_at',
-    ]);
+  /// The ordered column list of `pending_actions`, read straight from SQLite.
+  Future<List<String>> pendingActionColumns(Database db) async =>
+      (await db.rawQuery('PRAGMA table_info(pending_actions)'))
+          .map((r) => r['name'] as String)
+          .toList();
+
+  /// [before] is the same table's ordered columns on the pre-upgrade database.
+  /// Comparing against a live snapshot is what makes this a real invariant - a
+  /// hardcoded list only proves the list went stale. `pending_actions` carries
+  /// an owner column now (owner isolation), and must still survive the v15
+  /// upgrade untouched: no column added, dropped or reordered.
+  Future<void> expectPendingActionsUnchanged(
+    Database db,
+    List<String> before,
+  ) async {
+    expect(
+      await pendingActionColumns(db),
+      before,
+      reason: 'the v15 upgrade must not reshape pending_actions',
+    );
     final notNull = (await db.rawQuery(
       'PRAGMA table_info(pending_actions)',
     )).firstWhere((r) => r['name'] == 'job_id');
@@ -251,11 +256,12 @@ void main() {
         )).contains('supabase_application_id'),
         isFalse,
       );
+      final pendingBefore = await pendingActionColumns(db);
       await db.close();
 
       db = await upgradeToV15(path);
       await expectEveryExistingRowSurvived(db);
-      await expectPendingActionsUnchanged(db);
+      await expectPendingActionsUnchanged(db, pendingBefore);
       await expectRouteCacheUnchanged(db);
       await expectFinalV15Schema(db);
       await db.close();
@@ -320,6 +326,7 @@ void main() {
         'supabase_application_id': 'app-kept',
         'bridge_source_id': 'source-kept',
       });
+      final pendingBefore = await pendingActionColumns(db);
       await db.close();
 
       // This is the exact state that produced the device crash: running the
@@ -330,7 +337,7 @@ void main() {
       expect(job['bridge_source_id'], 'source-kept');
       await expectFinalV15Schema(db);
       await expectEveryExistingRowSurvived(db);
-      await expectPendingActionsUnchanged(db);
+      await expectPendingActionsUnchanged(db, pendingBefore);
       await expectRouteCacheUnchanged(db);
       await db.close();
     },
@@ -426,9 +433,10 @@ void main() {
 
   test('H. pending_actions schema is byte-for-byte unchanged', () async {
     var db = await buildV14(path);
+    final pendingBefore = await pendingActionColumns(db);
     await db.close();
     db = await upgradeToV15(path);
-    await expectPendingActionsUnchanged(db);
+    await expectPendingActionsUnchanged(db, pendingBefore);
     await db.close();
   });
 

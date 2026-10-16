@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:math' as math;
+import 'dart:math' show max, min, pi;
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 
 import '../../../core/models/user_profile.dart';
 import '../models/activity_event_category.dart';
@@ -17,8 +18,13 @@ import '../../../core/widgets/insight_bottom_nav.dart'; // kInsightBottomNavRese
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/motion/updating_tile.dart';
+import '../../../core/widgets/motion/linked_list_motion.dart';
+import '../../../core/widgets/app_feedback.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/offline_banner.dart';
+import '../../../core/widgets/task_sync_indicator.dart';
 import '../widgets/active_assignments_folder_card.dart';
+import '../widgets/recent_activity_folder.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// Whether a task belongs in the dashboard's Active Assignments carousel.
@@ -92,20 +98,41 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   List<TaskItem> _allTasks = [];
   // Keep real fetched metadata for selected normal entry; display is read-only.
   Map<String, Map<String, dynamic>> _entryJobs = {};
+  // Durable saved progress per upcoming card, read from the exact-owner draft.
   Map<String, int> _cardSteps = {};
   bool _isLoadingTasks = true;
+
+  /// Only the newest assignments load may write to this screen's state. A
+  /// superseded request, or a late answer to one, is discarded instead of
+  /// overwriting newer state.
+  int _tasksRequestId = 0;
+
+  /// Set while saved assignments are on screen and the remote refresh did not
+  /// complete, so the carousel says what it is showing instead of claiming
+  /// there is nothing.
+  String? _savedDataNotice;
+  TaskRefreshPhase _taskRefreshPhase = TaskRefreshPhase.checking;
+  DateTime? _lastTaskRefreshAt;
+
+  /// The authenticated owner whose assignments this page is currently showing.
+  ///
+  /// A genuine account change retires them instead of repurposing this
+  /// still-mounted page for the next inspector; the previous owner's durable
+  /// local rows are never deleted by that.
+  String? _tasksOwner;
+
+  StreamSubscription<AuthState>? _authSubscription;
+
+  /// Bounded remote refresh — same 10 s service bound My Tasks uses.
+  static const Duration _refreshTimeout = Duration(seconds: 10);
 
   List<Map<String, dynamic>> _recentActivity = [];
   bool _isLoadingActivity = true;
   int _unreadCount = 0;
 
-  // Recent Activity — category filter (All / Tasks / Sync / Reports / Profile).
-  // Buckets are owned by ActivityEventCategory so the mapping is testable
-  // without a widget tree; filtering happens client-side over the already-fetched
-  // batch (see _kRecentActivityLimit below) rather than re-querying per tap.
-  String _activityFilter = 'all';
-  bool _showAllActivity = false;
-  final ScrollController _activityFilterController = ScrollController();
+  // Home selects one latest event per category from the already-fetched batch.
+  // Tapping that preview opens the category's full history in the modal.
+  String _activityPreviewCategory = 'tasks';
 
    // The calendar selection is independent of the live Today/Note card.
    final DateTime _now = DateTime.now();
@@ -168,8 +195,37 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       }
     });
 
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange
+        .listen((_) => _retireIfOwnerChanged(),
+            onError: (Object _) => _retireIfOwnerChanged());
     _loadUpcomingTasks();
     _loadRecentActivity();
+  }
+
+  /// A real account change invalidates what this mounted page is showing: the
+  /// previous inspector's assignments are retired from the display (their
+  /// durable local rows are left exactly as they are) and any navigation bound
+  /// before the change is refused instead of opening another inspector's task.
+  void _retireIfOwnerChanged() {
+    if (!mounted) return;
+    final current = DBHelper.currentInspectorId;
+    if (current != null && current == _tasksOwner) return;
+    if (_tasksOwner == null && _allTasks.isEmpty && _savedDataNotice == null) {
+      return;
+    }
+    setState(() {
+      _tasksRequestId++; // Retire every pending UI result with its owner.
+      _tasksOwner = null;
+      _allTasks = [];
+      _upcomingTasks = [];
+      _entryJobs = {};
+      _isLoadingTasks = false;
+      _savedDataNotice = SavedDataNotice.ownerChanged;
+      _taskRefreshPhase = TaskRefreshPhase.ownerChanged;
+      _lastTaskRefreshAt = null;
+    });
+    ScaffoldMessenger.maybeOf(context)?.removeCurrentSnackBar();
+    AppFeedback.dismiss();
   }
 
   // TextPainter-based layout must be measured again when runtime fonts load.
@@ -196,77 +252,255 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     _pageController.dispose();
     PaintingBinding.instance.systemFonts.removeListener(_onFontsChanged);
-    _activityFilterController.dispose();
     _connectivitySubscription.cancel();
     disposeSpringEntrance();
     super.dispose();
   }
 
-  Future<void> _loadUpcomingTasks() async {
-    setState(() => _isLoadingTasks = true);
-    List<TaskItem> tasks = [];
-    try {
-      final dynamic connectivityResult = await Connectivity().checkConnectivity();
-      final bool hasConnection;
-      if (connectivityResult is ConnectivityResult) {
-        hasConnection = connectivityResult != ConnectivityResult.none;
-      } else if (connectivityResult is List) {
-        hasConnection = connectivityResult
-            .cast<ConnectivityResult>()
-            .any((status) => status != ConnectivityResult.none);
-      } else {
-        hasConnection = false;
-      }
-
-      if (hasConnection) {
-        final jobs = await SupabaseService.fetchMyJobs();
-        _entryJobs = {for (final job in jobs) job['id'] as String: job};
-        tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
-      } else {
-        _entryJobs = {};
-        final localJobs = await DBHelper.getCachedJobs();
-        tasks = localJobs.map(TaskItem.fromCachedJob).toList();
-      }
-    } catch (e) {
-      debugPrint('Error loading tasks: $e');
-    }
-
+  /// The carousel population: exactly the filter and order the dashboard has
+  /// always used.
+  List<TaskItem> _upcomingFrom(List<TaskItem> tasks) {
     final upcoming = tasks.where(isHomeDashboardActiveAssignment).toList()
       ..sort((a, b) {
         final aDate = _calendarDateForTask(a) ?? '9999-12-31';
         final bDate = _calendarDateForTask(b) ?? '9999-12-31';
         return aDate.compareTo(bDate);
       });
+    return upcoming.take(6).toList();
+  }
 
-    final cardSteps = <String, int>{};
+  /// Saved progress for the upcoming cards: the task's own counters joined
+  /// with the exact-owner SQLite draft, so a reopened assignment resumes at
+  /// the step it reached instead of resetting to the fetched value.
+  Future<Map<String, int>> _savedCardSteps(List<TaskItem> upcoming) async {
+    final steps = <String, int>{};
     for (final task in upcoming.take(6)) {
       try {
         final draft = await DBHelper.getLocalInspection(task.id);
         DBHelper.requireSameInspector(widget.profile.id);
-        cardSteps[task.id] = math.max(
-          math.max(task.currentStep, task.derivedHighestStep),
+        steps[task.id] = max(
+          max(task.currentStep, task.derivedHighestStep),
           (draft?['current_step'] as num?)?.toInt() ?? 0,
         ).clamp(0, 6);
       } catch (e) {
         debugPrint('Saved assignment progress unavailable: ${e.runtimeType}');
       }
     }
+    return steps;
+  }
 
-    if (mounted) {
+  /// Cache first, refresh second — the same contract My Tasks uses.
+  ///
+  /// 1. The owner-scoped cache renders immediately and is never gated on a
+  ///    connectivity indication, so a weak, captive or dead network cannot turn
+  ///    into an indefinite spinner while saved assignments sit unread. The
+  ///    moment saved rows are shown they are identified as saved data.
+  /// 2. The refresh is bounded, its commit is ordered per owner across every
+  ///    screen, and no failed, timed-out or superseded answer can erase what is
+  ///    on screen or leave the carousel claiming there is nothing.
+  /// 3. Reading the local store is as fallible as any other platform call: a
+  ///    damaged or unavailable store reaches a recoverable state instead of an
+  ///    unhandled future or a stuck spinner, and never deletes the row.
+  Future<void> _loadUpcomingTasks() async {
+    final requestId = ++_tasksRequestId;
+    final owner = DBHelper.currentInspectorId;
+    setState(() => _taskRefreshPhase = TaskRefreshPhase.checking);
+
+    List<Map<String, dynamic>> cached = const [];
+    var cacheFailed = false;
+    if (owner != null && owner.isNotEmpty) {
+      try {
+        cached = await DBHelper.getCachedJobs();
+      } catch (e) {
+        debugPrint('[HOME] saved task read failed: $e');
+        cacheFailed = true;
+      }
+    }
+    List<TaskItem>? parsed;
+    if (cached.isNotEmpty) {
+      try {
+        parsed = cached.map(TaskItem.fromCachedJob).toList();
+      } catch (e) {
+        debugPrint('[HOME] saved task rows unreadable: $e');
+        cacheFailed = true;
+      }
+    }
+    if (!mounted || requestId != _tasksRequestId) return;
+
+    // Saved-step reads happen before the cache paint, so a reopened draft is
+    // on screen from the first frame instead of only after a refresh answers.
+    final cardSteps = parsed == null
+        ? <String, int>{}
+        : await _savedCardSteps(_upcomingFrom(parsed));
+    if (!mounted || requestId != _tasksRequestId) return;
+
+    setState(() {
+      _cardSteps = cardSteps;
+      if (parsed != null) {
+        _allTasks = parsed;
+        _upcomingTasks = _upcomingFrom(parsed);
+        _isLoadingTasks = false;
+        // Identified as saved from the first frame it is shown, not only once
+        // the refresh has finished or failed.
+        _savedDataNotice = SavedDataNotice.refreshing;
+      } else if (cacheFailed) {
+        _isLoadingTasks = false;
+        _upcomingTasks = [];
+        _savedDataNotice = SavedDataNotice.cacheReadFailed;
+        _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+      } else if (_allTasks.isEmpty) {
+        // Nothing is known yet, so "loading" is the only honest state.
+        _isLoadingTasks = true;
+      }
+    });
+
+    // The owner is recorded before any read: rows rendered from the cache
+    // while offline still belong to this inspector and stay openable.
+    if (owner != null && owner.isNotEmpty) {
+      _tasksOwner = owner;
+    }
+
+    if (!await _hasConnectivity()) {
+      if (!mounted || requestId != _tasksRequestId) return;
+      setState(() {
+        // Unchanged from the original offline path: entry detail is refetched
+        // by the detail screen rather than served from a remembered online row.
+        _entryJobs = {};
+        _isLoadingTasks = false;
+        _taskRefreshPhase = cacheFailed && parsed == null
+            ? TaskRefreshPhase.cacheUnavailable : TaskRefreshPhase.offline;
+        if (parsed != null || _upcomingTasks.isNotEmpty) {
+          _savedDataNotice = SavedDataNotice.offline;
+        } else if (cacheFailed) {
+          _savedDataNotice = SavedDataNotice.cacheReadFailed;
+        } else {
+          // An empty device is not proof that there is no work.
+          _savedDataNotice = SavedDataNotice.noCacheOffline;
+        }
+      });
+      return;
+    }
+
+    if (owner == null || owner.isEmpty) {
+      // No authenticated owner: nothing may be fetched, written, or shown.
+      if (!mounted || requestId != _tasksRequestId) return;
+      setState(() {
+        _allTasks = [];
+        _upcomingTasks = [];
+        _entryJobs = {};
+        _isLoadingTasks = false;
+        _savedDataNotice = SavedDataNotice.ownerChanged;
+        _taskRefreshPhase = TaskRefreshPhase.ownerChanged;
+        _lastTaskRefreshAt = null;
+      });
+      return;
+    }
+    // Captured before the remote read, so the shared commit boundary can reject
+    // a snapshot that another screen or a later load has already superseded.
+    final refresh = DBHelper.beginJobsRefresh();
+    try {
+      final jobs = await SupabaseService.fetchMyJobs().timeout(_refreshTimeout);
+      if (!mounted || requestId != _tasksRequestId) return;
+      // An answer that arrives after the device changed accounts belongs to
+      // the previous account: it is never rendered and never cached.
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      final applied = await DBHelper.cacheJobs(jobs, refresh: refresh);
+      if (!mounted || requestId != _tasksRequestId) return;
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      if (!applied) {
+        // A newer snapshot already reached this device, so this answer is
+        // never presented as the current picture.
+        setState(() {
+          _savedDataNotice = SavedDataNotice.saved;
+          _taskRefreshPhase = TaskRefreshPhase.saved;
+          _isLoadingTasks = false;
+        });
+        return;
+      }
+      _entryJobs = {for (final job in jobs) job['id'] as String: job};
+      final tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
+      final cardSteps = await _savedCardSteps(_upcomingFrom(tasks));
+      if (!mounted || requestId != _tasksRequestId) return;
       setState(() {
         _allTasks = tasks;
-        _upcomingTasks = upcoming.take(6).toList(); 
+        _upcomingTasks = _upcomingFrom(tasks);
         _cardSteps = cardSteps;
         _isLoadingTasks = false;
+        _savedDataNotice = null;
+        _taskRefreshPhase = TaskRefreshPhase.fresh;
+        _lastTaskRefreshAt = DateTime.now();
+      });
+    } catch (e) {
+      debugPrint('Assignment refresh failed (saved data kept): $e');
+      if (!mounted || requestId != _tasksRequestId) return;
+      setState(() {
+        _isLoadingTasks = false;
+        _taskRefreshPhase = cacheFailed && parsed == null
+            ? TaskRefreshPhase.cacheUnavailable : TaskRefreshPhase.failed;
+        if (parsed != null || _upcomingTasks.isNotEmpty) {
+          _savedDataNotice = SavedDataNotice.refreshFailed;
+        } else {
+          _savedDataNotice = cacheFailed
+              ? SavedDataNotice.cacheReadFailed
+              : SavedDataNotice.noCacheFailure;
+        }
       });
     }
   }
 
-  // Fetch once; each category initially reveals seven of this recent batch.
-  static const int _kRecentActivityLimit = 15;
-  static const int _kVisibleActivityLimit = 7;
+  void _retryTaskRefresh() {
+    if (!mounted) return;
+    if (_tasksOwner == null || _tasksOwner != DBHelper.currentInspectorId) {
+      _retireIfOwnerChanged();
+      return;
+    }
+    _loadUpcomingTasks();
+  }
+
+  /// Retry is offered only where it can change the outcome: a terminal state
+  /// with nothing usable on screen. While a refresh is outstanding, or while
+  /// saved rows are being shown, there is nothing to retry yet.
+  VoidCallback? get _noticeRetry {
+    final notice = _savedDataNotice;
+    if (notice == SavedDataNotice.cacheReadFailed ||
+        notice == SavedDataNotice.noCacheFailure ||
+        notice == SavedDataNotice.noCacheOffline) {
+      return _retryTaskRefresh;
+    }
+    return null;
+  }
+
+  /// Connectivity is advisory only: it chooses the wording of the notice and
+  /// never decides what is rendered. The read is bounded, so a hanging
+  /// platform call cannot hold the screen.
+  Future<bool> _hasConnectivity() async {
+    try {
+      final dynamic result = await Connectivity()
+          .checkConnectivity()
+          .timeout(const Duration(milliseconds: 500));
+      if (result is ConnectivityResult) {
+        return result != ConnectivityResult.none;
+      }
+      if (result is List) {
+        return result.any((status) => status != ConnectivityResult.none);
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Fetch a bounded recent batch; the dashboard previews only one event.
+  static const int _kRecentActivityLimit = 50;
 
   Future<void> _loadRecentActivity() async {
     setState(() => _isLoadingActivity = true);
@@ -358,19 +592,177 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   String _eventCategoryLabel(String eventType) =>
       ActivityEventCategory.labelFor(_eventCategory(eventType));
 
-  List<Map<String, dynamic>> get _filteredActivity {
-    if (_activityFilter == 'all') return _recentActivity;
+  /// "All" is available only inside the history sheet.
+  String _activityLabel(String key) =>
+      key == 'all' ? 'All' : ActivityEventCategory.labelFor(key);
+
+  /// Home's category shortcuts, in sheet order. 'all' intentionally excluded.
+  static const List<String> _activityShortcuts = [
+    'tasks',
+    'sync',
+    ActivityEventCategory.reports,
+    'profile',
+  ];
+
+  List<Map<String, dynamic>> _activityMatching(String filter) {
+    if (filter == 'all') return _recentActivity;
     return _recentActivity
-        .where((a) => _eventCategory(a['event_type'] as String? ?? '') == _activityFilter)
+        .where((a) => _eventCategory(a['event_type'] as String? ?? '') == filter)
         .toList();
   }
 
-  void _selectActivityFilter(String filter) {
-    if (_activityFilter == filter) return;
-    setState(() {
-      _activityFilter = filter;
-      _showAllActivity = false;
-    });
+  /// The sheet starts on the preview's category and can switch independently.
+  void _showActivityHistory({String initialFilter = 'all'}) {
+    if (_isLoadingActivity) return;
+    var filter = initialFilter;
+    String labelOf(String key) => _activityLabel(key);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: InsightTheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final shown = _activityMatching(filter);
+            return SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.82,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 2, 12, 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Recent activity',
+                                      style: InsightTheme.urbanist(20,
+                                          w: FontWeight.w700,
+                                          c: InsightTheme.ink)),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                      '${labelOf(filter)} · ${shown.length} ${shown.length == 1 ? 'event' : 'events'}',
+                                      style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Close recent activity',
+                              onPressed: () => Navigator.of(sheetContext).pop(),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 20, top: 14),
+                        child: ScrollConfiguration(
+                          behavior: ScrollConfiguration.of(context)
+                              .copyWith(scrollbars: false),
+                          child: SingleChildScrollView(
+                            key: const ValueKey('modal_activity_filters'),
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                for (final key in ActivityEventCategory.filters)
+                                  Padding(
+                                    padding: EdgeInsets.only(
+                                        right: key == 'profile' ? 0 : 4),
+                                    child: _ActivityFilterChip(
+                                      label: labelOf(key),
+                                      selected: filter == key,
+                                      onTap: () =>
+                                          setSheetState(() => filter = key),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: shown.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'No ${labelOf(filter).toLowerCase()} activity yet.',
+                                  style: InsightTheme.inter(
+                                      13, c: InsightTheme.ink2),
+                                ),
+                              )
+                            : ListView.builder(
+                                key: const ValueKey('recent_activity_modal_list'),
+                                padding:
+                                    const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                                itemCount: shown.length,
+                                itemBuilder: (context, index) {
+                                  final event = shown[index];
+                                  final themeInfo = _eventTheme(
+                                      event['event_type'] as String? ?? '');
+                                  final tile = Stack(
+                                    children: [
+                                      if (index < shown.length - 1)
+                                        Positioned(
+                                          left: 16,
+                                          top: 16,
+                                          bottom: 0,
+                                          child: Container(
+                                            width: 2,
+                                            color: InsightTheme.ink3
+                                                .withValues(alpha: 0.15),
+                                          ),
+                                        ),
+                                      _TimelineActivityTile(
+                                        key: ValueKey(
+                                            'modal_${event['id'] ?? index}'),
+                                        icon: themeInfo['icon'],
+                                        color: themeInfo['color'],
+                                        categoryLabel: _eventCategoryLabel(event[
+                                                'event_type'] as String? ??
+                                            ''),
+                                        title: event['title'] as String? ??
+                                            'Update',
+                                        subtitle: event['subtitle'] as String? ??
+                                            '',
+                                        time: _timeAgo(
+                                            event['occurred_at'] as String?),
+                                        occurredAtIso:
+                                            event['occurred_at'] as String?,
+                                      ),
+                                    ],
+                                  );
+                                  return MediaQuery.disableAnimationsOf(context)
+                                      ? tile
+                                      : LinkedListSlide(
+                                          key: ValueKey('activity-rise-$filter-${event['id'] ?? index}'),
+                                          index: index,
+                                          itemDelay: Spring.step,
+                                          beginOffset: const Offset(0, 0.18),
+                                          child: tile,
+                                        );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   String _getInitials(String name) {
@@ -537,12 +929,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final firstName = UserProfile.displayFullName(widget.profile.fullName);
     final greeting = _greeting(_now);
      final tasksByDay = _tasksByDayInMonth(_calendarMonth);
-    final filteredActivity = _filteredActivity;
-    final visibleActivity = _showAllActivity
-        ? filteredActivity
-        : filteredActivity.take(_kVisibleActivityLimit).toList();
-    final activityMotion = MediaQuery.disableAnimationsOf(context)
-         ? Duration.zero : const Duration(milliseconds: 220);
+    final previewCategory = _activityPreviewCategory;
+    final previewList = _activityMatching(previewCategory);
+    final latestActivity = previewList.isEmpty ? null : previewList.first;
     final calendarMotion = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero : const Duration(milliseconds: 320);
 
@@ -785,10 +1174,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   onPrevMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
                                   onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
                                   onPick: _onFullCalendarPick,
+                                      ),
                                      ),
-                                    ),
-                                 ),
-                              ),
+                                  ),
+                               ),
                       ),
                const SizedBox(height: 8),
 
@@ -821,6 +1210,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   beginOffset: const Offset(0, 20),
                   child: _SectionLabel(
                     title: "Active Assignments",
+                    titleAction: TaskSyncIndicator(
+                      key: const ValueKey('task-sync-indicator'),
+                      phase: _taskRefreshPhase,
+                      hasSavedTasks: _allTasks.isNotEmpty,
+                      lastChecked: _lastTaskRefreshAt,
+                      onRetry: _retryTaskRefresh,
+                    ),
                     trailing: _SectionActionButton(label: 'See All', onTap: _goToTasksTab),
                   ),
                 ),
@@ -830,23 +1226,35 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                 animation: springFor(2),
                 beginOffset: const Offset(70, 0),
                 child: SizedBox(
-                height: 244 * math.max(1, MediaQuery.textScalerOf(context).scale(12) / 12),
+                height: 244 * max(1, MediaQuery.textScalerOf(context).scale(12) / 12),
                 child: _isLoadingTasks
                     ? const Center(child: ImapsLoadingIndicator(size: 50))
                     : _upcomingTasks.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.assignment_outlined, size: 36, color: InsightTheme.ink3),
-                                const SizedBox(height: 10),
-                                Text(
-                                  'No active assignments.',
-                                  style: InsightTheme.openSans(13, c: InsightTheme.ink2),
+                        ? (_savedDataNotice != null
+                            // Never claim emptiness when the refresh failed:
+                            // "nothing" is only ever stated once it is known.
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 36),
+                                  child: SavedDataNotice(
+                                    message: _savedDataNotice!,
+                                    onRetry: _noticeRetry,
+                                  ),
                                 ),
-                              ],
-                            ),
-                          )
+                              )
+                            : Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.assignment_outlined, size: 36, color: InsightTheme.ink3),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'No active assignments.',
+                                      style: InsightTheme.openSans(13, c: InsightTheme.ink2),
+                                    ),
+                                  ],
+                                ),
+                              ))
                         : PageView.builder(
                             controller: _pageController,
                             // Reuses the same controller; only the visible
@@ -868,7 +1276,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   }
                                   return Center(
                                     child: SizedBox(
-                                      height: Curves.easeOut.transform(value) * 220 * math.max(1, MediaQuery.textScalerOf(context).scale(12) / 12),
+                                      height: Curves.easeOut.transform(value) * 220 * max(1, MediaQuery.textScalerOf(context).scale(12) / 12),
                                       width: double.infinity,
                                       child: child,
                                     ),
@@ -883,21 +1291,28 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       _upcomingTasks[index].location,
                                       _upcomingTasks[index].applicationType,
                                       _upcomingTasks[index].landUseClass,
-                                       _upcomingTasks[index].status,
-                                       _cardSteps[_upcomingTasks[index].id],
-                                       _upcomingTasks[index].name,
+                                      _upcomingTasks[index].status,
                                     ),
                                     child: ActiveAssignmentsFolderCard(
+                                      // IDs remain in Task Details and are no
+                                      // longer printed on the carousel artwork.
                                       inspectionId: _formatShortId(_upcomingTasks[index].id),
                                       referenceNo: _upcomingTasks[index].inspectionNo,
-                                        date: _calendarDateForTask(_upcomingTasks[index]) != null
+                                      date: _calendarDateForTask(_upcomingTasks[index]) != null
                                           ? _formatScheduledDate(_calendarDateForTask(_upcomingTasks[index])!)
-                                           : '—',
+                                          : '—',
                                       dateLabel: _calendarDateForTask(_upcomingTasks[index]) == null
                                           ? null
                                           : _upcomingTasks[index].pendingSection == PendingTaskSection.scheduled
-                                              ? 'Visit Date' : 'Deadline',
-                                      savedStep: _cardSteps[_upcomingTasks[index].id],
+                                              ? 'Visit Date'
+                                              : 'Deadline',
+                                      // The durable draft step when it could be
+                                      // read; the fetched counters otherwise.
+                                      savedStep: _cardSteps[_upcomingTasks[index].id] ??
+                                          (_upcomingTasks[index].currentStep > 0
+                                                  ? _upcomingTasks[index].currentStep
+                                                  : _upcomingTasks[index].derivedHighestStep)
+                                              .clamp(0, 6),
                                       location: _upcomingTasks[index].location,
                                       applicantName: _upcomingTasks[index].name,
                                       applicationType: _upcomingTasks[index].applicationType?.isNotEmpty == true
@@ -907,12 +1322,22 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                           _upcomingTasks[index].lifecycleCategory,
                                       pendingSection:
                                           _upcomingTasks[index].pendingSection,
-                                      onTap: () => Navigator.of(context).push(
-                                          MaterialPageRoute(builder: (_) => ParcelDetailScreen(
-                                            task: _upcomingTasks[index],
-                                            fetchedJob: _entryJobs[_upcomingTasks[index].id],
-                                            relatedRounds: _allTasks.where(_upcomingTasks[index].sameApplicationAs).toList(),
-                                          ))),
+                                      onTap: () {
+                                        // A callback bound before an account
+                                        // change must not open another
+                                        // inspector's task from this page.
+                                        final current = DBHelper.currentInspectorId;
+                                        if (!mounted || current == null || current != _tasksOwner) {
+                                          _retireIfOwnerChanged();
+                                          return;
+                                        }
+                                        Navigator.of(context).push(
+                                            MaterialPageRoute(builder: (_) => ParcelDetailScreen(
+                                              task: _upcomingTasks[index],
+                                              fetchedJob: _entryJobs[_upcomingTasks[index].id],
+                                              relatedRounds: _allTasks.where(_upcomingTasks[index].sameApplicationAs).toList(),
+                                            )));
+                                      },
                                     ),
                                   ),
                                 ),
@@ -952,24 +1377,32 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: SpringSlide(
+                  animation: springFor(3),
+                  beginOffset: const Offset(0, 20),
+                  child: _SectionLabel(
+                    title: "Task completion flow",
+                    trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab),
+                  ),
+              ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: SpringSlide(
                   animation: springFor(4),
                   beginOffset: const Offset(0, 24),
-                  // Group container (Pattern A) — the ring chart previously
-                  // sat directly on the page background; giving it its own
-                  // card lets the shape actually register as a unit.
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: InsightTheme.surface,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: InsightTheme.line),
                     ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      _SectionLabel(title: 'Task completion flow',
-                        trailing: _SectionActionButton(label: 'More details', onTap: _goToTasksTab)),
-                      const SizedBox(height: 12),
-                      _isLoadingTasks
+                    // 8px inset keeps the white card reading as a card around
+                    // the tiles. With zero padding the four tiles ran edge to
+                    // edge and buried the container they sit in.
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: _isLoadingTasks
                         ? const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: ImapsLoadingIndicator(size: 40)))
                         : _allTasks.isEmpty
                             ? Text('No tasks yet.', style: InsightTheme.inter(12, c: InsightTheme.ink2))
@@ -994,198 +1427,76 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                       fractions: fractions,
                                       overdueCount: overdueCount,
                                 );
-                               }),
-                    ]),
+                              }),
+                    ),
                   ),
               ),
               ),
               const SizedBox(height: 12),
 
               // ----------------------------------------------------
-              // 4. RECENT ACTIVITY
+              // 4. RECENT ACTIVITY — one Home preview, full history in a modal.
               // ----------------------------------------------------
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  color: InsightTheme.surface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: InsightTheme.line),
-                ),
-                child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: SpringSlide(
                   animation: springFor(8),
                   beginOffset: const Offset(0, 20),
-                   child: const _SectionLabel(title: "Recent activity"),
-                 ),
-               ),
-               const SizedBox(height: 12),
-
-              // Content-sized tabs keep their full touch targets. The native
-              // scroll track and next-tab peek make narrow-screen scrolling clear.
-              SpringSlide(
-                animation: springFor(8),
-                beginOffset: const Offset(0, 20),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: RawScrollbar(
-                    // The shell's bottom-nav inset must not displace this
-                    // small local track upward into the preceding section.
-                    padding: EdgeInsets.zero,
-                    controller: _activityFilterController,
-                    thumbVisibility: true,
-                    trackVisibility: true,
-                    thickness: 3,
-                    radius: const Radius.circular(3),
-                    scrollbarOrientation: ScrollbarOrientation.bottom,
-                    child: SingleChildScrollView(
-                    key: const ValueKey('activity_filters'),
-                    controller: _activityFilterController,
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                    children: [
-                      _ActivityFilterChip(
-                        label: 'All',
-                        selected: _activityFilter == 'all',
-                        onTap: () => _selectActivityFilter('all'),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: 'Tasks',
-                        selected: _activityFilter == 'tasks',
-                        onTap: () => _selectActivityFilter('tasks'),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: 'Sync',
-                        selected: _activityFilter == 'sync',
-                        onTap: () => _selectActivityFilter('sync'),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: ActivityEventCategory.labelFor(
-                          ActivityEventCategory.reports,
-                        ),
-                        selected: _activityFilter == ActivityEventCategory.reports,
-                        onTap: () => _selectActivityFilter(ActivityEventCategory.reports),
-                      ),
-                      const SizedBox(width: 8),
-                      _ActivityFilterChip(
-                        label: 'Profile',
-                        selected: _activityFilter == 'profile',
-                        onTap: () => _selectActivityFilter('profile'),
-                      ),
-                    ],
-                    ),
-                    ),
-                  ),
+                  child: const _SectionLabel(title: 'Recent activity'),
                 ),
               ),
-              const SizedBox(height: 16),
-
+              const SizedBox(height: 10),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _isLoadingActivity
-                    ? const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: ImapsLoadingIndicator(size: 50)))
-                    // Crossfade the timeline content when the filter changes —
-                    // same easeOutCubic/220ms language _TimelineActivityTile
-                    // already uses for its own expand/collapse, so the motion
-                    // reads as one consistent feel rather than a second style.
-                    : AnimatedSize(
-                        duration: activityMotion,
-                        curve: Curves.easeOutCubic,
-                        alignment: Alignment.topCenter,
-                        child: AnimatedSwitcher(
-                        duration: activityMotion,
-                        switchInCurve: Curves.easeOutCubic,
-                        switchOutCurve: Curves.easeOutCubic,
-                        child: filteredActivity.isEmpty
-                            ? Padding(
-                                key: ValueKey('empty_$_activityFilter'),
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                child: Text(
-                                  _activityFilter == 'all'
-                                      ? 'No recent activity yet.'
-                                      : 'No $_activityFilter activity yet.',
-                                  style: InsightTheme.inter(12, c: InsightTheme.ink2),
-                                ),
-                              )
-                            : Stack(
-                                key: ValueKey('list_$_activityFilter'),
-                                children: [
-                                  Positioned(
-                                    left: 16, top: 16, bottom: 16,
-                                    child: Container(width: 2, color: InsightTheme.ink3.withValues(alpha: 0.15)),
-                                  ),
-                                  Column(
-                                    children: List.generate(visibleActivity.length, (i) {
-                                      final activity = visibleActivity[i];
-                                      final themeInfo = _eventTheme(activity['event_type'] as String? ?? '');
-                                      final activityId = activity['id'] ?? i;
-                                      return SpringSlide(
-                                        key: ValueKey(activityId),
-                                        // Existing rows retain their state; newly revealed rows
-                                        // enter immediately rather than waiting another second.
-                                        animation: springForKey('activity_$activityId', i < _kVisibleActivityLimit ? 9 + i : 0),
-                                        beginOffset: const Offset(0, 28),
-                                        child: UpdatingTile(
-                                          itemKey: activityId,
-                                          signature: Object.hash(
-                                            activity['title'],
-                                            activity['subtitle'],
-                                            activity['occurred_at'],
-                                          ),
-                                          child: _TimelineActivityTile(
-                                            icon: themeInfo['icon'],
-                                            color: themeInfo['color'],
-                                            categoryLabel: _eventCategoryLabel(activity['event_type'] as String? ?? ''),
-                                            title: activity['title'] as String? ?? 'Update',
-                                            subtitle: activity['subtitle'] as String? ?? '',
-                                            time: _timeAgo(activity['occurred_at'] as String?),
-                                            occurredAtIso: activity['occurred_at'] as String?,
-                                          ),
-                                        ),
-                                      );
-                                    }),
-                                  ),
-                                ],
-                              ),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: RecentActivityFolder(
+                  key: const ValueKey('recent_activity_folder'),
+                  categories: [for (final key in _activityShortcuts) (key: key, label: _activityLabel(key))],
+                  selectedCategory: previewCategory,
+                  onCategorySelected: (category) => setState(() => _activityPreviewCategory = category),
+                  child: _isLoadingActivity
+                    ? Semantics(
+                        key: const ValueKey('activity_folder_loading'),
+                        label: 'Loading recent activity',
+                        liveRegion: true,
+                        child: const SizedBox(
+                          height: 112,
+                          child: Center(child: ImapsLoadingIndicator(size: 32)),
                         ),
-                      ),
-              ),
-              if (filteredActivity.length > _kVisibleActivityLimit)
-                Center(
-                  child: Semantics(
-                    expanded: _showAllActivity,
-                    child: TextButton(
-                      onPressed: () => setState(() => _showAllActivity = !_showAllActivity),
-                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(_showAllActivity ? 'See less' : 'See more (${filteredActivity.length - _kVisibleActivityLimit})',
-                              style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
-                          const SizedBox(width: 6),
-                          AnimatedRotation(
-                            turns: _showAllActivity ? 0.5 : 0,
-                            duration: activityMotion,
-                            child: const Icon(Icons.keyboard_arrow_down_rounded, color: InsightTheme.blueInk, size: 20),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                      )
+                    : AnimatedSwitcher(
+                        duration: MediaQuery.disableAnimationsOf(context)
+                            ? Duration.zero
+                            : const Duration(milliseconds: 220),
+                        child: latestActivity == null
+                            ? ActivityFolderPreview(
+                                key: ValueKey('empty_recent_$previewCategory'),
+                                icon: Icons.inbox_outlined,
+                                color: InsightTheme.inkMuted,
+                                title: 'No ${_activityLabel(previewCategory).toLowerCase()} activity yet.',
+                                subtitle: '', time: '', historyCount: 0,
+                                onOpenHistory: () => _showActivityHistory(initialFilter: previewCategory),
+                              )
+                            : Builder(builder: (context) {
+                                final activity = latestActivity;
+                                final themeInfo = _eventTheme(
+                                    activity['event_type'] as String? ?? '');
+                                return ActivityFolderPreview(
+                                  key: ValueKey(
+                                      'preview_${previewCategory}_${activity['id'] ?? ''}'),
+                                  icon: themeInfo['icon'],
+                                  color: themeInfo['color'],
+                                  title: activity['title'] as String? ?? 'Update',
+                                  subtitle: activity['subtitle'] as String? ?? '',
+                                  time: _timeAgo(activity['occurred_at'] as String?),
+                                  onOpenHistory: () => _showActivityHistory(
+                                      initialFilter: previewCategory),
+                                  historyCount: previewList.length,
+                                );
+                              }),
+                       ),
                 ),
-                 ],
-                 ),
-               ),
               ),
+              const SizedBox(height: 12),
             ],
             ),
           ),
@@ -1702,10 +2013,30 @@ class _NotificationBtn extends StatelessWidget {
 class _SectionLabel extends StatelessWidget {
   final String title;
   final Widget? trailing;
-  const _SectionLabel({required this.title, this.trailing});
+  final Widget? titleAction;
+  const _SectionLabel({required this.title, this.trailing, this.titleAction});
 
   @override
   Widget build(BuildContext context) {
+    if (titleAction != null) {
+      return LayoutBuilder(builder: (context, constraints) => OverflowBar(
+        alignment: MainAxisAlignment.spaceBetween,
+        overflowAlignment: OverflowBarAlignment.end,
+        spacing: 12,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: Semantics(header: true, child: Text(title,
+                  style: InsightTheme.urbanist(16, w: FontWeight.w700, c: InsightTheme.ink)))),
+              const SizedBox(width: 8),
+              titleAction!,
+            ]),
+          ),
+          ?trailing,
+        ],
+      ));
+    }
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1776,22 +2107,27 @@ class _ActivityFilterChip extends StatelessWidget {
       button: true,
       selected: selected,
       child: Material(
-        color: Colors.transparent,
+        color: selected ? InsightTheme.blue1 : InsightTheme.surface,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(12),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero : const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             alignment: Alignment.center,
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 32),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(color: selected ? InsightTheme.blue1 : InsightTheme.surface2,
-              borderRadius: BorderRadius.circular(999)),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected ? InsightTheme.blue1 : InsightTheme.line,
+              ),
+            ),
             child: Text(
               label,
+              softWrap: false,
               textAlign: TextAlign.center,
               style: InsightTheme.inter(12, w: FontWeight.w600,
                 c: selected ? Colors.white : InsightTheme.ink2),
@@ -1803,11 +2139,7 @@ class _ActivityFilterChip extends StatelessWidget {
   }
 }
 
-/// Concentric ring chart for Task Completion Flow (replaces the old
-/// stacked progress-bar rows). One ring per category — Scheduled (outer)
-/// through Completed (inner) — each ring's filled arc is that category's
-/// share of the total task count. Four direct label/count rows sit beside the
-/// rings when they fit and below on narrow or enlarged-text layouts.
+/// One flip surface: a concentric chart first, four status tiles on the back.
 class _CompletionRingChart extends StatefulWidget {
   final int total;
   final List<String> labels;
@@ -1830,128 +2162,445 @@ class _CompletionRingChart extends StatefulWidget {
 }
 
 class _CompletionRingChartState extends State<_CompletionRingChart> {
-  bool _filled = false;
+  bool _flipped = false;
+  bool _autoFlipEnabled = false;
+  Timer? _autoFlip;
 
   @override
-  void initState() {
-    super.initState();
-    Future.delayed(const Duration(milliseconds: 80), () {
-      if (mounted) setState(() => _filled = true);
-    });
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _autoFlipEnabled = !MediaQuery.disableAnimationsOf(context) &&
+        !MediaQuery.accessibleNavigationOf(context) &&
+        TickerMode.valuesOf(context).enabled && (ModalRoute.isCurrentOf(context) ?? true);
+    _restartAutoFlip();
   }
 
-  static const double _outerSize = 100;
-  static const double _ringStep = 16;
-  static const double _strokeWidth = 8;
+  void _restartAutoFlip() {
+    _autoFlip?.cancel();
+    if (_autoFlipEnabled) {
+      _autoFlip = Timer.periodic(const Duration(seconds: 18), (_) {
+        if (mounted) setState(() => _flipped = !_flipped);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoFlip?.cancel();
+    super.dispose();
+  }
+
+  void _toggleFlip() {
+    setState(() => _flipped = !_flipped);
+    _restartAutoFlip();
+  }
 
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
-    final inheritedStyle = DefaultTextStyle.of(context).style;
-    final numberStyle = inheritedStyle.merge(InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.ink));
-    final tasksStyle = inheritedStyle.merge(InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3));
-    Size measure(String text, TextStyle style) {
-      final painter = TextPainter(text: TextSpan(text: text, style: style),
-        textDirection: Directionality.of(context), textScaler: scaler)..layout();
+    final reducedMotion = MediaQuery.disableAnimationsOf(context);
+    Size measure(String text, TextStyle style, {double maxWidth = double.infinity}) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: Directionality.of(context),
+        textScaler: scaler,
+      )..layout(maxWidth: maxWidth);
       final size = painter.size;
       painter.dispose();
       return size;
     }
-    final number = measure('${widget.total}', numberStyle);
-    final tasks = measure('Tasks', tasksStyle);
-    final readoutWidth = math.max(number.width, tasks.width);
-    final readoutHeight = number.height + 2 + tasks.height;
-    // Measure text, not geometry through the font scaler: Android scaling is nonlinear.
-    final hole = math.sqrt(readoutWidth * readoutWidth + readoutHeight * readoutHeight) + 8;
-    final ringSize = math.max(_outerSize, hole + _ringStep * 3 + _strokeWidth);
-    final rings = SizedBox(
-      key: const ValueKey('completion_rings'),
-      width: ringSize,
-      height: ringSize,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          for (int i = 0; i < widget.labels.length; i++)
-            SizedBox(
-              width: ringSize - _ringStep * i,
-              height: ringSize - _ringStep * i,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0.0, end: _filled ? widget.fractions[i].clamp(0.0, 1.0) : 0.0),
-                duration: const Duration(milliseconds: 750),
-                curve: Curves.easeOutCubic,
-                builder: (context, value, _) => CircularProgressIndicator(
-                  value: value <= 0 ? 0.001 : value,
-                  strokeWidth: _strokeWidth,
-                  strokeCap: StrokeCap.round,
-                  backgroundColor: widget.colors[i].withValues(alpha: 0.12),
-                  valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
+    final labelMeasureStyle = DefaultTextStyle.of(context).style.merge(
+      InsightTheme.inter(14, w: FontWeight.w600, h: 1.2),
+    );
+    final labelWidth = widget.labels.fold<double>(0,
+        (width, label) => max(width, measure(label, labelMeasureStyle).width));
+    final overdueLabel = '${widget.overdueCount} Overdue';
+    final overdueStyle = InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.redInk);
+    final overdueSize = measure(overdueLabel, overdueStyle);
+    // The centre gap is carved out whether or not a task is overdue: the
+    // framework is what carries the shape, and the badge is only a guest in
+    // it. With no badge the reserved slot stays empty instead of the block
+    // silently closing back into a plain 2x2 grid.
+    // Badge plus a small breathing margin; the gap between rows only has to
+    // clear this much, so a shorter badge keeps the tiles full-size.
+    // With no badge the reserved cross is only as wide as the tile gutter
+    // (36 x 10 carves an 18 x 18 cross): wide enough to still read as four
+    // tiles joined by a cross, narrow enough that the block stops looking
+    // like it has a hole punched in it.
+    var notchSize = widget.overdueCount > 0
+        ? Size(overdueSize.width + 20, overdueSize.height + 12)
+        : const Size(36, 10);
+
+    return LayoutBuilder(
+      key: const ValueKey('completion_chart'),
+      builder: (context, constraints) {
+        // The centre gap carries the badge, so it is wider than the tile gutter.
+        // The right-column numbers need room to clear the badge without being
+        // pushed off their own tile's left edge.
+        const gutter = 8.0;
+        final gap = max(gutter, notchSize.width / 2);
+        // The badge lives in the centre gap, so the gap between rows must be
+        // taller than the badge itself — otherwise the top-row number (bottom
+        // of its tile) and the badge share the same pixels. 8 is the floor.
+        final rowGap = max(gutter, notchSize.height + 8);
+        // One scale with the assignment cards: that row is the Home's normal
+        // section height, and a 2x2 block taller than it turns into a hero
+        // card that overpowers everything around it. Fixed (not derived from
+        // width) because height here is a rhythm decision, not a fit one; text
+        // scales with the scaler and the ring takes whatever square it can.
+        const height = 220.0;
+        // The notch is clamped so the badge never eats more than a third of the
+        // block it sits in — at 2x text an unbounded badge swallowed the tiles.
+        if (notchSize.height > height / 3) {
+          notchSize = Size(min(notchSize.width, constraints.maxWidth / 2),
+              height / 3);
+        }
+        final ringSize = min(constraints.maxWidth, height) - 32;
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: height,
+          child: _FlipCard(
+            key: const ValueKey('completion_flip'),
+            flipped: _flipped,
+            onTap: _toggleFlip,
+            back: Stack(
+              alignment: Alignment.center,
+              children: [
+                ClipPath(
+                  clipper: _CompletionNotchClipper(notchSize),
+                  child: Column(
+                    children: [
+                      for (var row = 0; row < 2; row++) ...[
+                        if (row > 0) SizedBox(height: rowGap),
+                        Expanded(child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (var i = row * 2; i < row * 2 + 2; i++) ...[
+                              if (i.isOdd) SizedBox(width: gap),
+                              Expanded(child: _CompletionStatusTile(
+                                index: i,
+                                label: widget.labels[i],
+                                labelWidth: labelWidth,
+                                count: widget.counts[i],
+                                color: widget.colors[i],
+                              )),
+                            ],
+                          ],
+                        )),
+                      ],
+                    ],
+                  ),
+                ),
+                if (widget.overdueCount > 0)
+                  Container(
+                    key: const ValueKey('completion_overdue'),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: InsightTheme.redTint,
+                        borderRadius: BorderRadius.circular(999)),
+                    child: FittedBox(fit: BoxFit.scaleDown, child: Text(overdueLabel, style: overdueStyle)),
+                  ),
+              ],
+            ),
+            front: Center(
+              key: const ValueKey('completion_ring_chart'),
+              child: SizedBox(
+                key: const ValueKey('completion_rings'),
+                width: ringSize,
+                height: ringSize,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    for (var i = 0; i < widget.labels.length; i++)
+                      SizedBox.square(
+                        dimension: ringSize * (1 - 0.14 * i),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0.0, end: widget.fractions[i].clamp(0.0, 1.0)),
+                          duration: reducedMotion ? Duration.zero : const Duration(milliseconds: 750),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, value, _) => CircularProgressIndicator(
+                            value: value,
+                            strokeWidth: ringSize * 0.045,
+                            strokeCap: StrokeCap.round,
+                            backgroundColor: widget.colors[i].withValues(alpha: 0.12),
+                            valueColor: AlwaysStoppedAnimation<Color>(widget.colors[i]),
+                            semanticsLabel: '${widget.labels[i]}: ${widget.counts[i]} of ${widget.total} tasks',
+                          ),
+                        ),
+                      ),
+                    SizedBox.square(
+                      key: const ValueKey('completion_readout'),
+                      dimension: ringSize * 0.48,
+                      child: Center(child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${widget.total}', style: InsightTheme.urbanist(36, w: FontWeight.w800)),
+                            Text('Tasks', style: InsightTheme.inter(14, w: FontWeight.w600)),
+                          ],
+                        ),
+                      )),
+                    ),
+                  ],
                 ),
               ),
             ),
-          SizedBox(
-            key: const ValueKey('completion_readout'),
-            width: readoutWidth,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('${widget.total}', style: numberStyle),
-                const SizedBox(height: 2),
-                Text('Tasks', style: tasksStyle),
-              ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Back-face artwork only; the parent continues to own all tile geometry.
+class _CompletionStatusTile extends StatelessWidget {
+  final int index;
+  final String label;
+  final double labelWidth;
+  final int count;
+  final Color color;
+
+  const _CompletionStatusTile({
+    required this.index,
+    required this.label,
+    required this.labelWidth,
+    required this.count,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = switch (index) {
+      0 => InsightTheme.orangeInk,
+      1 => InsightTheme.blueInk,
+      2 => Colors.white,
+      _ => InsightTheme.greenInk,
+    };
+    final tint = switch (index) {
+      0 => InsightTheme.orangeTint,
+      1 => InsightTheme.blueTint,
+      _ => InsightTheme.greenTint,
+    };
+    final fill = index == 2 ? color : Color.lerp(tint, color, 0.16)!;
+    final labelStyle = DefaultTextStyle.of(context).style.merge(
+      InsightTheme.inter(14, w: FontWeight.w600, c: foreground, h: 1.2),
+    );
+    final countStyle = DefaultTextStyle.of(context).style.merge(
+      InsightTheme.urbanist(30, w: FontWeight.w800, c: foreground, h: 1.2),
+    );
+    final scaler = MediaQuery.textScalerOf(context);
+    final icon = ExcludeSemantics(child: Container(
+      key: ValueKey('completion_icon_$label'),
+      width: 18,
+      height: 18,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withValues(alpha: index == 2 ? 0.18 : 0.7),
+      ),
+      child: CustomPaint(
+        size: const Size.square(14),
+        painter: _CompletionStatusIconPainter(index, foreground),
+      ),
+    ));
+    Widget fittedText(String value, TextStyle style) => FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(value, maxLines: 1, softWrap: false, style: style),
+    );
+    // Measure against the same longest label so narrow tiles keep a unified
+    // type size and baseline instead of enlarging only the shorter words.
+    final caption = FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(constraints: BoxConstraints(minWidth: labelWidth),
+        child: Text(label, maxLines: 1, softWrap: false, style: labelStyle)),
+    );
+
+    return Container(
+      key: ValueKey('completion_$label'),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(14)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            right: -24,
+            bottom: -40,
+            child: Container(
+              width: 112,
+              height: 112,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: foreground.withValues(alpha: 0.06)),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final stackedHeight = 18 + 2 + scaler.scale(14) * 1.2 + 2 + scaler.scale(30) * 1.2;
+              if (stackedHeight <= constraints.maxHeight) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    icon,
+                    const SizedBox(height: 2),
+                    caption,
+                    const SizedBox(height: 2),
+                    fittedText('$count', countStyle),
+                  ],
+                );
+              }
+              if (constraints.maxWidth >= labelWidth + scaler.scale(30) + 8) {
+                return Row(
+                  children: [
+                    Expanded(flex: 3, child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [icon, const SizedBox(height: 4), caption],
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(flex: 2, child: fittedText('$count', countStyle)),
+                  ],
+                );
+              }
+              // Give enlarged labels the full width; the icon moves beside
+              // the count so neither text scaling nor artwork grows the tile.
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.topLeft,
+                        child: Text('$count', maxLines: 1, softWrap: false, style: countStyle),
+                      )),
+                      const SizedBox(width: 4),
+                      icon,
+                    ],
+                  )),
+                  const SizedBox(height: 2),
+                  caption,
+                ],
+              );
+            }),
           ),
         ],
       ),
     );
-    final labelStyle = DefaultTextStyle.of(context).style.merge(
-      InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink2),
-    );
-    var labelWidth = 0.0;
-    for (final label in widget.labels) {
-      final painter = TextPainter(
-        text: TextSpan(text: label, style: labelStyle),
-        textDirection: Directionality.of(context),
-        textScaler: scaler,
-      )..layout();
-      if (painter.width > labelWidth) labelWidth = painter.width;
-      painter.dispose();
+  }
+}
+
+/// Original flat glyphs on a shared 24-unit grid, with one rounded stroke.
+class _CompletionStatusIconPainter extends CustomPainter {
+  final int index;
+  final Color color;
+  const _CompletionStatusIconPainter(this.index, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 24, size.height / 24);
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    if (index == 0) {
+      canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTRB(4, 6, 20, 21), const Radius.circular(2)), stroke);
+      canvas.drawPath(Path()
+        ..moveTo(8, 3)..lineTo(8, 8)
+        ..moveTo(16, 3)..lineTo(16, 8)
+        ..moveTo(4, 11)..lineTo(20, 11)
+        ..moveTo(8, 15)..lineTo(12, 15)
+        ..moveTo(8, 18)..lineTo(15, 18), stroke);
+      return;
     }
-    final legend = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      for (var i = 0; i < widget.labels.length; i++) Container(
-        key: ValueKey('completion_${widget.labels[i]}'),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: const BoxDecoration(color: InsightTheme.surface),
-        child: Row(children: [
-          Container(key: ValueKey('completion_color_${widget.labels[i]}'), width: 8, height: 8,
-            decoration: BoxDecoration(color: widget.colors[i], shape: BoxShape.circle)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(widget.labels[i], style: labelStyle)),
-          const SizedBox(width: 8),
-          Text('${widget.counts[i]}', style: InsightTheme.inter(16, w: FontWeight.w700, c: InsightTheme.ink)),
-        ]),
+    canvas.drawCircle(const Offset(12, 12), 9, stroke);
+    switch (index) {
+      case 1:
+        canvas.drawPath(Path()..moveTo(12, 7)..lineTo(12, 12)..lineTo(16, 14), stroke);
+      case 2:
+        canvas.drawPath(Path()..moveTo(10, 8)..lineTo(16, 12)..lineTo(10, 16)..close(), Paint()..color = color);
+      default:
+        canvas.drawPath(Path()..moveTo(8, 12)..lineTo(11, 15)..lineTo(16, 9), stroke);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_CompletionStatusIconPainter oldDelegate) =>
+      index != oldDelegate.index || color != oldDelegate.color;
+}
+
+/// A shared capsule cutout creates the four inward-curved central corners.
+class _CompletionNotchClipper extends CustomClipper<Path> {
+  final Size notch;
+  const _CompletionNotchClipper(this.notch);
+
+  @override
+  Path getClip(Size size) => Path()
+    ..fillType = PathFillType.evenOdd
+    ..addRect(Offset.zero & size)
+    ..addRRect(RRect.fromRectAndRadius(
+      Rect.fromCenter(center: size.center(Offset.zero), width: notch.width, height: notch.height),
+      Radius.circular(notch.height / 2),
+    ));
+
+  @override
+  bool shouldReclip(_CompletionNotchClipper oldClipper) => oldClipper.notch != notch;
+}
+
+/// The whole block turns together; the reverse is counter-rotated for legibility.
+class _FlipCard extends StatelessWidget {
+  final Widget front;
+  final Widget back;
+  final bool flipped;
+
+  final VoidCallback onTap;
+
+  const _FlipCard({
+    super.key,
+    required this.front,
+    required this.back,
+    required this.flipped,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      toggled: flipped,
+      label: 'Flip task completion card',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: flipped ? 1.0 : 0.0),
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero : const Duration(milliseconds: 620),
+          curve: Curves.easeInOutCubic,
+          builder: (context, t, _) {
+            final onBack = t >= 0.5;
+            final face = onBack ? back : front;
+            return Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.identity()
+                ..setEntry(3, 2, 0.0015)
+                ..rotateY(t * pi),
+              // Counter-rotate the back face so its text reads normally.
+              child: onBack
+                  ? Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.identity()..rotateY(pi),
+                      child: face,
+                    )
+                  : face,
+            );
+          },
+        ),
       ),
-      if (widget.overdueCount > 0) Padding(padding: const EdgeInsets.only(top: 8),
-        child: Text('${widget.overdueCount} Overdue', key: const ValueKey('completion_overdue'),
-          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.redInk))),
-    ]);
-    return LayoutBuilder(key: const ValueKey('completion_chart'), builder: (context, constraints) {
-      // Keep category words intact with the actual font and accessibility size.
-      final countWidth = widget.counts.map((count) => measure('$count', InsightTheme.inter(16, w: FontWeight.w700)).width)
-        .fold<double>(0, math.max);
-      final legendWidth = labelWidth + countWidth + 36;
-      if (constraints.maxWidth < ringSize + 12 + legendWidth) {
-        return Column(children: [
-          rings,
-           const SizedBox(height: 12),
-           legend,
-        ]);
-      }
-      return Row(children: [
-        rings,
-        const SizedBox(width: 12),
-        Expanded(child: legend),
-      ]);
-    });
+    );
   }
 }
 
@@ -2350,6 +2999,7 @@ class _TimelineActivityTile extends StatefulWidget {
   final String? occurredAtIso;
 
   const _TimelineActivityTile({
+    super.key,
     required this.icon, required this.color, required this.categoryLabel,
     required this.title, required this.subtitle, required this.time,
     this.occurredAtIso,
@@ -2383,8 +3033,7 @@ class _TimelineActivityTileState extends State<_TimelineActivityTile> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Timeline node — kept from before so this still reads as part
-          // of the vertical timeline (the connector line sits behind it).
+          // Timeline node remains within the scrollable modal.
           Container(
             width: 34,
             alignment: Alignment.topCenter,

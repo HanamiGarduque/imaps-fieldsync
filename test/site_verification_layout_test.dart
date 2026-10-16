@@ -1258,6 +1258,134 @@ void main() {
     );
   });
 
+  // Synthetic reproduction of absent guidance; not a diagnosis of phone GPS.
+  testWidgets(
+    'visibility: no road and coarse GPS keep markers and explain guidance',
+    (tester) async {
+      await tester.runAsync(() => db.delete('local_route_cache'));
+      gpsAccuracy = 40;
+      await mount(tester, const Size(390, 844));
+      await captureGuidance(tester, 'no-road-coarse-gps');
+      expect(routeLines(tester), isEmpty, reason: 'no fabricated road');
+      expect(find.text('Road route unavailable'), findsOneWidget);
+      expect(find.textContaining('GPS old or imprecise'), findsOneWidget);
+      final markers = tester.widget<MarkerLayer>(find.byType(MarkerLayer));
+      expect(markers.markers.map((m) => m.point), [target, device]);
+      expect(find.textContaining('Near the mapped site'), findsNothing);
+      expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+      expect(
+        find.textContaining('GPS-to-road link and ~100 m notice'),
+        findsOneWidget,
+        reason: 'explain which guidance needs a fresh precise fix',
+      );
+      final guidance = find.textContaining(
+        'GPS-to-road link and ~100 m notice',
+      );
+      for (final scale in [1.0, 2.0]) {
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        for (final width in [360.0, 375.0, 414.0]) {
+          tester.view.physicalSize = Size(width, 844);
+          await settle(tester);
+          await tester.tap(find.byTooltip('Fit both markers'));
+          await settle(tester);
+          // At 200%, the paragraph can exceed the scroll viewport. Bring its
+          // centre into view while the independent primary action stays pinned.
+          await Scrollable.ensureVisible(
+            tester.element(guidance),
+            alignment: 0.5,
+          );
+          await settle(tester);
+          expect(
+            guidance.hitTestable(),
+            findsOneWidget,
+            reason: '$width/$scale',
+          );
+          expect(
+            find.text('Proceed to Location').hitTestable(),
+            findsOneWidget,
+          );
+          expect(routeLines(tester), isEmpty);
+          await captureGuidance(
+            tester,
+            'no-road-guidance-${width.toInt()}-${scale.toInt()}x',
+          );
+          final targetLabel = tester.getRect(
+            find
+                .ancestor(
+                  of: find.text('Target site'),
+                  matching: find.byType(Container),
+                )
+                .first,
+          );
+          for (final tooltip in ['Full map', 'Fit both markers']) {
+            final control = tester.getRect(find.byTooltip(tooltip));
+            expect(
+              targetLabel.overlaps(control),
+              isFalse,
+              reason:
+                  '$width/$scale: target $targetLabel overlaps $tooltip $control',
+            );
+          }
+          expect(tester.takeException(), isNull);
+        }
+      }
+    },
+  );
+
+  testWidgets('visibility: coarse GPS retains the road and target link only', (
+    tester,
+  ) async {
+    await tester.runAsync(() => saveRoad([offsetStart, offsetEnd]));
+    gpsAccuracy = 40;
+    await mount(tester, const Size(390, 844));
+    await captureGuidance(tester, 'cached-road-coarse-gps');
+    final lines = routeLines(tester);
+    expect(lines.first.points, [offsetStart, offsetEnd]);
+    expect(lines, hasLength(2));
+    expect(lines.last.points, [offsetEnd, target]);
+    expect(find.textContaining('Near the mapped site'), findsNothing);
+    expect(
+      find.textContaining('GPS-to-road link and ~100 m notice'),
+      findsOneWidget,
+      reason: 'poor GPS does not suppress the route-to-target link',
+    );
+    await tester.ensureVisible(
+      find.textContaining('GPS-to-road link and ~100 m notice'),
+    );
+    await settle(tester);
+    await captureGuidance(tester, 'cached-road-gps-explanation');
+    gpsAccuracy = 5;
+    await sendPosition(tester);
+    await settle(tester);
+    expect(routeLines(tester), hasLength(3));
+    expect(routeLines(tester)[1].points.first, device);
+    expect(
+      find.textContaining('GPS-to-road link and ~100 m notice'),
+      findsNothing,
+    );
+    await captureGuidance(tester, 'cached-road-both-links-restored');
+  });
+
+  testWidgets('visibility: small gaps explain the absence of dotted links', (
+    tester,
+  ) async {
+    await tester.runAsync(() => saveRoad([device, target]));
+    await mount(tester, const Size(390, 844));
+    await captureGuidance(tester, 'road-small-gaps');
+    expect(routeLines(tester), hasLength(1));
+    expect(
+      find.textContaining('Small gaps or GPS uncertainty'),
+      findsOneWidget,
+    );
+    expect(find.text('··· Unverified links'), findsNothing);
+    expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+    await tester.ensureVisible(
+      find.textContaining('Small gaps or GPS uncertainty'),
+    );
+    await settle(tester);
+    await captureGuidance(tester, 'road-small-gap-explanation');
+  });
+
   for (final scale in [1.0, 2.0]) {
     testWidgets('guidance: links and advisory keep controls usable at $scale', (
       tester,
