@@ -5,22 +5,34 @@ import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 
+/// The legal documents shown on [TermsPrivacyScreen], in segment order.
+enum LegalDoc { terms, privacy, cookies }
+
 class TermsPrivacyScreen extends StatefulWidget {
   final bool initialShowTerms;
 
-  const TermsPrivacyScreen({super.key, this.initialShowTerms = true});
+  /// Document shown first. Takes precedence over [initialShowTerms] when set.
+  final LegalDoc? initialDoc;
+
+  const TermsPrivacyScreen({
+    super.key,
+    this.initialShowTerms = true,
+    this.initialDoc,
+  });
 
   @override
   State<TermsPrivacyScreen> createState() => _TermsPrivacyScreenState();
 }
 
 class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
-  late bool _showTerms;
+  late LegalDoc _doc;
 
   @override
   void initState() {
     super.initState();
-    _showTerms = widget.initialShowTerms;
+    _doc =
+        widget.initialDoc ??
+        (widget.initialShowTerms ? LegalDoc.terms : LegalDoc.privacy);
   }
 
   @override
@@ -40,21 +52,27 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
                 ),
                 Expanded(
                   child: ListView(
-                    key: ValueKey(_showTerms),
+                    key: ValueKey(_doc),
                     padding: const EdgeInsets.only(bottom: 32),
                     children: [
-                      FieldSegmentedControl<bool>(
-                        labels: const {true: 'Terms of Use', false: 'Privacy Policy'},
-                        value: _showTerms,
+                      FieldSegmentedControl<LegalDoc>(
+                        labels: const {
+                          LegalDoc.terms: 'Terms of Use',
+                          LegalDoc.privacy: 'Privacy Policy',
+                          LegalDoc.cookies: 'Cookie Policy',
+                        },
+                        value: _doc,
                         onChanged: (selection) {
                           HapticFeedback.selectionClick();
-                          setState(() => _showTerms = selection);
+                          setState(() => _doc = selection);
                         },
                       ),
                       const SizedBox(height: 20),
-                      _showTerms
-                          ? _buildTermsContent()
-                          : _buildPrivacyContent(),
+                      switch (_doc) {
+                        LegalDoc.terms => _buildTermsContent(),
+                        LegalDoc.privacy => _buildPrivacyContent(),
+                        LegalDoc.cookies => _buildCookiesContent(),
+                      },
                     ],
                   ),
                 ),
@@ -162,6 +180,42 @@ class _TermsPrivacyScreenState extends State<TermsPrivacyScreen> {
           title: '5. Data Subject Rights & Privacy Inquiries',
           body:
               'In accordance with the Data Privacy Act of 2012, data subjects may inquire about stored records or request corrections. For inquiries, access requests, or issues regarding data privacy, contact the Rosario Municipal Planning and Development Office (MPDO) through the administrative desk or the official municipal communication channels.',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCookiesContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        _HeaderSection(title: 'Cookie Policy', date: 'September 7, 2026'),
+        SizedBox(height: 24),
+        _PolicySection(
+          title: '1. What Cookies Are',
+          body:
+              'Cookies are small pieces of data a website asks your browser to store, then sends back on later requests so the site can recognize your browser. iMAPS:FieldSync is a mobile application: it does not store browser cookies. Sign-in and offline access are kept through secure session tokens in the device\'s protected storage. This policy also covers the cookies set by the iMAPS web portal when it is accessed from a browser.',
+        ),
+        _PolicySection(
+          title: '2. Cookies Used by iMAPS',
+          body:
+              '• Session cookie — identifies your signed-in session on the server so the system knows who you are between page requests. It is essential: without it you cannot stay signed in. It expires after a period of inactivity or when you log out.\n\n'
+              '• CSRF protection cookie (XSRF-TOKEN) — a security cookie used to verify that form submissions and requests genuinely come from your browser session, preventing cross-site request forgery attacks. It is essential and contains no personal data.',
+        ),
+        _PolicySection(
+          title: '3. Cookies We Do Not Use',
+          body:
+              'iMAPS does not set analytics, advertising or social-media cookies, and does not share browsing data with third parties. Because iMAPS is an internal government system, no cookie set here is used to track you across other websites.',
+        ),
+        _PolicySection(
+          title: '4. Managing Cookies',
+          body:
+              'You can block or delete cookies through your browser settings. Because the session and CSRF cookies are essential to signing in, disabling them will prevent you from using the iMAPS web portal. The mobile app itself sets no cookies; its session is ended by signing out of the application.',
+        ),
+        _PolicySection(
+          title: '5. Questions & Inquiries',
+          body:
+              'For questions about this Cookie Policy, contact the Rosario Municipal Planning and Development Office (MPDO) through the administrative desk or the official municipal communication channels.',
         ),
       ],
     );

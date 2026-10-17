@@ -579,7 +579,28 @@ class _ProfileScreenState extends State<ProfileScreen>
                                             context,
                                             MaterialPageRoute(
                                               builder: (_) =>
-                                                  const TermsPrivacyScreen(),
+                                                  const TermsPrivacyScreen(
+                                                    initialDoc:
+                                                        LegalDoc.privacy,
+                                                  ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      _ActionTile(
+                                        icon: Icons.cookie_outlined,
+                                        title: 'Cookie Policy',
+                                        subtitle:
+                                            'Cookies, sessions & device storage',
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const TermsPrivacyScreen(
+                                                    initialDoc:
+                                                        LegalDoc.cookies,
+                                                  ),
                                             ),
                                           );
                                         },
