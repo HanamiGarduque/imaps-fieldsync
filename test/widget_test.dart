@@ -17,10 +17,12 @@ void main() {
     expect(find.byWidgetPredicate((widget) => widget is Semantics &&
       widget.properties.label == 'FieldSync' && widget.properties.header == true), findsOneWidget);
 
-    // Session check waits 3s, then routes to LoginScreen via a 700ms fade
-    // (splash_screen.dart _checkSession/_goToLogin).
+    // The approved splash entrance settles at ~6.2s and the hand-off waits
+    // for it (splash_screen.dart _checkSession/_goToLogin), then routes to
+    // LoginScreen via the 700ms fade.
     await tester.pump(const Duration(seconds: 3));
-    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 3300));
+    await tester.pump(const Duration(milliseconds: 800));
 
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.widgetWithText(ElevatedButton, 'Sign in'), findsOneWidget);

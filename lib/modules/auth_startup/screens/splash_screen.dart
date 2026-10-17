@@ -16,6 +16,7 @@ import '../../../core/services/supabase_service.dart';
 import '../services/local_data_guard_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/fieldsync_brand.dart';
+import '../../../core/widgets/fieldsync_entrance_animation.dart';
 import '../../../core/widgets/app_feedback.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
@@ -37,10 +38,27 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  // The approved splash entrance is the screen's own identity moment;
+  // navigation waits for it so the journey is never cut off mid-flight.
+  // Reduced motion completes it immediately, restoring the old timing.
+  final Completer<void> _entranceDone = Completer<void>();
+
   @override
   void initState() {
     super.initState();
     _checkSession();
+  }
+
+  void _onEntranceCompleted() {
+    if (!_entranceDone.isCompleted) _entranceDone.complete();
+  }
+
+  @override
+  void dispose() {
+    // Never strand a pending navigation when the screen is torn down
+    // (route replacement and tests both do this).
+    if (!_entranceDone.isCompleted) _entranceDone.complete();
+    super.dispose();
   }
 
   Future<void> _checkSession() async {
@@ -63,6 +81,12 @@ class _SplashScreenState extends State<SplashScreen> {
         await _goToLogin(AuthFailure.profileUnavailable);
         return;
       }
+
+      // The entrance plays while the checks above run; hold only the
+      // hand-off until it has settled, so the completed logo is what
+      // leaves the splash. Reduced motion releases this immediately.
+      await _entranceDone.future;
+      if (!mounted) return;
 
       // ── STEP 4: Cold-start biometric gate ──────────────────────────────
       // "Require on App Open" (Security Settings) previously only gated
@@ -108,6 +132,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
 
   Future<void> _goToLogin([AuthFailure? failure]) async {
+    await _entranceDone.future;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
@@ -125,9 +150,11 @@ class _SplashScreenState extends State<SplashScreen> {
       key: const ValueKey('splash-brand'),
       padding: const EdgeInsets.all(32),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const FieldSyncBrand(
-          variant: FieldSyncBrandVariant.white,
-          height: 80,
+        // Approved entrance: the inspector's route journey, settled on the
+        // official artwork at video scale (video ≈ 72% of screen width).
+        FieldSyncEntranceAnimation(
+          width: min(MediaQuery.sizeOf(context).width * 0.72, 360.0),
+          onCompleted: _onEntranceCompleted,
         ),
         const SizedBox(height: 24),
         Text('iMAPS', style: InsightTheme.inter(16, w: FontWeight.w600, c: Colors.white)),
@@ -895,7 +922,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             maxLength: 254,
                             errorText: _emailError,
                             onChanged: (_) {
-                              if (_emailError != null) setState(() => _emailError = null);
+                              if (_emailError != null) { setState(() => _emailError = null); }
                             },
                           ),
                           const SizedBox(height: 12),
@@ -913,7 +940,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             maxLength: 256,
                             errorText: _passcodeError,
                             onChanged: (_) {
-                              if (_passcodeError != null) setState(() => _passcodeError = null);
+                              if (_passcodeError != null) { setState(() => _passcodeError = null); }
                             },
                           ),
                           Align(alignment: Alignment.centerRight,
