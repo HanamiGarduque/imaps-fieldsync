@@ -44,7 +44,8 @@ void main() {
       'a still-running bootstrap holds the session decision past the three-second minimum',
       (tester) async {
     // The fixture starts with a retained owner session: without the gate,
-    // the offline startup path would already be heading to Home at ~6.3 s.
+    // the offline startup path would deliver its destination as soon as the
+    // three-second minimum elapsed.
     final bootstrapGate = Completer<void>();
     AppBootstrap.initialize(steps: [
       (name: 'held-open', run: () => bootstrapGate.future),
@@ -58,7 +59,9 @@ void main() {
 
     bootstrapGate.complete();
     await fixture.flush(tester);
-    await advance(tester, const Duration(milliseconds: 2900));
+    // 4 s held + 6 s crosses the cinematic's hold end (9.85 s), where the
+    // completed logo hands over to the real destination.
+    await advance(tester, const Duration(milliseconds: 6000));
     expect(find.byType(MainShellScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -74,7 +77,9 @@ void main() {
     expect(find.textContaining('Still starting up'), findsNothing);
 
     await advance(tester, const Duration(seconds: 1));
-    await advance(tester, const Duration(milliseconds: 3400));
+    // 3.5 s + 6.4 s crosses the hold end (9.85 s): the launch moves on the
+    // cinematic's own beat, with no slow status ever shown.
+    await advance(tester, const Duration(milliseconds: 6400));
     expect(find.byType(MainShellScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -92,7 +97,9 @@ void main() {
 
     await fixture.mount(tester, const SplashScreen());
     await advance(tester, const Duration(seconds: 3));
-    await advance(tester, const Duration(milliseconds: 3400));
+    // 3 s + 8 s crosses the login's own mount beat (10.85 s): Page 3 appears
+    // as a layer of this same route, carrying the classified failure.
+    await advance(tester, const Duration(milliseconds: 8000));
     expect(find.byType(MainShellScreen), findsNothing);
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.text(AuthFailure.sessionRestoreFailed.message), findsOneWidget);
@@ -260,7 +267,8 @@ void main() {
       (tester) async {
     await fixture.mount(tester, const SplashScreen());
     await advance(tester, const Duration(seconds: 3));
-    await advance(tester, const Duration(milliseconds: 3400));
+    // 3 s + 7 s crosses the hold end (9.85 s) with the cinematic's own timing.
+    await advance(tester, const Duration(milliseconds: 7000));
     expect(find.byType(MainShellScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

@@ -25,6 +25,9 @@ import '../../../core/navigation/main_shell_screen.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/services/app_info_service.dart';
+import '../../../core/models/user_profile.dart';
+import '../../../core/widgets/fieldsync_cinematic_intro.dart';
+import '../../../core/widgets/fieldsync_logo_geometry.dart';
 import '../../profile_settings/screens/terms_privacy_screen.dart';
 
 
@@ -38,11 +41,47 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
-  // The approved splash entrance is the screen's own identity moment;
-  // navigation waits for it so the journey is never cut off mid-flight.
-  // Reduced motion completes it immediately, restoring the old timing.
-  final Completer<void> _entranceDone = Completer<void>();
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  /// The one clock of the launch: the approved three-page cinematic's own
+  /// timeline. Page 1's scene, the approved entrance (driven at its own local
+  /// second), the departure and the login reveal all read this same
+  /// animation — one route, one controller, one journey, 0 → 13.35 s.
+  late final AnimationController _clock = AnimationController(
+    vsync: this,
+    duration: Duration(
+      milliseconds: (FieldSyncCinematicTimeline.totalSeconds * 1000).round(),
+    ),
+  );
+  late final Animation<double> _seconds = Tween<double>(
+    begin: 0,
+    end: FieldSyncCinematicTimeline.totalSeconds,
+  ).animate(_clock);
+
+  /// The approved entrance's own clock, in its local seconds: the global
+  /// timeline shifted by [FieldSyncCinematicTimeline.painterStartSeconds],
+  /// clamped so mounting mid-flight continues from exactly there. One stable
+  /// instance for the widget's whole life.
+  late final Animation<double> _entranceSeconds = _ShiftedSeconds(
+    _seconds,
+    offset: FieldSyncCinematicTimeline.painterStartSeconds,
+    spanning: FieldSyncEntranceTimeline.total,
+  );
+
+  /// The login logo's reveal: hidden (its exact layout space reserved) until
+  /// the pulse dissolves, fully shown once the sequence completes.
+  late final Animation<double> _brandReveal = _EasedWindow(
+    _seconds,
+    start: FieldSyncCinematicTimeline.brandRevealStartSeconds,
+    end: FieldSyncCinematicTimeline.brandRevealEndSeconds,
+  );
+
+  /// The measured box the approved entrance lives in — the object the scene
+  /// splices onto and the departure leaves from.
+  final GlobalKey _logoBoxKey = GlobalKey(debugLabel: 'splash-logo-box');
+
+  /// The login's own brand mark, measured by the Page 3 route layer.
+  final GlobalKey _loginBrandKey = GlobalKey(debugLabel: 'login-brand');
 
   /// Flips the initialization card to its honest "still starting up" status
   /// after the app's established eight-second startup budget. That boundary
@@ -60,22 +99,65 @@ class _SplashScreenState extends State<SplashScreen> {
   /// in diagnostics only.
   bool _startupFailed = false;
 
+  // ── the session decision, kept as a destination ──────────────────────────
+  // The decision still runs exactly where it always did (bootstrap ready +
+  // the three-second minimum, through the T3.5 foundation gate). What it
+  // produces is a destination the cinematic hands over to at the right
+  // second — it never navigates before its beat, and a skip can only move
+  // the timing, never the safety.
+
+  /// Login (Page 3) destination, with the sanitized failure to carry over.
+  bool _loginResolved = false;
+  AuthFailure? _landingFailure;
+
+  /// Home destination: the profile to hand over, and whether the cold-start
+  /// biometric lock stands in front of it.
+  UserProfile? _pendingProfile;
+  bool _biometricLanding = false;
+
+  /// Skip bookkeeping: with the decision still pending the clock parks on the
+  /// settled Page 2 composition and moves only once the real destination is
+  /// known — skip can never bypass the bootstrap gate.
+  bool _skipRequested = false;
+
+  /// The cinematic is over: the barrier releases and Page 3 (when this launch
+  /// heads to login) is interactive.
+  bool _finished = false;
+
+  bool _reducedMotionDecided = false;
+  bool? _overlayDark;
+  bool _homePushed = false;
+
+  /// Page 3's mounted subtree; one instance, built once — only its opacity
+  /// animates.
+  Widget? _loginLayer;
+
   @override
   void initState() {
     super.initState();
+    _clock.addListener(_onClock);
+    _clock.forward();
     _checkSession();
   }
 
-  void _onEntranceCompleted() {
-    if (!_entranceDone.isCompleted) _entranceDone.complete();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_reducedMotionDecided) return;
+    _reducedMotionDecided = true;
+    // Reduced motion: the cinematic is skipped up front — the settled Page 2
+    // composition holds until the real session decision lands, then the
+    // launch moves straight to its destination. Exactly the tap-to-skip path,
+    // taken automatically.
+    if (MediaQuery.disableAnimationsOf(context)) _requestSkip();
   }
 
   @override
   void dispose() {
-    // Never strand a pending navigation when the screen is torn down
-    // (route replacement and tests both do this).
-    if (!_entranceDone.isCompleted) _entranceDone.complete();
+    // No timer and no ticker may outlive the screen (the layout tests assert
+    // no pending timers after teardown).
     _bootstrapSlowTimer?.cancel();
+    _clock.dispose();
     super.dispose();
   }
 
@@ -106,14 +188,14 @@ class _SplashScreenState extends State<SplashScreen> {
       final failure = AuthFailure.classify(bootstrapError,
           fallback: AuthFailure.sessionRestoreFailed);
       debugPrint('[SPLASH] Bootstrap did not complete: ${failure.name}');
-      await _goToLoginOrTerminal(failure);
+      _arriveAtLogin(failure);
       return;
     }
 
     try {
       // ── STEP 1: Local token check (no network) ────────────────────────
       if (!AuthService.isLoggedIn) {
-        await _goToLoginOrTerminal();
+        _arriveAtLogin(null);
         return;
       }
 
@@ -123,15 +205,14 @@ class _SplashScreenState extends State<SplashScreen> {
         restoreSession: true,
       );
       if (profile == null || !mounted) {
-        await _goToLoginOrTerminal(AuthFailure.profileUnavailable);
+        _arriveAtLogin(AuthFailure.profileUnavailable);
         return;
       }
 
-      // The entrance plays while the checks above run; hold only the
-      // hand-off until it has settled, so the completed logo is what
-      // leaves the splash. Reduced motion releases this immediately.
-      await _entranceDone.future;
-      if (!mounted) return;
+      // The entrance plays while the checks above run; the hand-off itself
+      // waits for the hold to end (or, once a skip is remembered, for this
+      // decision to be known) — the completed logo is what leaves the
+      // splash, and no destination can move before the gate above resolved.
 
       // ── STEP 4: Cold-start biometric gate ──────────────────────────────
       // "Require on App Open" (Security Settings) previously only gated
@@ -149,42 +230,32 @@ class _SplashScreenState extends State<SplashScreen> {
       // way through (this screen has no password field). Fall through to
       // STEP 5 instead, same as if biometric weren't enrolled at all.
       if (requireOnOpen && bioEnrolled && bioConfirmed) {
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => AppResumeLockScreen(
-                nextScreenBuilder: (_) => MainShellScreen(profile: profile),
-              ),
-            ),
-          );
-        }
+        _arriveAtHome(profile, biometric: true);
         return;
       }
 
       // ── STEP 5: Direct to MainShellScreen ────────────────────────────
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => MainShellScreen(profile: profile)),
-        );
-      }
+      _arriveAtHome(profile, biometric: false);
     } catch (e) {
       final failure = AuthFailure.classify(e,
           fallback: AuthFailure.sessionRestoreFailed);
       debugPrint('[SPLASH] Session check: ${failure.name}');
-      await _goToLoginOrTerminal(failure);
+      _arriveAtLogin(failure);
     }
   }
 
 
-  /// Routes to login only when interactive authentication actually has a
-  /// foundation: the Supabase client must exist — LoginScreen's build reads
-  /// it the moment biometrics are enrolled — and after a FAILED bootstrap
-  /// the step that stands the client's auth up must itself have completed.
-  /// A client that merely exists mid-initialization must not be presented as
-  /// an interactive login. When the foundation is unusable, the splash holds
-  /// a terminal, non-interactive state instead of mounting a screen that
-  /// would crash (debug) or throw LateInitializationError (release).
-  Future<void> _goToLoginOrTerminal([AuthFailure? failure]) async {
+  /// Delivers the login destination through the T3.5 foundation gate:
+  /// interactive authentication is mounted only when it actually has a
+  /// foundation — the Supabase client must exist (LoginScreen's build reads it
+  /// the moment biometrics are enrolled) and, after a FAILED bootstrap, the
+  /// step that stands the client's auth up must itself have completed. A
+  /// client that merely exists mid-initialization must not be presented as an
+  /// interactive login. When the foundation is unusable, the splash holds a
+  /// terminal, non-interactive state instead of mounting a screen that would
+  /// crash (debug) or throw LateInitializationError (release).
+  void _arriveAtLogin(AuthFailure? failure) {
+    if (!mounted) return;
     final clientAvailable = SupabaseService.hasClient;
     final foundationUsable = clientAvailable &&
         (AppBootstrap.error == null || AppBootstrap.supabaseInitialized);
@@ -192,101 +263,406 @@ class _SplashScreenState extends State<SplashScreen> {
       debugPrint('[SPLASH] Interactive login withheld: client available='
           '$clientAvailable, Supabase step completed='
           '${AppBootstrap.supabaseInitialized}.');
-      if (mounted) setState(() => _startupFailed = true);
+      setState(() => _startupFailed = true);
+      _onClock();
       return;
     }
-    await _goToLogin(failure);
+    setState(() {
+      _loginResolved = true;
+      _landingFailure = failure;
+    });
+    // A login decision that lands after the departure's own window has
+    // closed (slow bootstrap) enters the film mid-flow; finish straight to
+    // the settled login instead of replaying a journey whose exit already
+    // passed unseen.
+    if (_seconds.value > FieldSyncCinematicTimeline.departureStartSeconds) {
+      _skipRequested = true;
+    }
+    _onClock();
   }
 
-
-  Future<void> _goToLogin([AuthFailure? failure]) async {
-    await _entranceDone.future;
+  void _arriveAtHome(UserProfile profile, {required bool biometric}) {
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 700),
-        pageBuilder: (_, anim, _) =>
-            FadeTransition(opacity: anim, child: LoginScreen(initialFailure: failure)),
-      ),
+    setState(() {
+      _pendingProfile = profile;
+      _biometricLanding = biometric;
+    });
+    _onClock();
+  }
+
+  /// The single orchestration step, driven by the clock and by every
+  /// destination arrival: it decides, for the current time and destination,
+  /// what the launch may do next — never anything before its own beat.
+  void _onClock() {
+    if (!mounted) return;
+    final t = _seconds.value;
+    if (_skipRequested) {
+      _finalizeSkip();
+      return;
+    }
+    if (_loginResolved) {
+      if (_loginLayer == null &&
+          t >= FieldSyncCinematicTimeline.mountStartSeconds) {
+        setState(_attachLoginLayer);
+      }
+      if (!_finished &&
+          t >= FieldSyncCinematicTimeline.barrierReleaseSeconds) {
+        setState(() => _finished = true);
+      }
+    } else if (_startupFailed) {
+      if (!_finished &&
+          t >= FieldSyncCinematicTimeline.barrierReleaseSeconds) {
+        setState(() => _finished = true);
+      }
+    } else if (_pendingProfile != null) {
+      // Home (or the biometric lock standing in front of it) waits for the
+      // hold's end, so the completed logo is what leaves the splash; a slow
+      // decision past the hold hands over the moment it is known.
+      if (!_homePushed && t >= FieldSyncCinematicTimeline.holdEndSeconds) {
+        _pushDestination();
+      }
+    }
+  }
+
+  /// Page 3 mounts as a layer of this very route — the cinematic never
+  /// changes screens, so there is no transition that could clip the route.
+  void _attachLoginLayer() {
+    _loginLayer = LoginScreen(
+      initialFailure: _landingFailure,
+      brandKey: _loginBrandKey,
+      brandReveal: _brandReveal,
     );
   }
 
+  /// A tap anywhere during the cinematic: skip to the destination's finished
+  /// state. With the session decision still pending the skip is remembered
+  /// and the settled Page 2 composition holds until the decision is real —
+  /// the barrier can move time, never the gate.
+  void _requestSkip() {
+    if (_finished || _skipRequested) return;
+    _skipRequested = true;
+    if (!_destinationKnown) {
+      _clock.stop();
+      _clock.value = FieldSyncCinematicTimeline.holdEndSeconds /
+          FieldSyncCinematicTimeline.totalSeconds;
+      return;
+    }
+    _finalizeSkip();
+  }
+
+  bool get _destinationKnown =>
+      _loginResolved || _startupFailed || _pendingProfile != null;
+
+  /// Straight to the known destination: the login mounts in its finished
+  /// state (logo revealed, no route to replay), or Home / the biometric lock
+  /// takes the screen exactly once.
+  void _finalizeSkip() {
+    if (_finished || !_destinationKnown) return;
+    setState(() {
+      if (_loginResolved) _attachLoginLayer();
+      _finished = true;
+    });
+    if (_pendingProfile != null) {
+      _pushDestination();
+      return;
+    }
+    _clock.stop();
+    _clock.value = 1.0;
+  }
+
+  void _pushDestination() {
+    final profile = _pendingProfile;
+    if (profile == null || _homePushed || !mounted) return;
+    _homePushed = true;
+    final next = _biometricLanding
+        ? AppResumeLockScreen(
+            nextScreenBuilder: (_) => MainShellScreen(profile: profile))
+        : MainShellScreen(profile: profile);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => next),
+    );
+  }
+
+  static double _window(double t, double a, double b) =>
+      ((t - a) / (b - a)).clamp(0.0, 1.0);
+
+  /// The status bar flips with the login's own light surface, never before it
+  /// exists (deduplicated: this runs per frame).
+  void _syncSystemOverlay(double t) {
+    final dark = _loginResolved &&
+        t >= FieldSyncCinematicTimeline.mountStartSeconds;
+    if (dark == _overlayDark) return;
+    _overlayDark = dark;
+    SystemChrome.setSystemUIOverlayStyle(
+      dark ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light,
+    );
+  }
+
+  /// Wraps a chrome element (wordmark, status card) in the seam fade: the
+  /// initialization page's own UI steps in as Page 2 takes the frame — never
+  /// before — and is hidden from semantics while invisible.
+  Widget _chromeFade(Widget child) => AnimatedBuilder(
+    animation: _seconds,
+    builder: (context, child) {
+      final opacity = Curves.easeInOutSine.transform(_window(
+        _seconds.value,
+        FieldSyncCinematicTimeline.chromeFadeStartSeconds,
+        FieldSyncCinematicTimeline.chromeFadeEndSeconds,
+      ));
+      return Opacity(
+        opacity: opacity,
+        child: ExcludeSemantics(excluding: opacity < 0.5, child: child),
+      );
+    },
+    child: child,
+  );
+
+  /// The measured logo box. The approved entrance lives here — mounted from
+  /// the first frame with the shared clock as its driver, so it owns no time
+  /// of its own — Page 1's scene splices onto exactly this rect, and the
+  /// departure leaves from it: logo and leaving route are one subtree under
+  /// one transform and can never separate.
+  Widget _logoStage(double logoSpan) => SizedBox(
+    key: _logoBoxKey,
+    width: logoSpan,
+    child: AspectRatio(
+      aspectRatio: FieldSyncLogoGeometry.viewBoxWidth /
+          FieldSyncLogoGeometry.viewBoxHeight,
+      child: LayoutBuilder(builder: (context, constraints) {
+        final boxSize = Size(constraints.maxWidth, constraints.maxHeight);
+        return AnimatedBuilder(
+          animation: _seconds,
+          builder: (context, child) => Transform(
+            // The departure camera, and nothing else: identity through the
+            // hold, then push → follow → zoom-out while the journey leaves
+            // for the login. It never engages for a Home or terminal launch —
+            // that exit belongs to the login's own beat.
+            transform: _loginResolved
+                ? FieldSyncDepartureCamera.matrixAt(_seconds.value, boxSize)
+                : Matrix4.identity(),
+            child: child,
+          ),
+          child: Stack(fit: StackFit.expand, children: [
+            // The approved entrance, in full, on its own local second. It
+            // stays invisible until the seam: Page 1's scene is what the
+            // frame shows until then, and the painter's own first visible
+            // frame is exactly the frame the scene froze on — so the two
+            // layers agree to the pixel through the handoff.
+            AnimatedBuilder(
+              animation: _seconds,
+              builder: (context, child) => Opacity(
+                opacity:
+                    _seconds.value >= FieldSyncCinematicTimeline.seamSeconds
+                    ? 1
+                    : 0,
+                child: child,
+              ),
+              child: FieldSyncEntranceAnimation(
+                width: logoSpan,
+                driver: _entranceSeconds,
+                onCompleted: _onEntranceCompleted,
+              ),
+            ),
+            // The journey's exit — box-local, box-locked.
+            CustomPaint(
+              size: Size.infinite,
+              isComplex: true,
+              painter: FieldSyncDepartureRoutePainter(
+                time: _seconds,
+                active: _loginResolved,
+              ),
+            ),
+          ]),
+        );
+      }),
+    ),
+  );
+
+  /// The shared clock owns every beat; the approved entrance still requires
+  /// its completion callback, which fires exactly once on the settle.
+  void _onEntranceCompleted() {}
+
+  /// The initialization page's status card — content and layout verbatim.
+  Widget _statusCard() => Container(
+    key: const ValueKey('splash-status'),
+    width: double.infinity,
+    padding: const EdgeInsets.all(28),
+    decoration: const BoxDecoration(color: InsightTheme.surface,
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        if (_startupFailed)
+          const Icon(Icons.error_outline_rounded, size: 24, color: InsightTheme.redInk)
+        else
+          const ImapsLoadingIndicator(size: 24),
+        const SizedBox(width: 12),
+        Expanded(child: Text(
+          _startupFailed
+              ? 'Unable to initialize FieldSync. Please close and reopen the app.'
+              : _bootstrapSlow
+                  ? 'Still starting up… first launch can take a moment.'
+                  : 'Initializing field unit…',
+          style: InsightTheme.inter(13, w: FontWeight.w600,
+            c: _startupFailed ? InsightTheme.redInk : InsightTheme.blueInk))),
+      ]),
+      const SizedBox(height: 20),
+      Text('Municipal Planning & Zoning Office', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2)),
+      const SizedBox(height: 6),
+      Text(AppInfoService.fullVersionString, style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3)),
+    ]),
+  );
+
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+    final logoSpan = min(MediaQuery.sizeOf(context).width * 0.72, 360.0);
     final brand = SizedBox(width: double.infinity, child: Padding(
       key: const ValueKey('splash-brand'),
       padding: const EdgeInsets.all(32),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         // Approved entrance: the inspector's route journey, settled on the
         // official artwork at video scale (video ≈ 72% of screen width).
-        FieldSyncEntranceAnimation(
-          width: min(MediaQuery.sizeOf(context).width * 0.72, 360.0),
-          onCompleted: _onEntranceCompleted,
-        ),
+        _logoStage(logoSpan),
         const SizedBox(height: 24),
-        Text('iMAPS', style: InsightTheme.inter(16, w: FontWeight.w600, c: Colors.white)),
-        Semantics(label: 'FieldSync', header: true, excludeSemantics: true,
+        _chromeFade(Text('iMAPS', style: InsightTheme.inter(16, w: FontWeight.w600, c: Colors.white))),
+        _chromeFade(Semantics(label: 'FieldSync', header: true, excludeSemantics: true,
           child: Wrap(children: [
             Text('Field', style: InsightTheme.urbanist(44, w: FontWeight.w800, c: Colors.white)),
             Text('Sync', style: InsightTheme.urbanist(44, w: FontWeight.w800, c: Colors.white)),
-          ])),
+          ]))),
       ]),
     ));
-    final status = Container(
-      key: const ValueKey('splash-status'),
-      width: double.infinity,
-      padding: const EdgeInsets.all(28),
-      decoration: const BoxDecoration(color: InsightTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          if (_startupFailed)
-            const Icon(Icons.error_outline_rounded, size: 24, color: InsightTheme.redInk)
-          else
-            const ImapsLoadingIndicator(size: 24),
-          const SizedBox(width: 12),
-          Expanded(child: Text(
-            _startupFailed
-                ? 'Unable to initialize FieldSync. Please close and reopen the app.'
-                : _bootstrapSlow
-                    ? 'Still starting up… first launch can take a moment.'
-                    : 'Initializing field unit…',
-            style: InsightTheme.inter(13, w: FontWeight.w600,
-              c: _startupFailed ? InsightTheme.redInk : InsightTheme.blueInk))),
-        ]),
-        const SizedBox(height: 20),
-        Text('Municipal Planning & Zoning Office', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2)),
-        const SizedBox(height: 6),
-        Text(AppInfoService.fullVersionString, style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3)),
-      ]),
-    );
-    return Scaffold(backgroundColor: InsightTheme.blue2,
-      body: SafeArea(child: LayoutBuilder(builder: (context, constraints) {
-        if (context.responsive.canSplitTwoPane) {
-          return Row(children: [
-            Expanded(child: Center(child: SingleChildScrollView(child: brand))),
-            Expanded(child: Align(alignment: Alignment.bottomCenter, child: status)),
-          ]);
-        }
-        return Column(children: [
+    final status = _statusCard();
+    final layout = LayoutBuilder(builder: (context, constraints) {
+      if (context.responsive.canSplitTwoPane) {
+        return Row(children: [
           Expanded(child: Center(child: SingleChildScrollView(child: brand))),
-          status,
+          Expanded(child: Align(alignment: Alignment.bottomCenter, child: _chromeFade(status))),
         ]);
-      })),
+      }
+      return Column(children: [
+        Expanded(child: Center(child: SingleChildScrollView(child: brand))),
+        _chromeFade(status),
+      ]);
+    });
+    return Scaffold(backgroundColor: InsightTheme.blue2,
+      body: SafeArea(child: AnimatedBuilder(
+        animation: _seconds,
+        builder: (context, child) {
+          final t = _seconds.value;
+          _syncSystemOverlay(t);
+          return Stack(fit: StackFit.expand, children: [
+            // Page 1 — the cinematic's own pre-roll, spliced onto the
+            // measured logo box.
+            FieldSyncCinematicStage(time: _seconds, boxKey: _logoBoxKey),
+            // Page 2 — the approved initialization page, verbatim.
+            child!,
+            // Page 3 — the login, mounted in place during the departure's
+            // tail and faded in as the frame settles on it. The route layer
+            // above it owns the re-entry, the destination dot, the pulse and
+            // the logo reveal. Until the sequence finishes the barrier below
+            // keeps it inert.
+            if (_loginLayer != null) ...[
+              ExcludeSemantics(
+                excluding: !_finished,
+                child: Opacity(
+                  opacity: _window(
+                    t,
+                    FieldSyncCinematicTimeline.mountStartSeconds,
+                    FieldSyncCinematicTimeline.mountEndSeconds,
+                  ),
+                  child: _loginLayer,
+                ),
+              ),
+              FieldSyncLoginRouteOverlay(
+                time: _seconds,
+                brandKey: _loginBrandKey,
+              ),
+            ],
+            // The startup barrier: until the sequence completes, any tap is
+            // a skip request — it can move the timing, never the gate.
+            if (!_finished)
+              Semantics(
+                button: true,
+                label: 'Skip startup animation',
+                onTap: _requestSkip,
+                child: GestureDetector(
+                  key: const ValueKey('splash-skip'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _requestSkip,
+                  child: const SizedBox.expand(),
+                ),
+              ),
+          ]);
+        },
+        child: layout,
+      )),
     );
   }
+}
+
+/// The global cinematic clock, shifted into a child timeline's local seconds
+/// and clamped at both ends — mounting a driven widget mid-flight continues
+/// from exactly there, and an over-running clock holds the finished frame.
+class _ShiftedSeconds extends Animation<double>
+    with AnimationWithParentMixin<double> {
+  _ShiftedSeconds(this.parent, {required this.offset, required this.spanning});
+
+  @override
+  final Animation<double> parent;
+
+  /// Global second the child timeline starts on.
+  final double offset;
+
+  /// The child timeline's total length in its local seconds.
+  final double spanning;
+
+  @override
+  double get value => (parent.value - offset).clamp(0.0, spanning);
+}
+
+/// One eased window of the shared clock: 0 before [start] (global seconds),
+/// 1 after [end], smooth in between.
+class _EasedWindow extends Animation<double>
+    with AnimationWithParentMixin<double> {
+  _EasedWindow(this.parent, {required this.start, required this.end});
+
+  @override
+  final Animation<double> parent;
+
+  final double start;
+  final double end;
+
+  @override
+  double get value => Curves.easeInOutSine.transform(
+    ((parent.value - start) / (end - start)).clamp(0.0, 1.0),
+  );
 }
 
 /// ------------------------------------------------------------------
 /// REFINED LOGIN SCREEN
 /// ------------------------------------------------------------------
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, this.initialFailure});
+  const LoginScreen({
+    super.key,
+    this.initialFailure,
+    this.brandKey,
+    this.brandReveal,
+  });
 
   /// Sanitized reason a previous stage could not complete, so a user sent back
   /// here is never left believing their passcode was rejected.
   final AuthFailure? initialFailure;
+
+  /// Key on the brand mark, so the startup cinematic can measure its exact
+  /// layout rect. The mark keeps that space for its whole hidden phase, so
+  /// the rect is stable.
+  final Key? brandKey;
+
+  /// Reveal progress for the brand mark: 0 → hidden (its exact layout space
+  /// reserved), 1 → fully shown. Opacity/scale only; the form's layout never
+  /// moves. Null keeps the default fully-visible behavior for every other
+  /// caller.
+  final Animation<double>? brandReveal;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -891,6 +1267,28 @@ class _LoginScreenState extends State<LoginScreen> {
   /// column and nothing can push it: opening the keyboard, tapping between the
   /// two fields, or the auto-scroll that focus triggers all move the form
   /// underneath it while the brand stays exactly where it is.
+  /// The brand mark, with the startup cinematic's optional reveal driven by
+  /// the shared clock: hidden (its exact layout space reserved) until the
+  /// re-entered route arrives, then revealed by opacity/scale only — the
+  /// form's own layout never moves, and the measured rect the route was
+  /// guided to never changes.
+  Widget _brandMark() {
+    final mark = FieldSyncBrand(key: widget.brandKey, height: 56);
+    final reveal = widget.brandReveal;
+    if (reveal == null) return mark;
+    return AnimatedBuilder(
+      animation: reveal,
+      builder: (context, child) {
+        final v = reveal.value.clamp(0.0, 1.0);
+        return Opacity(
+          opacity: v,
+          child: Transform.scale(scale: 0.92 + 0.08 * v, child: child),
+        );
+      },
+      child: mark,
+    );
+  }
+
   Widget _brandBlock() => Padding(
     padding: const EdgeInsets.fromLTRB(28, 16, 28, 0),
     child: Wrap(
@@ -904,7 +1302,7 @@ class _LoginScreenState extends State<LoginScreen> {
           spacing: 12,
           runSpacing: 8,
           children: [
-            const FieldSyncBrand(height: 56),
+            _brandMark(),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
