@@ -236,7 +236,7 @@ void main() {
           final card = find.byKey(ValueKey('${screen.key}-details'));
           expect(card, findsOneWidget);
           final labels = screen.key == 'gps'
-            ? ['Distance to site', 'GPS accuracy', 'Required ≤ 30 m', task.location]
+            ? ['Distance', 'Accuracy', 'Status', 'Required ≤ 30 m', task.location]
             : ['Heading', 'Cardinal', 'Accuracy', 'Sensor · Live Device Magnetometer'];
           await image(tester, name: '${screen.key}-${viewport.key}-${scale.key}');
           for (final label in labels) {
@@ -308,7 +308,8 @@ void main() {
       'supabase_parcels': {'latitude': 13.84265, 'longitude': 121.1766}}]));
     await pumpSurface(tester, GpsVerificationScreen(task: task));
     expect(tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Confirm GPS')).onPressed, isNotNull);
-    expect(find.text('Offline · Distance to cached site point'), findsOneWidget);
+    expect(find.text('Offline'), findsOneWidget);
+    expect(find.byTooltip('Offline · Distance to cached site point'), findsOneWidget);
     await image(tester, name: 'gps-offline');
     await tester.tap(find.byTooltip('Copy device coordinates'));
     await tester.pump();

@@ -348,6 +348,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> openMapInfo(WidgetTester tester) async {
+    await tester.tap(find.text('Map info'));
+    await settle(tester);
+  }
+
+  Future<void> closeMapInfo(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('Close map information'));
+    await settle(tester);
+  }
+
   Future<void> mount(
     WidgetTester tester,
     Size size, {
@@ -509,16 +519,19 @@ void main() {
         expect(markers.markers.last.point, device);
         expect(markers.markers.first.point, target);
         if (scenario.links > 0) {
+          expect(find.text('Map info').hitTestable(), findsOneWidget);
+          await openMapInfo(tester);
           expect(
             find.text('··· Unverified links'),
             findsOneWidget,
-            reason: 'Schematic links must be identified without scrolling',
+            reason: 'The labelled map information control explains schematic links',
           );
           expect(
             find.text('··· Unverified links').hitTestable(),
             findsOneWidget,
           );
           expect(find.textContaining('not verified roads'), findsOneWidget);
+          await closeMapInfo(tester);
         }
         expect(tester.takeException(), isNull);
       },
@@ -758,7 +771,9 @@ void main() {
       await tester.runAsync(() => db.delete('local_route_cache'));
       await mount(tester, const Size(390, 844));
       expect(find.text('ESTIMATED drive · ~8 min'), findsOneWidget);
+      await openMapInfo(tester);
       expect(find.textContaining('not traffic-aware'), findsOneWidget);
+      await closeMapInfo(tester);
       gpsPoint = const LatLng(13.84285, 121.1765); // ~39 m movement.
       await sendPosition(tester);
       await settle(tester);
@@ -1273,14 +1288,16 @@ void main() {
       expect(markers.markers.map((m) => m.point), [target, device]);
       expect(find.textContaining('Near the mapped site'), findsNothing);
       expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+      await openMapInfo(tester);
       expect(
-        find.textContaining('GPS-to-road link and ~100 m notice'),
+        find.textContaining('GPS-to-road link'),
         findsOneWidget,
         reason: 'explain which guidance needs a fresh precise fix',
       );
       final guidance = find.textContaining(
-        'GPS-to-road link and ~100 m notice',
+        'GPS-to-road link',
       );
+      await closeMapInfo(tester);
       for (final scale in [1.0, 2.0]) {
         tester.platformDispatcher.textScaleFactorTestValue = scale;
         for (final width in [360.0, 375.0, 414.0]) {
@@ -1288,8 +1305,9 @@ void main() {
           await settle(tester);
           await tester.tap(find.byTooltip('Fit both markers'));
           await settle(tester);
-          // At 200%, the paragraph can exceed the scroll viewport. Bring its
-          // centre into view while the independent primary action stays pinned.
+          // The explanation scales inside its sheet; closing it returns to
+          // the independently pinned action and unchanged map controls.
+          await openMapInfo(tester);
           await Scrollable.ensureVisible(
             tester.element(guidance),
             alignment: 0.5,
@@ -1300,6 +1318,7 @@ void main() {
             findsOneWidget,
             reason: '$width/$scale',
           );
+          await closeMapInfo(tester);
           expect(
             find.text('Proceed to Location').hitTestable(),
             findsOneWidget,
@@ -1344,23 +1363,25 @@ void main() {
     expect(lines, hasLength(2));
     expect(lines.last.points, [offsetEnd, target]);
     expect(find.textContaining('Near the mapped site'), findsNothing);
+    await openMapInfo(tester);
     expect(
-      find.textContaining('GPS-to-road link and ~100 m notice'),
+      find.textContaining('GPS-to-road link'),
       findsOneWidget,
       reason: 'poor GPS does not suppress the route-to-target link',
     );
     await tester.ensureVisible(
-      find.textContaining('GPS-to-road link and ~100 m notice'),
+      find.textContaining('GPS-to-road link'),
     );
     await settle(tester);
     await captureGuidance(tester, 'cached-road-gps-explanation');
+    await closeMapInfo(tester);
     gpsAccuracy = 5;
     await sendPosition(tester);
     await settle(tester);
     expect(routeLines(tester), hasLength(3));
     expect(routeLines(tester)[1].points.first, device);
     expect(
-      find.textContaining('GPS-to-road link and ~100 m notice'),
+      find.textContaining('GPS-to-road link'),
       findsNothing,
     );
     await captureGuidance(tester, 'cached-road-both-links-restored');
@@ -1373,17 +1394,20 @@ void main() {
     await mount(tester, const Size(390, 844));
     await captureGuidance(tester, 'road-small-gaps');
     expect(routeLines(tester), hasLength(1));
+    expect(find.text('··· Unverified links'), findsNothing);
+    expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
+    await openMapInfo(tester);
     expect(
       find.textContaining('Small gaps or GPS uncertainty'),
       findsOneWidget,
     );
     expect(find.text('··· Unverified links'), findsNothing);
-    expect(find.text('Proceed to Location').hitTestable(), findsOneWidget);
     await tester.ensureVisible(
       find.textContaining('Small gaps or GPS uncertainty'),
     );
     await settle(tester);
     await captureGuidance(tester, 'road-small-gap-explanation');
+    await closeMapInfo(tester);
   });
 
   for (final scale in [1.0, 2.0]) {
@@ -1421,7 +1445,8 @@ void main() {
           expect(
             fit.overlaps(attribution),
             isFalse,
-            reason: '$size / $scale fit $fit attribution $attribution',
+            reason: '$size / $scale fit $fit attribution $attribution '
+              'footer ${tester.getSize(find.ancestor(of: find.text('© OpenStreetMap contributors'), matching: find.byType(LayoutBuilder)).first)}',
           );
           expect(
             full.overlaps(attribution),
@@ -1482,14 +1507,17 @@ void main() {
             tester.view.physicalSize = size;
             await settle(tester);
             expect(find.text('Site details'), findsOneWidget);
-            expect(find.text('Site Verification'), findsOneWidget);
+            final landscape = size.width > size.height;
+            expect(find.text('Site Verification'), landscape ? findsNothing : findsOneWidget);
             expect(
               find.text('STEP 1 OF 6 — LOCATE TARGET', findRichText: true),
-              findsOneWidget,
+              landscape ? findsNothing : findsOneWidget,
             );
             final full = find.byTooltip('Full map');
             final fit = find.byTooltip('Fit both markers');
-            final headerBounds = tester.getRect(
+            final headerBounds = landscape
+                ? tester.getRect(find.byTooltip('Exit inspection'))
+                : tester.getRect(
               find.ancestor(
                 of: find.byType(InspectionStepHeader),
                 matching: find.byType(SingleChildScrollView),
@@ -1716,7 +1744,9 @@ void main() {
                 )
                 .first,
           );
-          final header = find
+          final header = size.width > size.height
+              ? find.byTooltip('Exit inspection')
+              : find
               .ancestor(
                 of: find.byType(InspectionStepHeader),
                 matching: find.byType(SingleChildScrollView),
@@ -1886,7 +1916,9 @@ void main() {
     expect(find.text('Saved road route'), findsNothing);
     expect(find.text('3.4 km'), findsOneWidget);
     expect(find.text('ESTIMATED drive · ~8 min'), findsOneWidget);
+    await openMapInfo(tester);
     expect(find.textContaining('not traffic-aware'), findsOneWidget);
+    await closeMapInfo(tester);
     final output = Platform.environment['IMAPS_SITE_VISUAL_DIR'];
     final measurements = <String, Object>{};
     Future<void> capture(String name) async {
@@ -1990,7 +2022,7 @@ void main() {
     await mount(tester, const Size(390, 844));
     expect(find.text('Saved road route'), findsOneWidget);
     expect(
-      find.textContaining('Offline rerouting is unavailable'),
+      find.text('Rerouting needs a connection'),
       findsOneWidget,
     );
     await tester.tap(find.byTooltip('Fit both markers'));
@@ -2136,7 +2168,7 @@ void main() {
       await mount(tester, const Size(390, 844));
       expect(find.text('Saved road route'), findsOneWidget);
       expect(
-        find.textContaining('· Offline'),
+      find.textContaining('Offline'),
         findsNothing,
         reason: 'cache provenance does not establish connectivity',
       );

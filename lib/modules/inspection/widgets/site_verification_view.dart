@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/widgets/quick_actions_sheet.dart' show MapDetailPanel;
+import '../../../core/widgets/field_form_widgets.dart';
 import 'inspection_step_header.dart';
 
 /// Step 1 presentation only. GPS, road geometry, cache and progression remain
@@ -93,7 +94,12 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
 
   void _measureOverlays(Size mapSize, EdgeInsets fitPadding) {
     if (!mounted) return;
-    final header = _headerKey.currentContext?.size?.height ?? _headerHeight;
+    // Immersive landscape (matching GPS Verification) drops the header
+    // entirely, so its measured height must not keep a stale portrait value.
+    final immersive = _fullscreen || context.responsive.isLandscape;
+    final header = immersive
+        ? 0.0
+        : (_headerKey.currentContext?.size?.height ?? _headerHeight);
     final panel = _panelKey.currentContext?.size?.height ?? _panelHeight;
     final attribution =
         _attributionKey.currentContext?.size?.height ?? _attributionHeight;
@@ -133,7 +139,8 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
       builder: (context, box) {
         final width = box.maxWidth - safe.horizontal;
         final height = box.maxHeight - safe.vertical;
-        final landscape = bp.isLandscape && !bp.isCompactWidth;
+        final landscape = bp.isLandscape;
+        final headerHeight = _fullscreen || landscape ? 0.0 : _headerHeight;
         final split = landscape && !_fullscreen && !_collapsed && widget.ready;
         final sideWidth = (width * 0.34).clamp(260.0, 336.0);
         final mapRight = split ? safe.right + sideWidth + 24 : 0.0;
@@ -188,7 +195,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
             landscape ||
             (!_fullscreen &&
                 height <
-                    _headerHeight + panelMinHeight + _attributionHeight + 144);
+                    headerHeight + panelMinHeight + _attributionHeight + 144);
         final controlsHeight = horizontalControls ? 48.0 : 104.0;
         // The established header is unchanged. Very large text on a short phone
         // scrolls its two context containers rather than hiding either of them.
@@ -215,7 +222,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       12,
                   // Reserve both full targets, three 8dp gaps and 16dp bottom.
                   height -
-                      _headerHeight -
+                      headerHeight -
                       _attributionHeight -
                       controlsHeight -
                       40,
@@ -227,7 +234,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
             : 0.0;
         final attributionBottom = panelBottom + panelSpace;
         final controlsTop = math.max(
-          safe.top + (_fullscreen ? 8 : _headerHeight + 8),
+          safe.top + (_fullscreen || landscape ? 8 : headerHeight + 8),
           box.maxHeight -
               attributionBottom -
               _attributionHeight -
@@ -236,7 +243,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         );
         final fitPadding = EdgeInsets.fromLTRB(
           safe.left + 48,
-          safe.top + (_fullscreen ? 48 : _headerHeight + 24),
+          safe.top + (_fullscreen || landscape ? 48 : headerHeight + 24),
           (split ? mapRight : safe.right) +
               _textSize(
                 'Target site',
@@ -258,7 +265,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
             // The same element/controller survives disclosure, fullscreen and
             // rotation. The map also fills unused space beneath the side pane.
             Positioned.fill(child: widget.mapBuilder(fitPadding)),
-            if (!_fullscreen)
+            if (!_fullscreen && !landscape)
               Positioned(
                 top: safe.top,
                 left: safe.left,
@@ -276,6 +283,15 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       onBack: widget.onBack,
                     ),
                   ),
+                ),
+              ),
+            if (!_fullscreen && landscape)
+              Positioned(
+                left: safe.left + 12,
+                top: safe.top + 12,
+                child: FieldBackButton(
+                  tooltip: 'Exit inspection',
+                  onPressed: widget.onBack,
                 ),
               ),
             if (widget.ready) ...[
@@ -312,41 +328,36 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                   ],
                 ),
               ),
-              AnimatedPositioned(
-                duration: _motion,
-                curve: Curves.easeOutCubic,
+              Positioned(
                 left: safe.left + 16,
                 right: split ? mapRight + 16 : safe.right + 16,
                 bottom: attributionBottom,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    key: _attributionKey,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.72),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // A scrollable explanation can be off-screen. Keep the
-                         // legend on-map, or pinned in the expanded side pane.
-                         if (widget.hasDirectLinks && !split) _linkLegend(),
-                        Text(
-                          '– –  Rosario boundary · MPDO Rosario',
-                          style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                child: LayoutBuilder(
+                  key: _attributionKey,
+                  builder: (context, footer) => Row(
+                    children: [
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.92),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '© OpenStreetMap contributors',
+                              style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                            ),
+                          ),
                         ),
-                        Text(
-                          '© OpenStreetMap contributors',
-                          style: InsightTheme.inter(12, c: InsightTheme.ink2),
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: footer.maxWidth * 0.44),
+                        child: _mapInfoRow(),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -371,7 +382,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                       duration: _motion,
                       curve: Curves.easeOutCubic,
                       alignment: Alignment.bottomCenter,
-                       child: _details(showLinkLegend: split),
+                       child: _details(),
                     ),
                   ),
                 ),
@@ -382,16 +393,52 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
     );
   }
 
-  Widget _linkLegend() => Semantics(
-    label: 'Schematic direct links: access unverified',
+  /// Bare map information link; only its transparent touch target is enlarged.
+  Widget _mapInfoRow() => Semantics(
+    button: true,
+    label: 'Map information',
     excludeSemantics: true,
-    child: Text(
-      '··· Unverified links',
-      style: InsightTheme.inter(12, c: InsightTheme.ink2),
+    onTap: _openMapInfo,
+    child: Material(
+      type: MaterialType.transparency,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: InkWell(
+          onTap: _openMapInfo,
+          borderRadius: BorderRadius.circular(8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.info_outline_rounded,
+                size: 16,
+                color: InsightTheme.ink2,
+              ),
+              const SizedBox(width: 6),
+              Flexible(child: Text(
+                'Map info',
+                style: InsightTheme.inter(
+                  12,
+                  w: FontWeight.w600,
+                  c: InsightTheme.ink2,
+                ).copyWith(shadows: const [Shadow(color: Colors.white, blurRadius: 4)]),
+              )),
+            ],
+          ),
+        ),
+      ),
     ),
   );
 
-  Widget _details({required bool showLinkLegend}) {
+  Future<void> _openMapInfo() => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _MapInfoSheet(showLinks: widget.hasDirectLinks),
+  );
+
+  Widget _details() {
     return Container(
       key: _panelKey,
       child: MapDetailPanel(
@@ -399,7 +446,6 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
         embedded: true,
         headerKey: _detailsHeaderKey,
         initiallyCollapsed: _collapsed,
-        headerAccessory: showLinkLegend && widget.hasDirectLinks ? _linkLegend() : null,
         collapseLabel: 'site details',
         onCollapsedChanged: (collapsed) => setState(() => _collapsed = collapsed),
         footer: _proceedAction(),
@@ -443,23 +489,7 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            'Saved geometry. Offline rerouting is unavailable; street tiles may be missing. Estimates need a fresh route.',
-                            style: InsightTheme.inter(12, c: InsightTheme.ink3),
-                          ),
-                        ),
-                      const SizedBox(height: 8),
-                      if (!widget.approachNotice && !widget.nearSite)
-                        _guidanceNotice(),
-                      if (widget.approachNotice || widget.nearSite)
-                        Text(
-                          'Step 2 gives direct compass orientation when safely stopped/on foot. A bearing is not a verified access path.',
-                          style: InsightTheme.inter(12, c: InsightTheme.ink3),
-                        ),
-                      if (widget.hasDirectLinks)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Dotted links are schematic straight lines, not verified roads or walkable access. Small gaps or GPS uncertainty may hide a link; zoom in to inspect short links.',
+                            'Rerouting needs a connection',
                             style: InsightTheme.inter(12, c: InsightTheme.ink3),
                           ),
                         ),
@@ -469,6 +499,8 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
     );
   }
 
+  /// One concise status line for the two states where proximity changes what
+  /// the inspector should do next. Extended detail lives in Map info.
   Widget _guidanceNotice() => Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -484,14 +516,8 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
       Expanded(
         child: Text(
           widget.nearSite
-              ? 'GPS estimate ≤30 m from the mapped point · informational only. Confirm in Step 2.'
-              : widget.approachNotice
-              ? 'Near the mapped site (~100 m). You can open GPS Verification when safely stopped/on foot; confirm within 30 m.'
-              : widget.hasDeviceLocation && !widget.gpsReliable
-              ? 'GPS-to-road link and ~100 m notice need a fix ≤15 s old with accuracy ≤25 m. Step 2 confirms within 30 m when safely stopped/on foot.'
-              : widget.hasRoute && !widget.hasDirectLinks
-              ? 'Small gaps or GPS uncertainty hide dotted links. Step 2 gives direct compass orientation when safely stopped/on foot; a bearing does not verify access.'
-              : 'Step 2 provides direct compass orientation when safely stopped and on foot. Site confirmation requires 30 m; the compass does not verify an access path.',
+              ? 'GPS ≤30 m from the mapped point · still confirm in Step 2.'
+              : 'Near the mapped site (~100 m) · open GPS Verification when safely stopped/on foot; confirm within 30 m.',
           style: InsightTheme.inter(
             12,
             c: widget.nearSite ? InsightTheme.greenInk : InsightTheme.ink3,
@@ -644,16 +670,9 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
               style: InsightTheme.inter(12, w: FontWeight.w600),
             ),
           ),
-        if (!widget.routeEstimateStale &&
-            (widget.routeDistanceMeters != null ||
-                widget.routeDurationSeconds != null))
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'Roads only · not traffic-aware; direct links excluded.',
-              style: InsightTheme.inter(12, c: InsightTheme.ink3),
-            ),
-          ),
+        // Route limitations ("roads only · not traffic-aware; direct links
+        // excluded") moved into the Map info sheet with the other extended
+        // explanations; the estimate itself stays visible.
       ] else ...[
         Text(
           'Road route unavailable',
@@ -716,4 +735,147 @@ class _MapControl extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// One-tap reference for the map details that used to run inside the
+/// details panel: boundary provenance, unverified-link truthfulness, route
+/// limitations and the GPS precision gates. Presentation only — the
+/// wording mirrors what the panel showed before.
+class _MapInfoSheet extends StatelessWidget {
+  const _MapInfoSheet({required this.showLinks});
+
+  final bool showLinks;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Container(
+          width: double.infinity,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.78,
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+          decoration: BoxDecoration(
+            color: InsightTheme.surface,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(24),
+            ),
+            border: Border.all(color: InsightTheme.line),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: InsightTheme.line,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Map information',
+                      style: InsightTheme.urbanist(16, w: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close map information',
+                    onPressed: () => Navigator.of(context).pop(),
+                    constraints: const BoxConstraints.tightFor(
+                      width: 48,
+                      height: 48,
+                    ),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      size: 20,
+                      color: InsightTheme.ink2,
+                    ),
+                  ),
+                ],
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 4),
+                      _infoSection(Icons.polyline_rounded, 'Rosario boundary', [
+                        '– –  Rosario boundary · MPDO Rosario',
+                        'Dashed line marking the Rosario municipal boundary. Reference only — it does not complete or authorize an inspection step.',
+                      ]),
+                      _infoSection(
+                          Icons.more_horiz_rounded,
+                          'Unverified links',
+                          [
+                            if (showLinks) '··· Unverified links',
+                            'Dotted links are schematic straight lines, not verified roads or walkable access. Small gaps or GPS uncertainty may hide a link; zoom in to inspect short links.',
+                          ],
+                        ),
+                      _infoSection(Icons.route_rounded, 'Road route estimate', [
+                        'Estimates use mapped roads only — not traffic-aware; direct links excluded.',
+                        'Saved geometry is kept offline, but rerouting and street tiles may be missing, and a fresh estimate needs a connection.',
+                      ]),
+                      _infoSection(Icons.my_location_rounded, 'GPS precision', [
+                        'The GPS-to-road link and the ~100 m notice need a fix ≤15 s old with accuracy ≤25 m. Step 2 confirms within 30 m when safely stopped or on foot.',
+                        'Step 2 gives direct compass orientation when safely stopped/on foot. A bearing is not a verified access path.',
+                      ]),
+                      _infoSection(Icons.layers_rounded, 'Map data', [
+                        'Map tiles and street data: © OpenStreetMap contributors.',
+                      ]),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoSection(IconData icon, String title, List<String> lines) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(icon, size: 18, color: InsightTheme.blueInk),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: InsightTheme.inter(13, w: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  for (final line in lines)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text(
+                        line,
+                        style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
 }

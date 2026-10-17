@@ -703,6 +703,10 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
                 // so the verification metrics and the primary action stay
                 // reachable without the compass ever being pushed off-screen.
                 HeaderSplitBody(
+                  // Compact card pinned to the bottom of the stack: the
+                  // compass keeps the remaining height and the confirm
+                  // action stays inside the first screenful.
+                  pinnedSecondary: true,
                   landscapeBackButton: FieldBackButton(
                       tooltip: 'Exit inspection',
                       onPressed: () => handleInspectionExit(
@@ -1237,12 +1241,11 @@ class _AlignmentTip extends StatelessWidget {
   }
 }
 
-/// ── Unified bottom verification card ─────────────────────────────────
+/// ── Compact verification card ────────────────────────────────────────
 ///
-/// Four rows per the approved mockup: target site + live distance/zone,
-/// the Accuracy/Status/Heading metric grid, the tappable coordinates row
-/// (copies to clipboard), and the primary action button. Stays visible in
-/// fullscreen because confirming is the screen's primary action.
+/// Reference-led compact card: site/heading, three live metrics, coordinates
+/// and the confirm action. Only the readouts scroll on short/enlarged layouts;
+/// the existing gated action remains visible, including in fullscreen.
 class _VerificationCard extends StatelessWidget {
   final String distanceText;
   final double? accuracy;
@@ -1282,8 +1285,13 @@ class _VerificationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accentInk = verified ? InsightTheme.blueInk : InsightTheme.amberInk;
-
+    final accentInk = verified ? InsightTheme.greenInk : InsightTheme.amberInk;
+    final validationSource = distanceIsLocal
+        ? 'Offline · Distance to cached site point'
+        : 'Online · Server distance validation';
+    final readingStatus = verified
+        ? 'Ready'
+        : statusText == 'Outside zone' ? 'Too far' : 'Fix needed';
     return Container(
       key: const ValueKey('gps-details'),
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
@@ -1298,58 +1306,116 @@ class _VerificationCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Expanded(child: Semantics(header: true,
-                child: Text('Target site', style: InsightTheme.urbanist(14, w: FontWeight.w700)))),
-              const SizedBox(width: 8),
-              Flexible(child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: verified ? InsightTheme.greenTint : InsightTheme.amberTint,
-                  borderRadius: BorderRadius.circular(10)),
-                child: Text(statusText,
-                  style: InsightTheme.inter(12, w: FontWeight.w600,
-                    c: verified ? InsightTheme.greenInk : accentInk)))),
-            ],
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: verified ? InsightTheme.greenTint : InsightTheme.amberTint,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.my_location_rounded, size: 16, color: accentInk),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Semantics(header: true, child: Text('Target site',
+                              style: InsightTheme.inter(12, w: FontWeight.w700, ls: 0.5))),
+                            Tooltip(
+                              message: location,
+                              child: Text(location, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Semantics(
+                              label: '${heading == null ? 'Heading unavailable' : 'Heading ${heading!.round()} degrees, $headingCardinal'}. '
+                                '${bearingToParcel == null ? 'Target bearing unavailable' : 'Target bearing ${bearingToParcel!.round()} degrees'}',
+                              excludeSemantics: true,
+                              child: Text(heading == null ? '—' : '${heading!.round()}°',
+                                style: InsightTheme.inter(14, w: FontWeight.w700, c: InsightTheme.ink)),
+                            ),
+                            Text(statusText, textAlign: TextAlign.end,
+                              style: InsightTheme.inter(12, w: FontWeight.w600, c: accentInk)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.bg,
+                      borderRadius: InsightTheme.roundedSm,
+                      border: Border.all(color: InsightTheme.line),
+                    ),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(child: _Metric(label: 'Accuracy',
+                            value: accuracy == null ? 'Unavailable' : '± ${accuracy!.round()} m',
+                            valueColor: InsightTheme.ink)),
+                          const VerticalDivider(width: 16, color: InsightTheme.line),
+                          Expanded(child: _Metric(label: 'Status', value: readingStatus, valueColor: accentInk)),
+                          const VerticalDivider(width: 16, color: InsightTheme.line),
+                          Expanded(
+                            child: Tooltip(
+                              message: validationSource,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _Metric(label: 'Distance', value: distanceText, valueColor: InsightTheme.ink),
+                                  if (distanceIsLocal) Text('Offline', style: InsightTheme.inter(12)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _CoordinatesRow(coords: coords),
+                  if (!verified && statusText != 'Outside zone')
+                    Padding(padding: const EdgeInsets.only(top: 4),
+                      child: Text(helperText, style: InsightTheme.inter(12))),
+                  if (trackingStopped)
+                    TextButton(
+                      onPressed: onReconnect,
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      child: const Text('Reconnect GPS'),
+                    ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 8),
-          Text(location, style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 32, runSpacing: 12, children: [
-            _Metric(label: 'Distance to site', value: distanceText, valueColor: accentInk),
-            _Metric(label: 'GPS accuracy', value: accuracy == null ? 'Unavailable' : '± ${accuracy!.round()} m',
-              valueColor: InsightTheme.ink),
-          ]),
-          const SizedBox(height: 8),
-          Text('Required ≤ 30 m', style: InsightTheme.inter(12, c: InsightTheme.ink3)),
+          Text('Required ≤ 30 m', textAlign: TextAlign.center,
+            style: InsightTheme.inter(12, c: InsightTheme.ink3)),
           const SizedBox(height: 4),
-          Wrap(spacing: 16, runSpacing: 6, children: [
-            Semantics(label: heading == null ? 'Heading unavailable' : 'Heading ${heading!.round()} degrees, $headingCardinal',
-              excludeSemantics: true,
-              child: Text(heading == null ? 'Heading unavailable' : '${heading!.round()}°',
-                style: InsightTheme.inter(12, w: FontWeight.w600))),
-            ExcludeSemantics(child: Text(headingCardinal, style: InsightTheme.inter(12))),
-            Semantics(label: bearingToParcel == null ? 'Target bearing unavailable' : 'Target bearing ${bearingToParcel!.round()} degrees',
-              excludeSemantics: true,
-              child: Text(bearingToParcel == null ? 'Target bearing unavailable' : 'Target bearing ${bearingToParcel!.round()}°',
-                style: InsightTheme.inter(12))),
-          ]),
-          const SizedBox(height: 8),
-          Text(distanceIsLocal ? 'Offline · Distance to cached site point' : 'Online · Server distance validation',
-            style: InsightTheme.inter(12, c: InsightTheme.blueInk)),
-          const Divider(height: 16),
-          _CoordinatesRow(coords: coords),
-          const SizedBox(height: 8),
-          FieldPrimaryButton(label: isReworkMode ? 'Save' : 'Confirm GPS', busy: submitting,
-            onPressed: verified && !submitting ? onConfirm : null),
-          if (!verified) Padding(padding: const EdgeInsets.only(top: 8),
-            child: Text(helperText, style: InsightTheme.inter(12))),
-          if (trackingStopped) Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: TextButton(
-              onPressed: onReconnect,
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-              child: const Text('Reconnect GPS'),
-            ),
+          Tooltip(
+            message: verified ? 'Confirm GPS' : helperText,
+            child: FieldPrimaryButton(label: isReworkMode ? 'Save' : 'Confirm GPS', busy: submitting,
+              onPressed: verified && !submitting ? onConfirm : null),
           ),
         ],
       ),
@@ -1358,7 +1424,7 @@ class _VerificationCard extends StatelessWidget {
 
 }
 
-/// Natural-size label and reading; Wrap reflows without shrinking live values.
+/// Compact live reading; text wraps and scales rather than shrinking to fit.
 class _Metric extends StatelessWidget {
   final String label;
   final String value;
@@ -1373,14 +1439,15 @@ class _Metric extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: InsightTheme.inter(12)),
+          Text(label, textAlign: TextAlign.center, style: InsightTheme.inter(12, h: 1.25)),
           const SizedBox(height: 3),
           Text(
               value,
-              style: InsightTheme.inter(22, w: FontWeight.w700, c: valueColor),
+               textAlign: TextAlign.center,
+               style: InsightTheme.inter(14, h: 1.25, w: FontWeight.w700, c: valueColor),
           ),
         ],
     );
@@ -1423,16 +1490,16 @@ class _CoordinatesRowState extends State<_CoordinatesRow> {
     return TextButton(
       onPressed: widget.coords == null ? null : _copy,
       style: TextButton.styleFrom(minimumSize: const Size(48, 48),
-        padding: const EdgeInsets.symmetric(vertical: 6), foregroundColor: InsightTheme.ink2),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        backgroundColor: InsightTheme.bg, foregroundColor: InsightTheme.ink2,
+        shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm)),
       child: Tooltip(message: _copied ? 'Coordinates copied' : 'Copy device coordinates',
         child: Row(
           children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Device coordinates', style: InsightTheme.inter(12)),
-                Text(widget.coords ?? 'Coordinates unavailable', style: InsightTheme.inter(12, c: InsightTheme.blueInk)),
-              ]),
-            ),
+            const Icon(Icons.location_on_outlined, size: 16, color: InsightTheme.ink3),
+            const SizedBox(width: 8),
+            Expanded(child: Text(widget.coords ?? 'Coordinates unavailable',
+              style: InsightTheme.inter(12, w: FontWeight.w600))),
             const SizedBox(width: 8),
             Icon(_copied ? Icons.check_rounded : Icons.copy_rounded, size: 18,
               color: _copied ? InsightTheme.greenInk : InsightTheme.ink3),

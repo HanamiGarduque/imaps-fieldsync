@@ -229,6 +229,7 @@ class HeaderSplitBody extends StatelessWidget {
     this.splitGap = 16,
     this.stackGap = 0,
     this.landscapeBackButton,
+    this.pinnedSecondary = false,
   });
 
   /// Constant header above the body. Omit for a fullscreen/immersive mode.
@@ -237,6 +238,11 @@ class HeaderSplitBody extends StatelessWidget {
   /// Compass surfaces reclaim the header's space in landscape and keep only
   /// this floating back control. Portrait retains the supplied header.
   final Widget? landscapeBackButton;
+
+  /// Keep a self-scrolling secondary card at the bottom of stacked viewports,
+  /// capped at half the body (70% when body height is scarce). The card owns its
+  /// scroll region and pinned action; the primary keeps the remaining space.
+  final bool pinnedSecondary;
 
   /// The primary content: a visual, map, dial or the main form section.
   final Widget primary;
@@ -267,9 +273,29 @@ class HeaderSplitBody extends StatelessWidget {
               Expanded(
                 flex: secondaryFlex,
                 // Independent scroll: long detail must not squeeze the primary.
-                child: SingleChildScrollView(child: secondary!),
+                child: pinnedSecondary
+                    ? secondary!
+                    : SingleChildScrollView(child: secondary!),
               ),
             ],
+          )
+        : pinnedSecondary && hasSecondary
+        ? LayoutBuilder(
+            builder: (context, constraints) => Column(
+              children: [
+                Expanded(child: primary),
+                if (stackGap > 0) SizedBox(height: stackGap),
+                // Short phones need room for the live metrics as well as the
+                // pinned CTA. The primary remains independently scrollable.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight *
+                        (constraints.maxHeight < InsightBreakpoints.shortHeight ? 0.7 : 0.5),
+                  ),
+                  child: secondary,
+                ),
+              ],
+            ),
           )
         : Column(
             children: [
@@ -296,11 +322,19 @@ class HeaderSplitBody extends StatelessWidget {
       );
     }
     if (header == null) return body;
-    return Column(
-      children: [
-        header!,
-        Expanded(child: body),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        children: [
+          if (pinnedSecondary)
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: constraints.maxHeight * 0.4),
+              child: SingleChildScrollView(child: header!),
+            )
+          else
+            header!,
+          Expanded(child: body),
+        ],
+      ),
     );
   }
 }

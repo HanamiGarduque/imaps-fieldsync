@@ -386,7 +386,8 @@ void main() {
     distance = 30.01;
     await mountGps(tester);
     expect(find.text('Outside zone'), findsOneWidget);
-    expect(find.text('Move within 30 m of the site to confirm.'), findsOneWidget);
+    expect(find.text('Required ≤ 30 m'), findsOneWidget);
+    expect(find.byTooltip('Move within 30 m of the site to confirm.'), findsOneWidget);
     expect(confirmEnabled(tester), isFalse);
   });
 
@@ -584,7 +585,8 @@ void main() {
     expect(find.text('0 m'), findsOneWidget);
     expect(find.text('± 5 m'), findsOneWidget);
     expect(find.text('13°50\'33"N   121°10\'35"E'), findsOneWidget);
-    expect(find.text('Offline · Distance to cached site point'), findsOneWidget);
+    expect(find.text('Offline'), findsOneWidget);
+    expect(find.byTooltip('Offline · Distance to cached site point'), findsOneWidget);
     expect(confirmEnabled(tester), isTrue);
 
     // A stale delivery with unrelated coordinates must not replace the
