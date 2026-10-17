@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Brand blue (InsightTheme.blue2) so the native launch window matches
+         the first Flutter frame (Page 1's field). -->
+    <color name="launch_blue">#FF1D4ED8</color>
 </resources>
