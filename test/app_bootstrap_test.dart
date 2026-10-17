@@ -3,10 +3,17 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:imaps_fieldsync/core/services/app_bootstrap.dart';
+import 'package:imaps_fieldsync/core/services/supabase_service.dart';
 
 void main() {
-  setUp(AppBootstrap.resetForTests);
-  tearDown(AppBootstrap.resetForTests);
+  setUp(() {
+    AppBootstrap.resetForTests();
+    SupabaseService.debugClientAvailableOverride = null;
+  });
+  tearDown(() {
+    AppBootstrap.resetForTests();
+    SupabaseService.debugClientAvailableOverride = null;
+  });
 
   test('test runner exposes FLUTTER_TEST as a runtime environment variable', () {
     // The test-only default relies on the runtime environment, which is what
@@ -84,6 +91,57 @@ void main() {
     expect(identical(first, second), isTrue);
     await first;
     expect(runs, 1);
+  });
+
+  test('supabaseInitialized records the Supabase step only, never a substitute',
+      () async {
+    expect(AppBootstrap.supabaseInitialized, isFalse);
+    await AppBootstrap.initialize(steps: [
+      (name: 'something-else', run: () async {}),
+    ]);
+    expect(AppBootstrap.supabaseInitialized, isFalse,
+        reason: 'only the real step name counts');
+  });
+
+  test('supabaseInitialized survives a later-step failure', () async {
+    await AppBootstrap.initialize(steps: [
+      (name: AppBootstrap.supabaseStep, run: () async {}),
+      (name: 'boom', run: () async {
+        throw const SocketException('isolated late failure');
+      }),
+    ]);
+    expect(AppBootstrap.supabaseInitialized, isTrue);
+    expect(AppBootstrap.error, isA<SocketException>());
+  });
+
+  test('supabaseInitialized stays false when the Supabase step itself failed',
+      () async {
+    await AppBootstrap.initialize(steps: [
+      (name: AppBootstrap.supabaseStep, run: () async {
+        throw const SocketException('isolated early failure');
+      }),
+      (name: 'never', run: () async {}),
+    ]);
+    expect(AppBootstrap.supabaseInitialized, isFalse);
+    expect(AppBootstrap.error, isA<SocketException>());
+  });
+
+  test('resetForTests clears the completed-step record', () async {
+    await AppBootstrap.initialize(steps: [
+      (name: AppBootstrap.supabaseStep, run: () async {}),
+    ]);
+    expect(AppBootstrap.supabaseInitialized, isTrue);
+    AppBootstrap.resetForTests();
+    expect(AppBootstrap.supabaseInitialized, isFalse);
+    expect(AppBootstrap.settled, isFalse);
+  });
+
+  test('hasClient is false — never fatal — before any Supabase initialization',
+      () {
+    // This isolate never calls Supabase.initialize: the probe must swallow
+    // the uninitialized-instance assert (debug) / missing-instance failure
+    // (release) and answer false instead of crashing its caller.
+    expect(SupabaseService.hasClient, isFalse);
   });
 
   test('ready completes without initialize under flutter test (isolated default)',

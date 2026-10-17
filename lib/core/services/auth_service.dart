@@ -119,7 +119,13 @@ class AuthService {
   /// touches this — that's the entire point. This is what the Login
   /// screen's biometric button actually checks for, and what
   /// [clearSoftLogout] un-hides.
-  static bool get hasLiveUnderlyingSession => _client.auth.currentUser != null; //[cite: 2]
+  ///
+  /// Never throws: with the Supabase client never stood up (a failed or
+  /// never-reached startup), there demonstrably is no live session — and
+  /// this getter is read directly from build methods, so it must answer
+  /// false instead of crashing the screen.
+  static bool get hasLiveUnderlyingSession =>
+      SupabaseService.hasClient && _client.auth.currentUser != null; //[cite: 2]
 
   /// What the UI should treat as "is someone logged in." False while
   /// soft-logged-out, even though the real session may still be alive

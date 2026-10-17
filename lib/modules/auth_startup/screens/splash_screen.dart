@@ -44,11 +44,21 @@ class _SplashScreenState extends State<SplashScreen> {
   // Reduced motion completes it immediately, restoring the old timing.
   final Completer<void> _entranceDone = Completer<void>();
 
-  /// Releases the bootstrap gate below if bootstrap is still running when the
-  /// app's eight-second startup recovery budget expires. Cancelled as soon as
-  /// the gate resolves (or on dispose): no timer may outlive the wait — the
-  /// layout tests assert no pending timers after teardown.
-  Timer? _bootstrapRecoveryTimer;
+  /// Flips the initialization card to its honest "still starting up" status
+  /// after the app's established eight-second startup budget. That boundary
+  /// is a status threshold only — it never releases the gate. Cancelled as
+  /// soon as the gate resolves (or on dispose): no timer may outlive the
+  /// wait — the layout tests assert no pending timers after teardown.
+  Timer? _bootstrapSlowTimer;
+
+  /// True once the boundary above passed with the chain still running.
+  bool _bootstrapSlow = false;
+
+  /// True when the gate reached its terminal state: initialization failed and
+  /// the auth foundation is unusable, so nothing that depends on the client
+  /// may mount. The card shows recovery guidance; the classified detail stays
+  /// in diagnostics only.
+  bool _startupFailed = false;
 
   @override
   void initState() {
@@ -65,34 +75,30 @@ class _SplashScreenState extends State<SplashScreen> {
     // Never strand a pending navigation when the screen is torn down
     // (route replacement and tests both do this).
     if (!_entranceDone.isCompleted) _entranceDone.complete();
-    _bootstrapRecoveryTimer?.cancel();
+    _bootstrapSlowTimer?.cancel();
     super.dispose();
   }
 
-  /// Upper bound for the bootstrap gate below: the app's established
-  /// eight-second startup recovery budget. If bootstrap is still running
-  /// when it expires, the gate releases and the session check routes on with
-  /// an honest classified failure instead of holding the splash forever.
-  /// The bound only releases the gate — initialization itself is never
-  /// cancelled and keeps running in the background.
-  static const Duration _bootstrapGateBudget = Duration(seconds: 8);
+  /// The app's established eight-second startup budget, kept as a status
+  /// threshold only: when it passes with the chain still running, the
+  /// initialization card says so. It never authorizes navigation — the
+  /// session decision still waits for the actual bootstrap result, however
+  /// long that takes, because no destination may be chosen while the
+  /// services it depends on are still initializing.
+  static const Duration _bootstrapSlowStatusAfter = Duration(seconds: 8);
 
   Future<void> _checkSession() async {
     // Startup gate: no session decision before the moved service bootstrap
-    // has settled, while keeping the existing three-second minimum — both
-    // run in parallel and are bounded by _bootstrapGateBudget.
-    final budgetExpired = Completer<void>();
-    _bootstrapRecoveryTimer =
-        Timer(_bootstrapGateBudget, budgetExpired.complete);
-    await Future.any<void>(<Future<void>>[
-      Future.wait<void>(<Future<void>>[
-        AppBootstrap.ready,
-        Future<void>.delayed(const Duration(seconds: 3)),
-      ]),
-      budgetExpired.future,
+    // has settled, while keeping the existing three-second minimum.
+    _bootstrapSlowTimer = Timer(_bootstrapSlowStatusAfter, () {
+      if (mounted) setState(() => _bootstrapSlow = true);
+    });
+    await Future.wait<void>(<Future<void>>[
+      AppBootstrap.ready,
+      Future<void>.delayed(const Duration(seconds: 3)),
     ]);
-    _bootstrapRecoveryTimer?.cancel();
-    _bootstrapRecoveryTimer = null;
+    _bootstrapSlowTimer?.cancel();
+    _bootstrapSlowTimer = null;
     if (!mounted) return;
 
     final bootstrapError = AppBootstrap.error;
@@ -100,22 +106,14 @@ class _SplashScreenState extends State<SplashScreen> {
       final failure = AuthFailure.classify(bootstrapError,
           fallback: AuthFailure.sessionRestoreFailed);
       debugPrint('[SPLASH] Bootstrap did not complete: ${failure.name}');
-      await _goToLogin(failure);
-      return;
-    }
-    if (AppBootstrap.started && !AppBootstrap.settled) {
-      // A bootstrap step outlived the recovery budget. Route on honestly;
-      // the chain keeps running and the app recovers once services are up.
-      debugPrint('[SPLASH] Bootstrap still running after '
-          '${_bootstrapGateBudget.inSeconds}s; continuing to login.');
-      await _goToLogin(AuthFailure.sessionRestoreFailed);
+      await _goToLoginOrTerminal(failure);
       return;
     }
 
     try {
       // ── STEP 1: Local token check (no network) ────────────────────────
       if (!AuthService.isLoggedIn) {
-        await _goToLogin();
+        await _goToLoginOrTerminal();
         return;
       }
 
@@ -125,7 +123,7 @@ class _SplashScreenState extends State<SplashScreen> {
         restoreSession: true,
       );
       if (profile == null || !mounted) {
-        await _goToLogin(AuthFailure.profileUnavailable);
+        await _goToLoginOrTerminal(AuthFailure.profileUnavailable);
         return;
       }
 
@@ -173,8 +171,31 @@ class _SplashScreenState extends State<SplashScreen> {
       final failure = AuthFailure.classify(e,
           fallback: AuthFailure.sessionRestoreFailed);
       debugPrint('[SPLASH] Session check: ${failure.name}');
-      await _goToLogin(failure);
+      await _goToLoginOrTerminal(failure);
     }
+  }
+
+
+  /// Routes to login only when interactive authentication actually has a
+  /// foundation: the Supabase client must exist — LoginScreen's build reads
+  /// it the moment biometrics are enrolled — and after a FAILED bootstrap
+  /// the step that stands the client's auth up must itself have completed.
+  /// A client that merely exists mid-initialization must not be presented as
+  /// an interactive login. When the foundation is unusable, the splash holds
+  /// a terminal, non-interactive state instead of mounting a screen that
+  /// would crash (debug) or throw LateInitializationError (release).
+  Future<void> _goToLoginOrTerminal([AuthFailure? failure]) async {
+    final clientAvailable = SupabaseService.hasClient;
+    final foundationUsable = clientAvailable &&
+        (AppBootstrap.error == null || AppBootstrap.supabaseInitialized);
+    if (!foundationUsable) {
+      debugPrint('[SPLASH] Interactive login withheld: client available='
+          '$clientAvailable, Supabase step completed='
+          '${AppBootstrap.supabaseInitialized}.');
+      if (mounted) setState(() => _startupFailed = true);
+      return;
+    }
+    await _goToLogin(failure);
   }
 
 
@@ -220,9 +241,19 @@ class _SplashScreenState extends State<SplashScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const ImapsLoadingIndicator(size: 24),
+          if (_startupFailed)
+            const Icon(Icons.error_outline_rounded, size: 24, color: InsightTheme.redInk)
+          else
+            const ImapsLoadingIndicator(size: 24),
           const SizedBox(width: 12),
-          Expanded(child: Text('Initializing field unit…', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk))),
+          Expanded(child: Text(
+            _startupFailed
+                ? 'Unable to initialize FieldSync. Please close and reopen the app.'
+                : _bootstrapSlow
+                    ? 'Still starting up… first launch can take a moment.'
+                    : 'Initializing field unit…',
+            style: InsightTheme.inter(13, w: FontWeight.w600,
+              c: _startupFailed ? InsightTheme.redInk : InsightTheme.blueInk))),
         ]),
         const SizedBox(height: 20),
         Text('Municipal Planning & Zoning Office', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2)),

@@ -107,6 +107,28 @@ class SupabaseService {
 
   static SupabaseClient get client => Supabase.instance.client;
 
+  /// Test hook: pins [hasClient] so the client-unavailable startup shapes stay
+  /// exercisable from `flutter test` (where a fixture Supabase instance may
+  /// already exist in the same process). Never set by app code.
+  @visibleForTesting
+  static bool? debugClientAvailableOverride;
+
+  /// Whether a usable Supabase client exists right now. Never throws: before
+  /// [Supabase.initialize] has run, debug builds trip [Supabase.instance]'s
+  /// assert and release builds hit the unassigned `client` field — both mean
+  /// exactly "no client". Startup gates and build methods read this, so it
+  /// must stay exception-free.
+  static bool get hasClient {
+    final override = debugClientAvailableOverride;
+    if (override != null) return override;
+    try {
+      Supabase.instance.client;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// R4 read: absence/reassignment is not a successful delivery. Transport
   /// failures propagate, unlike the UI's best-effort detail reader.
   static Future<Map<String, dynamic>?> readOutboxRecoveryJob(

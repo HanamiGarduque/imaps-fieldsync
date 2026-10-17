@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:imaps_fieldsync/main.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/screens/splash_screen.dart' show LoginScreen;
@@ -7,6 +9,24 @@ import 'package:imaps_fieldsync/modules/profile_settings/widgets/dashboard_widge
 import 'package:imaps_fieldsync/modules/profile_settings/models/analytics_activity_range.dart';
 
 void main() {
+  setUpAll(() async {
+    // The app's real startup stands a Supabase client up before the session
+    // gate is reached (AppBootstrap's first step). This isolate must model
+    // that foundation: with no client, the corrected gate correctly refuses
+    // to mount an interactive login — a shape production never reaches.
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    await Supabase.initialize(
+      url: 'https://fs03.test',
+      publishableKey: 'fixture-publishable-key',
+      authOptions: const FlutterAuthClientOptions(
+        autoRefreshToken: false,
+        detectSessionInUri: false,
+        localStorage: EmptyLocalStorage(),
+      ),
+    );
+  });
+
   testWidgets('App builds and shows login screen', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
     await tester.pump();

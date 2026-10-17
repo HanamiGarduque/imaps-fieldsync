@@ -47,6 +47,20 @@ class AppBootstrap {
   static Object? _error;
   static StackTrace? _errorStackTrace;
   static bool _settled = false;
+  static final Set<String> _completedSteps = <String>{};
+
+  /// The step that stands the Supabase client up. Interactive authentication
+  /// cannot exist without it.
+  static const String supabaseStep = 'SupabaseService.initialize';
+
+  /// True once the [supabaseStep] completed successfully. Stays false while
+  /// the chain is still running before that step, and forever when the chain
+  /// never reached it — whether it failed or was never started. The startup
+  /// gate requires this (not merely an existing client object) before
+  /// mounting interactive authentication after a failed bootstrap: a client
+  /// that exists mid-initialization is not a finished auth dependency.
+  static bool get supabaseInitialized =>
+      _completedSteps.contains(supabaseStep);
 
   /// Test hook: pins [isTestEnvironment] so the never-started production
   /// branch stays exercisable from `flutter test` (where the environment
@@ -123,7 +137,7 @@ class AppBootstrap {
 
   /// The production chain, in its original order (see class docs).
   static List<BootstrapStep> defaultSteps() => <BootstrapStep>[
-        (name: 'SupabaseService.initialize', run: SupabaseService.initialize),
+        (name: supabaseStep, run: SupabaseService.initialize),
         (name: 'AuthService.loadSoftLogoutState',
             run: AuthService.loadSoftLogoutState),
         (name: 'NotificationService.initialize',
@@ -143,6 +157,7 @@ class AppBootstrap {
         final watch = Stopwatch()..start();
         try {
           await step.run();
+          _completedSteps.add(step.name);
           debugPrint('[AppBootstrap] ${step.name} ok '
               '(${watch.elapsedMilliseconds} ms)');
         } catch (e, stack) {
@@ -170,6 +185,7 @@ class AppBootstrap {
     _error = null;
     _errorStackTrace = null;
     _settled = false;
+    _completedSteps.clear();
     debugTestEnvironmentOverride = null;
   }
 }
