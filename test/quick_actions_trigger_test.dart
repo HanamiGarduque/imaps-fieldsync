@@ -5,16 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:imaps_fieldsync/core/theme/insight_theme.dart';
+import 'package:imaps_fieldsync/core/widgets/fieldsync_brand.dart';
 import 'package:imaps_fieldsync/core/widgets/insight_bottom_nav.dart';
 import 'package:imaps_fieldsync/core/widgets/quick_actions_sheet.dart';
 
-/// The redesigned Quick Actions trigger — a miniature of the nav rail:
-/// a solid-white 64px pill with a 40px blue gradient core (the same fill
-/// as the ACTIVE tab) and a white bolt; while the sheet is open the core
-/// fills the whole button and the glyph becomes a close mark.
+/// Quick Actions uses a large, bare FieldSync fingerprint with an invisible
+/// 64px tap target. Opening the sheet swaps the mark for a close glyph.
 ///
 /// Functionality is exercised end to end through the real sheet and
 /// overlay wiring: same open/close contract as before, every dismissal
@@ -167,11 +167,12 @@ Rect _triggerRect(WidgetTester tester) => tester.getRect(
       ),
     );
 
-/// The trigger's own glyphs — the sheet has its own close icon, so icon
-/// assertions are scoped to the trigger.
-Finder _boltInTrigger() => find.descendant(
+/// The trigger's own glyphs — the sheet has its own close icon, so mark
+/// assertions are scoped to the trigger. The idle mark is the kit's navy
+/// fingerprint symbol (FieldSyncBrand), not a Material icon.
+Finder _markInTrigger() => find.descendant(
       of: find.bySemanticsLabel('Quick actions'),
-      matching: find.byIcon(Icons.bolt_rounded),
+      matching: find.byType(FieldSyncBrand),
     );
 
 Finder _closeInTrigger() => find.descendant(
@@ -282,6 +283,9 @@ void main() {
       if (asset == 'AssetManifest.bin') {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
+      if (asset.startsWith('assets/branding/')) {
+        return ByteData.sublistView(File(asset).readAsBytesSync());
+      }
       if (!asset.endsWith('.ttf')) return null;
       return bytes;
     });
@@ -342,13 +346,45 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('shows the bolt mark, not the old circular chevron',
+    testWidgets('idle trigger is a large bare FieldSync symbol with a full tap target',
         (tester) async {
       await _pumpShell(tester, const Size(390, 844));
-      expect(_boltInTrigger(), findsOneWidget);
+      final mark = _markInTrigger();
+      expect(mark, findsOneWidget);
+      final picture = tester.widget<SvgPicture>(find.descendant(
+        of: mark,
+        matching: find.byType(SvgPicture),
+      ));
+      expect((picture.bytesLoader as SvgAssetLoader).assetName,
+          'assets/branding/fieldsync-symbol.svg');
+      expect(picture.colorFilter, isNull);
+      expect(picture.excludeFromSemantics, isTrue);
+      final markRect = tester.getRect(mark);
+      final triggerRect = _triggerRect(tester);
+      expect(markRect.size, const Size(48, 48));
+      expect(triggerRect.size, const Size(64, 64));
+      expect(markRect.center, triggerRect.center);
+      expect(markRect.left - triggerRect.left, 8);
+      expect(markRect.top - triggerRect.top, 8);
+      expect(find.descendant(
+        of: find.bySemanticsLabel('Quick actions'),
+        matching: find.byType(DecoratedBox),
+      ), findsNothing, reason: 'No blue tile, white circle, border or shadow.');
+      expect(find.byIcon(Icons.bolt_rounded), findsNothing);
       expect(find.byIcon(Icons.keyboard_arrow_up_rounded), findsNothing,
           reason: 'the redesigned trigger replaces the circular arrow button');
       expect(find.bySemanticsLabel('Quick actions'), findsOneWidget);
+      expect(tester.getSemantics(find.bySemanticsLabel('Quick actions')),
+          matchesSemantics(
+            label: 'Quick actions',
+            isButton: true,
+            hasTapAction: true,
+          ));
+      expect(tester.takeException(), isNull);
+      await tester.tapAt(triggerRect.topLeft + const Offset(2, 2));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('quick_actions_open')), findsOneWidget,
+          reason: 'The invisible margin must remain tappable.');
     });
   });
 
@@ -373,16 +409,21 @@ void main() {
       expect(fired, ['Compass']);
     });
 
-    testWidgets('the open state swaps the bolt for a close mark',
+    testWidgets('the open state swaps the brand mark for a close mark',
         (tester) async {
       await _pumpShell(tester, const Size(390, 844));
       await _openViaTrigger(tester);
       expect(_closeInTrigger(), findsOneWidget);
-      expect(_boltInTrigger(), findsNothing);
+      expect(tester.widget<Icon>(_closeInTrigger()).color, InsightTheme.blue2);
+      expect(find.descendant(
+        of: find.bySemanticsLabel('Quick actions'),
+        matching: find.byType(DecoratedBox),
+      ), findsNothing);
+      expect(_markInTrigger(), findsNothing);
 
       await tester.tap(find.byTooltip('Close quick actions'));
       await tester.pumpAndSettle();
-      expect(_boltInTrigger(), findsOneWidget);
+      expect(_markInTrigger(), findsOneWidget);
       expect(_closeInTrigger(), findsNothing);
     });
 
@@ -395,7 +436,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('quick_actions_open')), findsNothing);
-      expect(_boltInTrigger(), findsOneWidget);
+      expect(_markInTrigger(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -407,7 +448,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('quick_actions_open')), findsNothing);
-      expect(_boltInTrigger(), findsOneWidget);
+      expect(_markInTrigger(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -420,7 +461,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('quick_actions_open')), findsNothing);
-      expect(_boltInTrigger(), findsOneWidget);
+      expect(_markInTrigger(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -433,7 +474,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('quick_actions_open')), findsNothing);
-      expect(_boltInTrigger(), findsOneWidget);
+      expect(_markInTrigger(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -451,8 +492,8 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('quick_actions_open')), findsNothing,
             reason: 'cycle $cycle closed');
-        expect(_boltInTrigger(), findsOneWidget,
-            reason: 'cycle $cycle back to the bolt');
+        expect(_markInTrigger(), findsOneWidget,
+            reason: 'cycle $cycle back to the brand mark');
         expect(tester.takeException(), isNull, reason: 'cycle $cycle');
       }
     });
@@ -466,7 +507,7 @@ void main() {
       await tester.tap(find.byTooltip('Close quick actions'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('quick_actions_open')), findsNothing);
-      expect(_boltInTrigger(), findsOneWidget);
+      expect(_markInTrigger(), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/services/auth_service.dart';
 import '../services/biometric_service.dart';
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/widgets/fieldsync_brand.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/layout/responsive_layout.dart';
 import 'splash_screen.dart' show LoginScreen;
@@ -103,7 +104,7 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
       padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Image.asset('assets/icon/app_icon.png', width: 44, height: 44, excludeFromSemantics: true),
+          const FieldSyncBrand(variant: FieldSyncBrandVariant.white, height: 44),
           Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text('iMAPS', style: InsightTheme.inter(12, c: Colors.white)),
             Text('FieldSync', style: InsightTheme.urbanist(20, w: FontWeight.w800, c: Colors.white)),

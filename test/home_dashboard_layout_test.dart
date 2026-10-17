@@ -96,6 +96,9 @@ void main() {
       if (asset == 'AssetManifest.bin') {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
+      if (asset.startsWith('assets/branding/')) {
+        return ByteData.sublistView(File(asset).readAsBytesSync());
+      }
       if (!asset.endsWith('.ttf')) return null;
       if (asset.startsWith('Inter-')) await fontGate?.future;
       final realFonts = Platform.environment['IMAPS_LAYOUT_FONT_DIR'];

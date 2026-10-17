@@ -73,6 +73,7 @@ dependencies:
   sqflite_sqlcipher: ^3.4.0
 
   path: any
+  flutter_svg: ^2.3.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -93,6 +94,7 @@ flutter:
   assets:
     - .env
     - assets/icon/
+    - assets/branding/
     - assets/maps/
 
 flutter_launcher_icons:
@@ -101,7 +103,7 @@ flutter_launcher_icons:
   image_path: "assets/icon/app_icon.png"
   min_sdk_android: 21
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  adaptive_icon_foreground: "assets/branding/android-adaptive-foreground-1024.png"
 
 dependency_overrides:
   path_provider_foundation: 2.4.2

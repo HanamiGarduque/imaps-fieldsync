@@ -15,6 +15,7 @@ import '../services/secure_prefs_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../services/local_data_guard_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
+import '../../../core/widgets/fieldsync_brand.dart';
 import '../../../core/widgets/app_feedback.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import 'app_resume_lock_screen.dart';
@@ -124,9 +125,10 @@ class _SplashScreenState extends State<SplashScreen> {
       key: const ValueKey('splash-brand'),
       padding: const EdgeInsets.all(32),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ClipRRect(borderRadius: InsightTheme.roundedMd,
-          child: Image.asset('assets/icon/app_icon.png', width: 80, height: 80,
-            excludeFromSemantics: true, fit: BoxFit.contain)),
+        const FieldSyncBrand(
+          variant: FieldSyncBrandVariant.white,
+          height: 80,
+        ),
         const SizedBox(height: 24),
         Text('iMAPS', style: InsightTheme.inter(16, w: FontWeight.w600, c: Colors.white)),
         Semantics(label: 'FieldSync', header: true, excludeSemantics: true,
@@ -797,12 +799,7 @@ class _LoginScreenState extends State<LoginScreen> {
           spacing: 12,
           runSpacing: 8,
           children: [
-            ClipRRect(
-              borderRadius: InsightTheme.roundedMd,
-              child: Image.asset('assets/icon/app_icon.png',
-                width: 56, height: 56, excludeFromSemantics: true,
-                fit: BoxFit.contain, filterQuality: FilterQuality.high),
-            ),
+            const FieldSyncBrand(height: 56),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,

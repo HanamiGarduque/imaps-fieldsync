@@ -97,7 +97,8 @@ void main() {
       if (asset == 'AssetManifest.bin') {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
-      if (asset == 'assets/icon/app_icon.png') {
+      if (asset == 'assets/icon/app_icon.png' ||
+          asset == 'assets/branding/fieldsync-logo.svg') {
         return ByteData.sublistView(File(asset).readAsBytesSync());
       }
       if (!asset.endsWith('.ttf')) return null;

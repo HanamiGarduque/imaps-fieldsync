@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:imaps_fieldsync/core/widgets/fieldsync_brand.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/about_insight_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/help_faq_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/terms_privacy_screen.dart';
@@ -38,8 +39,8 @@ void main() {
         ];
       }
     }
-    final icon = ByteData.sublistView(
-      File('assets/icon/app_icon.png').readAsBytesSync(),
+    final brand = ByteData.sublistView(
+      File('assets/branding/fieldsync-logo.svg').readAsBytesSync(),
     );
     binding.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (
       message,
@@ -48,7 +49,7 @@ void main() {
       if (asset == 'AssetManifest.bin') {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
-      if (asset == 'assets/icon/app_icon.png') return icon;
+      if (asset == 'assets/branding/fieldsync-logo.svg') return brand;
       if (!asset.endsWith('.ttf')) return null;
       final folder = Platform.environment['IMAPS_LAYOUT_FONT_DIR'];
       return folder == null ? font : ByteData.sublistView(
@@ -152,11 +153,11 @@ void main() {
               await tester.pumpAndSettle();
               expect(lastSection.hitTestable(), findsOneWidget);
             } else {
-              final appIcon = find.byType(Image);
+              final appIcon = find.byType(FieldSyncBrand);
               expect(appIcon, findsOneWidget);
               expect(
-                tester.widget<Image>(appIcon).image,
-                const AssetImage('assets/icon/app_icon.png'),
+                tester.widget<FieldSyncBrand>(appIcon).variant,
+                FieldSyncBrandVariant.navy,
               );
               expect(appIcon.hitTestable(), findsOneWidget);
               expect(find.text('iMAPS:FieldSync'), findsOneWidget);
