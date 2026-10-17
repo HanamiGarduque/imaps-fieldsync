@@ -94,6 +94,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  fixture.widgetTest('double-tap final submit queues exactly one durable intent', (tester) async {
+    await tester.runAsync(seedDraft);
+    await fixture.mount(tester, ReviewSubmitScreen(task: offlineTask));
+    final submit = find.text('Submit Inspection');
+    // Two taps before any frame: the tree still shows an enabled button, so
+    // the in-flight guard itself must refuse the second press — no second
+    // enqueue, no second navigation, no error state.
+    await tester.tap(submit);
+    await tester.tap(submit);
+    await fixture.flush(tester);
+    await tester.pump(const Duration(milliseconds: 400)); await fixture.flush(tester);
+    expect(find.byType(SubmissionSuccessScreen), findsOneWidget);
+    expect(find.text('Saved Offline'), findsOneWidget);
+    final queued = (await tester.runAsync(() => DBHelper.getActionableActions()))!;
+    expect(queued, hasLength(1));
+    expect(queued.single['type'], 'submit_inspection');
+    expect((await tester.runAsync(() => DBHelper.getCachedJobs()))!
+        .firstWhere((r) => r['id'] == offlineJob)['status'], 'in_progress');
+  });
+
   for (final rejection in ['ABORT', 'IGNORE']) {
   fixture.widgetTest('SQLite enqueue $rejection keeps Review, draft, photo file and retry usable', (tester) async {
     final photo = await tester.runAsync(seedDraft);

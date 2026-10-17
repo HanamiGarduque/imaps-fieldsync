@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -192,11 +193,13 @@ void main() {
     };
     addTearDown(() async {
       if (!upload.isCompleted) upload.complete({'status': 'completed', 'current_step': 6});
-      await tester.runAsync(() async {
-        for (var frame = 0; frame < 100 && SyncOutboxService.isDraining; frame++) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-        }
-      });
+      // The drain continuation lives in this test's fake zone: it only
+      // resumes when the zone's microtasks are flushed, so alternate fake
+      // and real advances until the service reports itself settled.
+      for (var frame = 0; frame < 100 && SyncOutboxService.isDraining; frame++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+      }
       SyncOutboxService.recoveryReadForTesting = null;
     });
     await tester.runAsync(() async {
@@ -228,6 +231,73 @@ void main() {
         reason: 'Only the claimed action uploads; the next update remains queued.');
     expect(find.text('Uploading...'), findsOneWidget);
     expect(find.byIcon(Icons.schedule_rounded), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a queued final submission is presented as waiting, never accepted', (tester) async {
+    await tester.runAsync(() async {
+      await db.insert('pending_actions', {
+        'id': 'submit-queued', 'inspector_id': 'sync-inspector', 'job_id': 'job-1',
+        'type': 'submit_inspection', 'status': 'pending',
+        'payload': jsonEncode({
+          'findings': 'Fixture findings',
+          'photosData': [
+            {'photoPath': 'C:/isolated/fixture-photo.png'},
+          ],
+        }),
+        'created_at': '2026-10-08T00:00:00Z', 'updated_at': '2026-10-08T00:00:00Z',
+      });
+    });
+    await openScreen(tester, const Size(360, 800), 1);
+    // The screen refresh is async: wait until this case's queue renders
+    // before asserting so the labels below are the settled ones.
+    for (var frame = 0; frame < 60 && find.text('Sync 1 Queued').evaluate().isEmpty; frame++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    // The queue counts it and offers one job-scoped sync action.
+    final action = find.ancestor(of: find.text('Sync 1 Queued'), matching: find.byType(FilledButton));
+    expect(action, findsOneWidget);
+    expect(tester.widget<FilledButton>(action).onPressed, isNotNull);
+    expect(find.text('All Synced'), findsNothing);
+    expect(find.text('Completed Audit Log'), findsNothing);
+    final bodyScroll = find.descendant(of: find.byKey(const ValueKey('sync_body')), matching: find.byType(Scrollable));
+    await tester.scrollUntilVisible(find.text('Full Submission — 1 photo(s) + Findings'), 250,
+        scrollable: bodyScroll, maxScrolls: 30);
+    await tester.pump(const Duration(milliseconds: 400));
+    // Waiting for connection — never an upload spinner or a synced claim.
+    expect(find.text('Queued'), findsOneWidget);
+    expect(find.text('Waiting for connection'), findsOneWidget);
+    expect(find.text('Final submission'), findsOneWidget);
+    expect(find.text('Sync Inspection (1)'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a failed final submission reports truthful failure without acceptance', (tester) async {
+    await tester.runAsync(() async {
+      await db.insert('pending_actions', {
+        'id': 'submit-failed', 'inspector_id': 'sync-inspector', 'job_id': 'job-1',
+        'type': 'submit_inspection', 'status': 'failed', 'retry_count': 2,
+        'payload': jsonEncode({
+          'findings': 'Fixture findings',
+          'photosData': [],
+        }),
+        'last_error': 'Isolated transport failure',
+        'created_at': '2026-10-08T00:00:00Z', 'updated_at': '2026-10-08T00:00:00Z',
+      });
+    });
+    await openScreen(tester, const Size(360, 800), 1);
+    expect(find.text('All Synced'), findsNothing);
+    final bodyScroll = find.descendant(of: find.byKey(const ValueKey('sync_body')), matching: find.byType(Scrollable));
+    await tester.scrollUntilVisible(find.text('Sync failed — will retry'), 250,
+        scrollable: bodyScroll, maxScrolls: 30);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Sync failed — will retry'), findsOneWidget);
+    expect(find.byIcon(Icons.error_rounded), findsWidgets);
+    expect(find.text('Full Submission — 0 photo(s) + Findings'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
