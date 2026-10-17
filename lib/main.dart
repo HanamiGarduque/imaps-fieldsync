@@ -1,13 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'core/services/app_info_service.dart';
-import 'core/services/supabase_service.dart';
-import 'core/services/auth_service.dart';
-import './modules/profile_settings/services/notification_service.dart';
-import 'core/services/sync_outbox_service.dart';
-import 'modules/auth_startup/services/secure_prefs_service.dart';
+import 'core/services/app_bootstrap.dart';
 import './modules/inspection/providers/inspection_provider.dart';
 import 'modules/auth_startup/screens/splash_screen.dart';
 import 'modules/auth_startup/widgets/debug_screenshot_toggle.dart';
@@ -26,17 +23,14 @@ Future<void> main() async {
 
   await dotenv.load(fileName: ".env");
   await AppInfoService.initialize();
-  await SupabaseService.initialize();
-  await AuthService.loadSoftLogoutState();
-  await NotificationService.initialize();
 
-  // One-time cleanup: purges any pattern-lock data left over from before
-  // the App Pattern feature was removed (see AUTH_SECURITY_MASTER_DOC.md,
-  // Phase 3a). Idempotent, cheap no-op on any device that never had a
-  // pattern set up.
-  await SecurePrefsService.purgeLegacyPatternLockData();
-
-  SyncOutboxService.start();
+  // Everything below this point used to run awaited, before runApp() — a
+  // measured contributor to the ~5-second native launch window. It now runs
+  // in the same order inside AppBootstrap, concurrently with the launch
+  // cinematic's first frames. Consumers gate on AppBootstrap.ready (see
+  // SplashScreen._checkSession), so no service can be observed before it is
+  // ready.
+  unawaited(AppBootstrap.initialize());
 
   runApp(
     ChangeNotifierProvider(

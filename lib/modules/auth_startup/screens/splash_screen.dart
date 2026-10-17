@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart';
 
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/auth_failure.dart';
+import '../../../core/services/app_bootstrap.dart';
 import '../../profile_settings/services/notification_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
@@ -43,6 +44,12 @@ class _SplashScreenState extends State<SplashScreen> {
   // Reduced motion completes it immediately, restoring the old timing.
   final Completer<void> _entranceDone = Completer<void>();
 
+  /// Releases the bootstrap gate below if bootstrap is still running when the
+  /// app's eight-second startup recovery budget expires. Cancelled as soon as
+  /// the gate resolves (or on dispose): no timer may outlive the wait — the
+  /// layout tests assert no pending timers after teardown.
+  Timer? _bootstrapRecoveryTimer;
+
   @override
   void initState() {
     super.initState();
@@ -58,12 +65,52 @@ class _SplashScreenState extends State<SplashScreen> {
     // Never strand a pending navigation when the screen is torn down
     // (route replacement and tests both do this).
     if (!_entranceDone.isCompleted) _entranceDone.complete();
+    _bootstrapRecoveryTimer?.cancel();
     super.dispose();
   }
 
+  /// Upper bound for the bootstrap gate below: the app's established
+  /// eight-second startup recovery budget. If bootstrap is still running
+  /// when it expires, the gate releases and the session check routes on with
+  /// an honest classified failure instead of holding the splash forever.
+  /// The bound only releases the gate — initialization itself is never
+  /// cancelled and keeps running in the background.
+  static const Duration _bootstrapGateBudget = Duration(seconds: 8);
+
   Future<void> _checkSession() async {
-    await Future.delayed(const Duration(seconds: 3));
+    // Startup gate: no session decision before the moved service bootstrap
+    // has settled, while keeping the existing three-second minimum — both
+    // run in parallel and are bounded by _bootstrapGateBudget.
+    final budgetExpired = Completer<void>();
+    _bootstrapRecoveryTimer =
+        Timer(_bootstrapGateBudget, budgetExpired.complete);
+    await Future.any<void>(<Future<void>>[
+      Future.wait<void>(<Future<void>>[
+        AppBootstrap.ready,
+        Future<void>.delayed(const Duration(seconds: 3)),
+      ]),
+      budgetExpired.future,
+    ]);
+    _bootstrapRecoveryTimer?.cancel();
+    _bootstrapRecoveryTimer = null;
     if (!mounted) return;
+
+    final bootstrapError = AppBootstrap.error;
+    if (bootstrapError != null) {
+      final failure = AuthFailure.classify(bootstrapError,
+          fallback: AuthFailure.sessionRestoreFailed);
+      debugPrint('[SPLASH] Bootstrap did not complete: ${failure.name}');
+      await _goToLogin(failure);
+      return;
+    }
+    if (AppBootstrap.started && !AppBootstrap.settled) {
+      // A bootstrap step outlived the recovery budget. Route on honestly;
+      // the chain keeps running and the app recovers once services are up.
+      debugPrint('[SPLASH] Bootstrap still running after '
+          '${_bootstrapGateBudget.inSeconds}s; continuing to login.');
+      await _goToLogin(AuthFailure.sessionRestoreFailed);
+      return;
+    }
 
     try {
       // ── STEP 1: Local token check (no network) ────────────────────────
