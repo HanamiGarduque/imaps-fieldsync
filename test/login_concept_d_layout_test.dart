@@ -188,11 +188,9 @@ void main() {
       home: screen,
     ));
     await tester.pump(const Duration(milliseconds: 300));
-    if (find.byType(Image).evaluate().isNotEmpty) {
-      await tester.runAsync(() => precacheImage(
-        const AssetImage('assets/icon/app_icon.png'), tester.element(find.byType(Image).first),
-      ));
-    }
+    // The brand mark is an SVG (FieldSyncBrand) now. flutter_svg encodes
+    // synchronously in debug/test builds, so the pumps below render it; the
+    // old PNG precache went away with the app_icon.png branding images.
     await tester.pump(const Duration(milliseconds: 200));
     expect(tester.takeException(), isNull);
   }
@@ -220,9 +218,7 @@ void main() {
       home: const LoginScreen(),
     ));
     await tester.pumpAndSettle();
-    await tester.runAsync(() => precacheImage(
-      const AssetImage('assets/icon/app_icon.png'), tester.element(find.byType(Image)),
-    ));
+    // Brand mark is SVG (FieldSyncBrand) and paints during settle.
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   }

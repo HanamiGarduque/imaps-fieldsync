@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/widgets/field_form_widgets.dart';
+import '../../../core/widgets/fieldsync_brand.dart';
 import '../../../core/services/app_info_service.dart';
 
 class AboutInsightScreen extends StatelessWidget {
@@ -30,12 +31,7 @@ class AboutInsightScreen extends StatelessWidget {
                     children: [
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: Image.asset(
-                          'assets/icon/app_icon.png',
-                          width: 64,
-                          height: 64,
-                          excludeFromSemantics: true,
-                        ),
+                        child: const FieldSyncBrand(height: 64),
                       ),
                       const SizedBox(height: 12),
                       Semantics(

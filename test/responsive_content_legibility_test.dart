@@ -58,6 +58,9 @@ void main() {
       if (asset == 'AssetManifest.bin') {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
+      if (asset.startsWith('assets/branding/')) {
+        return ByteData.sublistView(File(asset).readAsBytesSync());
+      }
       if (!asset.endsWith('.ttf')) return null;
       final folder = Platform.environment['IMAPS_LAYOUT_FONT_DIR'];
       return folder == null
