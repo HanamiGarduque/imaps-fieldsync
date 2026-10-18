@@ -170,6 +170,9 @@ class _FieldSyncEntranceAnimationState extends State<FieldSyncEntranceAnimation>
           child: CustomPaint(
             isComplex: true,
             painter: FieldSyncEntrancePainter(
+              // The shared cinematic uses this box as an artwork anchor, not
+              // a crop. Foreground text/cards still paint above the artwork.
+              clipToBounds: widget.driver == null,
               // Reduced motion shows the finished artwork whatever the host
               // clock says; undriven the controller already sits at 1.0.
               animation: _reducedMotion && widget.driver != null
@@ -364,10 +367,11 @@ class FieldSyncEntranceCamera {
 /// Paints the approved entrance artwork for any position of [animation]; the
 /// camera math behind it is public via [cameraAt].
 class FieldSyncEntrancePainter extends CustomPainter {
-  FieldSyncEntrancePainter({required this.animation})
+  FieldSyncEntrancePainter({required this.animation, this.clipToBounds = true})
     : super(repaint: animation);
 
   final Animation<double> animation;
+  final bool clipToBounds;
 
   // Kit navy (`#102D50`) for the traveller puck's centre, mirroring the
   // reference where the puck's dot is darker than its disc.
@@ -638,7 +642,7 @@ class FieldSyncEntrancePainter extends CustomPainter {
     );
 
     canvas.save();
-    canvas.clipRect(Offset.zero & size);
+    if (clipToBounds) canvas.clipRect(Offset.zero & size);
     canvas.translate(screenAnchor.dx, screenAnchor.dy);
     canvas.scale(q * camera.zoom);
     canvas.translate(-camera.centre.dx, -camera.centre.dy);
@@ -847,5 +851,5 @@ class FieldSyncEntrancePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant FieldSyncEntrancePainter oldDelegate) =>
-      oldDelegate.animation != animation;
+      oldDelegate.animation != animation || oldDelegate.clipToBounds != clipToBounds;
 }

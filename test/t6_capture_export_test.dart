@@ -11,6 +11,9 @@ import 'package:imaps_fieldsync/core/layout/responsive_layout.dart';
 import 'package:imaps_fieldsync/core/services/app_bootstrap.dart';
 import 'package:imaps_fieldsync/core/services/auth_service.dart';
 import 'package:imaps_fieldsync/core/widgets/fieldsync_cinematic_intro.dart';
+import 'package:imaps_fieldsync/core/widgets/sensitive_screen.dart';
+import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_observer.dart';
+import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_service.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/screens/app_resume_lock_screen.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/screens/splash_screen.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/biometric_service.dart';
@@ -29,6 +32,8 @@ void main() {
     return;
   }
   final fixture = OfflineReliabilityFixture();
+  final playbackScale = FieldSyncCinematicTimeline.playbackDuration.inMicroseconds /
+      (FieldSyncCinematicTimeline.totalSeconds * 1e6);
   setUpAll(fixture.initialize);
   setUp(() async {
     AppBootstrap.resetForTests();
@@ -68,7 +73,7 @@ void main() {
           if (call.method == 'getAvailableBiometrics') return ['fingerprint'];
           if (call.method == 'authenticate') {
             authCalls++;
-            firstAuthenticationTime ??= clockValue();
+            firstAuthenticationTime ??= clockValue() * playbackScale;
             return authentication.future;
           }
           return true;
@@ -98,9 +103,13 @@ void main() {
           key: fixture.captureKey,
           child: ChangeNotifierProvider.value(
             value: fixture.provider,
-            child: const MaterialApp(
+            child: MaterialApp(
               debugShowCheckedModeBanner: false,
-              home: SplashScreen(),
+              navigatorObservers: [
+                ScreenProtectionObserver(ScreenProtectionService.instance),
+              ],
+              builder: (_, child) => ScreenProtectionHost(child: child!),
+              home: const SplashScreen(),
             ),
           ),
         ),
@@ -203,8 +212,21 @@ void main() {
               () => ('search-playback', 'Page 1 - continuous 30 fps sequence'));
         }
       }
+      // The review must play at real speed, not speed the 23-second film back
+      // up to its authored time. Export both phone journeys at 30 real fps.
+      if (viewport.width == 390) {
+        final frames = (FieldSyncCinematicTimeline.playbackDuration.inMicroseconds /
+            1e6 * 30).round();
+        for (var frame = 0; frame <= frames; frame++) {
+          shots.putIfAbsent((frame * 1e6 / (30 * playbackScale)).round(),
+              () => ('playback', 'Continuous real-time 30 fps review'));
+        }
+      }
       if (viewport.width > 390) {
         const wideSamples = {
+          6100000,
+          6200000,
+          7300000,
           9600000,
           10680000,
           10983333,
@@ -224,14 +246,15 @@ void main() {
             (time < 10200000 || time > 11300000));
       }
       final manifest = StringBuffer(
-        'file\tseconds\tgroup\tscene\tauthentication_calls\thead_x\thead_y\tdistance\n',
+        'file\tseconds\tgroup\tscene\tauthentication_calls\thead_x\thead_y\tdistance\tauthored_seconds\n',
       );
       final requested = shots.keys.toList()..sort();
       var elapsed = 0;
       FieldSyncJourneyPath? graph;
       for (final micros in requested) {
-        await tester.pump(Duration(microseconds: micros - elapsed));
-        elapsed = micros;
+        final wallMicros = (micros * playbackScale).round();
+        await tester.pump(Duration(microseconds: wallMicros - elapsed));
+        elapsed = wallMicros;
         await fixture.flush(tester);
         final actual = clockValue();
         expect(actual, closeTo(micros / 1e6, 0.000002));
@@ -244,7 +267,8 @@ void main() {
             tester.getSize(find.byType(FieldSyncLoginRouteOverlay)),
           );
         }
-        final stamp = actual.toStringAsFixed(6).padLeft(9, '0');
+        final seconds = wallMicros / 1e6;
+        final stamp = seconds.toStringAsFixed(6).padLeft(9, '0');
         final (group, scene) = shots[micros]!;
         final file = '$stamp-$group.png';
         await tester.runAsync(() async {
@@ -260,8 +284,8 @@ void main() {
         });
         final head = graph?.headAt(actual);
         manifest.writeln(
-          '$file\t${actual.toStringAsFixed(6)}\t$group\t$scene\t$authCalls\t'
-          '${head?.dx ?? ''}\t${head == null ? '' : head.dy + 24}\t${graph?.distanceAt(actual) ?? ''}',
+          '$file\t${seconds.toStringAsFixed(6)}\t$group\t$scene\t$authCalls\t'
+          '${head?.dx ?? ''}\t${head == null ? '' : head.dy + 24}\t${graph?.distanceAt(actual) ?? ''}\t$actual',
         );
       }
       File('${root.path}/manifest.tsv').writeAsStringSync(manifest.toString());
@@ -309,6 +333,8 @@ void main() {
           'viewport_pixels': [viewport.width, viewport.height],
           'canvas_pixels': [journey.viewport.width, journey.viewport.height],
           'frame_count': requested.length,
+          'playback_seconds': FieldSyncCinematicTimeline.playbackDuration.inMicroseconds / 1e6,
+          'authored_timeline_seconds': FieldSyncCinematicTimeline.totalSeconds,
           'route_contours': journey.path.computeMetrics().length,
           'exit_screen_xy': point(
             journey.metric.getTangentForOffset(journey.exitDistance)!.position,
@@ -318,13 +344,13 @@ void main() {
                 .getTangentForOffset(journey.returnDistance)!
                 .position,
           ),
-          'exit_time_seconds': exitTime,
-          'return_time_seconds': returnTime,
-          'head_center_offscreen_seconds': returnTime - exitTime,
+          'exit_time_seconds': exitTime * playbackScale,
+          'return_time_seconds': returnTime * playbackScale,
+          'head_center_offscreen_seconds': (returnTime - exitTime) * playbackScale,
           'velocity_before_turn_pixels_per_second':
-              (journey.distanceAt(11) - journey.distanceAt(10.999)) / 0.001,
+              (journey.distanceAt(11) - journey.distanceAt(10.999)) / (0.001 * playbackScale),
           'velocity_after_turn_pixels_per_second':
-              (journey.distanceAt(11.001) - journey.distanceAt(11)) / 0.001,
+              (journey.distanceAt(11.001) - journey.distanceAt(11)) / (0.001 * playbackScale),
           'paint_recording_microseconds': paintCosts,
           'paint_cost_excludes_raster_gpu_and_device_pacing': true,
           'authentication_calls': authCalls,
@@ -333,7 +359,10 @@ void main() {
         }),
       );
       expect(authCalls, lock ? 1 : 0);
-      if (lock) expect(firstAuthenticationTime, greaterThanOrEqualTo(13.35));
+      if (lock) {
+        expect(firstAuthenticationTime, greaterThanOrEqualTo(
+            FieldSyncCinematicTimeline.playbackDuration.inMicroseconds / 1e6));
+      }
       expect(
         find.byType(lock ? AppResumeLockScreen : LoginScreen),
         findsOneWidget,

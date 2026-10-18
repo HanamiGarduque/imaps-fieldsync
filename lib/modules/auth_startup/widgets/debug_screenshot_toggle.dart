@@ -1,21 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter/semantics.dart';
 
 import '../../../core/widgets/sensitive_screen.dart';
+import '../../../core/theme/insight_theme.dart';
 import '../services/screen_protection_service.dart';
 
-/// Debug-only, scoped and bounded documentation permission. No capture-event
-/// listener is used: this plugin does not provide Android screenshot detection.
+/// Manual debug-only setting, shown only in Security & Protection.
 class DebugScreenshotToggle extends StatefulWidget {
-  const DebugScreenshotToggle({
-    super.key,
-    required this.child,
-    this.navigatorKey,
-  });
-  final Widget child;
-  final GlobalKey<NavigatorState>? navigatorKey;
+  const DebugScreenshotToggle({super.key});
 
   @override
   State<DebugScreenshotToggle> createState() => _DebugScreenshotToggleState();
@@ -24,9 +16,6 @@ class DebugScreenshotToggle extends StatefulWidget {
 class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
   ScreenProtectionService? _protection;
   bool _confirming = false;
-  static final _restoreAction = CustomSemanticsAction(
-    label: 'Restore screenshot protection',
-  );
 
   @override
   void didChangeDependencies() {
@@ -36,16 +25,10 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
         ScreenProtectionService.instance;
   }
 
-  @override
-  void dispose() {
-    _protection?.endDocumentation();
-    super.dispose();
-  }
-
   Future<void> _confirm() async {
     final protection = _protection!;
-    final navigator = widget.navigatorKey?.currentState;
-    if (_confirming || !protection.showControl || navigator == null) return;
+    final navigator = Navigator.of(context);
+    if (_confirming || !protection.showControl) return;
     _confirming = true;
     final owner = protection.visibleScope;
     int? authorizationEpoch;
@@ -60,10 +43,9 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                'DEBUG ONLY. Protection restores automatically in 20 seconds, '
-                'on navigation or when the app leaves the foreground. '
-                'Restore early with Ctrl+Shift+P or the screen-reader action '
-                '“Restore screenshot protection”.',
+                'DEBUG ONLY. Use fictional/demo or redacted information. '
+                'Screenshots stay enabled until you switch them off here, '
+                'lock/sign out, restart, or leave the foreground.',
               ),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
@@ -88,7 +70,7 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
                       Navigator.pop(context, true);
                     }
                   : null,
-              child: const Text('Enable for 20 seconds'),
+              child: const Text('Enable demo screenshots'),
             ),
           ],
         ),
@@ -110,118 +92,33 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
 
   @override
   Widget build(BuildContext context) {
-    if (!kDebugMode) return widget.child;
+    if (!kDebugMode) return const SizedBox.shrink();
     final protection = _protection!;
+    if (!protection.documentationEnabled) return const SizedBox.shrink();
     return ListenableBuilder(
       listenable: protection,
-      child: widget.child,
-      builder: (context, child) {
-        final show = protection.showControl;
-        final documentation =
-            protection.documentationPhase != DocumentationPhase.off;
-        return CallbackShortcuts(
-          bindings: {
-            const SingleActivator(
-              LogicalKeyboardKey.keyP,
-              control: true,
-              shift: true,
-            ): protection.endDocumentation,
-          },
-          child: Focus(
-            autofocus: true,
-            child: Semantics(
-              container: documentation,
-              customSemanticsActions: documentation
-                  ? {_restoreAction: protection.endDocumentation}
-                  : null,
-              child: Column(
-                children: [
-                  ClipRect(
-                    child: IgnorePointer(
-                      ignoring: !show,
-                      child: ExcludeSemantics(
-                        excluding: !show,
-                        child: TweenAnimationBuilder<double>(
-                          duration: ScreenProtectionService.controlFadeDuration,
-                          tween: Tween(begin: 0, end: show ? 1 : 0),
-                          builder: (context, value, control) {
-                            if (value == 0) {
-                              if (protection.documentationPhase ==
-                                  DocumentationPhase.hidingControl) {
-                                final generation =
-                                    protection.documentationGeneration;
-                                WidgetsBinding.instance.addPostFrameCallback((
-                                  _,
-                                ) {
-                                  if (mounted) {
-                                    protection.confirmControlHidden(generation);
-                                  }
-                                });
-                              }
-                              return const SizedBox.shrink();
-                            }
-                            final height =
-                                48 + MediaQuery.paddingOf(context).top;
-                            return SizedBox(
-                              height: height * value,
-                              child: OverflowBox(
-                                alignment: Alignment.topCenter,
-                                minHeight: height,
-                                maxHeight: height,
-                                child: Opacity(
-                                  key: const ValueKey(
-                                    'documentation-control-opacity',
-                                  ),
-                                  opacity: value,
-                                  child: control,
-                                ),
-                              ),
-                            );
-                          },
-                          child: SafeArea(
-                            bottom: false,
-                            child: SizedBox(
-                              height: 48,
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: IconButton(
-                                    key: const ValueKey(
-                                      'documentation-control',
-                                    ),
-                                    style: IconButton.styleFrom(
-                                      minimumSize: const Size(48, 48),
-                                      foregroundColor: Colors.black54,
-                                      backgroundColor: Colors.white54,
-                                    ),
-                                    icon: const Icon(
-                                      Icons.camera_alt_outlined,
-                                      size: 18,
-                                      semanticLabel:
-                                          'Temporarily allow demo screenshots',
-                                    ),
-                                    onPressed: _confirm,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: MediaQuery.removePadding(
-                      context: context,
-                      removeTop: show,
-                      child: child!,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+      builder: (context, _) {
+        final active = protection.isDocumentationActive;
+        return SwitchListTile(
+          key: const ValueKey('demo-screenshot-switch'),
+          title: Text('Demo screenshots',
+              style: InsightTheme.inter(14, w: FontWeight.w600)),
+          subtitle: Text(active
+              ? 'On — screenshots allowed for this debug session. Switch off here to restore protection.'
+              : 'Off — screenshot protection is on. Enable only for fictional or redacted data.',
+              style: InsightTheme.inter(12.5, c: InsightTheme.ink2)),
+          value: active,
+          activeTrackColor: InsightTheme.blue1,
+          onChanged: protection.foreground && !protection.transitioning &&
+              !protection.hasPopup && (active || protection.showControl)
+              ? (value) {
+                  if (value) {
+                    _confirm();
+                  } else {
+                    protection.endDocumentation();
+                  }
+                }
+              : null,
         );
       },
     );

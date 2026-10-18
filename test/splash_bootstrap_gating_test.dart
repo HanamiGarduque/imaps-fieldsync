@@ -35,6 +35,14 @@ void main() {
     await fixture.flush(tester);
   }
 
+  // These tests measure bootstrap/session safety, not optional film duration.
+  // A skip only removes presentation and must never release the real gate.
+  Future<void> mountStartup(WidgetTester tester) async {
+    await fixture.mount(tester, const SplashScreen());
+    await tester.tap(find.byKey(const ValueKey('splash-skip')));
+    await fixture.flush(tester);
+  }
+
   BootstrapStep stubSupabaseStep({Future<void> Function()? run}) =>
       (name: AppBootstrap.supabaseStep, run: run ?? () async {});
 
@@ -51,7 +59,7 @@ void main() {
       (name: 'held-open', run: () => bootstrapGate.future),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 4));
     expect(find.byType(MainShellScreen), findsNothing);
     expect(find.byType(LoginScreen), findsNothing);
@@ -59,8 +67,7 @@ void main() {
 
     bootstrapGate.complete();
     await fixture.flush(tester);
-    // 4 s held + 6 s crosses the cinematic's hold end (9.85 s), where the
-    // completed logo hands over to the real destination.
+    // Once the real gate opens, queued navigation must stay stable.
     await advance(tester, const Duration(milliseconds: 6000));
     expect(find.byType(MainShellScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -71,14 +78,13 @@ void main() {
       (tester) async {
     AppBootstrap.initialize(steps: [stubSupabaseStep()]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 2, milliseconds: 500));
     expect(find.byType(LoginScreen), findsNothing);
     expect(find.textContaining('Still starting up'), findsNothing);
 
     await advance(tester, const Duration(seconds: 1));
-    // 3.5 s + 6.4 s crosses the hold end (9.85 s): the launch moves on the
-    // cinematic's own beat, with no slow status ever shown.
+    // A completed bootstrap must not later raise the slow-start status.
     await advance(tester, const Duration(milliseconds: 6400));
     expect(find.byType(MainShellScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -95,10 +101,9 @@ void main() {
           run: () async => throw Exception('isolated bootstrap failure')),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
-    // 3 s + 8 s crosses the login's own mount beat (10.85 s): Page 3 appears
-    // as a layer of this same route, carrying the classified failure.
+    // The classified failure remains attached to the real Login destination.
     await advance(tester, const Duration(milliseconds: 8000));
     expect(find.byType(MainShellScreen), findsNothing);
     expect(find.byType(LoginScreen), findsOneWidget);
@@ -114,7 +119,7 @@ void main() {
           run: () async => throw Exception('isolated bootstrap failure')),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     await advance(tester, const Duration(milliseconds: 3400));
     expect(find.byType(LoginScreen), findsNothing);
@@ -137,7 +142,7 @@ void main() {
       (name: 'hung', run: () => never.future),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     expect(find.byType(LoginScreen), findsNothing);
     expect(find.byType(MainShellScreen), findsNothing);
@@ -167,7 +172,7 @@ void main() {
     final gate = Completer<void>();
     AppBootstrap.initialize(steps: [stubSupabaseStep(run: () => gate.future)]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 9));
     expect(find.textContaining('Still starting up'), findsOneWidget);
     expect(find.byType(LoginScreen), findsNothing);
@@ -192,7 +197,7 @@ void main() {
           run: () async => throw Exception('isolated late failure')),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 9));
     expect(find.textContaining('Still starting up'), findsOneWidget);
 
@@ -218,7 +223,7 @@ void main() {
           run: () async => throw Exception('isolated late failure')),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 9));
     expect(find.textContaining('Still starting up'), findsOneWidget);
     expect(find.byType(LoginScreen), findsNothing);
@@ -250,7 +255,7 @@ void main() {
     expect(() => AuthService.isLoggedIn, returnsNormally);
     expect(AuthService.isLoggedIn, isFalse);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     await advance(tester, const Duration(milliseconds: 3400));
     expect(find.byType(LoginScreen), findsNothing);
@@ -265,9 +270,8 @@ void main() {
   fixture.widgetTest(
       'a bootstrap that was never started in the isolated test default still routes without hanging',
       (tester) async {
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
-    // 3 s + 7 s crosses the hold end (9.85 s) with the cinematic's own timing.
     await advance(tester, const Duration(milliseconds: 7000));
     expect(find.byType(MainShellScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -281,7 +285,7 @@ void main() {
     SupabaseService.debugClientAvailableOverride = false;
     AppBootstrap.initialize(steps: [stubSupabaseStep()]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     await advance(tester, const Duration(milliseconds: 3400));
     expect(find.byType(LoginScreen), findsNothing);
@@ -301,7 +305,7 @@ void main() {
       (name: 'hung', run: () => never.future),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 4));
     await tester.pumpWidget(const SizedBox.shrink());
     never.complete();
@@ -322,7 +326,7 @@ void main() {
       (name: 'hung', run: () => never.future),
     ]);
 
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 8, milliseconds: 500));
     expect(find.textContaining('Still starting up'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());

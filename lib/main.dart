@@ -9,7 +9,6 @@ import 'core/services/app_bootstrap.dart';
 import 'core/services/supabase_service.dart';
 import './modules/inspection/providers/inspection_provider.dart';
 import 'modules/auth_startup/screens/splash_screen.dart';
-import 'modules/auth_startup/widgets/debug_screenshot_toggle.dart';
 import 'modules/auth_startup/services/screen_protection_service.dart';
 import 'modules/auth_startup/services/screen_protection_observer.dart';
 import 'core/widgets/sensitive_screen.dart';
@@ -110,10 +109,7 @@ class _MyAppState extends State<MyApp> {
       ),
       home: const SplashScreen(),
       builder: (context, child) => ScreenProtectionHost(
-        child: DebugScreenshotToggle(
-          navigatorKey: navigatorKey,
-          child: child ?? const SizedBox.shrink(),
-        ),
+        child: child ?? const SizedBox.shrink(),
       ),
     );
   }

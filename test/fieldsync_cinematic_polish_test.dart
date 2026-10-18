@@ -60,7 +60,10 @@ void main() {
   });
 
   Future<void> advance(WidgetTester tester, double seconds) async {
-    await tester.pump(Duration(microseconds: (seconds * 1e6).round()));
+    // Geometry checks use authored beats; real-time pacing has separate tests.
+    await tester.pump(Duration(microseconds: (seconds *
+        FieldSyncCinematicTimeline.playbackDuration.inMicroseconds /
+        FieldSyncCinematicTimeline.totalSeconds).round()));
     await fixture.flush(tester);
   }
 
@@ -73,6 +76,99 @@ void main() {
     fixture.mode = 'transport';
     fixture.requests.clear();
   }
+
+  fixture.widgetTest('zoomed official logo has no rectangular internal cutoff',
+      (tester) async {
+    await SecurePrefsService.setSoftLoggedOut(true);
+    await AuthService.loadSoftLogoutState();
+    await fixture.mount(tester, const SplashScreen());
+    await advance(tester, 3);
+    await advance(tester, 3.1);
+    await fixture.capture(tester, 'logo-unclipped');
+    final box = tester.getRect(find.byType(AspectRatio).first);
+    expect(box.width / box.height, closeTo(887 / 1115, 0.0001));
+    Future<ByteData> pixels() async => (await tester.runAsync(() async {
+      final boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(fixture.captureKey),
+      );
+      final image = await boundary.toImage(pixelRatio: 1);
+      final data = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+      image.dispose();
+      return data;
+    }))!;
+    final zoomed = await pixels();
+    final left = box.right.floor() - 2;
+    final right = box.right.ceil() + 2;
+    var alignedCut = 0;
+    for (var y = box.top.ceil() + 16; y < box.bottom.floor() - 16; y++) {
+      final a = 4 * (y * 390 + left);
+      final b = 4 * (y * 390 + right);
+      if (zoomed.getUint8(a) - zoomed.getUint8(b) > 8) alignedCut++;
+    }
+    expect(alignedCut, lessThan(24),
+        reason: 'ribbons must not share the straight right edge of the logo box');
+    await advance(tester, 3.5);
+    final settled = await pixels();
+    var white = 0;
+    for (var y = box.top.ceil(); y < box.bottom.floor(); y++) {
+      for (var x = box.left.ceil(); x < box.right.floor(); x++) {
+        final i = 4 * (y * 390 + x);
+        if (settled.getUint8(i) > 210 && settled.getUint8(i + 1) > 210) white++;
+      }
+    }
+    expect(white, greaterThan(2000),
+        reason: 'fix the paint bounds, do not hide the complete official artwork');
+  });
+
+  fixture.widgetTest('the longer search remains skippable after six real seconds',
+      (tester) async {
+    await SecurePrefsService.setSoftLoggedOut(true);
+    await AuthService.loadSoftLogoutState();
+    await fixture.mount(tester, const SplashScreen());
+    await tester.pump(const Duration(seconds: 3));
+    await fixture.flush(tester);
+    await tester.pump(const Duration(seconds: 3));
+    await fixture.flush(tester);
+    final scene = tester.widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((widget) => widget.painter)
+        .whereType<FieldSyncCinematicScenePainter>().single;
+    expect(FieldSyncCinematicScenePainter.redDotAlphaAt(scene.time.value), 0,
+        reason: 'give the search real travel time, not a hurry then a long hold');
+    await tester.tap(find.byKey(const ValueKey('splash-skip')));
+    await fixture.flush(tester);
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(find.byKey(const ValueKey('splash-skip')), findsNothing);
+  });
+
+  fixture.widgetTest('the return journey is still travelling at nineteen real seconds',
+      (tester) async {
+    await SecurePrefsService.setSoftLoggedOut(true);
+    await AuthService.loadSoftLogoutState();
+    await fixture.mount(tester, const SplashScreen());
+    await tester.pump(const Duration(seconds: 3));
+    await fixture.flush(tester);
+    await tester.pump(const Duration(milliseconds: 16300));
+    await fixture.flush(tester);
+    FieldSyncLoginRoutePainter route() {
+      final routes = tester.widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((widget) => widget.painter)
+          .whereType<FieldSyncLoginRoutePainter>().toList();
+      expect(routes, hasLength(1), reason: 'the return must still be travelling');
+      return routes.single;
+    }
+    final painter = route();
+    final journey = painter.journeyFor!(
+      tester.getSize(find.byType(FieldSyncLoginRouteOverlay)),
+    )!;
+    final before = journey.headAt(painter.time.value);
+    await tester.pump(const Duration(milliseconds: 800));
+    await fixture.flush(tester);
+    expect((journey.headAt(route().time.value) - before).distance, greaterThan(10));
+    expect(route().time.value, lessThan(FieldSyncCinematicTimeline.travelEndSeconds));
+    await tester.pump(const Duration(milliseconds: 3000));
+    await fixture.flush(tester);
+    expect(find.byKey(const ValueKey('splash-skip')), findsNothing);
+  });
 
   fixture.widgetTest(
     'whole login branding is hidden without moving form or status',

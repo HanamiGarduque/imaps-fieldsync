@@ -10,6 +10,7 @@ import '../../../core/theme/insight_theme.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/widgets/app_feedback.dart';
+import '../widgets/debug_screenshot_toggle.dart';
 
 typedef _Colors = InsightTheme;
 
@@ -134,6 +135,14 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
               children: [
                 // Section 1: Device Status Header Card
                 _buildStatusCard(),
+
+                if (ScreenProtectionScope.maybeOf(context)?.documentationEnabled ??
+                    false) ...[
+                  const SizedBox(height: 20),
+                  _sectionHeader('DEBUG DOCUMENTATION'),
+                  const SizedBox(height: 8),
+                  _card([const DebugScreenshotToggle()]),
+                ],
 
                 const SizedBox(height: 20),
                 _sectionHeader('BIOMETRIC & DEVICE SECURITY'),

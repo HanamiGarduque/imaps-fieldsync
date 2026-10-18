@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:local_auth/local_auth.dart';
 import 'secure_prefs_service.dart';
+import 'screen_protection_service.dart';
 import '../../../core/services/supabase_service.dart';
 
 
@@ -75,6 +76,8 @@ class BiometricService {
     bool useDeviceCredentialAsFallback = true,
   }) async {
     final deviceId = _buildDeviceFingerprint();
+    final protection = ScreenProtectionService.instance;
+    protection.beginBiometricPrompt();
     try {
       final ok = await _auth.authenticate(
         localizedReason: reason,
@@ -110,6 +113,8 @@ class BiometricService {
         metadata: {'error': e.toString()},
       );
       return false;
+    } finally {
+      protection.endBiometricPrompt();
     }
   }
 

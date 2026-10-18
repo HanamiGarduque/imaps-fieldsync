@@ -25,39 +25,43 @@ void main() {
     expect(protection.appliedProtection, isTrue);
   }
 
-  bool beginWithHiddenFrame() {
-    final allowed = protection.beginDocumentation();
-    if (allowed) {
-      protection.confirmControlHidden(protection.documentationGeneration);
-    }
-    return allowed;
-  }
+  bool beginDocumentation() => protection.beginDocumentation();
 
-  testWidgets('Documentation hides for 200ms then expires within 20 seconds', (
+  testWidgets('Documentation stays enabled until manually switched off', (
     tester,
   ) async {
     await enter(tester);
-    expect(beginWithHiddenFrame(), isTrue);
-    await tester.pump(const Duration(milliseconds: 199));
-    expect(protection.appliedProtection, isTrue);
-    await tester.pump(const Duration(milliseconds: 1));
+    expect(beginDocumentation(), isTrue);
+    await tester.pump();
     expect(protection.isDocumentationActive, isTrue);
     expect(calls.last, isFalse);
-    await tester.pump(const Duration(milliseconds: 19800));
+    await tester.pump(const Duration(seconds: 60));
+    expect(protection.isDocumentationActive, isTrue);
+    expect(protection.appliedProtection, isFalse);
+    protection.endDocumentation();
+    await tester.pump();
     expect(protection.documentationPhase, DocumentationPhase.off);
     expect(protection.appliedProtection, isTrue);
   });
 
-  testWidgets('A missing hidden-frame acknowledgment never disables privacy', (
+  testWidgets('Pending native OFF does not grant a capture session', (
     tester,
   ) async {
+    protection.dispose();
+    final off = Completer<void>();
+    protection = ScreenProtectionService(
+      applyProtection: (secure) => secure ? Future.value() : off.future,
+    );
     await enter(tester);
     expect(protection.beginDocumentation(), isTrue);
-    await tester.pump(const Duration(seconds: 1));
-    expect(protection.appliedProtection, isTrue);
+    await tester.pump();
+    expect(protection.appliedProtection, isNull);
     expect(protection.isDocumentationActive, isFalse);
-    await tester.pump(const Duration(seconds: 19));
-    expect(protection.documentationPhase, DocumentationPhase.off);
+    expect(protection.mustObscure, isTrue);
+    off.complete();
+    await tester.pump();
+    expect(protection.isDocumentationActive, isTrue);
+    expect(protection.appliedProtection, isFalse);
   });
 
   testWidgets(
@@ -69,8 +73,8 @@ void main() {
         AppLifecycleState.hidden,
         AppLifecycleState.paused,
       ]) {
-        expect(beginWithHiddenFrame(), isTrue);
-        await tester.pump(ScreenProtectionService.controlFadeDuration);
+        expect(beginDocumentation(), isTrue);
+        await tester.pump();
         protection.didChangeAppLifecycleState(state);
         await tester.pump();
         expect(protection.isDocumentationActive, isFalse);
@@ -84,19 +88,19 @@ void main() {
     },
   );
 
-  testWidgets('Removing or changing visible scope revokes documentation', (
+  testWidgets('Ordinary visible-scope changes retain the manual debug setting', (
     tester,
   ) async {
     final token = Object();
     protection.register(token, null);
     await tester.pump();
-    expect(beginWithHiddenFrame(), isTrue);
-    await tester.pump(ScreenProtectionService.controlFadeDuration);
+    expect(beginDocumentation(), isTrue);
+    await tester.pump();
     protection.register(token, null, visible: false);
     protection.register(Object(), null);
     await tester.pump();
-    expect(protection.documentationPhase, DocumentationPhase.off);
-    expect(protection.appliedProtection, isTrue);
+    expect(protection.documentationPhase, DocumentationPhase.active);
+    expect(protection.appliedProtection, isFalse);
     expect(protection.requiresProtection, isTrue);
   });
 
@@ -104,8 +108,8 @@ void main() {
     tester,
   ) async {
     await enter(tester);
-    beginWithHiddenFrame();
-    await tester.pump(ScreenProtectionService.controlFadeDuration);
+    beginDocumentation();
+    await tester.pump();
     final epoch = protection.securityEpoch;
     protection.invalidateDocumentation();
     await tester.pump();
@@ -125,8 +129,8 @@ void main() {
       },
     );
     await enter(tester);
-    beginWithHiddenFrame();
-    await tester.pump(ScreenProtectionService.controlFadeDuration);
+    beginDocumentation();
+    await tester.pump();
     expect(protection.isDocumentationActive, isFalse);
     expect(protection.appliedProtection, isTrue);
     expect(calls, [true, false, true]);
@@ -144,8 +148,8 @@ void main() {
         },
       );
       await enter(tester);
-      beginWithHiddenFrame();
-      await tester.pump(ScreenProtectionService.controlFadeDuration);
+      beginDocumentation();
+      await tester.pump();
       await tester.pump(ScreenProtectionService.nativeTimeout);
       expect(protection.appliedProtection, isTrue);
       expect(protection.isDocumentationActive, isFalse);
@@ -178,8 +182,8 @@ void main() {
     tester,
   ) async {
     await enter(tester);
-    beginWithHiddenFrame();
-    await tester.pump(ScreenProtectionService.controlFadeDuration);
+    beginDocumentation();
+    await tester.pump();
     protection.dispose();
     await tester.pump();
     expect(calls.last, isTrue);
@@ -198,8 +202,8 @@ void main() {
       },
     );
     await enter(tester);
-    beginWithHiddenFrame();
-    await tester.pump(ScreenProtectionService.controlFadeDuration);
+    beginDocumentation();
+    await tester.pump();
     protection.dispose();
     await tester.pump();
     expect(calls, [true, false, true]);

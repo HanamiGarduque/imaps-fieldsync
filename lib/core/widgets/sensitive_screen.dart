@@ -37,7 +37,11 @@ class _ScreenProtectionHostState extends State<ScreenProtectionHost> {
         fit: StackFit.expand,
         children: [
           child!,
-          if (protection.mustObscure)
+          // Sensitive subtrees cover pending foreground protection, but popup
+          // routes paint above them. Hidden startup content needs no global cover.
+          if (protection.mustObscure &&
+              (!protection.foreground || protection.nativeFailure ||
+                  protection.hasPopup))
             Positioned.fill(
               child: Material(
                 key: const ValueKey('privacy-curtain'),

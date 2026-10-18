@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -234,17 +233,6 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
           : null,
       body: Stack(
         children: [
-          Positioned(
-            top: -40, right: -40,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
-              child: Container(
-                width: 220, height: 220,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: InsightTheme.blue1.withValues(alpha: 0.12)),
-              ),
-            ),
-          ),
-          
           SafeArea(
             bottom: false,
             child: Column(

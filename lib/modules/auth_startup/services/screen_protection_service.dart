@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:screen_protector/screen_protector.dart';
 
-enum DocumentationPhase { off, hidingControl, active }
+enum DocumentationPhase { off, active }
 
 /// Visible-scope policy, independently observable from native acknowledgments.
 /// The plugin remains the only native protection mechanism.
@@ -18,8 +18,6 @@ class ScreenProtectionService extends ChangeNotifier
        _documentationEnabled = kDebugMode && documentationEnabled;
 
   static final instance = ScreenProtectionService();
-  static const documentationDuration = Duration(seconds: 20);
-  static const controlFadeDuration = Duration(milliseconds: 200);
   static const nativeTimeout = Duration(seconds: 2);
 
   final Future<void> Function(bool) _apply;
@@ -28,11 +26,7 @@ class ScreenProtectionService extends ChangeNotifier
   final _navigation = <NavigatorObserver, _NavigationVisibility>{};
   AppLifecycleState _lifecycle = AppLifecycleState.resumed;
   DocumentationPhase _phase = DocumentationPhase.off;
-  Timer? _expiry;
-  Timer? _fade;
   bool _documentationRequested = false;
-  bool _controlHidden = false;
-  bool _fadeElapsed = false;
   bool? _applied;
   bool _failed = false;
   bool _running = false;
@@ -42,6 +36,7 @@ class ScreenProtectionService extends ChangeNotifier
   int _hosts = 0;
   int _generation = 0;
   int _securityEpoch = 0;
+  int _biometricPrompts = 0;
 
   static Future<void> _applyNative(bool secure) async {
     // screen_protector only ships an Android/iOS implementation. On other
@@ -103,8 +98,22 @@ class ScreenProtectionService extends ChangeNotifier
       _applied == true;
   bool get mustObscure =>
       requiresProtection &&
-      (!foreground || (!isDocumentationActive && _applied != true));
+      ((!foreground && !(_lifecycle == AppLifecycleState.inactive &&
+          _biometricPrompts > 0 && _applied == true)) ||
+          (!isDocumentationActive && _applied != true));
   bool get _desired => requiresProtection && !_documentationRequested;
+
+  /// Presentation only: the OS prompt may make a secured window inactive.
+  /// Hidden/paused windows and unconfirmed native protection stay covered.
+  void beginBiometricPrompt() {
+    _biometricPrompts++;
+    invalidateDocumentation();
+  }
+
+  void endBiometricPrompt() {
+    if (_biometricPrompts > 0) _biometricPrompts--;
+    _changed();
+  }
 
   void register(
     Object token,
@@ -114,12 +123,14 @@ class ScreenProtectionService extends ChangeNotifier
     final next = (route: route, visible: visible);
     if (_scopes[token] == next) return;
     _scopes[token] = next;
-    invalidateDocumentation();
+    _securityEpoch++;
+    _changed();
   }
 
   void unregister(Object token) {
     if (_scopes.remove(token) == null) return;
-    invalidateDocumentation();
+    _securityEpoch++;
+    _changed();
   }
 
   /// Called by the observer for structural navigation and animation completion.
@@ -138,7 +149,7 @@ class ScreenProtectionService extends ChangeNotifier
       transitioning,
       popup,
     );
-    endDocumentation();
+    _changed();
   }
 
   void attach() {
@@ -166,53 +177,14 @@ class ScreenProtectionService extends ChangeNotifier
 
   bool beginDocumentation() {
     if (!showControl) return false;
-    final generation = ++_generation;
-    _controlHidden = false;
-    _fadeElapsed = false;
-    _phase = DocumentationPhase.hidingControl;
-    _expiry = Timer(documentationDuration, endDocumentation);
-    _fade = Timer(controlFadeDuration, () {
-      if (_disposed || generation != _generation) return;
-      _fadeElapsed = true;
-      _requestDocumentationOff();
-    });
+    _generation++;
+    _documentationRequested = true;
     _changed();
     return true;
   }
 
-  /// UI acknowledgment comes after a frame with the control fully absent.
-  /// If painting stalls or the widget is abandoned, permission stays ON.
-  void confirmControlHidden(int generation) {
-    if (_disposed ||
-        generation != _generation ||
-        _controlHidden ||
-        _phase != DocumentationPhase.hidingControl) {
-      return;
-    }
-    _controlHidden = true;
-    _requestDocumentationOff();
-  }
-
-  void _requestDocumentationOff() {
-    if (!_documentationEnabled ||
-        !_controlHidden ||
-        !_fadeElapsed ||
-        _phase != DocumentationPhase.hidingControl ||
-        !foreground ||
-        !requiresProtection ||
-        transitioning ||
-        hasPopup) {
-      return;
-    }
-    _documentationRequested = true;
-    _changed();
-  }
-
   void _revokeDocumentation() {
     _generation++;
-    _expiry?.cancel();
-    _fade?.cancel();
-    _expiry = _fade = null;
     _documentationRequested = false;
     _phase = DocumentationPhase.off;
   }
@@ -223,8 +195,8 @@ class ScreenProtectionService extends ChangeNotifier
     _changed();
   }
 
-  /// Account, lock, active-tab and lifecycle boundaries invalidate pending UI
-  /// confirmations too, not just an already-running documentation timer.
+  /// Account, lock and lifecycle boundaries invalidate pending confirmations
+  /// and the manual debug session. Ordinary navigation keeps the setting.
   void invalidateDocumentation() {
     _securityEpoch++;
     endDocumentation();
@@ -289,7 +261,7 @@ class ScreenProtectionService extends ChangeNotifier
           if (_disposed) return;
           _applied = target;
           _failed = false;
-          if (!target && _documentationRequested && requiresProtection) {
+          if (!target && _documentationRequested) {
             _phase = DocumentationPhase.active;
           }
         } catch (_) {
@@ -315,8 +287,6 @@ class ScreenProtectionService extends ChangeNotifier
     if (_disposed) return;
     final restore =
         requiresProtection && (_documentationRequested || _applied != true);
-    _expiry?.cancel();
-    _fade?.cancel();
     if (_hosts > 0) WidgetsBinding.instance.removeObserver(this);
     _disposed = true;
     if (restore) unawaited(_apply(true).catchError((Object _) {}));

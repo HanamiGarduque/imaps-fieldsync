@@ -1,8 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:imaps_fieldsync/core/widgets/sensitive_screen.dart';
-import 'package:imaps_fieldsync/modules/auth_startup/widgets/debug_screenshot_toggle.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_service.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_observer.dart';
 
@@ -34,7 +35,7 @@ void main() {
         navigatorObservers: [ScreenProtectionObserver(protection)],
         builder: (_, child) => ScreenProtectionHost(
           protection: protection,
-          child: DebugScreenshotToggle(navigatorKey: navigator, child: child!),
+          child: child!,
         ),
         home: page,
       ),
@@ -44,22 +45,10 @@ void main() {
   }
 
   Future<void> authorize(WidgetTester tester) async {
-    await tester.tap(find.byIcon(Icons.camera_alt_outlined));
+    // The settings UI/attestation is exercised end-to-end in
+    // debug_screenshot_settings_test.dart; these tests isolate route policy.
+    expect(protection.beginDocumentation(), isTrue);
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Enable for 20 seconds'),
-          )
-          .onPressed,
-      isNull,
-    );
-    await tester.tap(find.byType(CheckboxListTile));
-    await tester.pump();
-    await tester.tap(find.text('Enable for 20 seconds'));
-    await tester.pumpAndSettle();
-    await tester.pump(const Duration(milliseconds: 250));
-    await tester.pump();
   }
 
   testWidgets('Generic page has no documentation screenshot control', (
@@ -137,7 +126,7 @@ void main() {
       expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
       navigator.currentState!.pop();
       await tester.pumpAndSettle();
-      expect(find.byIcon(Icons.camera_alt_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
     },
   );
 
@@ -179,7 +168,58 @@ void main() {
     },
   );
 
-  testWidgets('Control fades away and never covers shutter or form actions', (
+  testWidgets('Resumed modal stays covered until native protection acknowledges',
+      (tester) async {
+    final ready = Completer<void>();
+    var hold = false;
+    protection.dispose();
+    protection = ScreenProtectionService(applyProtection: (secure) =>
+        secure && hold ? ready.future : Future.value());
+    addTearDown(() async {
+      if (!ready.isCompleted) ready.complete();
+      await tester.pump();
+    });
+    final navigator = await mount(tester, const SensitiveScreen(
+      child: Scaffold(body: Text('Fictional secured page')),
+    ));
+    await authorize(tester);
+    var tapped = false;
+    showModalBottomSheet<void>(
+      context: navigator.currentState!.overlay!.context,
+      builder: (_) => Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Fictional task location'),
+        ElevatedButton(onPressed: () => tapped = true,
+            child: const Text('Open task location')),
+      ]),
+    );
+    await tester.pumpAndSettle();
+    expect(protection.hasPopup, isTrue);
+    final action = find.widgetWithText(ElevatedButton, 'Open task location');
+    expect(action.hitTestable(), findsOneWidget);
+    hold = true;
+    protection.didChangeAppLifecycleState(AppLifecycleState.inactive);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('privacy-curtain')), findsOneWidget);
+    protection.didChangeAppLifecycleState(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(protection.isDocumentationActive, isFalse);
+    expect(protection.appliedProtection, isNull);
+    expect(protection.mustObscure, isTrue);
+    expect(find.byKey(const ValueKey('privacy-curtain')), findsOneWidget,
+        reason: 'a modal is above its sensitive page, so it needs the host cover');
+    expect(action.hitTestable(), findsNothing);
+    ready.complete();
+    await tester.pumpAndSettle();
+    expect(protection.appliedProtection, isTrue);
+    expect(find.byKey(const ValueKey('privacy-curtain')), findsNothing);
+    await tester.tap(action);
+    expect(tapped, isTrue);
+    navigator.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('No global debug control covers shutter or form actions', (
     tester,
   ) async {
     await mount(
@@ -196,40 +236,34 @@ void main() {
         ),
       ),
     );
-    final control = tester.getRect(find.byIcon(Icons.camera_alt_outlined));
+    expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
     for (final label in ['Shutter', 'Save', 'Next', 'Submit']) {
-      expect(control.overlaps(tester.getRect(find.text(label))), isFalse);
+      expect(find.widgetWithText(ElevatedButton, label).hitTestable(), findsOneWidget);
     }
-    await tester.tap(find.byIcon(Icons.camera_alt_outlined));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 80));
-    final opacity = find.byKey(const ValueKey('documentation-control-opacity'));
-    expect(opacity, findsOneWidget);
-    final fading = tester.widget<Opacity>(opacity);
-    expect(fading.opacity, inExclusiveRange(0, 1));
     expect(protection.appliedProtection, isTrue);
-    await tester.pumpAndSettle();
   });
 
   testWidgets(
-    'Demo attestation gates capture; hidden control restores via shortcut',
+    'Manual OFF restores protection without recreating live form state',
     (tester) async {
       await mount(
         tester,
-        const SensitiveScreen(child: Scaffold(body: Text('Fictional only'))),
+        SensitiveScreen(child: Scaffold(body: TextFormField(
+          initialValue: 'Fictional unsaved notes',
+        ))),
       );
+      final before = find.byType(TextField).evaluate().single;
       await authorize(tester);
       expect(protection.isDocumentationActive, isTrue);
       expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
       expect(protection.appliedProtection, isFalse);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      protection.endDocumentation();
       await tester.pumpAndSettle();
       expect(protection.appliedProtection, isTrue);
-      expect(find.byIcon(Icons.camera_alt_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
+      expect(find.byType(TextField).evaluate().single, same(before));
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'Fictional unsaved notes');
     },
   );
 
@@ -265,8 +299,8 @@ void main() {
     expect(protection.isDocumentationActive, isTrue);
     changeTab(() => selected = 1);
     await tester.pumpAndSettle();
-    expect(protection.isDocumentationActive, isFalse);
-    expect(protection.appliedProtection, isTrue);
+    expect(protection.isDocumentationActive, isTrue);
+    expect(protection.appliedProtection, isFalse);
     for (final tab in [0, 1, 0, 2]) {
       changeTab(() => selected = tab);
       await tester.pump();

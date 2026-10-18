@@ -8,7 +8,7 @@ import 'fieldsync_entrance_animation.dart';
 import 'fieldsync_logo_geometry.dart';
 
 /// Global timeline of the approved three-page startup cinematic (SPEC v3), in
-/// absolute seconds from the first frame of the launch.
+/// authored seconds from the first frame, played over [playbackDuration].
 ///
 /// One clock drives all three pages. The approved entrance animation is fed
 /// 1:1 from [painterStartSeconds], so its own timeline is this one shifted by
@@ -19,6 +19,10 @@ import 'fieldsync_logo_geometry.dart';
 /// [FieldSyncEntranceTimeline.handoffSeconds].
 class FieldSyncCinematicTimeline {
   FieldSyncCinematicTimeline._();
+
+  /// Slower playback, not an added wait: both travelling lines and the camera
+  /// keep the same continuous choreography. Tap-to-skip remains immediate.
+  static const Duration playbackDuration = Duration(seconds: 23);
 
   /// Nominal total, from the first frame to the moment the destination screen
   /// is settled and the cinematic barrier may release.

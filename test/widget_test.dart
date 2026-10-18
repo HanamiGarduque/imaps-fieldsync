@@ -37,12 +37,11 @@ void main() {
     expect(find.byWidgetPredicate((widget) => widget is Semantics &&
       widget.properties.label == 'FieldSync' && widget.properties.header == true), findsOneWidget);
 
-    // One 13.35 s cinematic drives the whole launch: the completed logo holds
-    // until 9.85 s, Page 3 (the login) mounts in place at 10.85 s, the route
-    // re-enters and the logo reveals by 13.15 s. The splash hands the frame
-    // to the login exactly once, on the journey's own beats.
+    // The longer cinematic is optional; skipping must still open a usable
+    // Login only after bootstrap/session and native-protection readiness.
     await tester.pump(const Duration(seconds: 3));
-    await tester.pump(const Duration(milliseconds: 8300));
+    await tester.tap(find.byKey(const ValueKey('splash-skip')));
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byType(LoginScreen), findsOneWidget);

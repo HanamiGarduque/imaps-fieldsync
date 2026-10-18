@@ -700,7 +700,9 @@ void main() {
   // ── widget-level coverage of the launch itself ───────────────────────────
 
   Future<void> advance(WidgetTester tester, Duration elapsed) async {
-    await tester.pump(elapsed);
+    await tester.pump(Duration(microseconds: (elapsed.inMicroseconds *
+        FieldSyncCinematicTimeline.playbackDuration.inMicroseconds /
+        (FieldSyncCinematicTimeline.totalSeconds * 1e6)).round()));
     await fixture.flush(tester);
   }
 

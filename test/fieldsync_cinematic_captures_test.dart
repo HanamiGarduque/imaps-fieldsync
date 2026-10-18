@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:imaps_fieldsync/core/services/auth_service.dart';
+import 'package:imaps_fieldsync/core/widgets/fieldsync_cinematic_intro.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/screens/splash_screen.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/secure_prefs_service.dart';
 
@@ -37,7 +38,9 @@ void main() {
   tearDown(() => fixture.closeCase());
 
   Future<void> advance(WidgetTester tester, Duration elapsed) async {
-    await tester.pump(elapsed);
+    await tester.pump(Duration(microseconds: (elapsed.inMicroseconds *
+        FieldSyncCinematicTimeline.playbackDuration.inMicroseconds /
+        (FieldSyncCinematicTimeline.totalSeconds * 1e6)).round()));
     await fixture.flush(tester);
   }
 

@@ -9,7 +9,6 @@ import '../services/auth_failure.dart';
 import '../services/supabase_service.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
-import '../../modules/auth_startup/services/screen_protection_service.dart';
 import '../widgets/sensitive_screen.dart';
 import '../services/sync_outbox_service.dart';
 import '../services/db_helper.dart';
@@ -293,7 +292,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
   }
 
   void _openTab(int index) {
-    ScreenProtectionService.instance.invalidateDocumentation();
     setState(() => _currentIndex = index);
     // Tasks/Home repopulate `local_jobs` on refresh, so re-read the badge
     // inputs whenever the inspector moves through the tab that owns that data.

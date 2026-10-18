@@ -13,6 +13,7 @@ import '../../../core/services/app_bootstrap.dart';
 import '../../profile_settings/services/notification_service.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
+import '../services/screen_protection_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../services/local_data_guard_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
@@ -47,12 +48,10 @@ class _SplashScreenState extends State<SplashScreen>
   /// The one clock of the launch: the approved three-page cinematic's own
   /// timeline. Page 1's scene, the approved entrance (driven at its own local
   /// second), the departure and the login reveal all read this same
-  /// animation — one route, one controller, one journey, 0 → 13.35 s.
+  /// animation — one route, one controller, 23 seconds of continuous playback.
   late final AnimationController _clock = AnimationController(
     vsync: this,
-    duration: Duration(
-      milliseconds: (FieldSyncCinematicTimeline.totalSeconds * 1000).round(),
-    ),
+    duration: FieldSyncCinematicTimeline.playbackDuration,
   );
   late final Animation<double> _seconds = Tween<double>(
     begin: 0,
@@ -135,6 +134,11 @@ class _SplashScreenState extends State<SplashScreen>
   bool _reducedMotionDecided = false;
   bool? _overlayDark;
   bool _homePushed = false;
+  ScreenProtectionService? _protection;
+  bool _waitingForProtection = false;
+
+  bool get _protectionReady => _protection == null ||
+      (_protection!.foreground && _protection!.appliedProtection == true);
 
   /// The resolved Login or App Lock subtree, built once; presentation never
   /// invents a destination or eagerly builds the protected Home screen.
@@ -154,6 +158,12 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final protection = ScreenProtectionScope.maybeOf(context);
+    if (_protection != protection) {
+      _protection?.removeListener(_onProtectionChanged);
+      _protection = protection;
+      _protection?.addListener(_onProtectionChanged);
+    }
     if (_reducedMotionDecided) return;
     _reducedMotionDecided = true;
     // Reduced motion: the cinematic is skipped up front — the settled Page 2
@@ -168,6 +178,7 @@ class _SplashScreenState extends State<SplashScreen>
     // No timer and no ticker may outlive the screen (the layout tests assert
     // no pending timers after teardown).
     _bootstrapSlowTimer?.cancel();
+    _protection?.removeListener(_onProtectionChanged);
     _cinematicReady.dispose();
     _clock.dispose();
     super.dispose();
@@ -326,6 +337,11 @@ class _SplashScreenState extends State<SplashScreen>
           t >= FieldSyncCinematicTimeline.departureStartSeconds) {
         setState(_attachDestinationLayer);
       }
+      if (!_finished && !_protectionReady &&
+          t >= FieldSyncCinematicTimeline.mountStartSeconds) {
+        _waitForProtection(FieldSyncCinematicTimeline.mountStartSeconds);
+        return;
+      }
       if (!_finished &&
           t >= FieldSyncCinematicTimeline.barrierReleaseSeconds) {
         setState(() => _finished = true);
@@ -342,6 +358,23 @@ class _SplashScreenState extends State<SplashScreen>
       if (!_homePushed && t >= FieldSyncCinematicTimeline.holdEndSeconds) {
         _pushDestination();
       }
+    }
+  }
+
+  void _waitForProtection(double at) {
+    _waitingForProtection = true;
+    _clock.stop();
+    final value = at / FieldSyncCinematicTimeline.totalSeconds;
+    if ((_clock.value - value).abs() > 1e-9) _clock.value = value;
+  }
+
+  void _onProtectionChanged() {
+    if (!mounted || !_waitingForProtection || !_protectionReady) return;
+    _waitingForProtection = false;
+    if (_skipRequested) {
+      _finalizeSkip();
+    } else {
+      _clock.forward();
     }
   }
 
@@ -423,6 +456,11 @@ class _SplashScreenState extends State<SplashScreen>
   /// takes the screen exactly once.
   void _finalizeSkip() {
     if (_finished || !_destinationKnown) return;
+    if (_hasCinematicDestination && !_protectionReady) {
+      if (_destinationLayer == null) setState(_attachDestinationLayer);
+      _waitForProtection(FieldSyncCinematicTimeline.holdEndSeconds);
+      return;
+    }
     setState(() {
       if (_hasCinematicDestination) _attachDestinationLayer();
       _finished = true;

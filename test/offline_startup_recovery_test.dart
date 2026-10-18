@@ -33,32 +33,35 @@ void main() {
     await tester.pump(elapsed); await fixture.flush(tester);
   }
 
+  // Recovery budgets are wall-clock requirements, independent of the longer
+  // optional film. Skip only presentation; the real three/eight-second gates
+  // and all ownership/security assertions below remain unchanged.
+  Future<void> mountStartup(WidgetTester tester) async {
+    await fixture.mount(tester, const SplashScreen());
+    await tester.tap(find.byKey(const ValueKey('splash-skip')));
+    await fixture.flush(tester);
+  }
+
   for (final expired in [false, true]) {
     fixture.widgetTest('${expired ? "expired" : "valid"} retained owner starts offline within splash delay', (tester) async {
       await fixture.client.auth.setInitialSession(jsonEncode(fixture.session(expired: expired)));
-      await fixture.mount(tester, const SplashScreen());
+      await mountStartup(tester);
       await advance(tester, const Duration(seconds: 3));
-      // Checks finish well inside the 3s delay, but the launch's own cinematic
-      // still holds the hand-off until its completed-logo hold ends (9.85 s):
-      // navigation continues on the journey's own beat.
       await advance(tester, const Duration(milliseconds: 400));
-      expect(find.byType(MainShellScreen), findsNothing);
-      // 3.4 s + 6.5 s crosses the hold end (9.85 s).
-      await advance(tester, const Duration(milliseconds: 6500));
       expect(find.byType(MainShellScreen), findsOneWidget);
       expect(fixture.requests.where((r) => r.url.path.contains('/profiles')), isEmpty);
       final shell = tester.widget<MainShellScreen>(find.byType(MainShellScreen));
       expect(shell.profile.id, offlineInspector);
       measurements.add({'scenario': '${expired ? "expired" : "valid"}-no-transport',
         'clock': 'simulated', 'awaited_stage': 'connectivity/local cached profile',
-        'splash_seconds': 3, 'cinematic_hold_seconds': 9.85, 'network_recovery_seconds': 0,
-        'observed_shell_by_seconds': 9.9, 'destination': 'Home'});
+        'splash_seconds': 3, 'intro_skipped': true, 'network_recovery_seconds': 0,
+        'observed_shell_by_seconds': 3.4, 'destination': 'Home'});
     });
   }
 
   fixture.widgetTest('profile hang releases Splash at eight seconds of recovery', (tester) async {
     fixture.online = true; fixture.mode = 'profile-hang';
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     expect(fixture.held.single.stage, 'profile');
     await advance(tester, const Duration(milliseconds: 7999));
@@ -74,7 +77,7 @@ void main() {
   fixture.widgetTest('slow refresh plus profile hang share ONE eight-second budget', (tester) async {
     fixture.online = true; fixture.mode = 'refresh-hang';
     await fixture.client.auth.setInitialSession(jsonEncode(fixture.session(expired: true)));
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     expect(fixture.held.single.stage, 'refresh');
     await advance(tester, const Duration(seconds: 5));
@@ -92,7 +95,7 @@ void main() {
 
   fixture.widgetTest('connectivity probe latency is inside startup budget', (tester) async {
     fixture.connectivityReply = Completer<List<String>>();
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     await advance(tester, const Duration(milliseconds: 8400));
     expect(find.byType(MainShellScreen), findsOneWidget);
@@ -119,7 +122,7 @@ void main() {
     fixture.widgetTest('online transport failure with ${expired ? "expired" : "valid"} prior session stays bounded', (tester) async {
       fixture.online = true; fixture.mode = 'transport';
       await fixture.client.auth.setInitialSession(jsonEncode(fixture.session(expired: expired)));
-      await fixture.mount(tester, const SplashScreen());
+      await mountStartup(tester);
       await advance(tester, const Duration(seconds: 3));
       for (var i = 0; i < 8; i++) { await advance(tester, const Duration(seconds: 1)); }
       expect(find.byType(MainShellScreen), findsOneWidget);
@@ -156,7 +159,7 @@ void main() {
       if (scenario == 'empty-name-cache') {
         fixture.secure['sp_cached_profile'] = jsonEncode({...offlineProfile, 'full_name': ''});
       }
-      await fixture.mount(tester, const SplashScreen());
+      await mountStartup(tester);
       await advance(tester, const Duration(seconds: 3));
       await advance(tester, const Duration(seconds: 9));
       expect(find.byType(MainShellScreen), findsNothing);
@@ -211,13 +214,11 @@ void main() {
   fixture.widgetTest('owner change during startup local lock preferences cannot open stale profile', (tester) async {
     final preference = Completer<String?>();
     fixture.storageReplies['sp_bio_require_on_open'] = preference;
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     await fixture.client.auth.setInitialSession(jsonEncode(fixture.session(owner: otherOfflineInspector)));
     preference.complete('false'); await fixture.flush(tester);
-    // The launch's own cinematic mounts Page 3 in place at 10.85 s: this
-    // launch's destination (login, a different owner) was decided at ~3 s,
-    // and the film then runs on its own beats.
+    // Skipping presentation must never let a stale owner reach Home.
     await advance(tester, const Duration(milliseconds: 7600));
     await advance(tester, const Duration(milliseconds: 600));
     expect(find.byType(MainShellScreen), findsNothing);
@@ -225,16 +226,16 @@ void main() {
   });
 
   fixture.widgetTest('offline cold restart preserves the owner and Home destination', (tester) async {
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
-    // The launch's own cinematic holds the hand-off until the
-    // completed-logo hold ends (9.85 s).
     await advance(tester, const Duration(milliseconds: 6900));
     expect(find.byType(MainShellScreen), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await advance(tester, const Duration(milliseconds: 100));
     await tester.runAsync(fixture.restartDatabase);
     await tester.pumpWidget(MaterialApp(home: const SplashScreen()));
+    await tester.tap(find.byKey(const ValueKey('splash-skip')));
+    await fixture.flush(tester);
     await advance(tester, const Duration(seconds: 3));
     await advance(tester, const Duration(milliseconds: 6900));
     expect(tester.widget<MainShellScreen>(find.byType(MainShellScreen)).profile.id,
@@ -244,7 +245,7 @@ void main() {
   fixture.widgetTest('late authoritative refresh refusal closes cached shell access', (tester) async {
     fixture.online = true; fixture.mode = 'refresh-hang';
     await fixture.client.auth.setInitialSession(jsonEncode(fixture.session(expired: true)));
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     await advance(tester, const Duration(milliseconds: 8400));
     expect(find.byType(MainShellScreen), findsOneWidget);
@@ -256,7 +257,7 @@ void main() {
 
   fixture.widgetTest('late authoritative profile refusal closes cached shell and invalidates stale profile', (tester) async {
     fixture.online = true; fixture.mode = 'profile-hang';
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
     await advance(tester, const Duration(milliseconds: 8400));
     expect(find.byType(MainShellScreen), findsOneWidget);
@@ -270,9 +271,8 @@ void main() {
   });
 
   fixture.widgetTest('offline background resume keeps owner without reentering startup loading', (tester) async {
-    await fixture.mount(tester, const SplashScreen());
+    await mountStartup(tester);
     await advance(tester, const Duration(seconds: 3));
-    // 3 s + 6.9 s crosses the hold end (9.85 s).
     await advance(tester, const Duration(milliseconds: 6900));
     expect(find.byType(MainShellScreen), findsOneWidget);
     final profilesBefore = fixture.requests.where((r) => r.url.path.contains('/profiles')).length;

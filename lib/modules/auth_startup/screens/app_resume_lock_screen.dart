@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../../core/services/auth_service.dart';
 import '../services/biometric_service.dart';
+import '../services/screen_protection_service.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/widgets/fieldsync_brand.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -51,6 +52,7 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen>
   String _bioLabel = 'biometric';
   bool _initialAttemptStarted = false;
   bool _attemptQueued = false;
+  bool _protectionInitialized = false;
 
   bool get _presentationReady => widget.cinematicReady?.value ?? true;
 
@@ -75,6 +77,11 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_protectionInitialized) {
+      _protectionInitialized = true;
+      (ScreenProtectionScope.maybeOf(context) ?? ScreenProtectionService.instance)
+          .invalidateDocumentation();
+    }
     _queueInitialAttempt();
   }
 
