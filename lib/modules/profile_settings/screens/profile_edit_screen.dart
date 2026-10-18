@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -291,7 +292,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final initials = UserProfile.avatarInitials(_nameCtrl.text);
 
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: FieldFormBody(
         header: Padding(
@@ -462,6 +464,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             maxLength: 254,
           ),
         ],
+      ),
       ),
     );
   }

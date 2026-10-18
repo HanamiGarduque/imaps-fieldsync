@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/models/report_models.dart';
 import '../../../core/services/report_submission_service.dart';
@@ -124,7 +125,9 @@ class _ApplicationSupportScreenState extends State<ApplicationSupportScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => SensitiveScreen(child: _scaffold());
+
+  Widget _scaffold() => Scaffold(
     backgroundColor: InsightTheme.bg,
     appBar: AppBar(
       backgroundColor: InsightTheme.bg,

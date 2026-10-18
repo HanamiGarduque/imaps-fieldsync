@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import '../services/photo_source_resolver.dart';
 
 /// Renders a photo whether `path` is a local device file path or a remote
@@ -147,7 +148,8 @@ class _FullscreenPhotoViewerState extends State<FullscreenPhotoViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
@@ -172,6 +174,7 @@ class _FullscreenPhotoViewerState extends State<FullscreenPhotoViewer> {
             ),
           ),
         ),
+      ),
       ),
     );
   }

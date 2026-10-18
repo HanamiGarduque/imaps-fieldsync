@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
+import '../../../core/widgets/sensitive_screen.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/models/user_profile.dart';
@@ -345,7 +346,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         ? 'Administrator'
         : 'Zoning Officer I';
 
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       extendBody: true,
       body: Stack(
@@ -650,6 +652,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       // shell). This screen no longer renders its own nav bar — see
       // NAVIGATION_REFACTOR.md for why the duplicate, per-page nav bar
       // was removed.
+      ),
     );
   }
 

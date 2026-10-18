@@ -7,6 +7,7 @@ import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import 'supabase_service.dart';
 import 'auth_failure.dart';
 import '../../modules/auth_startup/services/biometric_service.dart';
+import '../../modules/auth_startup/services/screen_protection_service.dart';
 
 class AuthService {
   static final SupabaseClient _client = SupabaseService.client; //[cite: 2]
@@ -52,6 +53,7 @@ class AuthService {
     required String email,
     required String password,
   }) async {
+    ScreenProtectionService.instance.invalidateDocumentation();
     final AuthResponse res;
     try {
       res = await _client.auth.signInWithPassword( //[cite: 2]
@@ -97,6 +99,7 @@ class AuthService {
   /// enrolled+confirmed, since there's nothing to preserve access through
   /// in that case anyway.
   static Future<void> signOut({bool revokeEverywhere = false}) async {
+    ScreenProtectionService.instance.invalidateDocumentation();
     if (!revokeEverywhere &&
         await BiometricService.isEnrolled() &&
         await BiometricService.isConfirmed()) {

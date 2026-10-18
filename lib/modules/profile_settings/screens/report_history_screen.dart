@@ -189,7 +189,8 @@ class _ReportHistoryScreenState extends State<ReportHistoryScreen> {
   Widget build(BuildContext context) {
     final confirmed = _confirmedReports;
     final unconfirmed = _unconfirmedRows;
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: _kBg,
       appBar: AppBar(
         backgroundColor: _kBg,
@@ -339,6 +340,7 @@ class _ReportHistoryScreenState extends State<ReportHistoryScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

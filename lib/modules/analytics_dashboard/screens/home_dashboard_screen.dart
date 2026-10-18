@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' show max, min, pi;
 import 'package:flutter/material.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
@@ -935,9 +936,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     final calendarMotion = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero : const Duration(milliseconds: 320);
 
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
-      extendBody: true, 
+      extendBody: true,
       body: SafeArea(
         bottom: false,
         child: SingleChildScrollView(
@@ -1506,6 +1508,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       // shell). This screen no longer renders its own nav bar — see
       // NAVIGATION_REFACTOR.md for why the duplicate, per-page nav bar
       // was removed.
+      ),
     );
   }
 }

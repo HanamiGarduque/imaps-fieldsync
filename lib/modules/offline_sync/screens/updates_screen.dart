@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/models/user_profile.dart';
@@ -968,7 +969,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final hasPending = _pendingRows.isNotEmpty;
 
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       extendBody: true,
       body: Stack(
@@ -1457,6 +1459,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
       // shell). This screen no longer renders its own nav bar — see
       // NAVIGATION_REFACTOR.md for why the duplicate, per-page nav bar
       // was removed.
+      ),
     );
   }
 }

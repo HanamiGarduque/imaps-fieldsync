@@ -672,7 +672,8 @@ class SubmissionSuccessScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: FieldFormBody(
         header: const SizedBox(height: 40),
@@ -764,6 +765,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 import 'core/services/app_info_service.dart';
 import 'core/services/supabase_service.dart';
 import 'core/services/auth_service.dart';
@@ -11,6 +13,9 @@ import 'modules/auth_startup/services/secure_prefs_service.dart';
 import './modules/inspection/providers/inspection_provider.dart';
 import 'modules/auth_startup/screens/splash_screen.dart';
 import 'modules/auth_startup/widgets/debug_screenshot_toggle.dart';
+import 'modules/auth_startup/services/screen_protection_service.dart';
+import 'modules/auth_startup/services/screen_protection_observer.dart';
+import 'core/widgets/sensitive_screen.dart';
 import 'core/theme/insight_theme.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -41,7 +46,7 @@ Future<void> main() async {
   runApp(
     ChangeNotifierProvider(
       create: (_) => InspectionProvider(),
-      child: const MyApp(),
+      child: MyApp(authEvents: SupabaseService.client.auth.onAuthStateChange),
     ),
   );
 }
@@ -52,13 +57,39 @@ Future<void> main() async {
 // If that ever changes, this is where a uriLinkStream listener (e.g. via
 // app_links) routing to a password-reset screen would go back in.
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MyApp extends StatefulWidget {
+  const MyApp({super.key, this.authEvents});
+  final Stream<AuthState>? authEvents;
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final _protection = ScreenProtectionService.instance;
+  late final _protectionObserver = ScreenProtectionObserver(_protection);
+  StreamSubscription<AuthState>? _authPrivacySubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _authPrivacySubscription = widget.authEvents?.listen(
+      (_) => _protection.invalidateDocumentation(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _authPrivacySubscription?.cancel();
+    _protection.invalidateDocumentation();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
+      navigatorObservers: [_protectionObserver],
       title: 'iMAPS:FieldSync',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -78,12 +109,12 @@ class MyApp extends StatelessWidget {
         ),
       ),
       home: const SplashScreen(),
-      // Phase 3b (debug-only, see AUTH_SECURITY_MASTER_DOC.md and
-      // widgets/debug_screenshot_toggle.dart): DebugScreenshotToggle
-      // returns `child` completely unwrapped outside kDebugMode, so this
-      // line is inert in release/profile builds.
-      builder: (context, child) =>
-          DebugScreenshotToggle(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => ScreenProtectionHost(
+        child: DebugScreenshotToggle(
+          navigatorKey: navigatorKey,
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/models/report_models.dart';
 import '../../../core/services/report_submission_service.dart';
@@ -29,9 +30,8 @@ const _kCoral = InsightTheme.red;
 /// this device's own unsent queue so nothing is hidden and nothing is
 /// double-counted.
 ///
-/// Security: this summary screen stays screenshot-safe (it shows no secrets,
-/// tokens or auth data). The report DETAIL screen is wrapped in
-/// SensitiveScreen, consistent with the pre-existing Diagnostics behaviour.
+/// Security: pending report titles can contain applicant/personal information,
+/// so the summary is protected just like the history and detail screens.
 class ReportsSupportScreen extends StatefulWidget {
   const ReportsSupportScreen({
     super.key,
@@ -87,7 +87,8 @@ class _ReportsSupportScreenState extends State<ReportsSupportScreen> {
         .where((r) => r.queueState != ReportQueueState.sent)
         .toList(growable: false);
 
-    return Scaffold(
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: _kBg,
       body: SafeArea(
         child: Column(children: [
@@ -172,6 +173,7 @@ class _ReportsSupportScreenState extends State<ReportsSupportScreen> {
           ),
           )),
         ]),
+      ),
       ),
     );
   }

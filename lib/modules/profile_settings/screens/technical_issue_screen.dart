@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/models/report_models.dart';
 import '../../../core/services/app_info_service.dart';
@@ -87,7 +88,9 @@ class _TechnicalIssueScreenState extends State<TechnicalIssueScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => SensitiveScreen(child: _scaffold());
+
+  Widget _scaffold() => Scaffold(
     backgroundColor: InsightTheme.bg,
     appBar: AppBar(
       backgroundColor: InsightTheme.bg,
