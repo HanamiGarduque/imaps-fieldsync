@@ -68,7 +68,7 @@ class _SplashScreenState extends State<SplashScreen>
     spanning: FieldSyncEntranceTimeline.total,
   );
 
-  /// The login logo's reveal: hidden (its exact layout space reserved) until
+  /// The complete destination brand: hidden (its exact layout space reserved) until
   /// the pulse dissolves, fully shown once the sequence completes.
   late final Animation<double> _brandReveal = _EasedWindow(
     _seconds,
@@ -80,8 +80,15 @@ class _SplashScreenState extends State<SplashScreen>
   /// splices onto and the departure leaves from.
   final GlobalKey _logoBoxKey = GlobalKey(debugLabel: 'splash-logo-box');
 
-  /// The login's own brand mark, measured by the Page 3 route layer.
+  /// The resolved destination's artwork, measured by the shared route layer.
   final GlobalKey _loginBrandKey = GlobalKey(debugLabel: 'login-brand');
+  final GlobalKey _cinematicCanvasKey = GlobalKey(debugLabel: 'cinematic-canvas');
+  FieldSyncJourneyPath? _journey;
+
+  /// Presentation readiness is not authentication success. Only App Lock
+  /// consumes this gate, after the finished destination has actually painted.
+  final ValueNotifier<bool> _cinematicReady = ValueNotifier(false);
+  bool _readinessQueued = false;
 
   /// Flips the initialization card to its honest "still starting up" status
   /// after the app's established eight-second startup budget. That boundary
@@ -128,9 +135,12 @@ class _SplashScreenState extends State<SplashScreen>
   bool? _overlayDark;
   bool _homePushed = false;
 
-  /// Page 3's mounted subtree; one instance, built once — only its opacity
-  /// animates.
-  Widget? _loginLayer;
+  /// The resolved Login or App Lock subtree, built once; presentation never
+  /// invents a destination or eagerly builds the protected Home screen.
+  Widget? _destinationLayer;
+
+  bool get _lockResolved => _pendingProfile != null && _biometricLanding;
+  bool get _hasCinematicDestination => _loginResolved || _lockResolved;
 
   @override
   void initState() {
@@ -157,6 +167,7 @@ class _SplashScreenState extends State<SplashScreen>
     // No timer and no ticker may outlive the screen (the layout tests assert
     // no pending timers after teardown).
     _bootstrapSlowTimer?.cancel();
+    _cinematicReady.dispose();
     _clock.dispose();
     super.dispose();
   }
@@ -287,6 +298,12 @@ class _SplashScreenState extends State<SplashScreen>
       _pendingProfile = profile;
       _biometricLanding = biometric;
     });
+    // A late lock decision follows the same safe, settled landing as a late
+    // login decision. Never replay an already-missed departure or bypass lock.
+    if (biometric &&
+        _seconds.value > FieldSyncCinematicTimeline.departureStartSeconds) {
+      _skipRequested = true;
+    }
     _onClock();
   }
 
@@ -300,24 +317,27 @@ class _SplashScreenState extends State<SplashScreen>
       _finalizeSkip();
       return;
     }
-    if (_loginResolved) {
-      if (_loginLayer == null &&
-          t >= FieldSyncCinematicTimeline.mountStartSeconds) {
-        setState(_attachLoginLayer);
+    if (_hasCinematicDestination) {
+      // Lay out the resolved page invisibly before the crossing: its actual
+      // brand anchor is needed to author the one continuous route. This never
+      // builds Login for the lock branch, nor Home before a successful unlock.
+      if (_destinationLayer == null &&
+          t >= FieldSyncCinematicTimeline.departureStartSeconds) {
+        setState(_attachDestinationLayer);
       }
       if (!_finished &&
           t >= FieldSyncCinematicTimeline.barrierReleaseSeconds) {
         setState(() => _finished = true);
       }
+      if (_finished) _releasePresentationAfterFrame();
     } else if (_startupFailed) {
       if (!_finished &&
           t >= FieldSyncCinematicTimeline.barrierReleaseSeconds) {
         setState(() => _finished = true);
       }
     } else if (_pendingProfile != null) {
-      // Home (or the biometric lock standing in front of it) waits for the
-      // hold's end, so the completed logo is what leaves the splash; a slow
-      // decision past the hold hands over the moment it is known.
+      // Unprotected Home keeps its existing handoff at the hold's end. A
+      // protected launch instead takes the cinematic App Lock branch above.
       if (!_homePushed && t >= FieldSyncCinematicTimeline.holdEndSeconds) {
         _pushDestination();
       }
@@ -325,12 +345,56 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   /// Page 3 mounts as a layer of this very route — the cinematic never
-  /// changes screens, so there is no transition that could clip the route.
-  void _attachLoginLayer() {
-    _loginLayer = LoginScreen(
-      initialFailure: _landingFailure,
-      brandKey: _loginBrandKey,
-      brandReveal: _brandReveal,
+  /// changes routes, so no navigation transition can clip the shared stroke.
+  void _attachDestinationLayer() {
+    if (_destinationLayer != null) return;
+    _destinationLayer = _lockResolved
+        ? AppResumeLockScreen(
+            nextScreenBuilder: (_) => MainShellScreen(profile: _pendingProfile!),
+            brandKey: _loginBrandKey,
+            brandReveal: _brandReveal,
+            cinematicReady: _cinematicReady,
+          )
+        : LoginScreen(
+            initialFailure: _landingFailure,
+            brandKey: _loginBrandKey,
+            brandReveal: _brandReveal,
+          );
+  }
+
+  void _releasePresentationAfterFrame() {
+    if (!_lockResolved || _cinematicReady.value || _readinessQueued) return;
+    _readinessQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _readinessQueued = false;
+      if (!mounted || !_finished || !_lockResolved || _cinematicReady.value) return;
+      _cinematicReady.value = true;
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Read the untransformed layout boxes in the shared canvas coordinate
+  /// system. The retained path/metric is rebuilt only for a changed layout,
+  /// not on each tick or each painter reconstruction.
+  FieldSyncJourneyPath? _journeyFor(Size viewport) {
+    final stage = _cinematicCanvasKey.currentContext?.findRenderObject();
+    final box = _logoBoxKey.currentContext?.findRenderObject();
+    final brand = _loginBrandKey.currentContext?.findRenderObject();
+    if (stage is! RenderBox || box is! RenderBox || brand is! RenderBox ||
+        !stage.attached || !box.attached || !brand.attached ||
+        !box.hasSize || !brand.hasSize) {
+      return null;
+    }
+    final boxRect = box.localToGlobal(Offset.zero, ancestor: stage) & box.size;
+    final brandRect = brand.localToGlobal(Offset.zero, ancestor: stage) & brand.size;
+    if (boxRect.isEmpty || brandRect.isEmpty) return null;
+    final previous = _journey;
+    if (previous != null && previous.departureBox == boxRect &&
+        previous.brand == brandRect && previous.viewport == viewport) {
+      return previous;
+    }
+    return _journey = FieldSyncJourneyPath(
+      departureBox: boxRect, brand: brandRect, viewport: viewport,
     );
   }
 
@@ -359,25 +423,23 @@ class _SplashScreenState extends State<SplashScreen>
   void _finalizeSkip() {
     if (_finished || !_destinationKnown) return;
     setState(() {
-      if (_loginResolved) _attachLoginLayer();
+      if (_hasCinematicDestination) _attachDestinationLayer();
       _finished = true;
     });
-    if (_pendingProfile != null) {
+    if (_pendingProfile != null && !_biometricLanding) {
       _pushDestination();
       return;
     }
     _clock.stop();
     _clock.value = 1.0;
+    _releasePresentationAfterFrame();
   }
 
   void _pushDestination() {
     final profile = _pendingProfile;
-    if (profile == null || _homePushed || !mounted) return;
+    if (profile == null || _biometricLanding || _homePushed || !mounted) return;
     _homePushed = true;
-    final next = _biometricLanding
-        ? AppResumeLockScreen(
-            nextScreenBuilder: (_) => MainShellScreen(profile: profile))
-        : MainShellScreen(profile: profile);
+    final next = MainShellScreen(profile: profile);
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => next),
     );
@@ -390,7 +452,8 @@ class _SplashScreenState extends State<SplashScreen>
   /// exists (deduplicated: this runs per frame).
   void _syncSystemOverlay(double t) {
     final dark = _loginResolved &&
-        t >= FieldSyncCinematicTimeline.mountStartSeconds;
+        t >= (FieldSyncCinematicTimeline.mountStartSeconds +
+            FieldSyncCinematicTimeline.mountEndSeconds) / 2;
     if (dark == _overlayDark) return;
     _overlayDark = dark;
     SystemChrome.setSystemUIOverlayStyle(
@@ -420,8 +483,8 @@ class _SplashScreenState extends State<SplashScreen>
   /// The measured logo box. The approved entrance lives here — mounted from
   /// the first frame with the shared clock as its driver, so it owns no time
   /// of its own — Page 1's scene splices onto exactly this rect, and the
-  /// departure leaves from it: logo and leaving route are one subtree under
-  /// one transform and can never separate.
+  /// departure leaves from it. The overlay mirrors the logo's follow-the-head
+  /// transform, then paints one route across the destination surface change.
   Widget _logoStage(double logoSpan) => SizedBox(
     key: _logoBoxKey,
     width: logoSpan,
@@ -437,8 +500,10 @@ class _SplashScreenState extends State<SplashScreen>
             // hold, then push → follow → zoom-out while the journey leaves
             // for the login. It never engages for a Home or terminal launch —
             // that exit belongs to the login's own beat.
-            transform: _loginResolved
-                ? FieldSyncDepartureCamera.matrixAt(_seconds.value, boxSize)
+            transform: _hasCinematicDestination
+                ? FieldSyncDepartureCamera.matrixAt(_seconds.value, boxSize,
+                    followedTip: _journey == null ? null :
+                        _journey!.headAt(_seconds.value) - _journey!.departureBox.topLeft)
                 : Matrix4.identity(),
             child: child,
           ),
@@ -463,15 +528,8 @@ class _SplashScreenState extends State<SplashScreen>
                 onCompleted: _onEntranceCompleted,
               ),
             ),
-            // The journey's exit — box-local, box-locked.
-            CustomPaint(
-              size: Size.infinite,
-              isComplex: true,
-              painter: FieldSyncDepartureRoutePainter(
-                time: _seconds,
-                active: _loginResolved,
-              ),
-            ),
+            // The shared overlay owns the departure AND return head. Drawing
+            // a box-local departure here as well would duplicate that head.
           ]),
         );
       }),
@@ -549,19 +607,23 @@ class _SplashScreenState extends State<SplashScreen>
         animation: _seconds,
         builder: (context, child) {
           final t = _seconds.value;
+          final covered = _destinationLayer != null &&
+              t >= FieldSyncCinematicTimeline.mountEndSeconds;
           _syncSystemOverlay(t);
-          return Stack(fit: StackFit.expand, children: [
-            // Page 1 — the cinematic's own pre-roll, spliced onto the
-            // measured logo box.
-            FieldSyncCinematicStage(time: _seconds, boxKey: _logoBoxKey),
-            // Page 2 — the approved initialization page, verbatim.
-            child!,
-            // Page 3 — the login, mounted in place during the departure's
+          return Stack(key: _cinematicCanvasKey, fit: StackFit.expand, children: [
+            // Retain the measured layout, but never keep an invisible startup
+            // spinner and artwork painting/ticking behind the opaque page.
+            TickerMode(enabled: !covered, child: Opacity(opacity: covered ? 0 : 1,
+              child: Stack(fit: StackFit.expand, children: [
+                FieldSyncCinematicStage(time: _seconds, boxKey: _logoBoxKey),
+                child!,
+              ]))),
+            // Page 3 — the resolved Login or App Lock, during the departure's
             // tail and faded in as the frame settles on it. The route layer
             // above it owns the re-entry, the destination dot, the pulse and
             // the logo reveal. Until the sequence finishes the barrier below
             // keeps it inert.
-            if (_loginLayer != null) ...[
+            if (_destinationLayer != null) ...[
               ExcludeSemantics(
                 excluding: !_finished,
                 child: Opacity(
@@ -570,13 +632,17 @@ class _SplashScreenState extends State<SplashScreen>
                     FieldSyncCinematicTimeline.mountStartSeconds,
                     FieldSyncCinematicTimeline.mountEndSeconds,
                   ),
-                  child: _loginLayer,
+                  child: _destinationLayer,
                 ),
               ),
-              FieldSyncLoginRouteOverlay(
-                time: _seconds,
-                brandKey: _loginBrandKey,
-              ),
+              if (!_finished)
+                FieldSyncLoginRouteOverlay(
+                  time: _seconds,
+                  brandKey: _loginBrandKey,
+                  journeyFor: _journeyFor,
+                  onBlue: _lockResolved,
+                  splitSurface: _lockResolved && context.responsive.canSplitTwoPane,
+                ),
             ],
             // The startup barrier: until the sequence completes, any tap is
             // a skip request — it can move the timing, never the gate.
@@ -658,8 +724,8 @@ class LoginScreen extends StatefulWidget {
   /// the rect is stable.
   final Key? brandKey;
 
-  /// Reveal progress for the brand mark: 0 → hidden (its exact layout space
-  /// reserved), 1 → fully shown. Opacity/scale only; the form's layout never
+  /// Reveal progress for the complete brand group: 0 → hidden (its exact layout
+  /// space reserved), 1 → fully shown. Opacity only; the form's layout never
   /// moves. Null keeps the default fully-visible behavior for every other
   /// caller.
   final Animation<double>? brandReveal;
@@ -1267,25 +1333,37 @@ class _LoginScreenState extends State<LoginScreen> {
   /// column and nothing can push it: opening the keyboard, tapping between the
   /// two fields, or the auto-scroll that focus triggers all move the form
   /// underneath it while the brand stays exactly where it is.
-  /// The brand mark, with the startup cinematic's optional reveal driven by
-  /// the shared clock: hidden (its exact layout space reserved) until the
-  /// re-entered route arrives, then revealed by opacity/scale only — the
-  /// form's own layout never moves, and the measured rect the route was
-  /// guided to never changes.
-  Widget _brandMark() {
-    final mark = FieldSyncBrand(key: widget.brandKey, height: 56);
+  /// Reveal the existing artwork AND lettering together, without transforming
+  /// their measured anchor or hiding the separate connection-status indicator.
+  Widget _brandIdentity() {
+    final identity = Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        FieldSyncBrand(key: widget.brandKey, height: 56),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('iMAPS', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink3)),
+            Text('FieldSync', style: InsightTheme.urbanist(28, w: FontWeight.w800, c: InsightTheme.blue1)),
+          ],
+        ),
+      ],
+    );
     final reveal = widget.brandReveal;
-    if (reveal == null) return mark;
+    if (reveal == null) return identity;
     return AnimatedBuilder(
       animation: reveal,
       builder: (context, child) {
         final v = reveal.value.clamp(0.0, 1.0);
         return Opacity(
           opacity: v,
-          child: Transform.scale(scale: 0.92 + 0.08 * v, child: child),
+          child: ExcludeSemantics(excluding: v <= 0, child: child!),
         );
       },
-      child: mark,
+      child: identity,
     );
   }
 
@@ -1297,22 +1375,7 @@ class _LoginScreenState extends State<LoginScreen> {
       spacing: 12,
       runSpacing: 12,
       children: [
-        Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            _brandMark(),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('iMAPS', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink3)),
-                Text('FieldSync', style: InsightTheme.urbanist(28, w: FontWeight.w800, c: InsightTheme.blue1)),
-              ],
-            ),
-          ],
-        ),
+        _brandIdentity(),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(color: InsightTheme.surface,
@@ -1332,7 +1395,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    // A cinematic embedding owns the system bars until its surface arrives;
+    // merely laying out the hidden Login must not darken Page 2's icons.
+    if (widget.brandReveal == null) {
+      SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    }
 
     return SensitiveScreen(
       child: Scaffold(

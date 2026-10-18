@@ -139,6 +139,43 @@ void main() {
   });
 
   group('camera seam', () {
+    test('keeps the traveller in frame throughout search and approach', () {
+      final search = FieldSyncCinematicScenePainter.searchPath
+          .computeMetrics().first;
+      final route = FieldSyncLogoGeometry.route.computeMetrics().first;
+      final length = search.length + route.length;
+      final misses = <String>[];
+      for (final size in const [
+        Size(320, 568), Size(360, 640), Size(390, 844),
+        Size(430, 932), Size(844, 390), Size(1280, 800),
+        // The integrated splash removes 24 px system padding at each edge.
+        Size(320, 520), Size(844, 342),
+      ]) {
+        final visible = (Offset.zero & size).deflate(16);
+        for (var frame = 72; frame <= 316; frame++) {
+          final t = frame / 60;
+          final distance =
+              FieldSyncCinematicScenePainter.tipFractionAt(t) * length;
+          final head = distance <= search.length
+              ? search.getTangentForOffset(distance)!.position
+              : route.getTangentForOffset(
+                  (distance - search.length).clamp(0, route.length))!.position;
+          final camera = FieldSyncCinematicScenePainter.cameraAt(t);
+          final screen =
+              FieldSyncEntranceCamera.screenAnchorOf(size, camera.anchorT) +
+              (head - camera.centre) *
+                  (FieldSyncEntranceCamera.viewportFit(size) * camera.zoom);
+          if (!visible.contains(screen)) {
+            misses.add('$size t=${t.toStringAsFixed(3)} head=$head '
+                'camera=${camera.centre} screen=$screen');
+          }
+        }
+      }
+      expect(misses, isEmpty,
+          reason: '${misses.length} off-frame samples; '
+              '${misses.take(6).join('; ')}');
+    });
+
     test('lands exactly on the approved painter\'s handoff camera', () {
       final at = FieldSyncCinematicScenePainter.cameraAt;
       final landed = at(seam);
@@ -215,6 +252,58 @@ void main() {
   });
 
   group('search path', () {
+    test('follows the approved green direction through the inner channels', () {
+      final path = FieldSyncCinematicScenePainter.searchPath
+          .computeMetrics().first;
+      expect((path.getTangentForOffset(0)!.position - const Offset(629, 974))
+          .distance, lessThan(20), reason: 'start at the drawn lower-right end');
+      var distance = 0.0;
+      for (final checkpoint in const [
+        Offset(721, 689), // inner loop crown
+        Offset(641, 752), // descend its left side
+        Offset(409, 970), // lower bends, travelling west
+        Offset(548, 642), // return north through the middle corridor
+        Offset(326, 852), // wrap into the left channel
+        Offset(394, 709.5), // C1 join, then the official route reaches the dot
+      ]) {
+        var found = false;
+        while (distance <= path.length) {
+          if ((path.getTangentForOffset(distance)!.position - checkpoint)
+              .distance < 22) {
+            found = true;
+            break;
+          }
+          distance += 0.5;
+        }
+        expect(found, isTrue, reason: 'missing/out-of-order green checkpoint '
+            '$checkpoint');
+      }
+    });
+
+    test('full search stroke and glow envelope stay out of artwork fills', () {
+      final metric = FieldSyncCinematicScenePainter.searchPath
+          .computeMetrics().first;
+      final fills = [...FieldSyncLogoGeometry.fingerprints,
+        ...FieldSyncLogoGeometry.wordmark];
+      const eye = Offset(FieldSyncLogoGeometry.pinEyeX,
+          FieldSyncLogoGeometry.pinEyeY);
+      final collisions = <String>[];
+      for (var d = 0.0; d <= metric.length; d += 0.75) {
+        final centre = metric.getTangentForOffset(d)!.position;
+        // Sample a complete 6.5u envelope, including rounded end caps.
+        for (var i = 0; i < 16; i++) {
+          final angle = i * math.pi / 8;
+          final p = centre + Offset(math.cos(angle), math.sin(angle)) * 6.5;
+          if (fills.any((fill) => fill.contains(p)) ||
+              (p - eye).distance < FieldSyncLogoGeometry.pinEyeR) {
+            collisions.add('d=$d centre=$centre envelope=$p');
+            break;
+          }
+        }
+      }
+      expect(collisions, isEmpty, reason: collisions.take(5).join('; '));
+    });
+
     test('turns at least four times, then joins the route with C1 contact',
         () {
       final metric = FieldSyncCinematicScenePainter.searchPath
@@ -301,8 +390,9 @@ void main() {
           reason: 'dot should still be off-frame at $size',
         );
 
-        // Through the arrival hold it is framed dead centre.
-        for (final t in [5.05, 5.16, 5.27]) {
+        // Keep following the approach before the arrow appears: the earlier
+        // 5.05 hold hid the travelling line. Arrival and the seam do not move.
+        for (final t in [5.20, 5.24, 5.27]) {
           final screen = dotScreenPoint(t, size);
           expect((screen - middle).distance, lessThan(0.01), reason: 't=$t');
         }

@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Android 12+ (API 31) system splash: same brand blue as the launch
-         window and Page 1's field. The launcher icon shown by the OS is
-         left at its platform default — no additional branded screen. -->
+         window and Page 1's field, plus the official white fingerprint
+         symbol (kit PNG, transparent, padded into the central 2/3 safe
+         circle). The icon background is the same blue, so the system's
+         circular mask is invisible. -->
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
         <item name="android:windowSplashScreenBackground">@color/launch_blue</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_fieldsync</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/launch_blue</item>
     </style>
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@color/launch_blue</item>

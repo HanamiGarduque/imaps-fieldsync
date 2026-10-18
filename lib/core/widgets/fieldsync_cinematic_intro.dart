@@ -70,6 +70,10 @@ class FieldSyncCinematicTimeline {
   static const double routeGhostOutStartSeconds = seamSeconds;
   static const double routeGhostOutEndSeconds = 6.55;
 
+  /// Only the leftover search corridor yields earlier; approved ridges,
+  /// arrival and entrance pulses retain their original dissolve window.
+  static const double searchTailOutEndSeconds = 6.15;
+
   // ── Page 2: the approved entrance (wired in T5; boundaries only here) ─────
 
   /// The approved formation has fully settled (entrance-local 5.15).
@@ -88,6 +92,7 @@ class FieldSyncCinematicTimeline {
   static const double mountStartSeconds = 10.85;
   static const double mountEndSeconds = 11.15;
   static const double travelEndSeconds = 11.95;
+  static const double edgeTurnSeconds = 11.00;
   static const double revealEndSeconds = totalSeconds;
 
   /// Chrome (status card, wordmark texts) fades in right at the seam — the
@@ -101,12 +106,12 @@ class FieldSyncCinematicTimeline {
   static const double loginDotStartSeconds = travelEndSeconds; // 11.95
   static const double loginDotPopEndSeconds = 12.20;
 
-  /// The water-drop pulse: two rings in the approved arrival's own visual
-  /// language — same gap, duration and easing as the site-dot rings, at the
-  /// login's own scale.
+  /// Two rings in the approved arrival's visual language, with its gap and
+  /// easing. Only the destination duration is shorter, so both rings finish
+  /// before the complete brand group reveals. Page 1's pulse is unchanged.
   static const double loginPulseStartSeconds = 12.05;
   static const double loginPulseGapSeconds = pulseGapSeconds;
-  static const double loginPulseDurationSeconds = pulseDurationSeconds;
+  static const double loginPulseDurationSeconds = 0.60;
 
   /// The re-entered route dissolves once it has arrived …
   static const double loginLineFadeStartSeconds = 12.15;
@@ -115,20 +120,20 @@ class FieldSyncCinematicTimeline {
   /// … and the destination dot dissolves as the official logo takes its
   /// place.
   static const double loginDotFadeStartSeconds = 12.45;
-  static const double loginDotFadeEndSeconds = 12.95;
+  static const double loginDotFadeEndSeconds = 12.78;
 
-  /// The login's real brand mark fades in (opacity/scale only) where the
-  /// pulse was: the same measured rect the route was guided to.
-  static const double brandRevealStartSeconds = 12.55;
-  static const double brandRevealEndSeconds = 13.15;
+  /// The destination's complete brand group fades in (opacity only) after the
+  /// pulse, with the artwork at the same measured anchor the route reached.
+  static const double brandRevealStartSeconds = 12.80;
+  static const double brandRevealEndSeconds = 13.30;
 
   /// Interaction is allowed only once the reveal has finished; until then
   /// the barrier consumes taps (a tap is a skip request).
-  static const double barrierReleaseSeconds = brandRevealEndSeconds;
+  static const double barrierReleaseSeconds = totalSeconds;
 
-  /// The re-entered stroke's colour has fully settled on the official navy by
-  /// this second — well before the pipe crosses the right edge on screen.
-  static const double loginStrokeColourEndSeconds = 11.65;
+  /// The stroke settles on navy over light surfaces during the transition.
+  /// App Lock retains white over blue; neither replaces the authored route.
+  static const double loginStrokeColourEndSeconds = 11.45;
 }
 
 /// The driven, navigation-free Page 1 stage.
@@ -232,47 +237,52 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
   static const double _zoomEstablish = 2.0;
   static const double _zoomEnter = 2.4;
   static const double _zoomArrival = 7.2;
-  static const Offset _establishCentre = Offset(560, 700);
-  static const Offset _reframeA = Offset(700, 800);
-  static const Offset _reframeB = Offset(500, 700);
+  static final Offset _establishCentre =
+      _waypoints.first - const Offset(0, 500);
+  // Small route-relative leads keep the traveller inside the actual channels.
+  static const Offset _reframeA = Offset(-24, -8);
+  static const Offset _reframeB = Offset(8, 0);
   static const double _enterBlendStart = 0.55;
-  static const double _arrivalHoldSeconds = 5.05;
-  static const double _lookAhead = 0.04;
+  static const double _arrivalHoldSeconds =
+      FieldSyncCinematicTimeline.arrowStartSeconds;
+  static const double _lookAhead = 14; // SVG units, independent of route length
 
   // ── authored search corridor (viewBox units) ──────────────────────────────
-  // A serpentine crossing the fingerprint field with six deliberate turns —
-  // left, right, left, right, left, right — then an exact C1 join onto the
-  // artwork's own navigation route (the same route the approved entrance
-  // rides), which carries the line to the site dot. The join point and the
-  // join direction are read from the real route metric at prepare time, so
-  // the join cannot drift from the official geometry.
+  // User-drawn green direction: lower-right entrance -> inner loop -> lower
+  // bends -> left channel -> official route -> red dot. Guide points were
+  // centred in those same SVG gaps with the full stroke/glow envelope checked.
+  // They shape one continuous spline, not separate animation stops. The final
+  // position/tangent still come from the untouched official route metric.
   static const List<Offset> _waypoints = <Offset>[
-    Offset(596, 1260), // below the visible bottom edge
-    Offset(736, 1076),
-    Offset(606, 946),
-    Offset(806, 872),
-    Offset(614, 762),
-    Offset(764, 628),
-    Offset(588, 682),
-    Offset(368, 900),
+    Offset(629.500, 974.500), Offset(649.885, 956.115), Offset(672.027, 941.973),
+    Offset(694.755, 929.245), Offset(715.018, 911.982), Offset(720.500, 886.252),
+    Offset(735.110, 864.890), Offset(754.374, 846.626), Offset(772.051, 825.949),
+    Offset(785.500, 803.519), Offset(794.500, 779.833), Offset(797.500, 753.076),
+    Offset(795.500, 728.147), Offset(786.058, 706.058), Offset(764.916, 689.500),
+    Offset(743.644, 681.500), Offset(719.544, 679.500), Offset(692.786, 682.500),
+    Offset(670.514, 691.500), Offset(650.500, 708.858), Offset(637.054, 728.946),
+    Offset(633.500, 752.988), Offset(636.500, 779.746), Offset(645.500, 802.603),
+    Offset(654.766, 826.766), Offset(656.500, 854.047), Offset(644.500, 871.319),
+    Offset(623.728, 882.272), Offset(600.379, 893.500), Offset(576.107, 902.500),
+    Offset(552.249, 912.500), Offset(529.302, 924.698), Offset(509.090, 943.500),
+    Offset(486.889, 957.500), Offset(466.097, 974.903), Offset(439.855, 977.855),
+    Offset(414.901, 970.500), Offset(406.287, 952.713), Offset(421.500, 931.014),
+    Offset(435.500, 912.328), Offset(451.178, 890.822), Offset(470.489, 877.500),
+    Offset(493.220, 864.780), Offset(516.534, 853.466), Offset(533.500, 834.837),
+    Offset(553.500, 820.394), Offset(558.500, 794.465), Offset(558.576, 770.576),
+    Offset(558.500, 745.920), Offset(560.500, 719.577), Offset(567.500, 694.477),
+    Offset(572.413, 669.413), Offset(557.518, 650.500), Offset(536.418, 639.500),
+    Offset(512.835, 650.165), Offset(501.643, 670.357), Offset(490.500, 693.741),
+    Offset(487.965, 719.035), Offset(478.500, 743.114), Offset(471.702, 768.298),
+    Offset(460.509, 790.491), Offset(444.610, 804.390), Offset(423.455, 819.500),
+    Offset(399.861, 830.139), Offset(380.500, 847.190), Offset(356.538, 856.500),
+    Offset(329.113, 855.113), Offset(318.506, 831.506), Offset(322.272, 806.728),
+    Offset(332.879, 783.121), Offset(354.728, 768.272), Offset(374.406, 749.594),
+    Offset(387.500, 727.018),
   ];
 
-  /// Global windows in which the tip traverses each leg: the eight search
-  /// legs, then the artwork route itself. Speeds vary deliberately — slow in
-  /// the tight turns, opening up on the long west sweep and the final ride
-  /// home. The first window starts at
-  /// [FieldSyncCinematicTimeline.settleEndSeconds].
-  static const List<double> _legEndSeconds = <double>[
-    0.95,
-    1.42,
-    2.00,
-    2.55,
-    3.05,
-    3.55,
-    4.20,
-    4.72,
-    FieldSyncCinematicTimeline.arriveSeconds,
-  ];
+  // Preserve the existing join/arrival beats, without pausing at guide points.
+  static const double _routeJoinSeconds = 4.72;
 
   // ── arrival-mirror styles (kept in step with the approved painter) ────────
   static const double _ridgeTerrainAlpha = 0.10; // painter's ridge ghost level
@@ -294,8 +304,6 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
   static double _searchLength = 0;
   static double _routeLength = 0;
   static double _graphLength = 0;
-  static final List<double> _legLengths = <double>[];
-  static final List<double> _legStarts = <double>[];
 
   /// The approved painter's seam state, resolved once — the single source of
   /// truth this page lands on.
@@ -323,9 +331,6 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
 
     final points = <Offset>[..._waypoints, join];
     final path = Path()..moveTo(points.first.dx, points.first.dy);
-    _legLengths.clear();
-    _legStarts.clear();
-    var traversed = 0.0;
     for (var i = 0; i < points.length - 1; i++) {
       final from = points[i];
       final to = points[i + 1];
@@ -345,27 +350,11 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
         to.dx,
         to.dy,
       );
-      final leg = Path()
-        ..moveTo(from.dx, from.dy)
-        ..cubicTo(
-          control1.dx,
-          control1.dy,
-          control2.dx,
-          control2.dy,
-          to.dx,
-          to.dy,
-        );
-      final length = leg.computeMetrics().first.length;
-      _legStarts.add(traversed);
-      _legLengths.add(length);
-      traversed += length;
     }
-    _searchLength = traversed;
-    _legStarts.add(_searchLength);
-    _legLengths.add(_routeLength);
-    _graphLength = _searchLength + _routeLength;
     _searchPath = path;
     _searchMetric = path.computeMetrics().first;
+    _searchLength = _searchMetric!.length;
+    _graphLength = _searchLength + _routeLength;
   }
 
   static double _win(double t, double a, double b) =>
@@ -374,24 +363,17 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
   static double _ease(Curve curve, double t, double a, double b) =>
       curve.transform(_win(t, a, b));
 
-  /// Fraction (0..1) of the whole authored graph — search legs, then the
-  /// artwork route — that the tip has traversed at global second [t]. Each
-  /// leg eases in and out of its turn; the schedule is monotone and clamped.
+  /// One uninterrupted search traversal, then the official route's existing
+  /// final ride. Guide-point density never creates pauses or changes duration.
   static double tipFractionAt(double t) {
     _prepare();
     if (t <= FieldSyncCinematicTimeline.settleEndSeconds) return 0;
-    var legStart = FieldSyncCinematicTimeline.settleEndSeconds;
-    for (var i = 0; i < _legEndSeconds.length; i++) {
-      final legEnd = _legEndSeconds[i];
-      if (t < legEnd) {
-        final e = Curves.easeInOutSine.transform(
-          ((t - legStart) / (legEnd - legStart)).clamp(0.0, 1.0),
-        );
-        return (_legStarts[i] + _legLengths[i] * e) / _graphLength;
-      }
-      legStart = legEnd;
+    if (t < _routeJoinSeconds) {
+      return _searchLength / _graphLength * _ease(Curves.easeInOutSine, t,
+          FieldSyncCinematicTimeline.settleEndSeconds, _routeJoinSeconds);
     }
-    return 1.0;
+    return (_searchLength + _routeLength * _ease(Curves.easeInOutSine, t,
+        _routeJoinSeconds, FieldSyncCinematicTimeline.arriveSeconds)) / _graphLength;
   }
 
   static Offset _graphPointAt(double fraction) {
@@ -458,7 +440,7 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
 
   static Offset _centreAt(double t) {
     final follow = _graphPointAt(
-      math.min(1.0, tipFractionAt(t) + _lookAhead),
+      math.min(1.0, tipFractionAt(t) + _lookAhead / _graphLength),
     );
     if (t < _enterBlendStart) return _establishCentre;
     if (t < FieldSyncCinematicTimeline.enterEndSeconds) {
@@ -474,20 +456,19 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
       )!;
     }
     if (t < FieldSyncCinematicTimeline.searchEndSeconds) {
-      // The two gentle reframes: the frame leads the line into the east
-      // corridor, then pre-views the west sweep and the join.
+      // Two gentle reframes lead the channel bends without leaving the tip.
       final a = _ease(Curves.easeInOutSine, t, 1.95, 2.65);
       final b = _ease(Curves.easeInOutSine, t, 3.25, 3.95);
-      return Offset.lerp(Offset.lerp(follow, _reframeA, a)!, _reframeB, b)!;
+      return follow + Offset.lerp(_reframeA * a, _reframeB, b)!;
     }
     if (t < _arrivalHoldSeconds) {
       return Offset.lerp(
-        _reframeB,
+        follow + _reframeB,
         _siteDot,
         _ease(
           Curves.easeInOutSine,
           t,
-          FieldSyncCinematicTimeline.searchEndSeconds,
+          FieldSyncCinematicTimeline.puckOutStartSeconds,
           _arrivalHoldSeconds,
         ),
       )!;
@@ -593,7 +574,10 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
           );
       if (fade > 0.004) {
         _paintTerrain(canvas, t, fade: fade);
-        _paintSearchTail(canvas, fade);
+        _paintSearchTail(canvas, 1 - _ease(
+          Curves.easeInOutSine, t, FieldSyncCinematicTimeline.seamSeconds,
+          FieldSyncCinematicTimeline.searchTailOutEndSeconds,
+        ));
       }
     }
 
@@ -646,7 +630,7 @@ class FieldSyncCinematicScenePainter extends CustomPainter {
     final alpha = fade.clamp(0.0, 1.0);
     if (alpha <= 0.004) return;
     canvas.drawPath(
-      _searchMetric!.extractPath(0, _searchLength),
+      _searchPath!,
       Paint()
         ..color = Colors.white.withValues(alpha: alpha)
         ..style = PaintingStyle.stroke
@@ -867,10 +851,11 @@ class FieldSyncDepartureCamera {
   static const double _zoomIn = 1.28;
 
   /// The exit zoom, past 1.0 toward wide, releasing the route off the edge.
-  static const double _zoomOut = 0.94;
+  static const double _zoomOut = 1.0;
 
   /// The push ends here; the zoom-out owns the rest of the departure.
-  static const double _pushEndSeconds = 10.55;
+  static const double _pushEndSeconds = 10.20;
+  static const double settleSeconds = 10.65;
 
   static double zoomAt(double t) {
     if (t <= FieldSyncCinematicTimeline.departureStartSeconds) return 1;
@@ -890,7 +875,7 @@ class FieldSyncDepartureCamera {
               Curves.easeInOutSine,
               t,
               _pushEndSeconds,
-              FieldSyncCinematicTimeline.departureEndSeconds,
+              settleSeconds,
             );
   }
 
@@ -910,10 +895,10 @@ class FieldSyncDepartureCamera {
   /// The departure transform for the box subtree at [t]: identity through the
   /// hold, then a scale about the moving tip. Exactly [Matrix4.identity] at
   /// [FieldSyncCinematicTimeline.departureStartSeconds] — no translation jump.
-  static Matrix4 matrixAt(double t, Size boxSize) {
+  static Matrix4 matrixAt(double t, Size boxSize, {Offset? followedTip}) {
     final k = zoomAt(t);
     if (k == 1) return Matrix4.identity();
-    final tip = tipLocalAt(t, boxSize);
+    final tip = followedTip ?? tipLocalAt(t, boxSize);
     return Matrix4.identity()
       ..translateByDouble(tip.dx, tip.dy, 0, 1)
       ..scaleByDouble(k, k, 1, 1)
@@ -1078,13 +1063,106 @@ class FieldSyncDepartureRoutePainter extends CustomPainter {
       oldDelegate.time != time || oldDelegate.active != active;
 }
 
+/// One measured, single-contour journey from the official route's own end,
+/// through a short off-screen turn, to either destination's real brand anchor.
+/// Geometry and metrics are retained until the host's layout changes.
+class FieldSyncJourneyPath {
+  FieldSyncJourneyPath._(this.departureBox, this.brand, this.viewport, this.path,
+      this.metric, this.exitDistance, this.returnDistance);
+
+  final Rect departureBox;
+  final Rect brand;
+  final Size viewport;
+  final Path path;
+  final ui.PathMetric metric;
+  final double exitDistance;
+  final double returnDistance;
+
+  factory FieldSyncJourneyPath({required Rect departureBox, required Rect brand,
+      required Size viewport}) {
+    final settled = FieldSyncDepartureCamera.settled;
+    final anchor = FieldSyncEntranceCamera.screenAnchorOf(
+      departureBox.size, settled.anchorT,
+    );
+    final q = FieldSyncEntranceCamera.viewportFit(departureBox.size) * settled.zoom;
+    final mapping = Matrix4.identity()
+      ..translateByDouble(departureBox.left + anchor.dx,
+          departureBox.top + anchor.dy, 0, 1)
+      ..scaleByDouble(q, q, 1, 1)
+      ..translateByDouble(-settled.centre.dx, -settled.centre.dy, 0, 1);
+    final tail = FieldSyncDepartureRoutePainter.tailPath
+        .transform(mapping.storage).computeMetrics().first;
+    final start = tail.getTangentForOffset(0)!.position;
+    // Keep the approved departure's first bend and exact contact direction.
+    final prefix = math.min(tail.length * 0.18,
+        math.max(8.0, (viewport.width - start.dx) * 0.22));
+    final path = tail.extractPath(0, prefix);
+    final contact = tail.getTangentForOffset(prefix)!;
+    final handle = ((viewport.width - contact.position.dx) / 3).clamp(8.0, 96.0);
+    // Derive both crossings from the destination layout, not independent y
+    // constants. The lock's white route stays inside its existing blue header.
+    final inset = math.min(32.0, viewport.height / 2);
+    final y = (brand.center.dy + 96).clamp(inset, viewport.height - inset);
+    final exit = Offset(viewport.width, y);
+    final c1 = contact.position + contact.vector * handle;
+    path.cubicTo(c1.dx, c1.dy, exit.dx - handle, exit.dy, exit.dx, exit.dy);
+    final exitDistance = path.computeMetrics().first.length;
+    // A real, tangent-continuous turn, just 1.5 px outside the viewport. The
+    // head's ring straddles the edge; no teleport, reset or long hidden travel.
+    final returning = exit - const Offset(0, 2);
+    path.cubicTo(exit.dx + 2, exit.dy, returning.dx + 2, returning.dy,
+        returning.dx, returning.dy);
+    final returnDistance = path.computeMetrics().first.length;
+    final target = FieldSyncLoginRoutePainter.targetFor(brand);
+    final incomingHandle = ((returning.dx - target.dx) / 3).clamp(8.0, 120.0);
+    path.cubicTo(returning.dx - incomingHandle, returning.dy,
+        target.dx + incomingHandle, target.dy + 64, target.dx, target.dy);
+    return FieldSyncJourneyPath._(departureBox, brand, viewport, path,
+        path.computeMetrics().first, exitDistance, returnDistance);
+  }
+
+  /// One monotonically advancing arc distance. The two Hermite spans share
+  /// the same non-zero velocity at the turn; neither page owns a fresh clock.
+  double distanceAt(double t) {
+    const start = FieldSyncCinematicTimeline.departureStartSeconds;
+    const turn = FieldSyncCinematicTimeline.edgeTurnSeconds;
+    const end = FieldSyncCinematicTimeline.travelEndSeconds;
+    if (t <= start) return 0;
+    if (t >= end) return metric.length;
+    final atTurn = (exitDistance + returnDistance) / 2;
+    final velocity = 2 * math.min(atTurn / (turn - start),
+        (metric.length - atTurn) / (end - turn));
+    final first = t <= turn;
+    final duration = first ? turn - start : end - turn;
+    final u = (t - (first ? start : turn)) / duration;
+    final u2 = u * u;
+    final u3 = u2 * u;
+    final blend = 3 * u2 - 2 * u3;
+    return first
+        ? blend * atTurn + (u3 - u2) * duration * velocity
+        : atTurn + blend * (metric.length - atTurn) +
+            (u3 - 2 * u2 + u) * duration * velocity;
+  }
+
+  double progressAt(double t) => distanceAt(t) / metric.length;
+  Offset headAt(double t) => metric.getTangentForOffset(distanceAt(t))!.position;
+
+  /// The back of the SAME trail advances off Page 2 as the new surface comes
+  /// in. Once opaque, only the returning segment remains over the form/header.
+  double trailStartAt(double t) => math.min(distanceAt(t), returnDistance *
+      FieldSyncCinematicScenePainter._ease(Curves.easeInOutSine, t,
+        FieldSyncCinematicTimeline.mountStartSeconds,
+        FieldSyncCinematicTimeline.mountEndSeconds));
+}
+
 /// Page 3's route: the journey re-entering from the right edge of the login
 /// page, the stroke easing from the pages' white to the official navy on the
 /// light surface, arriving at the measured login logo, dropping the red
 /// destination dot, and pulsing it like water before the logo takes its
 /// place. Screen space: the login's layout is measured, never assumed.
 class FieldSyncLoginRoutePainter extends CustomPainter {
-  FieldSyncLoginRoutePainter({required this.time, this.brandRect})
+  FieldSyncLoginRoutePainter({required this.time, this.brandRect,
+    this.journeyFor, this.onBlue = false, this.splitSurface = false})
     : super(repaint: time);
 
   /// Global cinematic seconds.
@@ -1094,6 +1172,12 @@ class FieldSyncLoginRoutePainter extends CustomPainter {
   /// keeps its exact layout space while hidden). Null → nothing to aim at;
   /// the painter draws nothing.
   final Rect? Function()? brandRect;
+
+  /// The host retains one layout-derived path across both pages. Null keeps
+  /// the standalone destination painter's existing contract.
+  final FieldSyncJourneyPath? Function(Size)? journeyFor;
+  final bool onBlue;
+  final bool splitSurface;
 
   static const Color _siteRed = FieldSyncCinematicScenePainter._siteRed;
   static const Color _kitNavy = FieldSyncCinematicScenePainter._kitNavy;
@@ -1148,7 +1232,7 @@ class FieldSyncLoginRoutePainter extends CustomPainter {
     FieldSyncCinematicScenePainter._ease(
       Curves.easeInOutSine,
       t,
-      FieldSyncCinematicTimeline.departureEndSeconds,
+      FieldSyncCinematicTimeline.mountStartSeconds,
       FieldSyncCinematicTimeline.loginStrokeColourEndSeconds,
     ),
   )!;
@@ -1160,11 +1244,21 @@ class FieldSyncLoginRoutePainter extends CustomPainter {
     if (brand == null || brand.isEmpty) return;
     final t = time.value;
     final target = targetFor(brand);
-    final colour = strokeColourAt(t);
+    final colour = onBlue ? Colors.white : strokeColourAt(t);
+    // App Lock's existing wide layout is blue on the left, white on the
+    // right. A hard shader boundary changes only ink contrast, not the path,
+    // trail or head; there is still exactly one draw of each shape.
+    Paint routeInk(double alpha) => onBlue && splitSurface
+        ? (Paint()..shader = ui.Gradient.linear(Offset.zero, Offset(size.width, 0),
+            [Colors.white.withValues(alpha: alpha),
+             strokeColourAt(t).withValues(alpha: alpha)], const [0.5, 0.5]))
+        : (Paint()..color = colour.withValues(alpha: alpha));
+    final journey = journeyFor?.call(size);
+    if (journeyFor != null && journey == null) return;
 
     // The re-entered route: drawn to exactly the tip's own arc position,
     // dissolving once it has arrived.
-    final p = progressAt(t);
+    final p = journey?.progressAt(t) ?? progressAt(t);
     final lineAlpha =
         1 -
         FieldSyncCinematicScenePainter._ease(
@@ -1174,30 +1268,44 @@ class FieldSyncLoginRoutePainter extends CustomPainter {
           FieldSyncCinematicTimeline.loginLineFadeEndSeconds,
         );
     if (p > 0 && lineAlpha > 0.004) {
-      final metric = pathFor(brand, size).computeMetrics().first;
+      final metric = journey?.metric ?? pathFor(brand, size).computeMetrics().first;
       final at = p * metric.length;
+      final q = journey == null ? 1.0 :
+          FieldSyncEntranceCamera.viewportFit(journey.departureBox.size);
+      final width = journey == null ? lineWidth :
+          ui.lerpDouble(FieldSyncLogoGeometry.routeStrokeWidth * q, lineWidth, p)!;
+      canvas.save();
+      if (journey != null && t < FieldSyncDepartureCamera.settleSeconds) {
+        final box = journey.departureBox;
+        canvas.translate(box.left, box.top);
+        canvas.transform(FieldSyncDepartureCamera.matrixAt(t, box.size,
+          followedTip: journey.headAt(t) - box.topLeft).storage);
+        canvas.translate(-box.left, -box.top);
+      }
       canvas.drawPath(
-        metric.extractPath(0, at),
-        Paint()
-          ..color = colour.withValues(alpha: lineAlpha)
+        metric.extractPath(journey?.trailStartAt(t) ?? 0, at),
+        routeInk(lineAlpha)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = lineWidth
+          ..strokeWidth = width
           ..strokeCap = StrokeCap.round,
       );
-      final head = metric.getTangentForOffset(at)!.position;
-      canvas.drawCircle(
-        head,
-        3.0,
-        Paint()..color = colour.withValues(alpha: lineAlpha),
-      );
-      canvas.drawCircle(
-        head,
-        4.6,
-        Paint()
-          ..color = colour.withValues(alpha: 0.45 * lineAlpha)
+      // One head for the whole journey, yielding to the destination dot on
+      // arrival. Its size/stroke evolve continuously, never a second puck.
+      if (journey == null || t < FieldSyncCinematicTimeline.travelEndSeconds) {
+        final head = metric.getTangentForOffset(at)!.position;
+        final radius = journey == null ? 3.0 : ui.lerpDouble(2.9 * q, 3, p)!;
+        final ring = journey == null ? 4.6 : ui.lerpDouble(4.4 * q, 4.6, p)!;
+        canvas.drawCircle(head, radius,
+          routeInk(lineAlpha));
+        canvas.drawCircle(head, ring, routeInk(0.45 * lineAlpha)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.0,
-      );
+          ..strokeWidth = journey == null ? 1 : ui.lerpDouble(0.75 * q, 1, p)!);
+        if (journey != null) {
+          canvas.drawCircle(head, ui.lerpDouble(1.15 * q, 1, p)!,
+            Paint()..color = _kitNavy.withValues(alpha: lineAlpha));
+        }
+      }
+      canvas.restore();
     }
 
     // The red destination dot, popping on the approved site-dot shapes …
@@ -1258,7 +1366,9 @@ class FieldSyncLoginRoutePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant FieldSyncLoginRoutePainter oldDelegate) =>
-      oldDelegate.time != time || oldDelegate.brandRect != brandRect;
+      oldDelegate.time != time || oldDelegate.brandRect != brandRect ||
+      oldDelegate.journeyFor != journeyFor || oldDelegate.onBlue != onBlue ||
+      oldDelegate.splitSurface != splitSurface;
 }
 
 /// Page 3's route layer, above the login. Pointer-transparent by design: the
@@ -1270,6 +1380,9 @@ class FieldSyncLoginRouteOverlay extends StatefulWidget {
     super.key,
     required this.time,
     this.brandKey,
+    this.journeyFor,
+    this.onBlue = false,
+    this.splitSurface = false,
   });
 
   /// Global cinematic seconds.
@@ -1278,6 +1391,9 @@ class FieldSyncLoginRouteOverlay extends StatefulWidget {
   /// Key on the login logo (LoginScreen's `brandKey`), measured in this
   /// layer's own space.
   final GlobalKey? brandKey;
+  final FieldSyncJourneyPath? Function(Size)? journeyFor;
+  final bool onBlue;
+  final bool splitSurface;
 
   @override
   State<FieldSyncLoginRouteOverlay> createState() =>
@@ -1311,6 +1427,9 @@ class _FieldSyncLoginRouteOverlayState
           painter: FieldSyncLoginRoutePainter(
             time: widget.time,
             brandRect: widget.brandKey == null ? null : _brandRect,
+            journeyFor: widget.journeyFor,
+            onBlue: widget.onBlue,
+            splitSurface: widget.splitSurface,
           ),
         ),
       ),

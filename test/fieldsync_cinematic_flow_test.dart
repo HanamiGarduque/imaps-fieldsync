@@ -48,9 +48,9 @@ void main() {
         FieldSyncCinematicTimeline.loginLineFadeStartSeconds,
         FieldSyncCinematicTimeline.loginDotPopEndSeconds,
         FieldSyncCinematicTimeline.loginDotFadeStartSeconds,
-        FieldSyncCinematicTimeline.brandRevealStartSeconds,
         FieldSyncCinematicTimeline.loginLineFadeEndSeconds,
         FieldSyncCinematicTimeline.loginDotFadeEndSeconds,
+        FieldSyncCinematicTimeline.brandRevealStartSeconds,
         FieldSyncCinematicTimeline.brandRevealEndSeconds,
         FieldSyncCinematicTimeline.barrierReleaseSeconds,
         FieldSyncCinematicTimeline.totalSeconds,
@@ -77,8 +77,10 @@ void main() {
       );
       expect(
         FieldSyncCinematicTimeline.barrierReleaseSeconds,
-        FieldSyncCinematicTimeline.brandRevealEndSeconds,
+        FieldSyncCinematicTimeline.totalSeconds,
       );
+      expect(FieldSyncCinematicTimeline.brandRevealEndSeconds,
+          lessThanOrEqualTo(FieldSyncCinematicTimeline.barrierReleaseSeconds));
     });
 
     test('chrome steps in at the seam, never during page 1', () {
@@ -252,23 +254,24 @@ void main() {
       expect(FieldSyncDepartureCamera.zoomAt(start), 1.0);
       expect(FieldSyncDepartureCamera.matrixAt(start, box), Matrix4.identity());
       expect(FieldSyncDepartureCamera.zoomAt(0), 1.0);
-      expect(FieldSyncDepartureCamera.zoomAt(13.35), closeTo(0.94, 1e-12));
+      expect(FieldSyncDepartureCamera.zoomAt(13.35), closeTo(1.0, 1e-12));
 
       var previous = 1.0;
-      for (var t = start; t <= 10.55; t += 0.05) {
+      for (var t = start; t <= 10.20; t += 0.05) {
         final z = FieldSyncDepartureCamera.zoomAt(t);
         expect(z, greaterThanOrEqualTo(previous - 1e-12));
         previous = z;
       }
-      expect(FieldSyncDepartureCamera.zoomAt(10.55), closeTo(1.28, 1e-9));
+      expect(FieldSyncDepartureCamera.zoomAt(10.20), closeTo(1.28, 1e-9));
 
       previous = 1.28;
-      for (var t = 10.60; t <= end; t += 0.05) {
+      for (var t = 10.25; t <= end; t += 0.05) {
         final z = FieldSyncDepartureCamera.zoomAt(t);
         expect(z, lessThanOrEqualTo(previous + 1e-12));
         previous = z;
       }
-      expect(FieldSyncDepartureCamera.zoomAt(end), closeTo(0.94, 1e-9));
+      expect(FieldSyncDepartureCamera.zoomAt(end), closeTo(1.0, 1e-9));
+      expect(FieldSyncDepartureCamera.matrixAt(10.68, box), Matrix4.identity());
     });
 
     test('the tip is the one point the departure never moves', () {
@@ -576,7 +579,7 @@ void main() {
       expect(FieldSyncLoginRoutePainter.strokeColourAt(5.8), Colors.white);
       expect(
         FieldSyncLoginRoutePainter.strokeColourAt(
-          FieldSyncCinematicTimeline.departureEndSeconds,
+          FieldSyncCinematicTimeline.mountStartSeconds,
         ),
         Colors.white,
       );
@@ -610,15 +613,17 @@ void main() {
   // ── 8. one destination dot, shared pulse DNA ─────────────────────────────
 
   group('8 one destination dot and the shared pulse DNA', () {
-    test('the pulse mirrors the approved arrival rings exactly', () {
+    test('the pulse retains the approved rings but finishes before brand reveal', () {
       expect(
         FieldSyncCinematicTimeline.loginPulseGapSeconds,
         FieldSyncCinematicTimeline.pulseGapSeconds,
       );
-      expect(
-        FieldSyncCinematicTimeline.loginPulseDurationSeconds,
-        FieldSyncCinematicTimeline.pulseDurationSeconds,
-      );
+      expect(FieldSyncCinematicTimeline.loginPulseDurationSeconds,
+          allOf(greaterThan(0), lessThan(FieldSyncCinematicTimeline.pulseDurationSeconds)));
+      expect(FieldSyncCinematicTimeline.loginPulseStartSeconds +
+          FieldSyncCinematicTimeline.loginPulseGapSeconds +
+          FieldSyncCinematicTimeline.loginPulseDurationSeconds,
+          lessThanOrEqualTo(FieldSyncCinematicTimeline.brandRevealStartSeconds));
       // The dot pops only once the route has actually arrived …
       expect(
         FieldSyncCinematicTimeline.loginDotStartSeconds,

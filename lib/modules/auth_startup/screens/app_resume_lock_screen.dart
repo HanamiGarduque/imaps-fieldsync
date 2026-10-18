@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../../core/services/auth_service.dart';
 import '../services/biometric_service.dart';
@@ -30,24 +31,90 @@ class AppResumeLockScreen extends StatefulWidget {
   /// itself replaces the route with whatever's built here instead.
   final WidgetBuilder? nextScreenBuilder;
 
-  const AppResumeLockScreen({super.key, this.nextScreenBuilder});
+  /// Cinematic-only presentation controls. Null retains ordinary resume/idle
+  /// behavior: the brand is visible and the first frame prompts immediately.
+  final Key? brandKey;
+  final Animation<double>? brandReveal;
+  final ValueListenable<bool>? cinematicReady;
+
+  const AppResumeLockScreen({super.key, this.nextScreenBuilder,
+    this.brandKey, this.brandReveal, this.cinematicReady});
 
   @override
   State<AppResumeLockScreen> createState() => _AppResumeLockScreenState();
 }
 
-class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
+class _AppResumeLockScreenState extends State<AppResumeLockScreen>
+    with WidgetsBindingObserver {
   bool _checking = false;
   bool _lastAttemptFailed = false;
   String _bioLabel = 'biometric';
+  bool _initialAttemptStarted = false;
+  bool _attemptQueued = false;
+
+  bool get _presentationReady => widget.cinematicReady?.value ?? true;
+
+  bool get _canPresentPrompt {
+    if (widget.cinematicReady == null) return true;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return (lifecycle == null || lifecycle == AppLifecycleState.resumed) &&
+        (ModalRoute.of(context)?.isCurrent ?? false);
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.cinematicReady?.addListener(_presentationChanged);
     _loadLabel();
     // Auto-trigger the prompt as soon as this screen is actually on screen,
     // rather than waiting for the person to tap a button first.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _attempt());
+    _queueInitialAttempt();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _queueInitialAttempt();
+  }
+
+  @override
+  void didUpdateWidget(covariant AppResumeLockScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cinematicReady != widget.cinematicReady) {
+      oldWidget.cinematicReady?.removeListener(_presentationChanged);
+      widget.cinematicReady?.addListener(_presentationChanged);
+      _queueInitialAttempt();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _queueInitialAttempt();
+  }
+
+  @override
+  void dispose() {
+    widget.cinematicReady?.removeListener(_presentationChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _presentationChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _queueInitialAttempt();
+  }
+
+  void _queueInitialAttempt() {
+    if (!mounted || !_presentationReady || _initialAttemptStarted || _attemptQueued) return;
+    _attemptQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _attemptQueued = false;
+      if (!mounted || !_presentationReady || _initialAttemptStarted || !_canPresentPrompt) return;
+      _attempt();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   Future<void> _loadLabel() async {
@@ -56,7 +123,8 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
   }
 
   Future<void> _attempt() async {
-    if (_checking) return;
+    if (!mounted || _checking || !_presentationReady || !_canPresentPrompt) return;
+    _initialAttemptStarted = true;
     setState(() {
       _checking = true;
       _lastAttemptFailed = false;
@@ -84,6 +152,25 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
     }
   }
 
+  Widget _brandGroup() {
+    final brand = Wrap(spacing: 12, runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center, children: [
+        FieldSyncBrand(key: widget.brandKey,
+          variant: FieldSyncBrandVariant.white, height: 44),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Text('iMAPS', style: InsightTheme.inter(12, c: Colors.white)),
+          Text('FieldSync', style: InsightTheme.urbanist(20, w: FontWeight.w800, c: Colors.white)),
+        ]),
+      ]);
+    final reveal = widget.brandReveal;
+    if (reveal == null) return brand;
+    return AnimatedBuilder(animation: reveal, child: brand,
+      builder: (context, child) => Opacity(
+        opacity: reveal.value.clamp(0.0, 1.0),
+        child: ExcludeSemantics(excluding: reveal.value <= 0, child: child!),
+      ));
+  }
+
   Future<void> _signOutInstead() async {
     setState(() => _checking = true);
     try {
@@ -103,13 +190,7 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
     final header = Padding(
       padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          const FieldSyncBrand(variant: FieldSyncBrandVariant.white, height: 44),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text('iMAPS', style: InsightTheme.inter(12, c: Colors.white)),
-            Text('FieldSync', style: InsightTheme.urbanist(20, w: FontWeight.w800, c: Colors.white)),
-          ]),
-        ]),
+        _brandGroup(),
         const SizedBox(height: 32),
         Text('Your work.\nKept private.', style: InsightTheme.urbanist(34, w: FontWeight.w800, c: Colors.white)),
         const SizedBox(height: 12),
@@ -141,7 +222,7 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
                     minimumSize: const Size(48, 52),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd)),
-                  onPressed: _checking ? null : _attempt,
+                  onPressed: _checking || !_presentationReady ? null : _attempt,
                   child: Wrap(spacing: 8, runSpacing: 4, alignment: WrapAlignment.center,
                     crossAxisAlignment: WrapCrossAlignment.center, children: [
                       if (_checking) const SizedBox.square(dimension: 20,
@@ -149,12 +230,12 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen> {
                       else const Icon(Icons.fingerprint_rounded, size: 20),
                       Text(_checking ? 'Checking…' : 'Unlock with $_bioLabel', textAlign: TextAlign.center,
                         style: InsightTheme.inter(16, w: FontWeight.w600,
-                          c: _checking ? InsightTheme.ink3 : Colors.white)),
+                          c: _checking || !_presentationReady ? InsightTheme.ink3 : Colors.white)),
                     ]),
                 )),
               const SizedBox(height: 8),
               TextButton(style: TextButton.styleFrom(minimumSize: const Size(120, 48)),
-                onPressed: _checking ? null : _signOutInstead,
+                onPressed: _checking || !_presentationReady ? null : _signOutInstead,
                 child: Text('Log Out', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.redInk))),
             ]),
           ),
