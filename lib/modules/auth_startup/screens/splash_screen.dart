@@ -609,6 +609,9 @@ class _SplashScreenState extends State<SplashScreen>
           final t = _seconds.value;
           final covered = _destinationLayer != null &&
               t >= FieldSyncCinematicTimeline.mountEndSeconds;
+          final destinationOpacity = _window(t,
+              FieldSyncCinematicTimeline.mountStartSeconds,
+              FieldSyncCinematicTimeline.mountEndSeconds);
           _syncSystemOverlay(t);
           return Stack(key: _cinematicCanvasKey, fit: StackFit.expand, children: [
             // Retain the measured layout, but never keep an invisible startup
@@ -619,22 +622,13 @@ class _SplashScreenState extends State<SplashScreen>
                 child!,
               ]))),
             // Page 3 — the resolved Login or App Lock, during the departure's
-            // tail and faded in as the frame settles on it. The route layer
-            // above it owns the re-entry, the destination dot, the pulse and
-            // the logo reveal. Until the sequence finishes the barrier below
-            // keeps it inert.
+            // tail and faded in as the frame settles on it. Paint background,
+            // then journey, then foreground: cards and controls must occlude
+            // the line/head naturally, never have the route drawn over them.
             if (_destinationLayer != null) ...[
-              ExcludeSemantics(
-                excluding: !_finished,
-                child: Opacity(
-                  opacity: _window(
-                    t,
-                    FieldSyncCinematicTimeline.mountStartSeconds,
-                    FieldSyncCinematicTimeline.mountEndSeconds,
-                  ),
-                  child: _destinationLayer,
-                ),
-              ),
+              Opacity(opacity: destinationOpacity,
+                child: ColoredBox(color: _lockResolved
+                    ? InsightTheme.blue2 : InsightTheme.bg)),
               if (!_finished)
                 FieldSyncLoginRouteOverlay(
                   time: _seconds,
@@ -643,6 +637,11 @@ class _SplashScreenState extends State<SplashScreen>
                   onBlue: _lockResolved,
                   splitSurface: _lockResolved && context.responsive.canSplitTwoPane,
                 ),
+              ExcludeSemantics(
+                excluding: !_finished,
+                child: Opacity(opacity: destinationOpacity,
+                  child: _destinationLayer),
+              ),
             ],
             // The startup barrier: until the sequence completes, any tap is
             // a skip request — it can move the timing, never the gate.
@@ -1403,7 +1402,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return SensitiveScreen(
       child: Scaffold(
-        backgroundColor: InsightTheme.bg,
+        // The cinematic host paints the background below its journey layer;
+        // this screen's cards, fields, status and text stay above that layer.
+        backgroundColor: widget.brandReveal == null
+            ? InsightTheme.bg : Colors.transparent,
         body: SafeArea(
           child: ConstrainedContent(
             maxWidth: 480,

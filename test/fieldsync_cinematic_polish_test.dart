@@ -447,7 +447,7 @@ void main() {
 
   for (final size in const [Size(844, 390), Size(1280, 800)]) {
     fixture.widgetTest(
-      'App Lock route stays visible over split workspace $size',
+      'App Lock workspace occludes the route and traveller $size',
       (tester) async {
         await eligibleLock();
         await fixture.mount(tester, const SplashScreen(), size: size);
@@ -479,32 +479,99 @@ void main() {
           return bytes;
         }))!;
         final before = await pixels();
+        await advance(tester, 0.42); // 11.62: the head is back on the blue side.
+        final blueHead = journey.headAt(11.62) + const Offset(0, 24);
+        expect(blueHead.dx, lessThan(size.width / 2));
+        final blueBefore = await pixels();
+        await advance(tester, 1 / 60);
+        final blueAfter = await pixels();
+        var moving = 0;
+        for (var x = blueHead.dx.floor() - 16; x <= blueHead.dx.ceil() + 16; x++) {
+          for (var y = blueHead.dy.floor() - 16; y <= blueHead.dy.ceil() + 16; y++) {
+            final i = 4 * (y * size.width.toInt() + x);
+            if ((blueBefore.getUint8(i) - blueAfter.getUint8(i)).abs() > 8) moving++;
+          }
+        }
+        expect(moving, greaterThan(8),
+            reason: 'occlusion must not hide the journey on the blue background');
         await advance(
           tester,
-          2.1,
+          13.30 - 11.62 - 1 / 60,
         ); // 13.30: same workspace, route gone, no auth yet.
         final background = await pixels();
-        var visible = 0;
-        // Compare with the actual underlying UI, so text behind a white stroke
-        // cannot falsely pass. Exclude the dark center dot; the LINE must show.
-        for (var x = head.dx.ceil() + 8; x <= head.dx.ceil() + 24; x++) {
-          for (var y = head.dy.floor() - 4; y <= head.dy.ceil() + 4; y++) {
+        var changed = 0;
+        // The opaque workspace must cover both the trail and the head. Compare
+        // with its real, unchanged UI after the route has dissipated.
+        for (var x = head.dx.floor() - 8; x <= head.dx.ceil() + 24; x++) {
+          for (var y = head.dy.floor() - 8; y <= head.dy.ceil() + 8; y++) {
             final i = 4 * (y * size.width.toInt() + x);
-            var darker = 0;
             for (var c = 0; c < 3; c++) {
-              darker += background.getUint8(i + c) - before.getUint8(i + c);
+              if ((background.getUint8(i + c) - before.getUint8(i + c)).abs() > 8) {
+                changed++;
+                break;
+              }
             }
-            if (darker > 45) visible++;
           }
         }
         expect(
-          visible,
-          greaterThan(8),
-          reason: 'the returning stroke must contrast with the white pane',
+          changed,
+          0,
+          reason: 'the route and moving dot belong behind the opaque workspace',
         );
         expect(authenticationCalls, 0);
       },
     );
+  }
+
+  for (final lock in [false, true]) {
+    fixture.widgetTest('offline cinematic animates through to ${lock ? 'App Lock' : 'Login'}',
+        (tester) async {
+      if (lock) {
+        await eligibleLock();
+      } else {
+        fixture.online = false;
+        fixture.mode = 'transport';
+        await SecurePrefsService.setSoftLoggedOut(true);
+        await AuthService.loadSoftLogoutState();
+      }
+      expect(fixture.online, isFalse);
+      await fixture.mount(tester, const SplashScreen());
+      await advance(tester, 3);
+      FieldSyncCinematicScenePainter scene() => tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((widget) => widget.painter)
+          .whereType<FieldSyncCinematicScenePainter>().single;
+      final searchTime = scene().time.value;
+      await advance(tester, 1 / 60);
+      expect(scene().time.value, greaterThan(searchTime),
+          reason: 'offline startup must not freeze the local animation clock');
+      await advance(tester, 7.8 - 1 / 60); // 10.80: the departure is running.
+      final route = tester.widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((widget) => widget.painter)
+          .whereType<FieldSyncLoginRoutePainter>().single;
+      final journey = route.journeyFor!(
+          tester.getSize(find.byType(FieldSyncLoginRouteOverlay)))!;
+      final time = route.time.value;
+      final head = journey.headAt(time);
+      await advance(tester, 1 / 60);
+      expect((journey.headAt(route.time.value) - head).distance, greaterThan(0.1));
+      expect(authenticationCalls, 0);
+      await advance(tester, 2.55); // 13.3667: presentation has completed.
+      final destination = find.byType(lock ? AppResumeLockScreen : LoginScreen);
+      expect(destination, findsOneWidget);
+      expect(find.byType(lock ? LoginScreen : AppResumeLockScreen), findsNothing);
+      expect(find.byKey(const ValueKey('splash-skip')), findsNothing);
+      expect(effectiveOpacity(tester,
+          find.descendant(of: destination, matching: find.text('FieldSync'))), 1);
+      expect(fixture.online, isFalse);
+      expect(authenticationCalls, lock ? 1 : 0,
+          reason: 'offline animation never bypasses the App Lock readiness gate');
+      if (!lock) {
+        expect(find.text('Offline'), findsOneWidget);
+        expect(find.byType(TextFormField), findsNWidgets(2));
+      }
+      expect(tester.takeException(), isNull);
+    });
   }
 
   fixture.widgetTest(
@@ -579,7 +646,7 @@ void main() {
   });
 
   test(
-    'shared journey has one contour, compatible crossings and C1 contacts',
+    'shared journey has one contour, level exit and hidden C1 turn',
     () {
       final journey = FieldSyncJourneyPath(
         departureBox: const Rect.fromLTWH(32, 136, 280.8, 353),
@@ -593,10 +660,21 @@ void main() {
       )!;
       expect(exit.position.dx, closeTo(390, 0.1));
       expect(returning.position.dx, closeTo(390, 0.1));
+      final start = journey.metric.getTangentForOffset(0)!.position;
+      for (var d = 0.0; d <= journey.exitDistance; d += 2) {
+        expect(journey.metric.getTangentForOffset(d)!.position.dy,
+            closeTo(start.dy, 1),
+            reason: 'the outbound follows the green line at the site height');
+      }
+      expect(exit.position.dy, closeTo(start.dy, 1));
       expect(
         (exit.position.dy - returning.position.dy).abs(),
-        lessThanOrEqualTo(2.1),
+        greaterThan(24),
+        reason: 'separate the exit and entry rather than a visible hairpin',
       );
+      expect(journey.headAt(FieldSyncCinematicTimeline.edgeTurnSeconds).dx,
+          greaterThan(journey.viewport.width + 10),
+          reason: 'the complete head ring must be off-screen during reversal');
       expect(exit.vector.dx, greaterThan(0.99));
       expect(returning.vector.dx, lessThan(-0.99));
       for (final join in [journey.exitDistance, journey.returnDistance]) {
@@ -653,10 +731,12 @@ void main() {
           return (lo + hi) / 2;
         }
 
-        expect(
-          timeAt(journey.returnDistance) - timeAt(journey.exitDistance),
-          lessThan(1 / 60),
-        );
+        final hiddenSeconds =
+            timeAt(journey.returnDistance) - timeAt(journey.exitDistance);
+        expect(hiddenSeconds, greaterThan(1 / 60),
+            reason: 'the head exits before returning; no one-frame ricochet');
+        expect(hiddenSeconds, lessThan(0.35),
+            reason: 'the off-screen trip stays brief, not a stalled reveal');
         expect(
           journey.trailStartAt(11.2),
           closeTo(journey.returnDistance, 1e-6),

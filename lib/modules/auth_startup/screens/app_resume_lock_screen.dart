@@ -248,7 +248,10 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen>
       canPop: false,
       child: SensitiveScreen(
         child: Scaffold(
-          backgroundColor: InsightTheme.blue2,
+          // The cinematic host owns the background; the opaque workspace and
+          // header content paint in front of its journey, not underneath it.
+          backgroundColor: widget.brandReveal == null
+              ? InsightTheme.blue2 : Colors.transparent,
           body: SafeArea(
             child: LayoutBuilder(builder: (context, constraints) {
               Widget scrollWorkspace() => SingleChildScrollView(child: ConstrainedBox(

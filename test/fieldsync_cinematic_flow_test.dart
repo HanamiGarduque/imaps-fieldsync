@@ -312,6 +312,19 @@ void main() {
       expect(math.cos(tailDir - routeDir), greaterThan(0.9995));
     });
 
+    test('the tail holds the site height while continuing right', () {
+      final tail = FieldSyncDepartureRoutePainter.tailPath.computeMetrics().first;
+      final start = tail.getTangentForOffset(0)!.position;
+      var previousX = start.dx;
+      for (var d = 8.0; d <= tail.length; d += 8) {
+        final point = tail.getTangentForOffset(d)!.position;
+        expect(point.dx, greaterThan(previousX));
+        expect(point.dy, closeTo(start.dy, 2),
+            reason: 'the green departure goes right, not up into a crest');
+        previousX = point.dx;
+      }
+    });
+
     test('the tip is monotone and clamped to the authored window', () {
       expect(FieldSyncDepartureRoutePainter.progressAt(0), 0.0);
       expect(

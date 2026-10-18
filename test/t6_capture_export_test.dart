@@ -218,7 +218,10 @@ void main() {
           13340000,
           13350000,
         };
-        shots.removeWhere((time, _) => !wideSamples.contains(time));
+        // Keep the departure/turn dense on wide layouts too: a storyboard
+        // alone cannot expose an edge ricochet between sampled frames.
+        shots.removeWhere((time, _) => !wideSamples.contains(time) &&
+            (time < 10200000 || time > 11300000));
       }
       final manifest = StringBuffer(
         'file\tseconds\tgroup\tscene\tauthentication_calls\thead_x\thead_y\tdistance\n',

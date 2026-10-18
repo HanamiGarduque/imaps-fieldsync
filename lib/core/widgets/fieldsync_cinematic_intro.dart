@@ -925,16 +925,16 @@ class FieldSyncDepartureRoutePainter extends CustomPainter {
   /// Page 3.
   final bool active;
 
-  /// The authored external tail (viewBox units), continuing the route's end
-  /// direction then sweeping down off the right edge. It overflies the
+  /// The authored external tail (viewBox units), continuing right at the
+  /// site's height along the user-directed green exit. It overflies the
   /// screen edge of every supported portrait width at the departure's own
   /// end under the settled camera (pinned by the geometry tests).
   static const List<Offset> _tailWaypoints = <Offset>[
-    Offset(770, 405),
-    Offset(930, 385),
-    Offset(1105, 448),
-    Offset(1275, 610),
-    Offset(1560, 900),
+    Offset(770, 447),
+    Offset(930, 447),
+    Offset(1105, 447),
+    Offset(1275, 447),
+    Offset(1560, 447),
   ];
 
   static ui.Path? _tailPath;
@@ -1099,18 +1099,18 @@ class FieldSyncJourneyPath {
     final path = tail.extractPath(0, prefix);
     final contact = tail.getTangentForOffset(prefix)!;
     final handle = ((viewport.width - contact.position.dx) / 3).clamp(8.0, 96.0);
-    // Derive both crossings from the destination layout, not independent y
-    // constants. The lock's white route stays inside its existing blue header.
+    // Leave horizontally at the site's height; keep the returning crossing
+    // tied to the destination layout and its existing header.
     final inset = math.min(32.0, viewport.height / 2);
     final y = (brand.center.dy + 96).clamp(inset, viewport.height - inset);
-    final exit = Offset(viewport.width, y);
+    final exit = Offset(viewport.width, start.dy);
     final c1 = contact.position + contact.vector * handle;
     path.cubicTo(c1.dx, c1.dy, exit.dx - handle, exit.dy, exit.dx, exit.dy);
     final exitDistance = path.computeMetrics().first.length;
-    // A real, tangent-continuous turn, just 1.5 px outside the viewport. The
-    // head's ring straddles the edge; no teleport, reset or long hidden travel.
-    final returning = exit - const Offset(0, 2);
-    path.cubicTo(exit.dx + 2, exit.dy, returning.dx + 2, returning.dy,
+    // Reverse fully off-screen, with the head ring clear of the edge. The
+    // separated crossings read as departure/arrival, not a tight ricochet.
+    final returning = Offset(viewport.width, y - 2);
+    path.cubicTo(exit.dx + 48, exit.dy, returning.dx + 48, returning.dy,
         returning.dx, returning.dy);
     final returnDistance = path.computeMetrics().first.length;
     final target = FieldSyncLoginRoutePainter.targetFor(brand);
@@ -1371,9 +1371,9 @@ class FieldSyncLoginRoutePainter extends CustomPainter {
       oldDelegate.splitSurface != splitSurface;
 }
 
-/// Page 3's route layer, above the login. Pointer-transparent by design: the
-/// startup barrier owns input until the sequence completes. It measures the
-/// login logo's own rect in its own canvas space every paint and draws
+/// Page 3's route layer, between the background and foreground UI. Pointer-
+/// transparent: the startup barrier owns input until the sequence completes.
+/// It measures the login logo's own rect in its canvas space every paint and draws
 /// nothing while it is not measurable.
 class FieldSyncLoginRouteOverlay extends StatefulWidget {
   const FieldSyncLoginRouteOverlay({
