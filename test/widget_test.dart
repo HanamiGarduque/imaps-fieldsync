@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:imaps_fieldsync/main.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/screens/splash_screen.dart' show LoginScreen;
@@ -7,6 +9,24 @@ import 'package:imaps_fieldsync/modules/profile_settings/widgets/dashboard_widge
 import 'package:imaps_fieldsync/modules/profile_settings/models/analytics_activity_range.dart';
 
 void main() {
+  setUpAll(() async {
+    // The app's real startup stands a Supabase client up before the session
+    // gate is reached (AppBootstrap's first step). This isolate must model
+    // that foundation: with no client, the corrected gate correctly refuses
+    // to mount an interactive login — a shape production never reaches.
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+    await Supabase.initialize(
+      url: 'https://fs03.test',
+      publishableKey: 'fixture-publishable-key',
+      authOptions: const FlutterAuthClientOptions(
+        autoRefreshToken: false,
+        detectSessionInUri: false,
+        localStorage: EmptyLocalStorage(),
+      ),
+    );
+  });
+
   testWidgets('App builds and shows login screen', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
     await tester.pump();
@@ -17,12 +37,13 @@ void main() {
     expect(find.byWidgetPredicate((widget) => widget is Semantics &&
       widget.properties.label == 'FieldSync' && widget.properties.header == true), findsOneWidget);
 
-    // The approved splash entrance settles at ~6.2s and the hand-off waits
-    // for it (splash_screen.dart _checkSession/_goToLogin), then routes to
-    // LoginScreen via the 700ms fade.
+    // One 13.35 s cinematic drives the whole launch: the completed logo holds
+    // until 9.85 s, Page 3 (the login) mounts in place at 10.85 s, the route
+    // re-enters and the logo reveals by 13.15 s. The splash hands the frame
+    // to the login exactly once, on the journey's own beats.
     await tester.pump(const Duration(seconds: 3));
-    await tester.pump(const Duration(milliseconds: 3300));
-    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 8300));
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byType(LoginScreen), findsOneWidget);
     expect(find.widgetWithText(ElevatedButton, 'Sign in'), findsOneWidget);

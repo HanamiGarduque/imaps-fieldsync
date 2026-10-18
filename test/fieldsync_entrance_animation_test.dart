@@ -9,6 +9,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:imaps_fieldsync/core/widgets/fieldsync_entrance_animation.dart';
+import 'package:imaps_fieldsync/core/widgets/fieldsync_logo_geometry.dart';
 
 /// The approved splash entrance (`FieldSync_Inspector_Entrance_v2.mp4`,
 /// implemented natively) must:
@@ -186,6 +187,145 @@ void main() {
     }
   });
 
+  testWidgets('camera snapshot at the 2.15s handoff seam matches the painter', (
+    tester,
+  ) async {
+    expect(FieldSyncEntranceTimeline.handoffSeconds, 2.15);
+    const t = 2.15;
+    final camera = FieldSyncEntrancePainter.cameraAt(t);
+
+    // Re-derived from the approved choreography constants and Flutter's own
+    // curves — deliberately not read back from the painter, so a change on
+    // either side breaks this pin.
+    double win(double v, double a, double b) => ((v - a) / (b - a)).clamp(
+      0.0,
+      1.0,
+    );
+    final settleW = win(t, 4.90, 5.15);
+    final expectedZoom =
+        (8.0 + (1.0 - 8.0) * Curves.easeInOutQuart.transform(win(t, 2.02, 2.78))) *
+        (1.008 + (1.0 - 1.008) * Curves.easeInOutSine.transform(settleW));
+    final expectedAnchorT = Curves.easeInOutSine.transform(win(t, 2.10, 2.95));
+    final metric = FieldSyncLogoGeometry.route.computeMetrics().first;
+    final routeEnd = metric.getTangentForOffset(metric.length)!.position;
+    final lockupCentre = Offset(
+      FieldSyncLogoGeometry.viewBoxLeft +
+          FieldSyncLogoGeometry.viewBoxWidth / 2,
+      FieldSyncLogoGeometry.viewBoxTop +
+          FieldSyncLogoGeometry.viewBoxHeight / 2,
+    );
+    final expectedCentre = Offset.lerp(routeEnd, lockupCentre, expectedAnchorT)!;
+
+    expect(camera.zoom, closeTo(expectedZoom, 1e-9));
+    expect(camera.anchorT, closeTo(expectedAnchorT, 1e-9));
+    expect((camera.centre - expectedCentre).distance, lessThan(1e-9));
+    // Seam sanity: still at the arrival zoom, framed on the route's end (the
+    // site marker), only just beginning to recentre.
+    expect(camera.zoom, inInclusiveRange(7.5, 8.2));
+    expect(camera.anchorT, inInclusiveRange(0.0, 0.05));
+    // The camera is valid outside the timeline too, held at the boundaries.
+    expect(
+      FieldSyncEntrancePainter.cameraAt(-5).zoom,
+      closeTo(2.2 * 1.008, 1e-9),
+    );
+    expect(FieldSyncEntrancePainter.cameraAt(60).zoom, closeTo(1.0, 1e-9));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('external driver supplies exact time, clamps ends, and never '
+      'restarts the entrance', (tester) async {
+    final driver = _TestSeconds(2.15);
+    var calls = 0;
+    await tester.pumpWidget(
+      host(
+        FieldSyncEntranceAnimation(
+          width: 280,
+          onCompleted: () => calls++,
+          driver: driver,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      _painter(tester).animation.value,
+      closeTo(2.15 / FieldSyncEntranceTimeline.total, 1e-9),
+      reason: 'mounting mid-timeline paints exactly the host second',
+    );
+    // Real time passes with the host clock frozen: nothing may advance.
+    await tester.pump(const Duration(seconds: 5));
+    expect(
+      _painter(tester).animation.value,
+      closeTo(2.15 / FieldSyncEntranceTimeline.total, 1e-9),
+      reason: 'in driven mode the widget owns no clock',
+    );
+    expect(calls, 0);
+    driver.value = 6.2;
+    await tester.pump();
+    expect(_painter(tester).animation.value, 1.0);
+    expect(calls, 1, reason: 'completion fires when the host clock ends');
+    driver.value = 99; // overrun clamps
+    await tester.pump();
+    expect(_painter(tester).animation.value, 1.0);
+    driver.value = -3; // underrun clamps
+    await tester.pump();
+    expect(_painter(tester).animation.value, 0.0);
+    expect(calls, 1, reason: 'the entrance reports completion once');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('startSeconds mounts at the seam and plays the rest 1:1', (
+    tester,
+  ) async {
+    var calls = 0;
+    await tester.pumpWidget(
+      host(
+        FieldSyncEntranceAnimation(
+          width: 280,
+          onCompleted: () => calls++,
+          startSeconds: FieldSyncEntranceTimeline.handoffSeconds,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      _painter(tester).animation.value,
+      closeTo(2.15 / FieldSyncEntranceTimeline.total, 1e-9),
+    );
+    await tester.pump(const Duration(milliseconds: 4040)); // 4.05s span − 10ms
+    expect(calls, 0, reason: 'the remaining span runs at the original pace');
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(calls, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('driven + reduced motion settles immediately and stays settled', (
+    tester,
+  ) async {
+    final driver = _TestSeconds(0);
+    var calls = 0;
+    await tester.pumpWidget(
+      host(
+        FieldSyncEntranceAnimation(
+          width: 280,
+          onCompleted: () => calls++,
+          driver: driver,
+        ),
+        reduced: true,
+      ),
+    );
+    await tester.pump();
+    expect(calls, 1);
+    expect(_painter(tester).animation.value, 1.0);
+    driver.value = 3;
+    await tester.pump();
+    expect(
+      _painter(tester).animation.value,
+      1.0,
+      reason: 'reduced motion shows the finished artwork, host clock or not',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('captures entrance frames for preview', (tester) async {
     final folder = Platform.environment['IMAPS_ENTRANCE_CAPTURE_DIR'];
     if (folder == null) return;
@@ -263,3 +403,54 @@ void main() {
 }
 
 void _noop() {}
+
+/// The entrance's own painter, wherever it sits in the host tree.
+FieldSyncEntrancePainter _painter(WidgetTester tester) => tester
+    .widgetList<CustomPaint>(
+      find.descendant(
+        of: find.byType(FieldSyncEntranceAnimation),
+        matching: find.byType(CustomPaint),
+      ),
+    )
+    .map((customPaint) => customPaint.painter)
+    .whereType<FieldSyncEntrancePainter>()
+    .single;
+
+/// A minimal host clock for driven-mode tests: an [Animation<double>] in
+/// entrance-local seconds whose value the test sets directly.
+class _TestSeconds extends Animation<double> {
+  _TestSeconds(this._value);
+
+  double _value;
+  final List<VoidCallback> _listeners = <VoidCallback>[];
+
+  @override
+  double get value => _value;
+
+  set value(double next) {
+    if (next == _value) return;
+    _value = next;
+    for (final listener in List<VoidCallback>.of(_listeners)) {
+      listener();
+    }
+  }
+
+  @override
+  void addListener(VoidCallback listener) => _listeners.add(listener);
+
+  @override
+  void removeListener(VoidCallback listener) => _listeners.remove(listener);
+
+  @override
+  void addStatusListener(AnimationStatusListener listener) {}
+
+  @override
+  void removeStatusListener(AnimationStatusListener listener) {}
+
+  @override
+  AnimationStatus get status => value >= FieldSyncEntranceTimeline.total
+      ? AnimationStatus.completed
+      : value <= 0.0
+      ? AnimationStatus.dismissed
+      : AnimationStatus.forward;
+}
