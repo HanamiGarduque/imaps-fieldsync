@@ -15,7 +15,8 @@ import '../../tasks/screens/tasks_screen.dart' show TaskItem;
 import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
 import '../../auth_startup/screens/security_settings_screen.dart';
-import 'terms_privacy_screen.dart';
+import 'policy_document_screen.dart';
+import 'policy_documents.dart';
 import 'reports_support_screen.dart';
 import 'help_faq_screen.dart';
 import '../widgets/dashboard_widgets.dart';
@@ -572,26 +573,47 @@ class _ProfileScreenState extends State<ProfileScreen>
                                     const SizedBox(height: 12),
                                     _actionGroupCard([
                                       _ActionTile(
-                                        icon: Icons.shield_outlined,
-                                        title: 'Privacy Policy',
+                                        icon:
+                                            termsAndConditionsDocument.icon,
+                                        title: termsAndConditionsDocument
+                                            .menuLabel,
                                         subtitle:
-                                            'Legal information & policies',
+                                            'Responsible use of iMAPS and FieldSync',
                                         onTap: () {
                                           Navigator.push(
                                             context,
                                             MaterialPageRoute(
                                               builder: (_) =>
-                                                  const TermsPrivacyScreen(
-                                                    initialDoc:
-                                                        LegalDoc.privacy,
+                                                  const PolicyDocumentScreen(
+                                                    document:
+                                                        termsAndConditionsDocument,
                                                   ),
                                             ),
                                           );
                                         },
                                       ),
                                       _ActionTile(
-                                        icon: Icons.cookie_outlined,
-                                        title: 'Cookie Policy',
+                                        icon: privacyNoticeDocument.icon,
+                                        title: privacyNoticeDocument.menuLabel,
+                                        subtitle:
+                                            'How personal data is handled (Privacy Notice)',
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const PolicyDocumentScreen(
+                                                    document:
+                                                        privacyNoticeDocument,
+                                                  ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      _ActionTile(
+                                        icon: cookieStoragePolicyDocument.icon,
+                                        title:
+                                            cookieStoragePolicyDocument.menuLabel,
                                         subtitle:
                                             'Cookies, sessions & device storage',
                                         onTap: () {
@@ -599,9 +621,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                                             context,
                                             MaterialPageRoute(
                                               builder: (_) =>
-                                                  const TermsPrivacyScreen(
-                                                    initialDoc:
-                                                        LegalDoc.cookies,
+                                                  const PolicyDocumentScreen(
+                                                    document:
+                                                        cookieStoragePolicyDocument,
                                                   ),
                                             ),
                                           );

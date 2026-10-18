@@ -514,7 +514,7 @@ void main() {
     const cleaned = {
       'lib/modules/profile_settings/screens/notifications_screen.dart',
       'lib/modules/profile_settings/screens/about_insight_screen.dart',
-      'lib/modules/profile_settings/screens/terms_privacy_screen.dart',
+      'lib/modules/profile_settings/screens/policy_document_screen.dart',
       'lib/modules/profile_settings/screens/profile_edit_screen.dart',
       'lib/modules/profile_settings/screens/help_faq_screen.dart',
       'lib/modules/profile_settings/widgets/faq_widgets.dart',

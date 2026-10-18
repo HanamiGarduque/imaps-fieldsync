@@ -28,7 +28,8 @@ import '../../../core/services/app_info_service.dart';
 import '../../../core/models/user_profile.dart';
 import '../../../core/widgets/fieldsync_cinematic_intro.dart';
 import '../../../core/widgets/fieldsync_logo_geometry.dart';
-import '../../profile_settings/screens/terms_privacy_screen.dart';
+import '../../profile_settings/screens/policy_document_screen.dart';
+import '../../profile_settings/screens/policy_documents.dart';
 
 
 /// ==================================================================
@@ -1594,14 +1595,14 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Semantics(link: true,
               child: TextButton(style: linkButtonStyle,
                 onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const TermsPrivacyScreen(initialShowTerms: true))),
+                  MaterialPageRoute(builder: (_) => const PolicyDocumentScreen(document: termsAndConditionsDocument))),
                 child: Text('Terms of Use', textScaler: TextScaler.noScaling, style: linkStyle)))),
             const TextSpan(text: ' and '),
             WidgetSpan(alignment: PlaceholderAlignment.baseline, baseline: TextBaseline.alphabetic,
               child: Semantics(link: true,
               child: TextButton(style: linkButtonStyle,
                 onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const TermsPrivacyScreen(initialShowTerms: false))),
+                  MaterialPageRoute(builder: (_) => const PolicyDocumentScreen(document: privacyNoticeDocument))),
                 child: Text('Privacy Policy', textScaler: TextScaler.noScaling, style: linkStyle)))),
             const TextSpan(text: '.'),
           ]),

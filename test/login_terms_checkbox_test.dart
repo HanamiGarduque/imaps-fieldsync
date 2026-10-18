@@ -13,7 +13,9 @@ void main() {
     expect(text, contains('By signing in, you agree to the '));
     expect(text, contains("'Terms of Use'"));
     expect(text, contains("'Privacy Policy'"));
-    expect(text, contains('TermsPrivacyScreen('));
+    expect(text, contains('PolicyDocumentScreen('));
+    expect(text, contains('termsAndConditionsDocument'));
+    expect(text, contains('privacyNoticeDocument'));
     expect(text, contains('setAcceptedLegalVersion('));
   });
 }

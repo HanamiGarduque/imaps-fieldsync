@@ -96,6 +96,7 @@ flutter:
     - assets/icon/
     - assets/branding/
     - assets/maps/
+    - assets/policies/
 
 flutter_launcher_icons:
   android: true
@@ -107,6 +108,3 @@ flutter_launcher_icons:
 
 dependency_overrides:
   path_provider_foundation: 2.4.2
-
-
-  

@@ -7,10 +7,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:imaps_fieldsync/core/widgets/fieldsync_brand.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/about_insight_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/help_faq_screen.dart';
-import 'package:imaps_fieldsync/modules/profile_settings/screens/terms_privacy_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_document_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_documents.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => rootBundle.clear());
+
   setUpAll(() {
     // Use supplied real fonts for acceptance, or the offline SDK fixture.
     GoogleFonts.config.allowRuntimeFetching = false;
@@ -50,6 +53,9 @@ void main() {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
       if (asset == 'assets/branding/fieldsync-logo.svg') return brand;
+      if (asset.startsWith('assets/policies/')) {
+        return ByteData.sublistView(File(asset).readAsBytesSync());
+      }
       if (!asset.endsWith('.ttf')) return null;
       final folder = Platform.environment['IMAPS_LAYOUT_FONT_DIR'];
       return folder == null ? font : ByteData.sublistView(
@@ -109,8 +115,9 @@ void main() {
         (tester) async {
           for (final page in [
             const HelpFaqScreen(),
-            const TermsPrivacyScreen(),
-            const TermsPrivacyScreen(initialShowTerms: false),
+            const PolicyDocumentScreen(document: termsAndConditionsDocument),
+            const PolicyDocumentScreen(document: privacyNoticeDocument),
+            const PolicyDocumentScreen(document: cookieStoragePolicyDocument),
             const AboutInsightScreen(),
           ]) {
             await pump(tester, page, size, scale);
@@ -139,19 +146,41 @@ void main() {
                 find.textContaining('normal priority state'),
                 findsOneWidget,
               );
-            } else if (page is TermsPrivacyScreen) {
+            } else if (page is PolicyDocumentScreen) {
+              const lastSectionsByAsset = {
+                'assets/policies/terms_and_conditions.md':
+                    '11. Contact and Acknowledgment',
+                'assets/policies/privacy_notice.md':
+                    '13. Policy Changes and Contact',
+                'assets/policies/cookie_and_storage_policy.md':
+                    '10. Contact and Version',
+              };
               final lastSection = find.text(
-                page.initialShowTerms
-                    ? '7. Governing Law'
-                    : '5. Data Subject Rights & Privacy Inquiries',
+                lastSectionsByAsset[page.document.assetPath]!,
               );
+              final scrollable = find.byType(Scrollable).first;
+              // A fixed 400px drag can skip a heading in a 120px viewport.
+              final step = tester.getSize(scrollable).height / 2;
               await tester.scrollUntilVisible(
                 lastSection,
-                400,
-                scrollable: find.byType(Scrollable).first,
+                step,
+                scrollable: scrollable,
+                maxScrolls: 300,
               );
               await tester.pumpAndSettle();
               expect(lastSection.hitTestable(), findsOneWidget);
+              final footer = find.text(
+                'iMAPS FieldSync · Municipal Planning and Development Office, '
+                'Rosario, Batangas',
+              );
+              await tester.scrollUntilVisible(
+                footer,
+                step,
+                scrollable: scrollable,
+                maxScrolls: 300,
+              );
+              await tester.pumpAndSettle();
+              expect(footer.hitTestable(), findsOneWidget);
             } else {
               final appIcon = find.byType(FieldSyncBrand);
               expect(appIcon, findsOneWidget);
@@ -222,25 +251,31 @@ void main() {
     },
   );
 
-  testWidgets('Legal tabs switch the document shown', (tester) async {
-    await pump(
-      tester,
-      const TermsPrivacyScreen(initialShowTerms: false),
-      const Size(390, 844),
-      1,
-    );
-    expect(find.text('1. Information We Collect & Process'), findsOneWidget);
-    final documentTarget = find.ancestor(of: find.text('Terms of Use'),
-        matching: find.byWidgetPredicate((w) => w is Semantics && w.properties.button == true)).first;
-    expect(tester.getSize(documentTarget).height, greaterThanOrEqualTo(48));
-    expect(find.text('1. Authorized Use & Municipal Purpose'), findsNothing);
-    await tester.tap(find.text('Terms of Use'));
-    await tester.pumpAndSettle();
-    expect(find.text('1. Authorized Use & Municipal Purpose'), findsOneWidget);
-    expect(find.text('1. Information We Collect & Process'), findsNothing);
-    await tester.tap(find.text('Privacy Policy').first);
-    await tester.pumpAndSettle();
-    expect(find.text('1. Information We Collect & Process'), findsOneWidget);
-    expect(tester.takeException(), isNull);
+  testWidgets('Policy pages open as independent documents', (tester) async {
+    for (final (document, firstSection) in [
+      (termsAndConditionsDocument, '1. Purpose and Scope'),
+      (privacyNoticeDocument, '1. Who This Notice Covers'),
+      (cookieStoragePolicyDocument, '1. Scope: Web Cookies and Mobile Storage'),
+    ]) {
+      await pump(
+        tester,
+        PolicyDocumentScreen(document: document),
+        const Size(390, 844),
+        1,
+      );
+      expect(find.byType(PolicyDocumentScreen), findsOneWidget);
+      final section = find.text(firstSection);
+      await tester.scrollUntilVisible(
+        section,
+        320,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(section.hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open page'), findsOneWidget);
+    }
   });
 }

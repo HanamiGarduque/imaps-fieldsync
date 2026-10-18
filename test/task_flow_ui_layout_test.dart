@@ -98,7 +98,8 @@ void main() {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
       if (asset == 'assets/icon/app_icon.png' ||
-          asset == 'assets/branding/fieldsync-logo.svg') {
+          asset == 'assets/branding/fieldsync-logo.svg' ||
+          asset.startsWith('assets/policies/')) {
         return ByteData.sublistView(File(asset).readAsBytesSync());
       }
       if (!asset.endsWith('.ttf')) return null;
@@ -886,8 +887,8 @@ void main() {
       }
 
       for (final (label, heading) in [
-        ('Terms of Use', '1. Authorized Use & Municipal Purpose'),
-        ('Privacy Policy', '1. Information We Collect & Process'),
+        ('Terms of Use', '1. Purpose and Scope'),
+        ('Privacy Policy', '1. Who This Notice Covers'),
       ]) {
         // ignore: deprecated_member_use
         final root = binding.pipelineOwner.semanticsOwner!.rootSemanticsNode!;
@@ -921,7 +922,14 @@ void main() {
         );
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pumpAndSettle();
-        expect(find.text(heading), findsOneWidget);
+        final section = find.text(heading);
+        await tester.scrollUntilVisible(
+          section,
+          320,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(section, findsOneWidget);
         tester.state<NavigatorState>(find.byType(Navigator).first).pop();
         await tester.pumpAndSettle();
       }

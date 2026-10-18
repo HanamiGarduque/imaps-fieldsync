@@ -13,7 +13,8 @@ import 'package:imaps_fieldsync/modules/profile_settings/screens/report_history_
 import 'package:imaps_fieldsync/modules/profile_settings/screens/technical_issue_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/help_faq_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/about_insight_screen.dart';
-import 'package:imaps_fieldsync/modules/profile_settings/screens/terms_privacy_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_document_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_documents.dart';
 import 'package:imaps_fieldsync/modules/inspection/widgets/photo_viewer.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
 
@@ -71,7 +72,15 @@ void main() {
   for (final page in <String, Widget Function()>{
     'Help FAQ': () => const HelpFaqScreen(),
     'About': () => const AboutInsightScreen(),
-    'Legal information': () => const TermsPrivacyScreen(),
+    'Terms and Conditions': () => const PolicyDocumentScreen(
+      document: termsAndConditionsDocument,
+    ),
+    'Privacy Notice': () => const PolicyDocumentScreen(
+      document: privacyNoticeDocument,
+    ),
+    'Cookie and Storage Policy': () => const PolicyDocumentScreen(
+      document: cookieStoragePolicyDocument,
+    ),
   }.entries) {
     fixture.widgetTest('${page.key} does not activate sensitive policy', (
       tester,

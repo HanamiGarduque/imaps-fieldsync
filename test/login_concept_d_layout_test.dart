@@ -20,7 +20,8 @@ import 'package:imaps_fieldsync/modules/auth_startup/screens/splash_screen.dart'
 import 'package:imaps_fieldsync/modules/auth_startup/screens/app_resume_lock_screen.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/biometric_service.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/secure_prefs_service.dart';
-import 'package:imaps_fieldsync/modules/profile_settings/screens/terms_privacy_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_document_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_documents.dart';
 
 // Same AOSP 200% curve used by the existing Site/Home composition checks.
 class _Android200TextScaler extends TextScaler {
@@ -406,12 +407,17 @@ void main() {
 
   testWidgets('Both grouped legal links retain their actual destinations', (tester) async {
     await pumpLogin(tester);
-    for (final link in ['Terms of Use', 'Privacy Policy']) {
+    for (final (link, document, formalTitle) in [
+      ('Terms of Use', termsAndConditionsDocument, 'Terms and Conditions'),
+      ('Privacy Policy', privacyNoticeDocument, 'Privacy Notice'),
+    ]) {
       await tester.ensureVisible(find.text(link));
       await tester.tap(find.text(link));
       await tester.pumpAndSettle();
-      expect(tester.widget<TermsPrivacyScreen>(find.byType(TermsPrivacyScreen)).initialShowTerms,
-        link == 'Terms of Use');
+      final screen =
+          tester.widget<PolicyDocumentScreen>(find.byType(PolicyDocumentScreen));
+      expect(screen.document, same(document));
+      expect(find.text(formalTitle), findsOneWidget);
       await tester.pageBack();
       await tester.pumpAndSettle();
     }
