@@ -232,7 +232,25 @@ void main() {
     test('no authentication rule was edited', () {
       // Layout-only: these call sites are unchanged.
       expect(splash, contains('onPressed: (_isLoading ||'));
-      expect(lock, contains('onPressed: _checking ? null : _attempt'));
+
+      // The unlock button keeps both of its gates: none while an attempt is
+      // already in flight, and none until the cinematic hands the screen over.
+      // Live behaviour is exercised in fieldsync_cinematic_polish_test.dart
+      // ("stays inert", "cannot be bypassed"); this contract keeps them wired.
+      final unlockGate =
+          RegExp(r'onPressed:\s*(.+?)\s*\?\s*null\s*:\s*_attempt,');
+      final match = unlockGate.firstMatch(lock);
+      expect(match, isNotNull,
+          reason: 'the unlock button keeps its enable/disable gate');
+      final gate = match!.group(1)!;
+      expect(gate, contains('_checking'),
+          reason: 'disabled while an attempt is already checking');
+      expect(gate, contains('!_presentationReady'),
+          reason: 'disabled until cinematic presentation readiness');
+
+      // Ordinary (non-cinematic) resume launches carry no readiness signal and
+      // must stay immediately actionable — the default is still `true`.
+      expect(lock, contains('widget.cinematicReady?.value ?? true'));
     });
   });
 
