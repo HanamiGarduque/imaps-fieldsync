@@ -128,7 +128,7 @@ void main() {
     // the offline-reliability fixture does, rather than a partial table stub.
     final source = File('lib/core/services/db_helper.dart').readAsStringSync();
     for (final match in RegExp(
-      r'CREATE TABLE(?: IF NOT EXISTS)? (local_jobs|pending_actions)\([\s\S]*?\)',
+      r'CREATE TABLE(?: IF NOT EXISTS)? (local_jobs|pending_actions|local_inspections)\([\s\S]*?\)',
     ).allMatches(source)) {
       await db.execute(match.group(0)!);
     }
@@ -167,7 +167,7 @@ void main() {
                           'created_at': today,
                           'supabase_zoning_applications': {
                             'applicant_name': status == 'in_progress'
-                                ? 'PO due today'
+                                ? 'Started scheduled applicant'
                                 : status == 'completed'
                                 ? 'Completed applicant'
                                 : 'Test applicant',
@@ -979,7 +979,7 @@ void main() {
         expect(tester.getSize(arcs.first).width,
             greaterThanOrEqualTo(tester.getSize(chart).height * 0.85),
             reason: 'The chart uses the block height it was given, not a shrunken fixed size.');
-        for (final (index, fraction) in [0.5, 1 / 6, 1 / 6, 1 / 6].indexed) {
+        for (final (index, fraction) in [4 / 6, 1 / 6, 0.0, 1 / 6].indexed) {
           expect(tester.widget<CircularProgressIndicator>(arcs.at(index)).value, closeTo(fraction, 0.001));
         }
         await capture(tester, size.width == 360 ? 'completion-chart-face' : 'completion-chart-${size.width.toInt()}');
@@ -2003,8 +2003,8 @@ void main() {
           await tester.drag(notes, const Offset(0, -160));
           await tester.pumpAndSettle();
           expect(
-            find.descendant(of: notes, matching: find.text('PO due today')),
-            findsOneWidget,
+            find.descendant(of: notes, matching: find.text('Started scheduled applicant')),
+            findsNothing,
           );
           expect(
             find.descendant(
@@ -2054,8 +2054,8 @@ void main() {
             findsOneWidget,
           );
           expect(
-            find.descendant(of: calendar, matching: find.text('PO due today')),
-            findsOneWidget,
+            find.descendant(of: calendar, matching: find.text('Started scheduled applicant')),
+            findsNothing,
           );
           expect(
             find.descendant(
@@ -2084,8 +2084,8 @@ void main() {
             findsOneWidget,
           );
           expect(
-            find.descendant(of: calendar, matching: find.text('PO due today')),
-            findsNothing,
+            find.descendant(of: calendar, matching: find.text('Started scheduled applicant')),
+            findsOneWidget,
           );
           await tester.ensureVisible(find.byTooltip('Hide full calendar'));
           await tester.tap(find.byTooltip('Hide full calendar'));

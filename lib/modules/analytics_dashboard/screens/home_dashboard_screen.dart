@@ -7,10 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 
 import '../../../core/models/user_profile.dart';
+import '../../../core/models/task_submission.dart';
 import '../models/activity_event_category.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
+import '../../../core/services/sync_outbox_service.dart';
+import '../../../core/utils/calendar_date.dart';
 import '../../tasks/screens/tasks_screen.dart';
 import '../../../core/navigation/parcel_detail_screen.dart';
 import '../../profile_settings/screens/notifications_screen.dart';
@@ -36,8 +39,8 @@ bool isHomeDashboardActiveAssignment(TaskItem task) =>
 
 /// The existing dashboard display bucket for a task.
 ///
-/// "Scheduled" remains a visual Pending subsection; it is never returned for
-/// Ongoing, Completed, or Unknown lifecycle values.
+/// Started inspector-committed Visits remain Scheduled; the raw workflow status
+/// is preserved by TaskItem's canonical presentation.
 String? homeDashboardTaskPresentationCategory(TaskItem task) {
   return switch (task.lifecycleCategory) {
     TaskLifecycleCategory.pending =>
@@ -97,6 +100,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // complete picture, so this is loaded alongside it in the same fetch
   // rather than issuing a second network/service call.
   List<TaskItem> _allTasks = [];
+  Set<String> _deviceCompletedIds = {};
   // Keep real fetched metadata for selected normal entry; display is read-only.
   Map<String, Map<String, dynamic>> _entryJobs = {};
   // Durable saved progress per upcoming card, read from the exact-owner draft.
@@ -198,7 +202,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
     _authSubscription = SupabaseService.client.auth.onAuthStateChange
         .listen((_) => _retireIfOwnerChanged(),
-            onError: (Object _) => _retireIfOwnerChanged());
+             onError: (Object _) => _retireIfOwnerChanged());
+    SyncOutboxService.drainCompleted.addListener(_refreshSubmissionState);
+    SyncOutboxService.progress.addListener(_refreshSubmissionState);
     _loadUpcomingTasks();
     _loadRecentActivity();
   }
@@ -218,6 +224,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       _tasksRequestId++; // Retire every pending UI result with its owner.
       _tasksOwner = null;
       _allTasks = [];
+      _deviceCompletedIds = {};
       _upcomingTasks = [];
       _entryJobs = {};
       _isLoadingTasks = false;
@@ -253,6 +260,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
   @override
   void dispose() {
+    SyncOutboxService.drainCompleted.removeListener(_refreshSubmissionState);
+    SyncOutboxService.progress.removeListener(_refreshSubmissionState);
     _authSubscription?.cancel();
     _pageController.dispose();
     PaintingBinding.instance.systemFonts.removeListener(_onFontsChanged);
@@ -263,14 +272,61 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
   /// The carousel population: exactly the filter and order the dashboard has
   /// always used.
-  List<TaskItem> _upcomingFrom(List<TaskItem> tasks) {
-    final upcoming = tasks.where(isHomeDashboardActiveAssignment).toList()
+  List<TaskItem> _upcomingFrom(List<TaskItem> tasks, [Set<String>? deviceCompleted]) {
+    final completed = deviceCompleted ?? _deviceCompletedIds;
+    final upcoming = tasks.where((task) => isHomeDashboardActiveAssignment(task) &&
+        !completed.contains(task.id)).toList()
       ..sort((a, b) {
         final aDate = _calendarDateForTask(a) ?? '9999-12-31';
         final bDate = _calendarDateForTask(b) ?? '9999-12-31';
         return aDate.compareTo(bDate);
       });
     return upcoming.take(6).toList();
+  }
+
+  Set<String> _deviceCompletions(TaskPresentationSnapshot snapshot) {
+    final activeIds = {for (final job in snapshot.jobs)
+      if (mapTaskStatusToLifecycle(job['status'] as String?) != TaskLifecycleCategory.completed &&
+          mapTaskStatusToLifecycle(job['status'] as String?) != TaskLifecycleCategory.unknown) job['id']};
+    return {for (final row in snapshot.submissions)
+      if (activeIds.contains(row['job_id'])) TaskSubmission.fromRow(row).jobId};
+  }
+
+  List<TaskItem> _snapshotTasks(TaskPresentationSnapshot snapshot) => [
+    for (final row in snapshot.jobs)
+      if (_entryJobs[row['id']] case final remote?)
+        TaskItem.fromJob({...remote, 'status': row['status'],
+          'current_step': max((remote['current_step'] as num?)?.toInt() ?? 0,
+              (row['current_step'] as num?)?.toInt() ?? 0)})
+      else TaskItem.fromCachedJob(row),
+  ];
+
+  /// Final intent and receipts refresh from the same owner-scoped SQLite
+  /// snapshot as My Tasks; no network request or invented remote completion.
+  Future<void> _refreshSubmissionState() async {
+    final owner = _tasksOwner;
+    final request = _tasksRequestId;
+    if (owner == null || owner != DBHelper.currentInspectorId) return;
+    try {
+      final snapshot = await DBHelper.getTaskPresentationSnapshot();
+      if (!mounted || request != _tasksRequestId) return;
+      if (owner != DBHelper.currentInspectorId) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      final completed = _deviceCompletions(snapshot);
+      final tasks = _snapshotTasks(snapshot);
+      setState(() {
+        _deviceCompletedIds = completed;
+        _allTasks = tasks;
+        _upcomingTasks = _upcomingFrom(tasks, completed);
+      });
+    } catch (_) {
+      // Keep the last known snapshot; never turn a cache failure into success.
+      if (mounted && request == _tasksRequestId && owner == DBHelper.currentInspectorId) {
+        setState(() => _savedDataNotice = SavedDataNotice.cacheReadFailed);
+      }
+    }
   }
 
   /// Saved progress for the upcoming cards: the task's own counters joined
@@ -311,10 +367,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     setState(() => _taskRefreshPhase = TaskRefreshPhase.checking);
 
     List<Map<String, dynamic>> cached = const [];
+    var deviceCompleted = <String>{};
     var cacheFailed = false;
     if (owner != null && owner.isNotEmpty) {
       try {
-        cached = await DBHelper.getCachedJobs();
+        final snapshot = await DBHelper.getTaskPresentationSnapshot();
+        cached = snapshot.jobs;
+        deviceCompleted = _deviceCompletions(snapshot);
       } catch (e) {
         debugPrint('[HOME] saved task read failed: $e');
         cacheFailed = true;
@@ -335,11 +394,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     // on screen from the first frame instead of only after a refresh answers.
     final cardSteps = parsed == null
         ? <String, int>{}
-        : await _savedCardSteps(_upcomingFrom(parsed));
+        : await _savedCardSteps(_upcomingFrom(parsed, deviceCompleted));
     if (!mounted || requestId != _tasksRequestId) return;
 
     setState(() {
       _cardSteps = cardSteps;
+      _deviceCompletedIds = deviceCompleted;
       if (parsed != null) {
         _allTasks = parsed;
         _upcomingTasks = _upcomingFrom(parsed);
@@ -428,11 +488,19 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
         return;
       }
       _entryJobs = {for (final job in jobs) job['id'] as String: job};
-      final tasks = jobs.map((j) => TaskItem.fromJob(j)).toList();
-      final cardSteps = await _savedCardSteps(_upcomingFrom(tasks));
+      final snapshot = await DBHelper.getTaskPresentationSnapshot();
+      if (!mounted || requestId != _tasksRequestId) return;
+      if (DBHelper.currentInspectorId != owner) {
+        _retireIfOwnerChanged();
+        return;
+      }
+      final completed = _deviceCompletions(snapshot);
+      final tasks = _snapshotTasks(snapshot);
+      final cardSteps = await _savedCardSteps(_upcomingFrom(tasks, completed));
       if (!mounted || requestId != _tasksRequestId) return;
       setState(() {
         _allTasks = tasks;
+        _deviceCompletedIds = completed;
         _upcomingTasks = _upcomingFrom(tasks);
         _cardSteps = cardSteps;
         _isLoadingTasks = false;
@@ -526,12 +594,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
 
   String _formatScheduledDate(String isoDate) {
-    try {
-      final d = DateTime.parse(isoDate);
-      return '${_monthNames[d.month - 1]} ${d.day}, ${d.year}';
-    } catch (_) {
-      return isoDate;
-    }
+    final d = parseLocalCalendarDate(isoDate);
+    return d == null ? isoDate : '${_monthNames[d.month - 1]} ${d.day}, ${d.year}';
   }
 
   String _timeAgo(String? isoTimestamp) {
@@ -793,7 +857,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
     };
     for (final task in _allTasks) {
       final presentationCategory =
-          homeDashboardTaskPresentationCategory(task);
+          _deviceCompletedIds.contains(task.id) ? 'Completed' : homeDashboardTaskPresentationCategory(task);
       if (presentationCategory != null) {
         counts[presentationCategory] = counts[presentationCategory]! + 1;
       }
@@ -806,22 +870,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // and Ongoing tasks use their admin Deadline date. Unknown and Completed
   // tasks are not represented as active calendar work.
   String? _calendarDateForTask(TaskItem task) {
-    switch (task.lifecycleCategory) {
-      case TaskLifecycleCategory.pending:
-        if (task.pendingSection == PendingTaskSection.scheduled) {
-          return task.scheduledDate.isEmpty ? null : task.scheduledDate;
-        }
-        return task.deadlineDate?.isNotEmpty == true
-            ? task.deadlineDate
-            : null;
-      case TaskLifecycleCategory.ongoing:
-        return task.deadlineDate?.isNotEmpty == true
-            ? task.deadlineDate
-            : null;
-      case TaskLifecycleCategory.completed:
-      case TaskLifecycleCategory.unknown:
-        return null;
-    }
+    return _deviceCompletedIds.contains(task.id) ? null : task.activeDate;
   }
 
   Set<int> _taskDaysInMonth(DateTime month) {
@@ -830,7 +879,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       final calendarDate = _calendarDateForTask(t);
       if (calendarDate == null) continue;
       try {
-        final d = DateTime.parse(calendarDate);
+        final d = parseLocalCalendarDate(calendarDate);
+        if (d == null) continue;
         if (d.year == month.year && d.month == month.month) days.add(d.day);
       } catch (_) {}
     }
@@ -843,7 +893,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       final calendarDate = _calendarDateForTask(t);
       if (calendarDate == null) continue;
       try {
-        final d = DateTime.parse(calendarDate);
+        final d = parseLocalCalendarDate(calendarDate);
+        if (d == null) continue;
         if (d.year == month.year && d.month == month.month) {
           map.putIfAbsent(d.day, () => <TaskItem>[]).add(t);
         }
@@ -865,22 +916,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   }
 
   int _calendarVisitPriority(TaskItem task) {
-    try {
-      final calendarDate = _calendarDateForTask(task);
-      if (calendarDate == null) return 2;
-      final visit = DateTime.parse(calendarDate);
-      final today = DateTime.now();
-      final taskDay = DateTime(visit.year, visit.month, visit.day);
-      final todayDay = DateTime(today.year, today.month, today.day);
-      final daysUntilTask = taskDay.difference(todayDay).inDays;
-      if (task.pendingSection == PendingTaskSection.scheduled) {
-        if (daysUntilTask <= 1) return 0;
-        if (daysUntilTask <= 3) return 1;
-      } else {
-        if (daysUntilTask <= 1) return 0;
-        if (daysUntilTask <= 3) return 1;
-      }
-    } catch (_) {}
+    final p = task.presentation;
+    if (p.isOverdue) return 0;
+    final date = p.activeDay;
+    if (date == null) return 2;
+    final days = calendarDaysBetween(DateTime.now(), date);
+    if (days <= 1) return 0;
+    if (days <= 3) return 1;
     return 2;
   }
 
@@ -1366,6 +1408,21 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                     );
                   }),
                  ),
+              if (!_isLoadingTasks && _upcomingTasks.isNotEmpty)
+                Builder(builder: (context) {
+                  final task = _upcomingTasks[_currentCardIndex.clamp(0, _upcomingTasks.length - 1)];
+                  final p = task.presentation;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(key: ValueKey('home_task_notices_${task.id}'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [for (final notice in p.notices)
+                        Padding(padding: const EdgeInsets.only(top: 8),
+                          child: Text('${task.inspectionNo} · ${p.noticeText(notice)}',
+                              style: InsightTheme.inter(12, c: p.isOverdue ? InsightTheme.redInk : InsightTheme.ink2)))],
+                    ),
+                  );
+                }),
                  const SizedBox(height: 8),
                    ],
                  ),
@@ -1418,7 +1475,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   return total == 0 ? 0.0 : count / total;
                                 });
                                 final overdueCount = _allTasks.where((task) {
-                                  if (task.category == 'Completed') return false;
+                                  if (task.category == 'Completed' || _deviceCompletedIds.contains(task.id)) return false;
                                   return task.scheduleUrgency == 'Overdue';
                                 }).length;
                                 return _CompletionRingChart(
@@ -1434,6 +1491,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   ),
               ),
               ),
+              if (_deviceCompletedIds.isNotEmpty)
+                Padding(padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                  child: Text('${_deviceCompletedIds.length} completed on device — awaiting server acceptance.',
+                      style: InsightTheme.inter(12, c: InsightTheme.orangeInk))),
               const SizedBox(height: 12),
 
               // ----------------------------------------------------

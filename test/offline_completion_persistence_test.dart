@@ -283,7 +283,9 @@ void main() {
       ...cached,
       'is_self_scheduled': cached['is_self_scheduled'] == 1,
     });
-    expect(task.category, 'Ongoing');
+    expect(task.category, 'Pending');
+    expect(task.pendingSection, PendingTaskSection.scheduled);
+    expect(task.status, 'in_progress', reason: 'queued final intent is not server acceptance');
     expect(await DBHelper.getActionableActions(), before);
   });
 

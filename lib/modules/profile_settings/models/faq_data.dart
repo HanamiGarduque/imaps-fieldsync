@@ -13,25 +13,25 @@ class FaqData {
           questionEn: 'Why is my task blue?',
           questionTl: 'Bakit kulay blue ang task ko?',
           answerEn:
-              'Blue means the task is in its normal priority state. It does not mean the task is completed.',
+              'Blue is the normal active state: no committed Visit, or a Visit at least 4 days away. Completed is green, not blue. Check the separate PO Deadline notice even when the border is blue.',
           answerTl:
-              'Ang kulay blue ay nangangahulugang normal ang priority ng task. Hindi ibig sabihin nito na completed na ang task.',
+              'Normal na active state ang blue: walang napiling Visit, o 4 na araw o higit pa bago ang Visit. Green ang Completed, hindi blue. Basahin pa rin ang hiwalay na abiso ng PO Deadline.',
         ),
         FaqItem(
           questionEn: 'Why did my task turn orange?',
           questionTl: 'Bakit naging orange ang task ko?',
           answerEn:
-              'Orange means the scheduled visit date is getting close. It is a warning to help you prepare for the upcoming visit.',
+              'An orange border means your committed Visit is in 2–3 days. The PO Deadline has its own separate reminder.',
           answerTl:
-              'Ang kulay orange ay nangangahulugang papalapit na ang nakatakdang visit date. Babala ito upang makapaghanda ka sa iyong pagbisita.',
+              'Ang orange na border ay nangangahulugang 2–3 araw na lang bago ang napili mong Visit. May hiwalay na paalala ang PO Deadline.',
         ),
         FaqItem(
           questionEn: 'Why did my task turn red?',
           questionTl: 'Bakit naging red ang task ko?',
           answerEn:
-              'Red means the task needs urgent attention. This can happen when the scheduled visit is very close or when the administrative deadline has already passed.',
+              'A red border means your Visit is tomorrow, today, or missed. It stays red until a valid reschedule, then follows the new Visit date. The whole active card turns red only after the PO Deadline passes. Completed stays green.',
           answerTl:
-              'Ang kulay red ay nangangahulugang kailangan ng agarang aksyon. Nangyayari ito kapag napakalapit na ng scheduled visit o kaya ay lumagpas na ang administrative deadline.',
+              'Red ang border kapag bukas, ngayon, o lumipas na ang Visit. Mananatili ito hanggang sa valid na reschedule, saka ibabatay ang kulay sa bagong Visit. Buong active card lang ang magiging red kapag lumampas na sa PO Deadline. Green pa rin ang Completed.',
         ),
         FaqItem(
           questionEn: 'What does "Available Anytime" mean?',
@@ -54,9 +54,9 @@ class FaqData {
           questionTl:
               'Anong mga petsa ang maaari kong piliin sa pag-schedule ng pagbisita?',
           answerEn:
-              'You can choose any date starting from tomorrow up to the administrative deadline. The app does not allow scheduling on the same day or past the deadline.',
+              'While online, choose tomorrow through the current PO Deadline, inclusive. You cannot schedule today, after the deadline, or when the PO Deadline is today, passed, missing or unverified. You can still continue an authorized inspection or coordinate with the Planning Officer.',
           answerTl:
-              'Maaari kang pumili ng alinmang petsa simula bukas hanggang sa administrative deadline. Hindi pinapayagan ng app ang same-day schedule o ang pagpili ng petsang lampas sa deadline.',
+              'Habang online, pumili mula bukas hanggang sa kasalukuyang PO Deadline, kasama ang petsa ng deadline. Hindi puwede ang same-day, lampas sa deadline, o kapag ngayon na, lumipas, wala o hindi beripikado ang PO Deadline. Maaari pa ring ipagpatuloy ang awtorisadong inspection o makipag-ugnayan sa Planning Officer.',
         ),
         FaqItem(
           questionEn: 'Why can\'t I schedule a visit for today?',
@@ -71,17 +71,29 @@ class FaqData {
           questionEn: 'Can I reschedule?',
           questionTl: 'Maaari ba akong mag-reschedule?',
           answerEn:
-              'Yes. A scheduled inspection can be rescheduled again as long as it has not been finally submitted. The new visit date replaces the previous scheduled date.',
+              'Yes, while online and before the PO Deadline day, if the inspection has not been finally submitted. Choose a new Visit after today and on or before the current PO Deadline. Repeated rescheduling keeps your saved steps, photos and findings. It does not extend the PO Deadline.',
           answerTl:
-              'Oo. Maaaring i-reschedule muli ang isang scheduled inspection hangga\'t hindi pa ito pinal na naisusumite. Papalitan ng bagong visit date ang dating petsa.',
+              'Oo, habang online at bago ang araw ng PO Deadline, kung hindi pa pinal na naisusumite ang inspection. Pumili ng Visit pagkatapos ngayon at hindi lalampas sa kasalukuyang PO Deadline. Nananatili ang mga na-save na step, litrato at findings. Hindi nito pinahahaba ang PO Deadline.',
         ),
         FaqItem(
           questionEn: 'What does "For Reschedule" mean?',
           questionTl: 'Ano ang ibig sabihin ng "For Reschedule"?',
           answerEn:
-              'It means your chosen visit date has passed, but the administrative deadline is still active. You should pick a new valid visit date as soon as possible.',
+              'Your Visit was missed and the PO Deadline is still in the future. Reschedule to a valid Visit or continue inspecting. On PO Deadline Today this is replaced by a scheduling-unavailable deadline notice; an expired PO Deadline is Overdue.',
           answerTl:
-              'Ibig sabihin nito ay lumipas na ang napili mong petsa ng pagbisita, ngunit hindi pa lumalampas ang administrative deadline. Pumili agad ng bagong petsa ng pagbisita.',
+              'Lumipas na ang Visit at nasa hinaharap pa ang PO Deadline. Pumili ng valid na Visit o ipagpatuloy ang inspection. Kapag PO Deadline Today na, papalitan ito ng abiso na hindi na puwedeng mag-schedule. Overdue naman kapag lumampas na sa PO Deadline.',
+        ),
+        FaqItem(
+          questionEn: 'Why does my started inspection stay Scheduled?',
+          questionTl: 'Bakit Scheduled pa rin ang nasimulan kong inspection?',
+          answerEn: 'A committed Visit keeps the task under Pending → Scheduled through Steps 1–6 until final submission. In Progress appears only at Steps 1–5. Ongoing is for started tasks without a committed Visit. Completed on Device is distinct from confirmed server acceptance.',
+          answerTl: 'Nananatili sa Pending → Scheduled ang task na may napiling Visit sa Steps 1–6 hanggang sa final submission. In Progress lang ang badge sa Steps 1–5. Para sa nasimulang task na walang napiling Visit ang Ongoing. Iba ang Completed on Device sa kumpirmadong pagtanggap ng server.',
+        ),
+        FaqItem(
+          questionEn: 'What do Urgent and the in-app reminders mean?',
+          questionTl: 'Ano ang ibig sabihin ng Urgent at mga paalala sa app?',
+          answerEn: 'Urgent includes active Visits due, missed or within 3 days, and PO Deadlines today or within 3 days. Past PO Deadlines appear only in Overdue. My Tasks and Home compute separate Visit and PO Deadline notices when displayed; these are not phone push notifications and do not claim an earlier notification was sent.',
+          answerTl: 'Kasama sa Urgent ang active Visit na due, lumipas o nasa loob ng 3 araw, at PO Deadline ngayon o sa loob ng 3 araw. Sa Overdue lang kasama ang lumampas na PO Deadline. Kinukuwenta ng My Tasks at Home ang hiwalay na abiso para sa Visit at PO Deadline kapag ipinakita; hindi ito phone push notification at hindi patunay na may naunang naipadalang abiso.',
         ),
         FaqItem(
           questionEn: 'What does "Modified" mean?',

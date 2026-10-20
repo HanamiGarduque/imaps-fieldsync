@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'db_helper.dart';
 import 'inspection_authority.dart';
 import 'supabase_endpoint.dart';
+import '../utils/calendar_date.dart';
 export 'inspection_authority.dart';
 
 enum PhotoObjectState { exists, missing, unknown }
@@ -18,6 +19,22 @@ enum PhotoObjectState { exists, missing, unknown }
 /// here: they must reconcile through the existing satisfied-state read so the
 /// original `started_at` is never rewritten.
 const List<String> kStartableTaskStatuses = ['assigned', 'Pending', 'pending'];
+
+/// Active states a committed visit may be written to.
+///
+/// `pending` belongs here because earlier scheduling writes used that state,
+/// so excluding it made every repeat reschedule a
+/// zero-row write that the authority check then refused. `completed` and the
+/// unsupported lifecycle values stay excluded, so a finished round can never
+/// be resurrected.
+const List<String> kSchedulableTaskStatuses = [
+  'assigned',
+  'Pending',
+  'pending',
+  'in_progress',
+  'in-progress',
+  'ongoing',
+];
 
 class PhotoRecoveryUnknownException implements Exception {
   final String message;
@@ -762,42 +779,149 @@ class SupabaseService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SCHEDULE / RESCHEDULE A JOB  (Tasks screen → a Pending or Ongoing card)
-  //   Inspector picks a specific future date (never past deadline_date,
-  //   enforced both here and by the date picker's lastDate on the UI side).
-  //   Both `assigned` and `in_progress` are schedulable: rescheduling an
-  //   Ongoing task is an explicit product flow, and the write returns it to
-  //   `pending` so the card lands under Pending → Scheduled.
+  // SCHEDULE / RESCHEDULE A JOB  (Tasks screen → a Pending, Scheduled or
+  //   Ongoing card)
+  //   Hard PO-deadline policy (MY_TASKS_FINAL_FLOW_SPEC_20261020 §3):
+  //     today < Visit <= current verified PO deadline, all date-only.
+  //     The earliest new Visit is tomorrow; the latest is the PO deadline.
+  //     When the deadline is today or past, scheduling is closed.
+  //   `pending` is schedulable: earlier scheduling writes set that state,
+  //   so excluding it made every REPEAT reschedule a
+  //   zero-row write that the authority check then refused. `completed` stays
+  //   excluded, so a finished round can never be resurrected.
   // ─────────────────────────────────────────────────────────────────────────
   static Future<InspectionAuthorityResult> scheduleJob({
     required String jobId,
     required DateTime date,
+    DateTime? now,
+    DateTime Function()? clock,
   }) async {
-    final dateStr =
-        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    // The lifecycle predicate keeps a stale card/action a safe no-op after
-    // another client completes the job: `completed` is excluded, so this can
-    // never resurrect a finished round.
-    return _writeWithAuthority(
+    final uid = client.auth.currentUser?.id;
+    if (uid == null) return InspectionAuthorityResult.authRequired;
+
+    final visit = _localDay(date);
+    final dateStr = _formatLocalDay(visit);
+
+    // The PO deadline is the Planning Officer's to change, so it is read from
+    // the server row — never from the card the inspector is looking at.
+    final Map<String, dynamic>? current;
+    try {
+      current = await _readOwnedJob(jobId, uid);
+    } catch (_) {
+      if (_sessionUid != uid) return InspectionAuthorityResult.authRequired;
+      return InspectionAuthorityResult.offlineOrUnverifiable;
+    }
+    if (_sessionUid != uid) return InspectionAuthorityResult.authRequired;
+    if (current == null) return InspectionAuthorityResult.notAssignedOrUnavailable;
+
+    final status = current['status'];
+    if (!kSchedulableTaskStatuses.contains(status)) {
+      return InspectionAuthorityResult.notAssignedOrUnavailable;
+    }
+    final deadline = parseLocalCalendarDate(current['deadline_date']);
+    if (deadline == null) return InspectionAuthorityResult.deadlineUnavailable;
+    // A slow read may cross midnight. Validate the dispatch day's window, not
+    // the day on which the inspector opened or confirmed the picker.
+    final today = _localDay(clock?.call() ?? now ?? DateTime.now());
+    if (!deadline.isAfter(today)) return InspectionAuthorityResult.deadlinePassed;
+    if (!visit.isAfter(today)) return InspectionAuthorityResult.visitDateNotAllowed;
+    if (visit.isAfter(deadline)) return InspectionAuthorityResult.visitDateNotAllowed;
+
+    final payload = <String, dynamic>{
+      // Do not downgrade started rows or race a concurrent start/completion.
+      // The committed Visit determines Scheduled presentation, not raw status.
+      'scheduled_date': dateStr,
+      'is_self_scheduled': true,
+    };
+
+    final result = await _writeWithAuthority(
       jobId,
       (uid) => client
           .from('field_jobs')
-          .update({
-            'scheduled_date': dateStr,
-            'is_self_scheduled': true,
-            'status': 'pending',
-          })
+          .update(payload)
           .eq('id', jobId)
           .eq('assigned_inspector_id', uid)
-          .inFilter('status', ['assigned', 'in_progress'])
+          .inFilter('status', kSchedulableTaskStatuses)
+          // Re-checked against the server row at write time: the visit may
+          // never be later than the PO deadline, so a deadline the PO
+          // shortened since the card was drawn cannot be crossed.
+          .gte('deadline_date', dateStr)
           .select()
           .retry(enabled: false),
-      satisfied: (row) =>
-          row['scheduled_date'] == dateStr &&
-          row['is_self_scheduled'] == true &&
-          row['status'] == 'pending',
+      satisfied: (row) {
+        final actualDeadline = parseLocalCalendarDate(row['deadline_date']);
+        return row['scheduled_date'] == dateStr &&
+            row['is_self_scheduled'] == true &&
+            kSchedulableTaskStatuses.contains(row['status']) &&
+            actualDeadline != null && actualDeadline.isAfter(today) &&
+            !visit.isAfter(actualDeadline);
+      },
     );
+    if (_sessionUid != uid) return InspectionAuthorityResult.authRequired;
+    if (result != InspectionAuthorityResult.offlineOrUnverifiable) return result;
+
+    // A zero-row write is never success: name the real reason instead of
+    // blaming the network.
+    return _explainScheduleRefusal(jobId, uid, today, visit);
   }
+
+  /// The current owner-scoped row, or null when this inspector cannot see it.
+  static Future<Map<String, dynamic>?> _readOwnedJob(
+    String jobId,
+    String uid,
+  ) async {
+    final row = await client
+        .from('field_jobs')
+        .select(
+            'id,status,deadline_date,scheduled_date,is_self_scheduled,assigned_inspector_id')
+        .eq('id', jobId)
+        .eq('assigned_inspector_id', uid)
+        .maybeSingle()
+        .retry(enabled: false)
+        .timeout(const Duration(seconds: 10));
+    if (row == null) return null;
+    if (row['id'] != jobId || row['assigned_inspector_id'] != uid) return null;
+    return row;
+  }
+
+  /// Explains a refused schedule write with the reason that actually applies.
+  static Future<InspectionAuthorityResult> _explainScheduleRefusal(
+    String jobId,
+    String uid,
+    DateTime today,
+    DateTime visit,
+  ) async {
+    Map<String, dynamic>? row;
+    try {
+      row = await _readOwnedJob(jobId, uid);
+    } catch (_) {
+      if (_sessionUid != uid) return InspectionAuthorityResult.authRequired;
+      return InspectionAuthorityResult.offlineOrUnverifiable;
+    }
+    if (_sessionUid != uid) return InspectionAuthorityResult.authRequired;
+    if (row == null) return InspectionAuthorityResult.notAssignedOrUnavailable;
+    final status = row['status'];
+    if (!kSchedulableTaskStatuses.contains(status)) {
+      return InspectionAuthorityResult.notAssignedOrUnavailable;
+    }
+    final deadline = parseLocalCalendarDate(row['deadline_date']);
+    if (deadline == null) return InspectionAuthorityResult.deadlineUnavailable;
+    if (!deadline.isAfter(today)) return InspectionAuthorityResult.deadlinePassed;
+    if (!visit.isAfter(today) || visit.isAfter(deadline)) {
+      return InspectionAuthorityResult.visitDateNotAllowed;
+    }
+    return InspectionAuthorityResult.offlineOrUnverifiable;
+  }
+
+  /// A calendar day in the device's local time, with the time of day dropped.
+  static DateTime _localDay(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  /// `YYYY-MM-DD` for a local calendar day.
+  static String _formatLocalDay(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
 
   // ─────────────────────────────────────────────────────────────────────────
   // GPS DISTANCE CHECK  (GPS verification screen)

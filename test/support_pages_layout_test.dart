@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:imaps_fieldsync/core/widgets/fieldsync_brand.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/models/faq_data.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/about_insight_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/help_faq_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_document_screen.dart';
@@ -143,7 +144,7 @@ void main() {
               await tester.tap(question);
               await tester.pumpAndSettle();
               expect(
-                find.textContaining('normal priority state'),
+                find.text(FaqData.categories.first.items.first.answerEn),
                 findsOneWidget,
               );
             } else if (page is PolicyDocumentScreen) {

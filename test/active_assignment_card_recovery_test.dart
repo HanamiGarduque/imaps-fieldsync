@@ -78,7 +78,8 @@ void main() {
     for (final scenario in [
       (status: 'assigned', scheduled: false, badge: 'PENDING', dateLabel: 'Deadline', date: 'Oct 31, 2026'),
       (status: 'assigned', scheduled: true, badge: 'SCHEDULED', dateLabel: 'Visit Date', date: 'Oct 21, 2026'),
-      (status: 'in_progress', scheduled: true, badge: 'ONGOING', dateLabel: 'Deadline', date: 'Oct 31, 2026'),
+      (status: 'in_progress', scheduled: true, badge: 'SCHEDULED', dateLabel: 'Visit Date', date: 'Oct 21, 2026'),
+      (status: 'in_progress', scheduled: false, badge: 'ONGOING', dateLabel: 'Deadline', date: 'Oct 31, 2026'),
     ]) {
       await tester.runAsync(() => cacheAssignments(status: scenario.status, selfScheduled: scenario.scheduled));
       await mountHome(tester);

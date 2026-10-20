@@ -1011,11 +1011,15 @@ class DBHelper {
     final db = await database;
     return db.transaction((txn) async {
       requireSameInspector(uid);
-      final jobs = await txn.query(
-        'local_jobs',
-        where: 'inspector_id = ?',
-        whereArgs: [uid],
-      );
+      // Read-only progress projection: v18 already stores saved steps in the
+      // exact-owner draft, not local_jobs. Do not rewrite either stored row.
+      final jobs = await txn.rawQuery('''
+        SELECT jobs.*, draft.current_step AS current_step
+        FROM local_jobs AS jobs
+        LEFT JOIN local_inspections AS draft
+          ON draft.id = jobs.id AND draft.inspector_id = jobs.inspector_id
+        WHERE jobs.inspector_id = ?
+      ''', [uid]);
       final submissions = await txn.query(
         'pending_actions',
         where: "type = 'submit_inspection' AND inspector_id = ?",

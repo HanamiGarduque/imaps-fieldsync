@@ -57,13 +57,13 @@ void main() {
       );
     });
 
-    test('in_progress with self-scheduling remains Ongoing', () {
+    test('in_progress with self-scheduling remains Scheduled', () {
       expectConsumerBehavior(
         status: 'in_progress',
         isSelfScheduled: true,
         isActiveAssignment: true,
-        dashboardPresentation: 'Ongoing',
-        cardLabel: 'Ongoing',
+        dashboardPresentation: 'Scheduled',
+        cardLabel: 'Scheduled',
       );
     });
 

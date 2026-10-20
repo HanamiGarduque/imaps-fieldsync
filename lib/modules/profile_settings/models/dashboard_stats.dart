@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../tasks/screens/tasks_screen.dart' show TaskItem;
+import '../../../core/utils/calendar_date.dart';
 
 /// One daily (Week) or weekly (Month) submission bar.
 @immutable
@@ -40,9 +41,8 @@ class CompletedTaskDay {
   const CompletedTaskDay({required this.date, required this.label});
 }
 
-/// A task that carries a usable `scheduled_date`, used to build the Gauge's
-/// scheduled cohort. Tasks without a schedule are simply absent — the Gauge
-/// must never quietly treat them as either numerator or denominator.
+/// An inspector-committed Visit in the Gauge cohort. Missing/invalid dates and
+/// PO placeholders are excluded from both numerator and denominator.
 @immutable
 class ScheduledCohortTask {
   final String id;
@@ -84,9 +84,8 @@ class InspectorDashboardStats {
   final int currentYear;
   final List<TypeBreakdownEntry> typeBreakdown;
 
-  /// Every task that has a scheduled date, with that date and whether it is
-  /// Completed. The Gauge builds its scheduled cohort from this: a task with no
-  /// `scheduled_date` is excluded entirely rather than assumed.
+  /// Recognized inspector-committed Visits (including Completed). PO-supplied
+  /// placeholders are never evidence that the inspector chose a Visit.
   final List<ScheduledCohortTask> scheduledCohort;
 
   /// Completed tasks paired with their real submission day and their existing
@@ -197,18 +196,12 @@ class InspectorDashboardStats {
         .toList()
       ..sort((a, b) => b.count.compareTo(a.count));
 
-    // ── Scheduled cohort for the Gauge: only tasks that actually carry a
-    // parseable scheduled_date. A task without a schedule is excluded rather
-    // than defaulted, so an empty cohort stays honestly empty.
+    // Only a recognized task with an inspector-committed Visit joins the cohort.
     final cohort = <ScheduledCohortTask>[];
     for (final t in tasks) {
-      if (t.scheduledDate.isEmpty) continue;
-      DateTime parsed;
-      try {
-        parsed = DateTime.parse(t.scheduledDate);
-      } catch (_) {
-        continue;
-      }
+      if (!t.isSelfScheduled || t.category == 'Unknown') continue;
+      final parsed = parseLocalCalendarDate(t.scheduledDate);
+      if (parsed == null) continue;
       cohort.add(ScheduledCohortTask(
         id: t.id,
         scheduledDate: DateTime(parsed.year, parsed.month, parsed.day),

@@ -45,6 +45,7 @@ TaskItem _task(
   String status = 'completed',
   String? submittedAt,
   String? scheduledDate,
+  bool isSelfScheduled = false,
   String? type,
   String landUse = '',
 }) => TaskItem.fromJob({
@@ -52,6 +53,7 @@ TaskItem _task(
   'status': status,
   'submitted_at': submittedAt,
   'scheduled_date': scheduledDate,
+  'is_self_scheduled': isSelfScheduled,
   'supabase_zoning_applications': {
     'applicant_name': 'Applicant $id',
     'barangay': 'Mavalor',
@@ -396,9 +398,9 @@ void main() {
       tester,
     ) async {
       final stats = InspectorDashboardStats.fromTasks([
-        _task('a', scheduledDate: '2026-10-01', status: 'completed'),
-        _task('b', scheduledDate: '2026-10-02', status: 'completed'),
-        _task('c', scheduledDate: '2026-10-03', status: 'in_progress'),
+        _task('a', scheduledDate: '2026-10-01', isSelfScheduled: true, status: 'completed'),
+        _task('b', scheduledDate: '2026-10-02', isSelfScheduled: true, status: 'completed'),
+        _task('c', scheduledDate: '2026-10-03', isSelfScheduled: true, status: 'in_progress'),
       ]);
       final metrics = AnalyticsActivityRange.week(
         DateTime(2026, 10, 3),
@@ -858,8 +860,9 @@ void main() {
 
     test('unscheduled tasks never enter the cohort', () {
       final stats = InspectorDashboardStats.fromTasks([
-        _task('scheduled', scheduledDate: '2026-10-01', status: 'completed'),
+        _task('scheduled', scheduledDate: '2026-10-01', isSelfScheduled: true, status: 'completed'),
         _task('unscheduled', status: 'completed'), // no scheduled_date
+        _task('po-placeholder', scheduledDate: '2026-10-02', status: 'completed'),
       ]);
       expect(stats.scheduledCohort.map((t) => t.id), ['scheduled']);
       expect(stats.scheduledCohort.single.isCompleted, isTrue);
@@ -869,8 +872,8 @@ void main() {
       'a task with an unparseable scheduled date is skipped, not defaulted',
       () {
         final stats = InspectorDashboardStats.fromTasks([
-          _task('bad', scheduledDate: 'not-a-date'),
-          _task('good', scheduledDate: '2026-10-01'),
+          _task('bad', scheduledDate: 'not-a-date', isSelfScheduled: true),
+          _task('good', scheduledDate: '2026-10-01', isSelfScheduled: true),
         ]);
         expect(stats.scheduledCohort.map((t) => t.id), ['good']);
       },

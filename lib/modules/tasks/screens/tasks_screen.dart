@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show max;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,20 +29,19 @@ import '../../../core/widgets/field_form_widgets.dart';
 
 
 import '../../../core/theme/insight_theme.dart';
+import '../models/task_lifecycle.dart';
 
 /// ==================================================================
 /// CONSTANTS
 /// ==================================================================
 
-/// Height reserved for the pinned Pending/Ongoing/Completed bar in
-/// AppBar.bottom, including its 12px bottom gap and the 1px divider.
-///
-/// Derived from the bar's own metrics rather than guessed: segmented container
-/// padding 4+4, tab vertical padding 10+10 around a ~15px row, then the 12px
-/// bottom gap and the 1px divider. A regression test asserts the bar still fits
-/// (no overflow) at several widths and text scales, so if the tab metrics ever
-/// change this constant fails loudly instead of silently clipping.
-const double kCategoryBarHeight = 68;
+/// Independent track gutters and tab padding; content never borrows either.
+const double _segmentGap = 8;
+const double _segmentCountGap = 6;
+const double _segmentInset = 4;
+const double _segmentPadH = 12;
+const double _segmentBadgePad = 4;
+const double _segmentHeight = 54;
 
 const List<String> rosarioBarangays = [
   'All Barangays', 'Alupay', 'Antipolo', 'Bagong Tubig', 'Bayawang', 'Bulihan', 
@@ -65,13 +65,12 @@ enum PendingTaskSection { availableAnytime, scheduled }
 /// coerce, or use substring matching here: anything outside this approved map
 /// must remain visible to diagnostics rather than entering a normal task list.
 TaskLifecycleCategory mapTaskStatusToLifecycle(String? status) {
-  return switch (status) {
-    'assigned' || 'Pending' || 'pending' => TaskLifecycleCategory.pending,
-    'in_progress' || 'in-progress' || 'ongoing' =>
-      TaskLifecycleCategory.ongoing,
-    'completed' || 'Completed' || 'submitted' =>
-      TaskLifecycleCategory.completed,
-    _ => TaskLifecycleCategory.unknown,
+  return switch (MyTaskPresentation.lifecycleFor(
+      MyTaskFacts(status: status, isSelfScheduled: false))) {
+    MyTaskLifecycle.scheduled || MyTaskLifecycle.availableAnytime => TaskLifecycleCategory.pending,
+    MyTaskLifecycle.ongoing => TaskLifecycleCategory.ongoing,
+    MyTaskLifecycle.completed => TaskLifecycleCategory.completed,
+    MyTaskLifecycle.unknown => TaskLifecycleCategory.unknown,
   };
 }
 
@@ -302,11 +301,32 @@ class TaskItem {
     if (checklistCompletedCount > 0) return 4;
     if (photoCount > 0 || photoPaths.isNotEmpty) return 3;
     if (confirmedLatitude != null && confirmedLongitude != null) return 2;
-    if (lifecycleCategory == TaskLifecycleCategory.ongoing) return 1;
+    if (currentStep > 0 || startedAt?.isNotEmpty == true ||
+        mapTaskStatusToLifecycle(status) == TaskLifecycleCategory.ongoing) {
+      return 1;
+    }
     return 0;
   }
 
-  TaskLifecycleCategory get lifecycleCategory => mapTaskStatusToLifecycle(status);
+  MyTaskFacts get _presentationFacts => MyTaskFacts(
+    status: status, isSelfScheduled: isSelfScheduled,
+    visitDate: scheduledDate, deadlineDate: deadlineDate, currentStep: currentStep,
+    hasStarted: startedAt?.isNotEmpty == true,
+  );
+
+  MyTaskPresentation presentationAt(DateTime today) => MyTaskPresentation.of(_presentationFacts, today);
+  MyTaskPresentation get presentation => presentationAt(DateTime.now());
+
+  TaskLifecycleCategory get lifecycleCategory => switch (MyTaskPresentation.lifecycleFor(_presentationFacts)) {
+    MyTaskLifecycle.scheduled || MyTaskLifecycle.availableAnytime => TaskLifecycleCategory.pending,
+    MyTaskLifecycle.ongoing => TaskLifecycleCategory.ongoing,
+    MyTaskLifecycle.completed => TaskLifecycleCategory.completed,
+    MyTaskLifecycle.unknown => TaskLifecycleCategory.unknown,
+  };
+
+  /// The displayed active date, never a PO placeholder disguised as a Visit.
+  String? get activeDate => presentation.activeDay == null ? null :
+      pendingSection == PendingTaskSection.scheduled ? scheduledDate : deadlineDate;
 
   String get category => switch (lifecycleCategory) {
     TaskLifecycleCategory.pending => 'Pending',
@@ -323,25 +343,7 @@ class TaskItem {
   }
 
   String? get forReschedule {
-    // Gate on isSelfScheduled directly — scheduledDate is non-nullable and
-    // always populated in the DB even for tasks the inspector never chose
-    // a visit date for, so checking scheduledDate alone (as before) let
-    // this fire for every category, not just Scheduled.
-    if (!isSelfScheduled || scheduledDate.isEmpty) return null;
-    try {
-      final visitDate = DateTime.parse(scheduledDate);
-      final today = DateTime.now();
-      final visitDay = DateTime(visitDate.year, visitDate.month, visitDate.day);
-      final todayDay = DateTime(today.year, today.month, today.day);
-      if (!visitDay.isBefore(todayDay)) return null;
-      if (deadlineDate == null || deadlineDate!.isEmpty) return 'For Reschedule';
-      final deadline = DateTime.parse(deadlineDate!);
-      final deadlineDay = DateTime(deadline.year, deadline.month, deadline.day);
-      if (deadlineDay.isAfter(todayDay)) return 'For Reschedule';
-    } catch (_) {
-      return null;
-    }
-    return null;
+    return presentation.forReschedule ? 'For Reschedule' : null;
   }
 
   /// Due Today / Overdue, correctly split by category (Fix 3):
@@ -356,34 +358,8 @@ class TaskItem {
   ///   Available Anytime tasks whose default scheduled_date happened to
   ///   equal today's date).
   String? get scheduleUrgency {
-    final today = DateTime.now();
-    final todayDay = DateTime(today.year, today.month, today.day);
-
-    if (deadlineDate != null && deadlineDate!.isNotEmpty) {
-      try {
-        final due = DateTime.parse(deadlineDate!);
-        final dueDay = DateTime(due.year, due.month, due.day);
-        if (dueDay.isBefore(todayDay)) return 'Overdue';
-      } catch (_) {}
-    }
-
-    if (isSelfScheduled && scheduledDate.isNotEmpty) {
-      try {
-        final due = DateTime.parse(scheduledDate);
-        final dueDay = DateTime(due.year, due.month, due.day);
-        if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
-      } catch (_) {}
-      return null; // Scheduled, visit not today, not overdue — nothing yet
-    }
-
-    if (deadlineDate != null && deadlineDate!.isNotEmpty) {
-      try {
-        final due = DateTime.parse(deadlineDate!);
-        final dueDay = DateTime(due.year, due.month, due.day);
-        if (dueDay.isAtSameMomentAs(todayDay)) return 'Due today';
-      } catch (_) {}
-    }
-    return null;
+    final p = presentation;
+    return p.isOverdue ? 'Overdue' : p.isDueToday ? 'Due today' : null;
   }
 
   IconData get typeIcon {
@@ -399,20 +375,7 @@ class TaskItem {
   /// any passed visit date until the task reaches deadline overdue. Orange is
   /// used for 2-3 days away; blue is the normal/default state.
   bool get isUrgentDeadline {
-    // Gate on isSelfScheduled directly, not the old isScheduledPlan (which
-    // incorrectly treated every task as "on the schedule plan" since
-    // scheduledDate is never actually empty in the DB).
-    if (!isSelfScheduled || scheduledDate.isEmpty) return false;
-    try {
-      final due = DateTime.parse(scheduledDate);
-      final today = DateTime.now();
-      final dueDay = DateTime(due.year, due.month, due.day);
-      final todayDay = DateTime(today.year, today.month, today.day);
-      final diff = dueDay.difference(todayDay).inDays;
-      return diff <= 1 || dueDay.isBefore(todayDay);
-    } catch (_) {
-      return false;
-    }
+    return presentation.border == MyTaskBorder.red;
   }
 }
 
@@ -427,9 +390,8 @@ class TasksScreen extends StatefulWidget {
   /// callers stay readable and in sync with `_visibleTabOrder`.
   final int initialTabIndex;
 
-  // Phase 3 (My Tasks status architecture): "Scheduled" is not a lifecycle
-  // category or segment tab. It is a subsection inside Pending, selected only
-  // after the explicit lifecycle mapper classifies a task as Pending.
+  // Scheduled is a Pending subsection. Canonical presentation keeps active
+  // committed Visits there even when the raw workflow status is in_progress.
   static const int tabPending = 0;
   static const int tabOngoing = 1;
   static const int tabCompleted = 2;
@@ -460,9 +422,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   DateTime? _customStartDate;
   DateTime? _customEndDate;
   String _selectedBarangay = 'All Barangays';
-  // 'All' | 'Urgent' | 'Scheduled' | 'Overdue' — finalized urgency
-  // quick-filter inside the filter sheet (deadline-driven; see the
-  // switch in _categorizeAndFilter for each option's exact condition).
+  // Urgent uses the shared Visit/PO reminder window, excluding Overdue.
   String _urgencyFilter = 'All';
 
   static const _tabOrder = ['Pending', 'Ongoing', 'Completed'];
@@ -590,7 +550,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   List<TaskItem> _snapshotTasks(TaskPresentationSnapshot snapshot) => [
     for (final row in snapshot.jobs)
       if (_remoteJobs[row['id']] case final remote?)
-        TaskItem.fromJob({...remote, 'status': row['status']})
+        TaskItem.fromJob({...remote, 'status': row['status'],
+          'current_step': max((remote['current_step'] as num?)?.toInt() ?? 0,
+              (row['current_step'] as num?)?.toInt() ?? 0)})
       else TaskItem.fromCachedJob(row),
   ];
 
@@ -963,16 +925,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                       children: [
                         const SizedBox(height: 24),
 
-                        // URGENCY SECTION — disjoint filter model (revised
-                        // after testing showed Urgent ⊇ Overdue made the two
-                        // chips return identical counts): All / Urgent /
-                        // Scheduled / Overdue — Urgent = admin deadline_date
-                        // is today or tomorrow (approaching, NOT yet past),
-                        // Scheduled = on the schedule plan (orange), Overdue
-                        // = admin deadline already passed. No overlap between
-                        // Urgent and Overdue; each matches its card badge.
-                        // Visit date drives no filter option; Completed
-                        // never matches.
+                        // Active Visit/PO reminders are Urgent; a passed PO
+                        // deadline is exclusively Overdue. Completed is neither.
                         Row(
                           children: [
                             const Icon(Icons.priority_high_rounded, color: InsightTheme.ink3, size: 18),
@@ -1271,10 +1225,10 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         bool matches;
         switch (_urgencyFilter) {
           case 'Urgent':
-            matches = !isCompleted && (task.scheduleUrgency == 'Due today' || task.isUrgentDeadline);
+            matches = !isCompleted && task.presentation.isUrgent;
             break;
           case 'Scheduled':
-            matches =
+            matches = !isCompleted &&
                 task.pendingSection == PendingTaskSection.scheduled;
             break;
           case 'Overdue':
@@ -1285,18 +1239,24 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         }
         if (!matches) continue;
       }
-      if (_datePreset != null && task.scheduledDate.isNotEmpty) {
-        try {
-          final taskDate = DateTime.parse(task.scheduledDate);
+      if (_datePreset != null) {
+          final completionTime = _displayCategory(task) == 'Completed'
+              ? DateTime.tryParse(task.submittedAt ?? _submissions[task.id]?.savedAt ?? '')?.toLocal()
+              : null;
+          final taskDate = completionTime == null
+              ? (_displayCategory(task) == 'Completed' ? null : task.presentation.activeDay)
+              : DateTime(completionTime.year, completionTime.month, completionTime.day);
+          if (taskDate == null) continue;
+          final now = DateTime.now();
+          final today = DateTime(now.year, now.month, now.day);
           if (_datePreset == 'last30') {
-            if (taskDate.isBefore(DateTime.now().subtract(const Duration(days: 30)))) continue;
+            if (taskDate.isBefore(DateTime(today.year, today.month, today.day - 30))) continue;
           } else if (_datePreset == 'last6months') {
-            if (taskDate.isBefore(DateTime.now().subtract(const Duration(days: 182)))) continue;
+            if (taskDate.isBefore(DateTime(today.year, today.month, today.day - 182))) continue;
           } else if (_datePreset == 'custom') {
             if (_customStartDate != null && taskDate.isBefore(_customStartDate!)) continue;
             if (_customEndDate != null && taskDate.isAfter(_customEndDate!)) continue;
           }
-        } catch (_) {}
       }
       map[_displayCategory(task)]!.add(task);
     }
@@ -1322,65 +1282,260 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     return map;
   }
 
+  /// Header card — title, live sync state, summary, search/filter and the
+  /// Pending / Ongoing / Completed switcher in one surface.
+  Widget _buildHeaderCard({
+    required int pendingCount,
+    required int ongoingCount,
+    required int completedCount,
+    required int dueToday,
+    required bool hasActiveFilters,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: InsightTheme.roundedLg,
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: InsightTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Semantics(
+                      header: true,
+                      child: Text(
+                        'My Tasks',
+                        style: InsightTheme.urbanist(
+                          24,
+                          w: FontWeight.w800,
+                          c: InsightTheme.ink,
+                          ls: -0.4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _isLoading
+                          ? 'Loading tasks…'
+                          : _errorMessage != null
+                              ? 'Saved tasks unavailable'
+                              : '${_allTasks.length} assigned · $dueToday due today',
+                      style: InsightTheme.inter(
+                        12,
+                        w: FontWeight.w500,
+                        c: InsightTheme.ink3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TaskSyncIndicator(
+                key: const ValueKey('task-sync-indicator'),
+                phase: _taskRefreshPhase,
+                hasSavedTasks: _allTasks.isNotEmpty,
+                lastChecked: _lastTaskRefreshAt,
+                onRetry: _retryTaskRefresh,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Semantics(label: 'Search tasks', child: Container(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: TextField(
+                    controller: _searchController,
+                    style: InsightTheme.inter(14, c: InsightTheme.ink),
+                    textAlignVertical: TextAlignVertical.center,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: InsightTheme.surface2,
+                      hintText: 'Search name, site or ID',
+                      hintStyle: InsightTheme.inter(14, c: InsightTheme.ink3),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        color: InsightTheme.ink3,
+                        size: 20,
+                      ),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: 44,
+                        minHeight: 44,
+                      ),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'Clear task search',
+                              onPressed: () {
+                                _searchController.clear();
+                                FocusScope.of(context).unfocus();
+                              },
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                color: InsightTheme.ink3,
+                                size: 20,
+                              ),
+                            )
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: InsightTheme.roundedSm,
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: InsightTheme.roundedSm,
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: InsightTheme.roundedSm,
+                        borderSide: const BorderSide(
+                          color: InsightTheme.blue1,
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                )),
+              ),
+              const SizedBox(width: 8),
+              Semantics(
+                button: true,
+                label: hasActiveFilters
+                    ? 'Filter and sort tasks, active'
+                    : 'Filter and sort tasks',
+                child: Tooltip(
+                  message: hasActiveFilters
+                      ? 'Filter and sort tasks (active)'
+                      : 'Filter and sort tasks',
+                  child: SizedBox.square(
+                    dimension: 48,
+                    child: Material(
+                      color: hasActiveFilters
+                          ? InsightTheme.blueTint
+                          : InsightTheme.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: InsightTheme.roundedSm,
+                        side: BorderSide(
+                          color: hasActiveFilters
+                              ? InsightTheme.blue1
+                              : InsightTheme.lineStrong,
+                        ),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: _showFilterBottomSheet,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Icon(
+                              Icons.tune_rounded,
+                              color: hasActiveFilters
+                                  ? InsightTheme.blueInk
+                                  : InsightTheme.ink,
+                              size: 22,
+                            ),
+                            if (hasActiveFilters)
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: InsightTheme.blue1,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: InsightTheme.surface,
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildCategoryBar(pendingCount, ongoingCount, completedCount),
+        ],
+      ),
+    );
+  }
+
   /// The Pending / Ongoing / Completed segmented switcher.
   ///
-  /// Extracted so the exact same widget can be mounted in AppBar.bottom (where
-  /// it stays pinned) without duplicating it or leaving a second copy behind in
-  /// the scroll view. Same `_currentTabIndex` state and same tap handlers —
-  /// presentation only, category logic untouched.
+  /// Flutter lays out the real label/count widths. Overflow scrolls rather
+  /// than consuming the track gutters or reducing a tab's internal padding.
   Widget _buildCategoryBar(
       int pendingCount, int ongoingCount, int completedCount) {
-    // The opaque outer surface is what makes this safe to pin: the Search /
-    // Filter row scrolling up disappears behind it rather than bleeding through.
     return Container(
-      color: InsightTheme.surface,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-        child: SpringSlide(
-          animation: springFor(2),
-          beginOffset: const Offset(0, 22),
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: InsightTheme.surface2,
-              borderRadius: BorderRadius.circular(14),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface2,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final pending = _SegmentTab(
+            text: "Pending",
+            count: pendingCount,
+            isActive: _currentTabIndex == 0,
+            onTap: () => setState(() => _currentTabIndex = 0),
+          );
+          final ongoing = _SegmentTab(
+            text: "Ongoing",
+            count: ongoingCount,
+            isActive: _currentTabIndex == 1,
+            onTap: () => setState(() => _currentTabIndex = 1),
+          );
+          final completed = _SegmentTab(
+            text: "Completed",
+            count: completedCount,
+            isActive: _currentTabIndex == 2,
+            onTap: () => setState(() => _currentTabIndex = 2),
+          );
+
+          return ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              // Keep the end gutters INSIDE the viewport, including at either
+              // scroll limit. Vertical paint space belongs to each touch target.
+              padding: const EdgeInsets.symmetric(horizontal: _segmentInset),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                    minWidth: constraints.maxWidth - _segmentInset * 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    pending,
+                    const SizedBox(width: _segmentGap),
+                    ongoing,
+                    const SizedBox(width: _segmentGap),
+                    completed,
+                  ],
+                ),
+              ),
             ),
-            child: LayoutBuilder(builder: (context, constraints) {
-              return SingleChildScrollView(scrollDirection: Axis.horizontal,
-                reverse: _currentTabIndex == TasksScreen.tabCompleted, child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                child: IntrinsicWidth(child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: _SegmentTab(
-                    text: "Pending",
-                    count: pendingCount,
-                    isActive: _currentTabIndex == 0,
-                    onTap: () => setState(() => _currentTabIndex = 0),
-                  ),
-                ),
-                Expanded(
-                  child: _SegmentTab(
-                    text: "Ongoing",
-                    count: ongoingCount,
-                    isActive: _currentTabIndex == 1,
-                    onTap: () => setState(() => _currentTabIndex = 1),
-                  ),
-                ),
-                Expanded(
-                  child: _SegmentTab(
-                    text: "Completed",
-                    count: completedCount,
-                    isActive: _currentTabIndex == 2,
-                    onTap: () => setState(() => _currentTabIndex = 2),
-                  ),
-                ),
-              ],
-            ))));
-            }),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -1388,32 +1543,6 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final categorized = _categorizeAndFilter();
-    final scaler = MediaQuery.textScalerOf(context);
-    Size measureHeader(String text, TextStyle style, {double width = double.infinity}) {
-      final painter = TextPainter(
-        text: TextSpan(text: text, style: DefaultTextStyle.of(context).style.merge(style)),
-        textDirection: Directionality.of(context), textScaler: scaler,
-      )..layout(maxWidth: width);
-      final size = painter.size;
-      painter.dispose();
-      return size;
-    }
-    final titleStyle = InsightTheme.urbanist(26, w: FontWeight.w800, c: InsightTheme.ink, ls: -0.4);
-    final assignedStyle = InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3);
-    final countSize = measureHeader('${_allTasks.length}', InsightTheme.urbanist(22, w: FontWeight.w800, h: 1));
-    final assignedSize = measureHeader('ASSIGNED', assignedStyle);
-    final counterWidth = countSize.width.clamp(assignedSize.width, double.infinity) + 32;
-    final availableWidth = MediaQuery.sizeOf(context).width - MediaQuery.paddingOf(context).horizontal - 40;
-    final naturalTitleWidth = measureHeader('My Tasks', titleStyle).width;
-    const statusWidth = 48.0 + 8;
-    final stackedHeader = naturalTitleWidth + statusWidth + counterWidth + 12 > availableWidth;
-    final titleWidth = stackedHeader ? availableWidth : availableWidth - counterWidth - 12;
-    final titleHeight = measureHeader('My Tasks', titleStyle, width: titleWidth - statusWidth)
-        .height.clamp(48.0, double.infinity);
-    final counterHeight = countSize.height + assignedSize.height + 22;
-    final headerHeight = (12 + (stackedHeader ? titleHeight + counterHeight + 8
-        : titleHeight.clamp(counterHeight, double.infinity))).ceilToDouble().clamp(kToolbarHeight, double.infinity);
-    final categoryHeight = (scaler.scale(12) * 1.4 + 44).ceilToDouble().clamp(kCategoryBarHeight, double.infinity);
     final ongoing = categorized['Ongoing'] ?? [];
     final pendingTasks = categorized['Pending'] ?? [];
     final scheduled = pendingTasks
@@ -1434,208 +1563,95 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         : (categorized[selectedCategory] ?? []);
 
     final bool hasActiveFilters = _selectedBarangay != 'All Barangays' || _datePreset != null || _urgencyFilter != 'All';
+    final dueToday = _allTasks
+        .where((task) =>
+            task.lifecycleCategory != TaskLifecycleCategory.unknown &&
+            _displayCategory(task) != 'Completed' &&
+            task.scheduleUrgency == 'Due today')
+        .length;
 
     return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
       extendBody: true,
-      appBar: AppBar(
-        titleSpacing: 20,
-        backgroundColor: InsightTheme.surface,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        surfaceTintColor: Colors.transparent,
-        // The My Tasks title and ASSIGNED counter stay together,
-        // and the whole group is pinned because it is Scaffold app-bar chrome.
-        // Only Search / Filter scroll away; the category switcher below is a
-        // pinned sliver that parks directly under this complete header.
-        toolbarHeight: headerHeight,
-        title: SpringSlide(
-          animation: springFor(0),
-          beginOffset: const Offset(0, -24),
-          child: Padding(
-          padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-          child: Flex(
-            direction: stackedHeader ? Axis.vertical : Axis.horizontal,
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: stackedHeader ? CrossAxisAlignment.start : CrossAxisAlignment.center,
-            children: [
-              SizedBox(width: titleWidth, child: Row(children: [
-                Flexible(child: Text('My Tasks', style: titleStyle)),
-                const SizedBox(width: 8),
-                TaskSyncIndicator(
-                  key: const ValueKey('task-sync-indicator'),
-                  phase: _taskRefreshPhase,
-                  hasSavedTasks: _allTasks.isNotEmpty,
-                  lastChecked: _lastTaskRefreshAt,
-                  onRetry: _retryTaskRefresh,
-                ),
-              ])),
-              SizedBox(width: stackedHeader ? 0 : 12, height: stackedHeader ? 8 : 0),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: InsightTheme.blueTint,
-                  borderRadius: InsightTheme.roundedSm,
-                ),
-                child: Column(
-                  children: [
-                    CountUpText(
-                      value: _allTasks.length,
-                      style: InsightTheme.urbanist(22, w: FontWeight.w800, c: InsightTheme.blueInk, h: 1.0),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'ASSIGNED',
-                      style: assignedStyle,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          ),
-        ),
-        centerTitle: false,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1.0),
-          child: Container(color: InsightTheme.line, height: 1.0),
-        ),
-      ),
       body: SafeArea(
         bottom: false,
-        child: _isLoading
-            ? const Center(child: ImapsLoadingIndicator(size: 60))
-            : _errorMessage != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(_errorMessage!, textAlign: TextAlign.center, style: InsightTheme.inter(14)),
-                          const SizedBox(height: 12),
-                          TextButton(
-                            onPressed: _loadTasks,
-                            style: TextButton.styleFrom(minimumSize: const Size(88, 44)),
-                            child: Text('Retry', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.blue1)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : RefreshIndicator(
-                    color: InsightTheme.blue1,
-                    onRefresh: _loadTasks,
-                    child: CustomScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      slivers: [
+        child: RefreshIndicator(
+          color: InsightTheme.blue1,
+          onRefresh: _loadTasks,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
                         SliverToBoxAdapter(
-                          child: Container(
-                            color: InsightTheme.surface,
-                            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 // Session recovery is not a saved-task banner.
                                 if (_savedDataNotice == SavedDataNotice.ownerChanged)
-                                  SavedDataNotice(message: _savedDataNotice!),
-                                // SEARCH & FILTER COMPONENT
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: SavedDataNotice(message: _savedDataNotice!),
+                                  ),
                                 SpringSlide(
-                                  animation: springFor(1),
-                                  beginOffset: const Offset(0, 22),
-                                  child: LayoutBuilder(builder: (context, constraints) {
-                                    final searchWidth = measureHeader('Search tasks', InsightTheme.inter(16)).width + 96;
-                                    final stacked = searchWidth + 68 > constraints.maxWidth;
-                                    return Wrap(alignment: WrapAlignment.end, spacing: 12, runSpacing: 12,
-                                  children: [
-                                    SizedBox(width: stacked ? constraints.maxWidth : constraints.maxWidth - 68,
-                                        child: Container(
-                                          constraints: const BoxConstraints(minHeight: 56),
-                                        child: TextField(
-                                          controller: _searchController,
-                                          style: InsightTheme.inter(16, c: InsightTheme.ink),
-                                          decoration: InsightTheme.formInput.copyWith(
-                                            fillColor: InsightTheme.bg,
-                                            labelText: 'Search tasks',
-                                            hintText: 'Name, site or inspection ID',
-                                            prefixIcon: const Icon(Icons.search_rounded, color: InsightTheme.ink2, size: 20),
-                                            suffixIcon: _searchQuery.isNotEmpty 
-                                                ? IconButton(
-                                                    tooltip: 'Clear task search',
-                                                    onPressed: () {
-                                                      _searchController.clear();
-                                                      FocusScope.of(context).unfocus();
-                                                    },
-                                                    icon: const Icon(Icons.close_rounded, color: InsightTheme.ink3, size: 20),
-                                                  )
-                                                : null,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: hasActiveFilters ? 'Filter and sort tasks (active)' : 'Filter and sort tasks',
-                                      onPressed: _showFilterBottomSheet,
-                                      padding: EdgeInsets.zero,
-                                      icon: Stack(
-                                        clipBehavior: Clip.none,
-                                        children: [
-                                          Container(
-                                            height: 56, width: 56,
-                                            decoration: BoxDecoration(
-                                              color: hasActiveFilters ? InsightTheme.blueTint : InsightTheme.surface,
-                                              border: Border.all(color: hasActiveFilters ? InsightTheme.blue1 : InsightTheme.lineStrong),
-                                              borderRadius: InsightTheme.roundedSm,
-                                            ),
-                                            child: Icon(Icons.tune_rounded, color: hasActiveFilters ? InsightTheme.blueInk : InsightTheme.ink, size: 22),
-                                          ),
-                                          if (hasActiveFilters)
-                                            Positioned(
-                                              top: 7, right: 7,
-                                              child: Container(
-                                                width: 10, height: 10,
-                                                decoration: BoxDecoration(
-                                                  color: InsightTheme.blue1,
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(color: InsightTheme.surface, width: 2),
-                                                ),
-                                              ),
-                                            )
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                  );
-                                  }),
+                                  animation: springFor(0),
+                                  beginOffset: const Offset(0, -18),
+                                  child: _buildHeaderCard(
+                                    pendingCount: pending.length + scheduled.length,
+                                    ongoingCount: ongoing.length,
+                                    completedCount: completed.length,
+                                    dueToday: dueToday,
+                                    hasActiveFilters: hasActiveFilters,
+                                  ),
                                 ),
-                                const SizedBox(height: 14),
                               ],
-                            ),
-                          ),
-                        ),
-                        // Pinned Pending / Ongoing / Completed switcher.
-                        //
-                        // Placed AFTER Search/Filter so the original visual
-                        // order is preserved, and pinned so it stays directly
-                        // under the (already pinned) "My Tasks" title once the
-                        // user scrolls. Its opaque surface means the Search /
-                        // Filter row travelling up passes behind it instead of
-                        // showing through.
-                        SliverPersistentHeader(
-                          pinned: true,
-                           delegate: _CategoryBarHeaderDelegate(
-                             extent: categoryHeight,
-                            child: _buildCategoryBar(
-                              pending.length + scheduled.length,
-                              ongoing.length,
-                              completed.length,
                             ),
                           ),
                         ),
 
                         // ACTIVE LIST VIEW
-                        if (selectedTasks.isEmpty)
+                        if (_isLoading)
+                          const SliverFillRemaining(
+                            hasScrollBody: false,
+                            child: Center(
+                              child: ImapsLoadingIndicator(size: 60),
+                            ),
+                          )
+                        else if (_errorMessage != null)
+                          SliverFillRemaining(
+                            hasScrollBody: false,
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _errorMessage!,
+                                      textAlign: TextAlign.center,
+                                      style: InsightTheme.inter(14),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    TextButton(
+                                      onPressed: _loadTasks,
+                                      style: TextButton.styleFrom(
+                                        minimumSize: const Size(88, 44),
+                                      ),
+                                      child: Text(
+                                        'Retry',
+                                        style: InsightTheme.inter(
+                                          14,
+                                          w: FontWeight.w600,
+                                          c: InsightTheme.blue1,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        else if (selectedTasks.isEmpty)
                           SliverToBoxAdapter(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 80, horizontal: 20),
@@ -1833,93 +1849,96 @@ class _PendingSectionHeader extends StatelessWidget {
   }
 }
 
-/// Pins the Pending/Ongoing/Completed switcher to the top of the scroll view.
-///
-/// One extent (min == max) for the chosen text size, so the whole band parks
-/// under the pinned "My Tasks" app bar without scaling the labels.
-class _CategoryBarHeaderDelegate extends SliverPersistentHeaderDelegate {
-  _CategoryBarHeaderDelegate({required this.child, required this.extent});
-
-  final Widget child;
-  final double extent;
-
-  @override
-  double get minExtent => extent;
-
-  @override
-  double get maxExtent => extent;
-
-  @override
-  Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return SizedBox(height: extent, child: child);
-  }
-
-  @override
-  bool shouldRebuild(covariant _CategoryBarHeaderDelegate oldDelegate) =>
-      oldDelegate.child != child || oldDelegate.extent != extent;
-}
-
 class _SegmentTab extends StatelessWidget {
   final String text;
   final int count;
   final bool isActive;
   final VoidCallback onTap;
 
-  const _SegmentTab({required this.text, required this.count, required this.isActive, required this.onTap});
+  const _SegmentTab({
+    required this.text,
+    required this.count,
+    required this.isActive,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // Restyled from a left-packed filled chip to a full-width segmented
-    // tab (white pill + shadow when active) — same tap target/state,
-    // matches the reference's segmented-tab look while staying on
-    // this screen's own InsightTheme tokens.
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(11),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-        // Centers the Row now that this tab is wrapped in Expanded (see the
-        // call site) — without this, the tab's fixed-size content would
-        // sit left-packed with dead space to the right of it.
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: isActive ? InsightTheme.surface : Colors.transparent,
-          borderRadius: BorderRadius.circular(11),
-          boxShadow: isActive ? const [BoxShadow(color: Color(0x0F000000), blurRadius: 8, offset: Offset(0, 2))] : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              text,
-              style: InsightTheme.inter(
-                11.5,
-                w: isActive ? FontWeight.w700 : FontWeight.w600,
-                c: isActive ? InsightTheme.blueInk : InsightTheme.ink3,
-              ),
-            ),
-            const SizedBox(width: 4),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: isActive ? InsightTheme.blueTint : InsightTheme.surface,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                count.toString(),
+    final textScaler = MediaQuery.textScalerOf(context);
+    if (isActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted || context.widget != this) return;
+        // Reveal only this horizontal viewport, never the surrounding page.
+        Scrollable.of(context).position.ensureVisible(
+          context.findRenderObject()!,
+          alignment: 0.5,
+        );
+      });
+    }
+    return Semantics(
+      selected: isActive,
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          // The hit target includes the paint gutter: the track stays 54dp high
+          // while the white surface has a real 4dp inset above and below it.
+          margin: const EdgeInsets.symmetric(vertical: _segmentInset),
+          constraints: const BoxConstraints(
+              minHeight: _segmentHeight - _segmentInset * 2),
+          padding: const EdgeInsets.symmetric(horizontal: _segmentPadH),
+          decoration: BoxDecoration(
+            color: isActive ? InsightTheme.surface : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+            boxShadow: isActive
+                ? const [
+                    BoxShadow(
+                        color: Color(0x0F000000),
+                        blurRadius: 8,
+                        offset: Offset(0, 2))
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                text,
+                textScaler: textScaler,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
                 style: InsightTheme.inter(
-                  10.5,
-                  w: FontWeight.w700,
-                  c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
+                  12,
+                  w: isActive ? FontWeight.w700 : FontWeight.w600,
+                  c: isActive ? InsightTheme.ink : InsightTheme.ink3,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: _segmentCountGap),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: _segmentBadgePad, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isActive ? InsightTheme.blueTint : InsightTheme.surface,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  count.toString(),
+                  textScaler: textScaler,
+                  style: InsightTheme.inter(
+                    10.5,
+                    w: FontWeight.w700,
+                    c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1951,29 +1970,20 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
   }
   
-  Color _getStatusColor() {
+  Color _getStatusColor(MyTaskPresentation p) {
     final cat = _displayCategory;
     if (_awaitingAcceptance) return InsightTheme.orangeInk;
     if (cat == 'Completed') return InsightTheme.green;
-    if (widget.task.pendingSection == PendingTaskSection.scheduled) {
-      final scheduledDate = widget.task.scheduledDate;
-      if (scheduledDate.isEmpty) return InsightTheme.blue1;
-      try {
-        final due = DateTime.parse(scheduledDate);
-        final today = DateTime.now();
-        final dueDay = DateTime(due.year, due.month, due.day);
-        final todayDay = DateTime(today.year, today.month, today.day);
-        final diff = dueDay.difference(todayDay).inDays;
-        if (diff <= 1 || dueDay.isBefore(todayDay)) return InsightTheme.red;
-        if (diff >= 2 && diff <= 3) return InsightTheme.orange;
-      } catch (_) {}
-      return InsightTheme.blue1;
-    }
-    return InsightTheme.blue1;
+    return switch (p.border) {
+      MyTaskBorder.red || MyTaskBorder.fullRed => InsightTheme.red,
+      MyTaskBorder.orange => InsightTheme.orange,
+      _ => InsightTheme.blue1,
+    };
   }
 
   Future<void> _showContextualInfo() async {
     final task = widget.task;
+    final p = task.presentation;
     final indicators = <MapEntry<String, String>>[];
     final isCompleted = _displayCategory == 'Completed';
     final isScheduled =
@@ -1981,27 +1991,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     final visitRowVisible = isScheduled && task.scheduledDate.isNotEmpty;
     final deadlineRowVisible = !isCompleted && task.deadlineDate?.isNotEmpty == true;
 
-    DateTime? parseDay(String? value) {
-      if (value == null || value.isEmpty) return null;
-      try {
-        final date = DateTime.parse(value);
-        return DateTime(date.year, date.month, date.day);
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final now = DateTime.now();
-    final todayDay = DateTime(now.year, now.month, now.day);
-    final visitDay = parseDay(task.scheduledDate);
-    final visitDiff = visitDay?.difference(todayDay).inDays;
-    final isOverdue = !isCompleted && task.scheduleUrgency == 'Overdue';
-    final scheduledVisitRed = isScheduled && task.isUrgentDeadline && !isOverdue;
-    final scheduledVisitOrange = isScheduled &&
-        !task.isUrgentDeadline &&
-        visitDiff != null &&
-        visitDiff >= 2 &&
-        visitDiff <= 3;
+    final isOverdue = !isCompleted && p.isOverdue;
+    final scheduledVisitRed = isScheduled && p.border == MyTaskBorder.red;
+    final scheduledVisitOrange = isScheduled && p.border == MyTaskBorder.orange;
 
     if (isCompleted) {
       indicators.add(_awaitingAcceptance
@@ -2035,7 +2027,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         indicators.add(const MapEntry('Blue border', 'The visit date is not close yet, or this task has no deliberate visit date, so no urgent action is needed.'));
       }
       if (task.scheduleUrgency == 'Due today') {
-        final dueTodayFromVisit = visitRowVisible && visitDay?.isAtSameMomentAs(todayDay) == true;
+        final dueTodayFromVisit = visitRowVisible && p.visitDaysUntil == 0;
         indicators.add(MapEntry(
           'Due Today',
           dueTodayFromVisit
@@ -2049,8 +2041,17 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       if (isOverdue) {
         indicators.add(const MapEntry('Overdue', 'The admin-set deadline has already passed. This task needs immediate attention.'));
       }
+      if (p.deadlineState == MyTaskDeadlineState.today) {
+        indicators.add(MapEntry('PO Deadline Today', p.noticeText(MyTaskNotice.deadlineToday)));
+      }
+      if (p.notices.contains(MyTaskNotice.scheduleConflict)) {
+        indicators.add(MapEntry('Visit / Deadline conflict', p.noticeText(MyTaskNotice.scheduleConflict)));
+      }
+      if (!p.canSchedule) {
+        indicators.add(MapEntry('Scheduling unavailable', p.scheduleBlockReason!));
+      }
     }
-    if (isScheduled && task.currentStep >= 1 && task.currentStep <= 5) {
+    if (!isCompleted && p.showInProgress) {
       indicators.add(const MapEntry('In Progress', 'You have already started this scheduled inspection. Continue working through the remaining steps until it is completed.'));
     }
 
@@ -2059,17 +2060,21 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Task details'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final indicator in indicators) ...[
-              Text(indicator.key, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
-              const SizedBox(height: 2),
-              Text(indicator.value, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
-              const SizedBox(height: 10),
+        content: SingleChildScrollView(
+          // At enlarged text the indicator list is taller than the dialog, so
+          // it scrolls instead of overflowing and cutting the last lines off.
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final indicator in indicators) ...[
+                Text(indicator.key, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
+                const SizedBox(height: 2),
+                Text(indicator.value, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                const SizedBox(height: 10),
+              ],
             ],
-          ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
@@ -2162,31 +2167,24 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     await _launchOrFallback(emailUri, email, 'email');
   }
 
-  // Long-press a Pending card -> pick a date (never past the assignment
-  // deadline) -> moves the task into the Scheduled subsection while its
-  // lifecycle remains Pending.
+  // Scheduling changes only the Visit; the raw inspection lifecycle survives.
   Future<void> _scheduleTask(BuildContext context) async {
     HapticFeedback.mediumImpact();
 
-    final tomorrow = DateTime.now().add(const Duration(days: 1));
-    DateTime? deadline;
-    if (widget.task.deadlineDate != null && widget.task.deadlineDate!.isNotEmpty) {
-      try {
-        deadline = DateTime.parse(widget.task.deadlineDate!);
-      } catch (_) {}
+    final policy = widget.task.presentation;
+    final owner = DBHelper.currentInspectorId;
+    if (owner == null || owner != SupabaseService.client.auth.currentUser?.id ||
+        _displayCategory == 'Completed' || !policy.canSchedule) {
+      return;
     }
-    final lastPickableDate = (deadline != null && deadline.isAfter(tomorrow)) ? deadline : tomorrow;
-
-    // Reschedule UX: if this task already has a scheduledDate, start the
-    // picker there instead of always defaulting to tomorrow — same
-    // scheduleJob() call either way, just a friendlier starting point.
+    final deadline = policy.latestVisit!;
     DateTime? pickedDate;
-    if (widget.task.scheduledDate.isNotEmpty) {
-      try {
-        final existing = DateTime.parse(widget.task.scheduledDate);
-        if (!existing.isBefore(tomorrow)) pickedDate = existing;
-      } catch (_) {}
+    final existing = policy.visitDay;
+    if (widget.task.isSelfScheduled && existing != null &&
+        !existing.isBefore(policy.earliestVisit!) && !existing.isAfter(deadline)) {
+      pickedDate = existing;
     }
+    var saving = false;
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -2215,7 +2213,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                       ),
                     ),
                     Text(
-                      widget.task.scheduledDate.isNotEmpty ? 'Reschedule this task' : 'Schedule this task',
+                      widget.task.isSelfScheduled ? 'Reschedule this task' : 'Schedule this task',
                       style: InsightTheme.poppins(16, w: FontWeight.w700),
                     ),
                     const SizedBox(height: 4),
@@ -2227,13 +2225,21 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                     InkWell(
                       borderRadius: BorderRadius.circular(10),
                       onTap: () async {
+                        if (!mounted || owner != DBHelper.currentInspectorId ||
+                            owner != SupabaseService.client.auth.currentUser?.id) {
+                          return;
+                        }
+                        final window = widget.task.presentation;
+                        if (_displayCategory == 'Completed' || !window.canSchedule || saving) return;
+                        final selected = pickedDate;
                         final result = await showDatePicker(
                           context: sheetContext,
-                          initialDate: pickedDate ?? tomorrow,
-                          firstDate: tomorrow,
-                          lastDate: lastPickableDate,
+                          initialDate: selected != null && !selected.isBefore(window.earliestVisit!) &&
+                              !selected.isAfter(window.latestVisit!) ? selected : window.earliestVisit!,
+                          firstDate: window.earliestVisit!,
+                          lastDate: window.latestVisit!,
                         );
-                        if (result != null) setSheetState(() => pickedDate = result);
+                        if (result != null && sheetContext.mounted) setSheetState(() => pickedDate = result);
                       },
                       child: Container(
                         width: double.infinity,
@@ -2257,44 +2263,67 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                         ),
                       ),
                     ),
-                    if (deadline != null) ...[
+                    ...[
                       const SizedBox(height: 6),
                       Text(
                         'Must be on or before ${deadline.year}-${deadline.month.toString().padLeft(2, '0')}-${deadline.day.toString().padLeft(2, '0')} (assignment deadline)',
                         style: InsightTheme.inter(11, c: InsightTheme.ink3),
                       ),
+                      const SizedBox(height: 4),
+                      Text('Scheduling is online only. Your PO deadline is checked again at confirmation.',
+                          style: InsightTheme.inter(11, c: InsightTheme.ink3)),
                     ],
 
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: pickedDate == null
+                        onPressed: pickedDate == null || saving
                             ? null
                             : () async {
+                                if (!mounted || owner != DBHelper.currentInspectorId ||
+                                    owner != SupabaseService.client.auth.currentUser?.id) {
+                                  ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                      const SnackBar(content: Text(SavedDataNotice.ownerChanged)));
+                                  Navigator.pop(sheetContext);
+                                  return;
+                                }
+                                final window = widget.task.presentation;
+                                final selected = pickedDate!;
+                                if (_displayCategory == 'Completed' || !window.canSchedule ||
+                                    selected.isBefore(window.earliestVisit!) || selected.isAfter(window.latestVisit!)) {
+                                  ScaffoldMessenger.of(sheetContext).showSnackBar(SnackBar(content: Text(
+                                    window.scheduleBlockReason ?? InspectionAuthorityResult.visitDateNotAllowed.message)));
+                                  return;
+                                }
+                                setSheetState(() => saving = true);
                                 try {
                                   // A zero-row write is never a successful
                                   // schedule; report the real outcome.
                                   final result = await SupabaseService.scheduleJob(
                                     jobId: widget.task.id,
-                                    date: pickedDate!,
+                                    date: selected,
                                   );
                                   if (result != InspectionAuthorityResult.authorized) {
                                     if (sheetContext.mounted) {
                                       ScaffoldMessenger.of(sheetContext).showSnackBar(
                                         SnackBar(content: Text(result.message)),
                                       );
+                                      Navigator.pop(sheetContext);
                                     }
+                                    if (mounted) widget.onScheduled?.call();
                                     return;
                                   }
                                   if (sheetContext.mounted) Navigator.pop(sheetContext);
-                                  widget.onScheduled?.call();
-                                } catch (e) {
+                                  if (mounted) widget.onScheduled?.call();
+                                } catch (_) {
                                   if (sheetContext.mounted) {
                                     ScaffoldMessenger.of(sheetContext).showSnackBar(
-                                      SnackBar(content: Text('Could not schedule: $e')),
+                                      SnackBar(content: Text(InspectionAuthorityResult.offlineOrUnverifiable.message)),
                                     );
                                   }
+                                } finally {
+                                  if (sheetContext.mounted) setSheetState(() => saving = false);
                                 }
                               },
                         style: ElevatedButton.styleFrom(
@@ -2304,7 +2333,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         child: Text(
-                          widget.task.scheduledDate.isNotEmpty ? 'Confirm reschedule' : 'Confirm schedule',
+                          widget.task.isSelfScheduled ? 'Confirm reschedule' : 'Confirm schedule',
                           style: InsightTheme.poppins(14, w: FontWeight.w600, c: Colors.white),
                         ),
                       ),
@@ -2323,41 +2352,14 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   @override
   Widget build(BuildContext context) {
     final String taskCategory = _displayCategory;
-    final bool isOverdue = taskCategory != 'Completed' && widget.task.scheduleUrgency == 'Overdue';
-    final statusColor = isOverdue ? InsightTheme.red : _getStatusColor();
-    final bool showInProgress =
-        widget.task.pendingSection == PendingTaskSection.scheduled &&
-        widget.task.currentStep >= 1 &&
-        widget.task.currentStep <= 5;
+    final p = widget.task.presentation;
+    final bool isOverdue = taskCategory != 'Completed' && p.isOverdue;
+    final statusColor = _getStatusColor(p);
+    final bool showInProgress = taskCategory != 'Completed' && p.showInProgress;
     final int stepValue = (taskCategory == 'Completed' ? 6 : widget.task.currentStep > 0 ? widget.task.currentStep : widget.task.derivedHighestStep)
         .clamp(0, InspectionProgress.totalSteps);
-    final bool canSchedule = taskCategory != 'Completed';
-
-    Color borderColor;
-    if (isOverdue) {
-      borderColor = InsightTheme.red;
-    } else if (taskCategory == 'Completed') {
-      borderColor = statusColor;
-    } else if (widget.task.pendingSection == PendingTaskSection.scheduled) {
-      if (widget.task.isUrgentDeadline) {
-        borderColor = InsightTheme.red;
-      } else if (widget.task.scheduledDate.isNotEmpty) {
-        try {
-          final due = DateTime.parse(widget.task.scheduledDate);
-          final today = DateTime.now();
-          final dueDay = DateTime(due.year, due.month, due.day);
-          final todayDay = DateTime(today.year, today.month, today.day);
-          final diff = dueDay.difference(todayDay).inDays;
-          borderColor = diff >= 2 && diff <= 3 ? InsightTheme.orange : InsightTheme.blue1;
-        } catch (_) {
-          borderColor = InsightTheme.blue1;
-        }
-      } else {
-        borderColor = InsightTheme.blue1;
-      }
-    } else {
-      borderColor = InsightTheme.blue1;
-    }
+    final bool canSchedule = taskCategory != 'Completed' && p.canSchedule;
+    final borderColor = statusColor;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -2380,11 +2382,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                 setState(() => _isExpanded = !_isExpanded);
                 HapticFeedback.selectionClick();
               },
-              // Reschedule allowed for Pending, Scheduled, AND an
-              // Ongoing-but-scheduled task — same canSchedule test used
-              // for the button below, so long-press and the visible
-              // button never disagree about whether this card can be
-              // (re)scheduled.
+              // One deadline window controls every scheduling entry point.
               onLongPress: canSchedule ? () => _scheduleTask(context) : null,
               behavior: HitTestBehavior.opaque,
               child: Padding(
@@ -2487,10 +2485,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               ),
                             ],
                           ),
-                          // The Visit row belongs only to the Scheduled
-                          // subsection of Pending. Ongoing and Completed tasks
-                          // may retain schedule metadata, but scheduling never
-                          // overrides their lifecycle category.
+                          // A started inspector-committed Visit stays Scheduled.
                           if (taskCategory == 'Pending' && widget.task.pendingSection ==
                                   PendingTaskSection.scheduled &&
                               widget.task.scheduledDate.isNotEmpty) ...[
@@ -2570,8 +2565,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // Visit row already say it) and added clutter
                               // on urgent cards. Scheduled state is carried
                               // by the orange border + avatar instead.
-                              if (widget.task.pendingSection == PendingTaskSection.scheduled &&
-                                  widget.task.forReschedule != null)
+                              if (taskCategory != 'Completed' && p.forReschedule)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
@@ -2608,6 +2602,14 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                       ),
                                     ],
                                   ),
+                                ),
+                              if (taskCategory != 'Completed' && p.deadlineState == MyTaskDeadlineState.today)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(color: InsightTheme.orangeTint,
+                                      borderRadius: BorderRadius.circular(999)),
+                                  child: Text('PO Deadline Today',
+                                      style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk)),
                                 ),
                               // Rework redesign: status stays 'completed' for
                               // the whole rework session now (see
@@ -2692,6 +2694,13 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // category correctly.
                             ],
                           ),
+                          if (taskCategory != 'Completed')
+                            for (final notice in p.notices)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(p.noticeText(notice),
+                                    style: InsightTheme.inter(12, c: isOverdue ? InsightTheme.redInk : InsightTheme.ink2)),
+                              ),
                           const SizedBox(height: 10),
                           Row(
                             children: [
@@ -2779,6 +2788,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             onTap: () => _scheduleTask(context),
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              constraints: const BoxConstraints(minHeight: 48),
                               decoration: BoxDecoration(
                                 color: InsightTheme.orangeTint,
                                 borderRadius: BorderRadius.circular(8),
@@ -2789,22 +2799,19 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                 children: [
                                   const Icon(Icons.calendar_today_rounded, color: InsightTheme.orange, size: 14),
                                   const SizedBox(width: 6),
-                                  Text(
-                                    // Label now reflects whether a date is
-                                    // actually already set (scheduledDate),
-                                    // not just the category string — an
-                                    // Ongoing-but-scheduled task also has a
-                                    // date on file, so it should read
-                                    // "Reschedule" too, not "Schedule".
-                                    widget.task.scheduledDate.isNotEmpty
+                                    Flexible(child: Text(
+                                      widget.task.isSelfScheduled
                                         ? 'Reschedule Inspection Date'
                                         : 'Schedule Inspection Date',
                                     style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.orangeInk),
-                                  ),
+                                    )),
                                 ],
                               ),
                             ),
                           ),
+                        ] else if (taskCategory != 'Completed') ...[
+                          const SizedBox(height: 8),
+                          Text(p.scheduleBlockReason!, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
                         ],
                       ],
                     ),

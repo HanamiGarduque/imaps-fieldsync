@@ -4,7 +4,19 @@ enum InspectionAuthorityResult {
   authRequired,
   serverRejected,
   offlineOrUnverifiable,
-  localOwnershipIncomplete;
+  localOwnershipIncomplete,
+
+  /// The requested visit date is outside the window the PO deadline allows:
+  /// not after today, or later than the PO deadline itself.
+  visitDateNotAllowed,
+
+  /// The PO deadline could not be read or parsed, so no verified upper bound
+  /// exists. Scheduling stays closed rather than inventing one.
+  deadlineUnavailable,
+
+  /// The PO deadline is today or has already passed, so no further visit may
+  /// be scheduled. The inspection itself may still continue.
+  deadlinePassed;
 
   String get message => switch (this) {
     authorized => '',
@@ -21,6 +33,15 @@ enum InspectionAuthorityResult {
     localOwnershipIncomplete =>
       "This older task can't be safely resumed on this device because its "
           'local ownership information is incomplete. Your local data is preserved.',
+    visitDateNotAllowed =>
+      'The visit date is not allowed. Choose a date after today and on or '
+          'before the PO deadline.',
+    deadlineUnavailable =>
+      'The PO deadline could not be verified, so scheduling is unavailable. '
+          'Continue your inspection or ask the Planning Office to confirm the deadline.',
+    deadlinePassed =>
+      'The PO deadline is today or has passed. You cannot schedule another '
+          'visit. Continue your inspection or coordinate with the Planning Officer.',
   };
 
   void requireAuthorized() {

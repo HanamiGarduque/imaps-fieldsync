@@ -23,7 +23,7 @@ import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 /// wrong to make every reschedule a zero-row write.
 ///
 /// The locked transition: owned + in_progress + chosen future date
-///   -> status pending, scheduled_date set, is_self_scheduled true,
+///   -> actual status retained, scheduled_date set, is_self_scheduled true,
 ///      same inspector, nothing else on the row touched.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -35,7 +35,7 @@ void main() {
   var row = <String, dynamic>{};
   var visible = true;
   var failWrite = false;
-  var stripStatusOnWrite = false;
+  var stripVisitOnWrite = false;
   var writeStatus = 200;
   final writes = <Map<String, dynamic>>[];
   final filters = <Map<String, String>>[];
@@ -44,7 +44,7 @@ void main() {
     row = <String, dynamic>{};
     visible = true;
     failWrite = false;
-    stripStatusOnWrite = false;
+    stripVisitOnWrite = false;
     writeStatus = 200;
     writes.clear();
     filters.clear();
@@ -91,11 +91,20 @@ void main() {
                 : [statusFilter.substring(3)];
             matched = matched && allowed.contains(row['status']);
           }
+          // The deadline bound is part of the write predicate: the visit may
+          // never be later than the row's deadline, and a row without one
+          // never matches, exactly as in PostgREST.
+          final deadlineFilter = q['deadline_date'];
+          if (deadlineFilter != null && deadlineFilter.startsWith('gte.')) {
+            final current = row['deadline_date'];
+            matched = matched &&
+                current != null &&
+                (current as String).compareTo(deadlineFilter.substring(4)) >= 0;
+          }
           if (matched) {
             final applied = jsonDecode(request.body) as Map<String, dynamic>;
-            // Simulates a store that accepts the scheduling columns but never
-            // performs the lifecycle transition.
-            if (stripStatusOnWrite) applied.remove('status');
+            // A partially applied scheduling write is not success.
+            if (stripVisitOnWrite) applied.remove('scheduled_date');
             row.addAll(applied);
             return http.Response(jsonEncode([row]), writeStatus, request: request);
           }
@@ -135,13 +144,14 @@ void main() {
     return boot();
   });
 
-  test('CASE A: an owned assigned task schedules into pending', () async {
+  test('CASE A: an owned assigned task schedules without rewriting its status', () async {
     row = {
       'id': jobX,
       'assigned_inspector_id': owner,
       'status': 'assigned',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-03-10',
       'current_step': 0,
     };
 
@@ -151,18 +161,19 @@ void main() {
     );
 
     expect(result, InspectionAuthorityResult.authorized);
-    expect(row['status'], 'pending');
+    expect(row['status'], 'assigned');
     expect(row['scheduled_date'], '2030-03-04');
     expect(row['is_self_scheduled'], isTrue);
   });
 
-  test('CASE B: an owned in_progress task reschedules into pending', () async {
+  test('CASE B: an owned in_progress task reschedules without losing its lifecycle', () async {
     row = {
       'id': jobX,
       'assigned_inspector_id': owner,
       'status': 'in_progress',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-05-10',
       'current_step': 3,
     };
 
@@ -172,8 +183,8 @@ void main() {
     );
 
     expect(result, InspectionAuthorityResult.authorized);
-    expect(row['status'], 'pending',
-        reason: 'the locked contract moves an ongoing task back to pending');
+    expect(row['status'], 'in_progress',
+        reason: 'Scheduled placement must not falsify the actual lifecycle');
     expect(row['scheduled_date'], '2030-05-06');
     expect(row['is_self_scheduled'], isTrue);
   });
@@ -185,6 +196,7 @@ void main() {
       'status': 'in_progress',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-07-10',
       'current_step': 4,
       'findings': 'isolated prior findings',
       'is_compliant': false,
@@ -198,7 +210,7 @@ void main() {
 
     expect(result, InspectionAuthorityResult.authorized);
     expect(writes.single.keys,
-        unorderedEquals(['scheduled_date', 'is_self_scheduled', 'status']),
+        unorderedEquals(['scheduled_date', 'is_self_scheduled']),
         reason: 'progress, findings and assignee must not be written');
     expect(row['assigned_inspector_id'], owner);
     expect(row['current_step'], 4);
@@ -216,6 +228,7 @@ void main() {
         'status': foreignStatus,
         'scheduled_date': '2026-01-01',
         'is_self_scheduled': false,
+        'deadline_date': '2030-01-05',
       };
 
       final result = await SupabaseService.scheduleJob(
@@ -239,6 +252,7 @@ void main() {
       'status': 'in_progress',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-11-20',
     };
     visible = false;
 
@@ -259,6 +273,7 @@ void main() {
       'status': 'completed',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-01-05',
     };
 
     final result = await SupabaseService.scheduleJob(
@@ -271,7 +286,7 @@ void main() {
         reason: 'a completed job is outside the schedulable lifecycle');
   });
 
-  test('CASE F2: a post-write row without the pending transition is not success',
+  test('CASE F2: a partial write without the selected Visit is not success',
     () async {
     row = {
       'id': jobX,
@@ -279,8 +294,9 @@ void main() {
       'status': 'in_progress',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-02-05',
     };
-    stripStatusOnWrite = true;
+    stripVisitOnWrite = true;
 
     final result = await SupabaseService.scheduleJob(
       jobId: jobX,
@@ -288,7 +304,7 @@ void main() {
     );
 
     expect(result, isNot(InspectionAuthorityResult.authorized),
-        reason: 'scheduling without the lifecycle transition is a partial write');
+        reason: 'the committed Visit must be verified, not merely the flag');
     expect(row['status'], 'in_progress');
   });
 
@@ -299,6 +315,7 @@ void main() {
       'status': 'in_progress',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-04-10',
     };
     failWrite = true;
 
@@ -317,15 +334,70 @@ void main() {
       'status': 'in_progress',
       'scheduled_date': '2026-01-01',
       'is_self_scheduled': false,
+      'deadline_date': '2030-06-10',
     };
 
     await SupabaseService.scheduleJob(jobId: jobX, date: DateTime(2030, 6, 7));
 
-    final patch = filters.firstWhere((f) => f.containsKey('id'));
+    // The write is the request that carries the status and deadline
+    // predicates; the read that precedes it only fetches the row.
+    final patch = filters.firstWhere((f) => f.containsKey('status'));
     expect(patch['id'], 'eq.$jobX');
     expect(patch['assigned_inspector_id'], 'eq.$owner',
         reason: 'ownership is never dropped from the authority predicate');
-    expect(patch['status'], 'in.("assigned","in_progress")');
+    expect(patch['status'],
+        'in.("assigned","Pending","pending","in_progress","in-progress","ongoing")',
+        reason: 'a scheduled assignment is pending, so it must be reschedulable');
+    expect(patch['deadline_date'], 'gte.2030-06-07',
+        reason: 'the selected visit is re-checked against the server deadline');
+  });
+
+  // ── CASE H: a REPEAT reschedule of an already scheduled assignment ──
+  // `pending` is the state this write sets, so excluding it made every
+  // second reschedule a zero-row write that was refused as unverifiable.
+  test('CASE H: an owned pending (already scheduled) task reschedules again',
+      () async {
+    row = {
+      'id': jobX,
+      'assigned_inspector_id': owner,
+      'status': 'pending',
+      'scheduled_date': '2030-05-06',
+      'is_self_scheduled': true,
+      'deadline_date': '2030-05-10',
+      'current_step': 0,
+    };
+
+    final result = await SupabaseService.scheduleJob(
+      jobId: jobX,
+      date: DateTime(2030, 5, 8),
+    );
+
+    expect(result, InspectionAuthorityResult.authorized);
+    expect(row['scheduled_date'], '2030-05-08',
+        reason: 'the new visit replaces the previous one');
+    expect(row['is_self_scheduled'], isTrue);
+  });
+
+  // ── CASE I: the PO deadline is a hard upper bound ──
+  test('CASE I: a visit later than the PO deadline is refused', () async {
+    row = {
+      'id': jobX,
+      'assigned_inspector_id': owner,
+      'status': 'assigned',
+      'scheduled_date': '2026-01-01',
+      'is_self_scheduled': false,
+      'deadline_date': '2030-05-10',
+      'current_step': 0,
+    };
+
+    final result = await SupabaseService.scheduleJob(
+      jobId: jobX,
+      date: DateTime(2030, 5, 11),
+    );
+
+    expect(result, InspectionAuthorityResult.visitDateNotAllowed);
+    expect(row['scheduled_date'], '2026-01-01',
+        reason: 'a refused schedule never writes the row');
   });
 
   // ── CASE G: the lifecycle mapper already derives the required placement ──
@@ -356,13 +428,13 @@ void main() {
       expect(task.scheduledDate, '2030-05-06');
     });
 
-    test('the same row before rescheduling sat under Ongoing', () {
+    test('the same raw in_progress row still belongs to Scheduled', () {
       final task = taskFrom({...remoteRow(), 'status': 'in_progress'});
 
-      expect(task.lifecycleCategory, TaskLifecycleCategory.ongoing);
-      expect(task.category, 'Ongoing');
-      expect(task.pendingSection, isNull,
-          reason: 'only the pending lifecycle exposes a scheduled subgroup');
+      expect(task.lifecycleCategory, TaskLifecycleCategory.pending);
+      expect(task.category, 'Pending');
+      expect(task.pendingSection, PendingTaskSection.scheduled);
+      expect(task.status, 'in_progress');
     });
 
     test('a pending job without a chosen date stays Available Anytime', () {

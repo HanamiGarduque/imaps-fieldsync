@@ -67,7 +67,9 @@ void main() {
         expect(row['status'], 'in_progress');
         expect(row['is_self_scheduled'], 1);
         final task = TaskItem.fromJob({...row, 'is_self_scheduled': true});
-        expect(task.category, 'Ongoing');
+        expect(task.category, 'Pending');
+        expect(task.pendingSection, PendingTaskSection.scheduled);
+        expect(task.status, 'in_progress');
         expect(task.isSelfScheduled, isTrue);
         expect(rows.firstWhere((r) => r['id'] == b)['status'], 'assigned');
         expect((await db.query('inspection_job_retention')).single['job_id'], a);

@@ -17,7 +17,7 @@ void main() {
       scheduledDate: scheduledDate,
       isSelfScheduled: isSelfScheduled,
       createdAt: '2026-09-01T00:00:00.000Z',
-      currentStep: 1,
+      currentStep: 0,
     );
   }
 
@@ -85,10 +85,10 @@ void main() {
     });
 
     for (final status in ['in_progress', 'ongoing']) {
-      test('$status remains Ongoing when self-scheduled', () {
+      test('$status remains Pending / Scheduled when self-scheduled', () {
         final task = buildTask(status: status, isSelfScheduled: true);
-        expect(task.category, 'Ongoing');
-        expect(task.pendingSection, isNull);
+        expect(task.category, 'Pending');
+        expect(task.pendingSection, PendingTaskSection.scheduled);
       });
     }
 

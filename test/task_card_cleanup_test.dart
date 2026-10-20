@@ -13,6 +13,7 @@ import 'package:image/image.dart' as image;
 import 'package:imaps_fieldsync/core/models/user_profile.dart';
 import 'package:imaps_fieldsync/core/navigation/parcel_detail_screen.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
+import 'package:imaps_fieldsync/core/theme/insight_theme.dart';
 import 'package:imaps_fieldsync/core/widgets/field_form_widgets.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/completed_inspection_detail_screen.dart';
@@ -80,8 +81,17 @@ void main() {
       if (asset == 'AssetManifest.bin') {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
-      return asset.endsWith('.ttf') ? font : null;
+      if (!asset.endsWith('.ttf')) return null;
+      final folder = Platform.environment['IMAPS_LAYOUT_FONT_DIR'];
+      return folder == null ? font : ByteData.sublistView(
+        File('$folder/${asset.split('-').first}.ttf').readAsBytesSync());
     });
+    for (final weight in [FontWeight.w400, FontWeight.w500, FontWeight.w600,
+        FontWeight.w700, FontWeight.w800]) {
+      GoogleFonts.inter(fontWeight: weight);
+      GoogleFonts.urbanist(fontWeight: weight);
+    }
+    await GoogleFonts.pendingFonts();
     binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('dev.fluttercommunity.plus/connectivity'),
       (_) async => [offline ? 'none' : 'wifi']);
@@ -174,30 +184,274 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> capture(WidgetTester tester, String name, Map<String, Object> measurements) async {
+  Future<void> capture(WidgetTester tester, String name, Map<String, Object> measurements,
+      {Rect? crop, double pixelRatio = 1}) async {
     final directory = Platform.environment['IMAPS_TASK_CARD_CAPTURE_DIR'];
     if (directory == null) return;
     await tester.runAsync(() async {
       final render = boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-      final image = await render.toImage(pixelRatio: 1);
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
+      final screenshot = await render.toImage(pixelRatio: pixelRatio);
+      final bytes = await screenshot.toByteData(format: ui.ImageByteFormat.png);
+      screenshot.dispose();
+      final png = bytes!.buffer.asUint8List();
       Directory(directory).createSync(recursive: true);
-      File('$directory/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+      File('$directory/$name.png').writeAsBytesSync(crop == null ? png : image.encodePng(
+        image.copyCrop(image.decodePng(png)!, x: (crop.left * pixelRatio).round(),
+          y: (crop.top * pixelRatio).round(), width: (crop.width * pixelRatio).round(),
+          height: (crop.height * pixelRatio).round())));
       File('$directory/$name.json').writeAsStringSync(jsonEncode(measurements));
+    });
+  }
+
+  testWidgets('Header counts only unfinished tasks due today', (tester) async {
+    final today = DateTime.now().toIso8601String().split('T').first;
+    jobs = [
+      {..._job(1, 'completed'), 'deadline_date': today},
+      {..._job(2, 'assigned'), 'deadline_date': today},
+    ];
+    await mount(tester, width: 390);
+    expect(find.text('2 assigned · 1 due today'), findsOneWidget);
+    for (final label in ['Pending', 'Ongoing', 'Completed']) {
+      expect(tester.getRect(find.text(label)).right, lessThanOrEqualTo(370),
+        reason: 'All three task tabs fit the normal 390px header without scrolling.');
+    }
+    expect(tester.takeException(), isNull);
+    await capture(tester, 'tasks-header', {'width': 390});
+  });
+
+  for (final width in [320.0, 360.0, 390.0]) {
+    // Exercise normal and enlarged text; this is not a platform maximum.
+    for (final scale in [1.0, 2.0]) {
+      testWidgets('All task tabs and counts stay readable at $width / $scale', (tester) async {
+        jobs = [
+          for (var i = 0; i < 5; i++)
+            {..._job(1, 'completed'), 'id': 'tab-completed-$i'},
+          for (var i = 0; i < 3; i++)
+            {..._job(2, 'assigned'), 'id': 'tab-pending-$i'},
+        ];
+        await mount(tester, width: width, scale: scale);
+        for (final label in ['Pending', 'Ongoing', 'Completed']) {
+          final tab = find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+          // The bar scrolls sideways when the three tabs do not fit, so the tab
+          // is brought into view before it is measured.
+          await tester.ensureVisible(tab);
+          await tester.pumpAndSettle();
+          final pill = tester.getRect(tab);
+          final labelRect = tester.getRect(find.text(label));
+          // The badge's own chip, not its digits: the chip is the content's
+          // right edge.
+          final badge = tester.getRect(
+              find.descendant(of: tab, matching: find.byType(AnimatedContainer)).last);
+          expect(labelRect.left - pill.left, greaterThanOrEqualTo(5.9),
+              reason: '$label has breathing room on the left');
+          expect(pill.right - badge.right, greaterThanOrEqualTo(5.9),
+              reason: '$label has breathing room on the right');
+          expect(labelRect.left - pill.left, closeTo(pill.right - badge.right, 1.0),
+              reason: 'the content is centred in the tab');
+          expect(labelRect.center.dy, closeTo(badge.center.dy, 1.0),
+              reason: 'the label and the count share one line');
+          expect(pill.height, greaterThanOrEqualTo(48),
+              reason: 'the tap target stays 48dp');
+          expect(find.text(label).hitTestable(), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+        await capture(tester, 'task-tabs-$width-$scale', {'width': width, 'scale': scale});
+        await tester.tap(find.text('Completed'));
+        await tester.pumpAndSettle();
+        expect(card('tab-completed-0'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  testWidgets('every selected task tab has breathing room and a centred content',
+      (tester) async {
+    jobs = [
+      for (var i = 0; i < 5; i++)
+        {..._job(1, 'completed'), 'id': 'tab-completed-$i'},
+      for (var i = 0; i < 3; i++)
+        {..._job(2, 'assigned'), 'id': 'tab-pending-$i'},
+    ];
+    await mount(tester, width: 360);
+    // The gray container keeps the dimensions it always had.
+    final bar = tester.getRect(find.ancestor(
+      of: find.text('Pending'),
+      matching: find.byWidgetPredicate((w) =>
+          w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration! as BoxDecoration).color == InsightTheme.surface2),
+    ).first);
+    expect(bar.height, 54, reason: 'the bar is not made taller or bulkier');
+
+    for (final (label, count) in [('Pending', '3'), ('Ongoing', '0'), ('Completed', '5')]) {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      final tab =
+          find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+      final pill = tester.getRect(tab);
+      final labelRect = tester.getRect(find.text(label));
+      // The badge's own chip, not its digits: the chip is the content's
+      // right edge.
+      final badge = tester.getRect(
+          find.descendant(of: tab, matching: find.byType(AnimatedContainer)).last);
+      // The white indicator is the selected tab's own surface.
+      final chip = tester.widget<AnimatedContainer>(
+        find
+            .ancestor(of: find.text(label), matching: find.byType(AnimatedContainer))
+            .first,
+      );
+      expect((chip.decoration! as BoxDecoration).color, InsightTheme.surface,
+          reason: '$label is the selected tab');
+      expect(labelRect.left - pill.left, greaterThanOrEqualTo(5.9),
+          reason: '$label has breathing room on the left');
+      expect(pill.right - badge.right, greaterThanOrEqualTo(5.9),
+          reason: '$label has breathing room on the right');
+      expect(labelRect.left - pill.left, closeTo(pill.right - badge.right, 1.0),
+          reason: 'the content is centred in the white pill');
+      expect(labelRect.center.dy, closeTo(badge.center.dy, 1.0),
+          reason: 'the label and the count share one line');
+      expect(pill.height, greaterThanOrEqualTo(48));
+      await capture(tester, 'segment-${label.toLowerCase()}', {
+        'width': 360,
+        'label': label,
+        'count': count,
+      });
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  Finder segment(String label) =>
+      find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+  Finder indicator(String label) => find.descendant(
+      of: find.ancestor(of: find.text(label), matching: find.byType(AnimatedContainer)).first,
+      matching: find.byType(DecoratedBox)).first;
+  Finder segmentTrack() => find.ancestor(of: find.text('Pending'),
+      matching: find.byWidgetPredicate((w) => w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration! as BoxDecoration).color == InsightTheme.surface2)).first;
+
+  void expectSelectedEdges(WidgetTester tester, String label) {
+    final track = tester.getRect(segmentTrack());
+    final pill = tester.getRect(indicator(label));
+    final labelRect = tester.getRect(find.text(label));
+    final badge = tester.getRect(find.descendant(
+        of: segment(label), matching: find.byType(AnimatedContainer)).last);
+    debugPrint('SELECTOR $label track=$track pill=$pill label=$labelRect badge=$badge');
+    expect(pill.left, greaterThanOrEqualTo(track.left + 3.9),
+        reason: '$label keeps its full left edge inside the track gutter');
+    expect(pill.right, lessThanOrEqualTo(track.right - 3.9),
+        reason: '$label keeps its full right edge inside the track gutter');
+    expect(pill.top - track.top, closeTo(4, 0.1));
+    expect(track.bottom - pill.bottom, closeTo(4, 0.1));
+    expect(labelRect.left - pill.left, greaterThanOrEqualTo(11.9));
+    expect(pill.right - badge.right, closeTo(labelRect.left - pill.left, 0.1));
+    expect(badge.left - labelRect.right, closeTo(6, 0.1));
+    expect(labelRect.center.dy, closeTo(badge.center.dy, 0.1));
+    expect(tester.getSize(segment(label)).height, greaterThanOrEqualTo(48));
+    expect(tester.renderObject<RenderParagraph>(find.text(label)).didExceedMaxLines, isFalse);
+    expect((tester.widget<DecoratedBox>(indicator(label)).decoration as BoxDecoration).color,
+        InsightTheme.surface);
+    expect(track.height, 54, reason: 'normal track dimensions are preserved');
+  }
+
+  Future<void> expectRoundedPaint(WidgetTester tester, String label) async {
+    final pill = tester.getRect(indicator(label));
+    final pixels = await tester.runAsync(() async {
+      final render = boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final screenshot = await render.toImage(pixelRatio: 3);
+      final bytes = await screenshot.toByteData(format: ui.ImageByteFormat.rawRgba);
+      final width = screenshot.width;
+      screenshot.dispose();
+      return (bytes!, width);
+    });
+    int redAt(Offset point) => pixels!.$1.getUint8(
+        ((point.dy * 3).floor() * pixels.$2 + (point.dx * 3).floor()) * 4);
+    for (final corner in [pill.topLeft + const Offset(1, 1),
+        pill.topRight + const Offset(-1, 1), pill.bottomLeft + const Offset(1, -1),
+        pill.bottomRight + const Offset(-1, -1)]) {
+      expect(redAt(corner), lessThan(250),
+          reason: '$label has visible gray around every rounded white corner');
+    }
+    for (final edge in [pill.centerLeft + const Offset(1, 0),
+        pill.centerRight + const Offset(-1, 0)]) {
+      expect(redAt(edge), greaterThan(250),
+          reason: '$label paints both complete white side edges');
+    }
+  }
+
+  for (final (width, scale, completedCount) in [
+    (320.0, 1.0, 12), (360.0, 1.0, 5), (390.0, 2.0, 12),
+  ]) {
+    for (final (tab, label) in [(0, 'Pending'), (1, 'Ongoing'), (2, 'Completed')]) {
+    testWidgets('initial selected indicator keeps both edges visible: $label at $width / $scale', (tester) async {
+      jobs = [
+        for (var i = 0; i < 3; i++) {..._job(2, 'assigned'), 'id': 'edge-pending-$i'},
+        {..._job(2, 'in_progress'), 'id': 'edge-ongoing'},
+        for (var i = 0; i < completedCount; i++) {..._job(1, 'completed'), 'id': 'edge-completed-$i'},
+      ];
+      await mount(tester, tab: tab, width: width, scale: scale);
+      // Deliberately do not call tester.ensureVisible: production owns reveal.
+      final track = tester.getRect(segmentTrack());
+      final measurements = <String, Object>{'label': label, 'width': width, 'scale': scale,
+        'track': track.toString(), 'indicator': tester.getRect(indicator(label)).toString()};
+      final name = 'selected-${label.toLowerCase()}-${width.toInt()}-$scale';
+      await capture(tester, '$name-screen', measurements);
+      await capture(tester, name, measurements,
+          crop: track.inflate(12), pixelRatio: 3);
+      expectSelectedEdges(tester, label);
+      await expectRoundedPaint(tester, label);
+      expect(within(segment('Pending'), '3'), findsOneWidget);
+      expect(within(segment('Ongoing'), '1'), findsOneWidget);
+      expect(within(segment('Completed'), '$completedCount'), findsOneWidget);
+      expect(card(tab == 0 ? 'edge-pending-0' : tab == 1 ? 'edge-ongoing' : 'edge-completed-0'),
+          findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+    }
+  }
+
+  for (final scale in [1.0, 2.0]) {
+    testWidgets('selecting clipped Completed reveals both edges at $scale without moving page',
+        (tester) async {
+      jobs = [
+        {..._job(2, 'assigned'), 'id': 'edge-pending'},
+        for (var i = 0; i < 12; i++) {..._job(1, 'completed'), 'id': 'edge-completed-$i'},
+      ];
+      await mount(tester, width: 320, scale: scale);
+      final page = tester.state<ScrollableState>(find.byWidgetPredicate(
+          (w) => w is Scrollable && w.axisDirection == AxisDirection.down).first).position;
+      final pageOffset = page.pixels;
+      final track = tester.getRect(segmentTrack());
+      final horizontal = find.descendant(of: segmentTrack(),
+          matching: find.byWidgetPredicate((w) => w is SingleChildScrollView &&
+              w.scrollDirection == Axis.horizontal));
+      // A real swipe exposes part of Completed. Tapping that visible part must
+      // reveal the whole selected pill, rather than leaving a flat clipped edge.
+      await tester.drag(horizontal, Offset(scale == 1 ? -15 : -200, 0));
+      await tester.pumpAndSettle();
+      final visible = tester.getRect(segment('Completed')).intersect(track.deflate(8));
+      expect(visible.width, greaterThan(0));
+      await tester.tapAt(visible.center);
+      await tester.pumpAndSettle();
+      expectSelectedEdges(tester, 'Completed');
+      expect(within(segment('Completed'), '12'), findsOneWidget);
+      expect(card('edge-completed-0'), findsOneWidget);
+      expect(page.pixels, pageOffset, reason: 'revealing a tab must not scroll the page');
+      expect(tester.takeException(), isNull);
     });
   }
 
   for (final state in [
     ('Pending Scheduled', 'assigned', true, TasksScreen.tabPending, 'Reschedule Inspection Date', 'Reschedule this task'),
     ('Pending Available Anytime', 'assigned', false, TasksScreen.tabPending, 'Schedule Inspection Date', 'Schedule this task'),
-    ('Ongoing', 'in_progress', true, TasksScreen.tabOngoing, 'Reschedule Inspection Date', 'Reschedule this task'),
+    ('Scheduled In Progress', 'in_progress', true, TasksScreen.tabPending, 'Reschedule Inspection Date', 'Reschedule this task'),
+    ('Ongoing', 'in_progress', false, TasksScreen.tabOngoing, 'Schedule Inspection Date', 'Schedule this task'),
   ]) {
     testWidgets('${state.$1} expanded card has no round sublist and retains its actions', (tester) async {
       jobs = [_job(1, 'completed'), _job(2, state.$2, scheduled: state.$3)];
       await mount(tester, tab: state.$4);
-      for (final pair in [('Pending', state.$2 == 'assigned' ? '1' : '0'),
-          ('Ongoing', state.$2 == 'in_progress' ? '1' : '0'), ('Completed', '1')]) {
+      for (final pair in [('Pending', state.$2 == 'assigned' || state.$3 ? '1' : '0'),
+          ('Ongoing', state.$2 == 'in_progress' && !state.$3 ? '1' : '0'), ('Completed', '1')]) {
         final tab = find.ancestor(of: find.text(pair.$1), matching: find.byType(InkWell)).first;
         expect(within(tab, pair.$2), findsOneWidget);
       }
@@ -338,8 +592,7 @@ void main() {
             await tester.sendKeyEvent(LogicalKeyboardKey.enter);
             await tester.pumpAndSettle();
             expect(find.text('Task details'), findsOneWidget);
-            expect(tester.takeException(), isNull);
-          } finally {
+            expect(tester.takeException(), isNull);          } finally {
             semantics.dispose();
           }
         });
