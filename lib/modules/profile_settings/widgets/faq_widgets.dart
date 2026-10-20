@@ -22,8 +22,8 @@ class FaqExpansionTile extends StatelessWidget {
     return ExpansionTile(
       key: PageStorageKey(question),
       minTileHeight: 48,
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: const EdgeInsets.only(bottom: 12),
+      tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+      childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 13),
       shape: const Border(),
       collapsedShape: const Border(),
       iconColor: InsightTheme.blueInk,
@@ -31,7 +31,7 @@ class FaqExpansionTile extends StatelessWidget {
       onExpansionChanged: (_) => HapticFeedback.selectionClick(),
       title: Text(
         question,
-        style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink),
+        style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink),
       ),
       children: [
         Align(

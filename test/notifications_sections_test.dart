@@ -67,14 +67,27 @@ void main() {
         .add(const Duration(hours: 9));
   }
 
-  Future<void> pumpScreen(WidgetTester tester, {int mode = 0}) async {
-    tester.view.physicalSize = const Size(430, 1400);
+  Future<void> pumpScreen(
+    WidgetTester tester, {
+    int mode = 0,
+    Size size = const Size(430, 1400),
+    double textScale = 1,
+  }) async {
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
       RepaintBoundary(
         key: captureKey,
-        child: MaterialApp(home: NotificationsScreen(initialMode: mode)),
+        child: MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(textScale),
+            ),
+            child: child!,
+          ),
+          home: NotificationsScreen(initialMode: mode),
+        ),
       ),
     );
     // The screen loads sync history from the isolate-backed test database;
@@ -138,8 +151,29 @@ void main() {
       if (asset == 'AssetManifest.bin') {
         return const StandardMessageCodec().encodeMessage(manifest);
       }
-      return asset.endsWith('.ttf') ? bytes : null;
+      if (!asset.endsWith('.ttf')) return null;
+      final folder = Platform.environment['IMAPS_LAYOUT_FONT_DIR'];
+      return folder == null
+          ? bytes
+          : ByteData.sublistView(
+              File('$folder/${asset.split('-').first}.ttf').readAsBytesSync(),
+            );
     });
+    for (final weight in [
+      FontWeight.w400,
+      FontWeight.w500,
+      FontWeight.w600,
+      FontWeight.w700,
+      FontWeight.w800,
+    ]) {
+      GoogleFonts.inter(fontWeight: weight);
+      GoogleFonts.urbanist(fontWeight: weight);
+    }
+    await GoogleFonts.pendingFonts();
+    await (FontLoader('MaterialIcons')..addFont(Future.value(
+      ByteData.sublistView(File('${fonts.path}/MaterialIcons-Regular.otf')
+          .readAsBytesSync()),
+    ))).load();
     binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('screen_protector'),
       (_) async => null,
@@ -245,7 +279,13 @@ void main() {
       expect(find.text(title), findsOneWidget, reason: '$title missing');
     }
     expect(find.textContaining('All ·'), findsNothing);
-    expect(find.text('Unread · 4'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('unread-filter')),
+        matching: find.text('4'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Clear All'), findsOneWidget);
     final tops = ['TODAY', 'YESTERDAY', 'THIS WEEK', 'EARLIER']
         .map((label) => tester.getTopLeft(find.text(label)).dy)
@@ -280,8 +320,14 @@ void main() {
     ];
     await pumpScreen(tester);
     expect(find.text('Seen yesterday'), findsOneWidget);
-    expect(find.text('Unread · 2'), findsOneWidget);
-    await tester.tap(find.text('Unread · 2'));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('unread-filter')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('unread-filter')));
     await tester.pumpAndSettle();
     expect(find.text('Seen yesterday'), findsNothing);
     expect(find.text('Urgent now'), findsOneWidget);
@@ -290,7 +336,7 @@ void main() {
     expect(find.text('THIS WEEK'), findsOneWidget);
     expect(find.text('YESTERDAY'), findsNothing);
     await capture(tester, 'activity-unread-only');
-    await tester.tap(find.text('Unread · 2'));
+    await tester.tap(find.byKey(const ValueKey('unread-filter')));
     await tester.pumpAndSettle();
     expect(find.text('Seen yesterday'), findsOneWidget);
     expect(find.text('YESTERDAY'), findsOneWidget);
@@ -324,7 +370,53 @@ void main() {
     expect(find.text('Synced photo upload'), findsOneWidget);
     expect(find.text('Synced job status'), findsOneWidget);
     expect(find.text('Synced old record'), findsOneWidget);
-    expect(find.text('Unread · 3'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('unread-filter')),
+        matching: find.text('3'),
+      ),
+      findsOneWidget,
+    );
     await capture(tester, 'sync-sections');
   });
+
+  for (final size in [
+    const Size(320, 640),
+    const Size(390, 844),
+    const Size(640, 360),
+  ]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets('Modes stay readable and tappable at $size / $scale', (
+        tester,
+      ) async {
+        activityRows = [activity('layout', 'Layout check', daysAgo(0))];
+        await tester.runAsync(() async {
+          await db.insert(
+            'sync_log_entries',
+            syncEntry('layout-sync', 'Sync layout check', daysAgo(0)),
+          );
+        });
+        await pumpScreen(tester, size: size, textScale: scale);
+        expect(tester.takeException(), isNull);
+        for (final label in ['Notifications', 'Sync history']) {
+          final text = find.text(label).last;
+          final paragraph = tester.renderObject<RenderParagraph>(text);
+          expect(
+            paragraph.didExceedMaxLines,
+            isFalse,
+            reason: '$label must remain readable at the chosen text size',
+          );
+        }
+        await tester.tap(find.text('Sync history'));
+        await tester.pumpAndSettle();
+        expect(find.text('Synchronization History'), findsOneWidget);
+        expect(find.text('Sync layout check'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text('Notifications'));
+        await tester.pumpAndSettle();
+        expect(find.text('Layout check'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
 }

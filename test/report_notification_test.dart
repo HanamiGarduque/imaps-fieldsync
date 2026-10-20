@@ -210,7 +210,13 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text(title), findsOneWidget);
         expect(find.text('Other inspector'), findsNothing);
-        expect(find.text('Unread · 2'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('unread-filter')),
+            matching: find.text('2'),
+          ),
+          findsOneWidget,
+        );
         await tester.tap(find.text(title));
         await tester.pumpAndSettle();
         expect(find.byType(BottomSheet), findsOneWidget);
@@ -221,7 +227,13 @@ void main() {
           findsWidgets,
         );
         expect(find.text('Close'), findsOneWidget);
-        expect(find.text('Unread · 1'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('unread-filter')),
+            matching: find.text('1'),
+          ),
+          findsOneWidget,
+        );
         expect(patches, hasLength(1));
         final id = title == 'Report resolved'
             ? 'event-resolved'

@@ -61,6 +61,17 @@ void main() {
               File('$folder/${asset.split('-').first}.ttf').readAsBytesSync(),
             );
     });
+    for (final weight in [
+      FontWeight.w400,
+      FontWeight.w500,
+      FontWeight.w600,
+      FontWeight.w700,
+      FontWeight.w800,
+    ]) {
+      GoogleFonts.inter(fontWeight: weight);
+      GoogleFonts.urbanist(fontWeight: weight);
+    }
+    await GoogleFonts.pendingFonts();
     binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('dev.fluttercommunity.plus/connectivity'),
       (_) async => [online ? 'wifi' : 'none'],
@@ -185,6 +196,7 @@ void main() {
           expect(find.text('Sync Center'), findsOneWidget);
           expect(find.text('Online'), findsOneWidget);
           expect(find.text('Last sync: Never'), findsOneWidget);
+          expect(find.text('12 changes waiting'), findsOneWidget);
           final help = find.ancestor(
             of: find.byTooltip('About Sync Center'),
             matching: find.byType(IconButton),
@@ -192,7 +204,7 @@ void main() {
           expect(tester.getSize(help).width, greaterThanOrEqualTo(48));
           expect(tester.getSize(help).height, greaterThanOrEqualTo(48));
           final action = find.ancestor(
-            of: find.text('Sync 12 Queued'),
+            of: find.text('Sync now'),
             matching: find.byType(FilledButton),
           );
           expect(action, findsOneWidget);
@@ -201,16 +213,16 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.getSize(action).height, greaterThanOrEqualTo(48));
           final paragraph = tester.renderObject<RenderParagraph>(
-            find.text('Sync 12 Queued'),
+            find.text('Sync now'),
           );
           final glyphs = paragraph.getBoxesForSelection(
-            const TextSelection(baseOffset: 0, extentOffset: 14),
+            const TextSelection(baseOffset: 0, extentOffset: 8),
           );
           expect(
             glyphs.last.right,
             lessThanOrEqualTo(paragraph.size.width + 0.1),
             reason:
-                'The queue count/action must fit without shrinking or clipping.',
+                'The primary action must fit without shrinking or clipping.',
           );
           await tester.drag(
             find.byKey(const ValueKey('sync_body')),
@@ -227,13 +239,19 @@ void main() {
             matching: find.byType(Scrollable),
           );
           await tester.scrollUntilVisible(
-            find.text('Offline Storage Cache'),
+            find.text('Cached jobs'),
             250,
             scrollable: bodyScroll,
             maxScrolls: 30,
           );
           await tester.pumpAndSettle();
-          expect(find.text('Cached Jobs'), findsOneWidget);
+          expect(find.text('Cached jobs'), findsOneWidget);
+          expect(
+            tester.renderObject<RenderParagraph>(find.text('Offline storage'))
+                .didExceedMaxLines,
+            isFalse,
+            reason: 'The storage heading must stay readable at enlarged text.',
+          );
           expect(tester.takeException(), isNull);
           await tester.pumpWidget(const SizedBox.shrink());
         },
@@ -242,33 +260,49 @@ void main() {
   }
 
   testWidgets(
-    'Offline all-synced status is readable and exposes a disabled action',
+    'Offline empty-queue status is truthful and offers no dead action',
     (tester) async {
       online = false;
       final semantics = tester.ensureSemantics();
       try {
         await openScreen(tester, const Size(360, 800), 1);
         expect(find.text('Offline'), findsOneWidget);
-        final action = find.ancestor(
-          of: find.text('No queued updates'),
-          matching: find.byType(FilledButton),
-        );
-        expect(action, findsOneWidget);
-        expect(tester.widget<FilledButton>(action).onPressed, isNull);
+        expect(find.text('No queued updates'), findsOneWidget);
+        expect(find.text('Everything is synced'), findsNothing);
         expect(
-          tester.getSemantics(action),
-          matchesSemantics(
-            isButton: true,
-            hasEnabledState: true,
-            isEnabled: false,
-            label: 'No queued updates',
-          ),
+          find.text('No changes waiting to send.'),
+          findsOneWidget,
+        );
+        for (final label in ['Synced (recent)', 'Pending queue', 'Pending size']) {
+          expect(find.text(label), findsOneWidget,
+            reason: 'Queue/performance fields remain visible even at zero');
+        }
+        final statusCard = find.ancestor(
+          of: find.text('No queued updates'), matching: find.byType(Container),
+        ).first;
+        expect(find.descendant(of: statusCard, matching: find.text('0')), findsNWidgets(2));
+        expect(find.descendant(of: statusCard, matching: find.text('0.00 B')), findsOneWidget);
+        expect(find.text('Sync now'), findsNothing);
+        expect(
+          find.byType(FilledButton),
+          findsNothing,
+          reason: 'nothing waiting means no disabled primary action',
         );
         await tester.tap(find.byTooltip('About Sync Center'));
         await tester.pumpAndSettle();
         expect(find.byType(AlertDialog), findsOneWidget);
         await tester.tap(find.text('Close'));
         await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('No queued inspection updates.'), 150,
+          scrollable: find.descendant(
+            of: find.byKey(const ValueKey('sync_body')),
+            matching: find.byType(Scrollable),
+          ),
+        );
+        expect(find.text('Waiting to sync'), findsOneWidget);
+        expect(await tester.runAsync(() => db.query('pending_actions')), isEmpty,
+          reason: 'Rendering an empty queue must not invent records');
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
       } finally {
@@ -276,6 +310,28 @@ void main() {
       }
     },
   );
+
+  for (final scale in [1.0, 2.0]) {
+    testWidgets('History card has breathing room at phone width / $scale', (tester) async {
+      await openScreen(tester, const Size(360, 800), scale);
+      final title = find.text('Synchronization history');
+      await tester.scrollUntilVisible(title, 150,
+        scrollable: find.descendant(
+          of: find.byKey(const ValueKey('sync_body')),
+          matching: find.byType(Scrollable),
+        ));
+      final card = tester.getRect(find.ancestor(of: title, matching: find.byType(InkWell)).first);
+      final titleBounds = tester.getRect(title);
+      final summary = tester.getRect(find.text('0 recent receipts'));
+      final lastSuccess = tester.getRect(find.text('Last successful action: Not recorded'));
+      expect(titleBounds.top - card.top, greaterThanOrEqualTo(12));
+      expect(card.bottom - lastSuccess.bottom, greaterThanOrEqualTo(12));
+      expect(lastSuccess.top - summary.bottom, greaterThanOrEqualTo(8));
+      expect(lastSuccess.width, greaterThanOrEqualTo(card.width * 0.8),
+        reason: 'The last-success line must not be squeezed beside the row actions');
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
     'offline queued update is truthfully described as waiting for connection',
@@ -457,7 +513,7 @@ void main() {
       // before asserting so the labels below are the settled ones.
       for (
         var frame = 0;
-        frame < 60 && find.text('Sync 1 Queued').evaluate().isEmpty;
+        frame < 60 && find.text('1 change waiting').evaluate().isEmpty;
         frame++
       ) {
         await tester.runAsync(
@@ -465,9 +521,9 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 16));
       }
-      // The queue counts it and offers one job-scoped sync action.
+      // The queue counts it and the status card offers the primary action.
       final action = find.ancestor(
-        of: find.text('Sync 1 Queued'),
+        of: find.text('Sync now'),
         matching: find.byType(FilledButton),
       );
       expect(action, findsOneWidget);

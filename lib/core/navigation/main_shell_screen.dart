@@ -7,6 +7,7 @@ import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../services/auth_failure.dart';
 import '../services/supabase_service.dart';
+import '../theme/insight_theme.dart';
 import '../../modules/auth_startup/services/auto_lock_controller.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import '../widgets/sensitive_screen.dart';
@@ -525,6 +526,8 @@ class _MainShellScreenState extends State<MainShellScreen> {
               icon: _items[2].icon,
               label: _items[2].label,
               showBadge: syncProgress != null,
+              // Amber is reserved for "needs attention"; running progress is blue.
+              badgeColor: InsightTheme.blue1,
             ),
             _items[3],
           ];

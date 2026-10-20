@@ -394,27 +394,21 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     return 'Earlier';
   }
 
-  /// Flattens newest-first items into `String` section labels interleaved
-  /// with their rows. Labels come out in fixed time order, and a label is
-  /// only emitted when at least one item belongs to it.
-  List<Object> _withSectionHeaders(
+  /// Groups newest-first items into fixed-order time buckets. A bucket with
+  /// no items never renders.
+  Map<String, List<Map<String, dynamic>>> _bucketItems(
     List<Map<String, dynamic>> items,
     String timeKey,
   ) {
-    final buckets = <String, List<Map<String, dynamic>>>{};
+    final buckets = <String, List<Map<String, dynamic>>>{
+      for (final label in const ['Today', 'Yesterday', 'This week', 'Earlier'])
+        label: <Map<String, dynamic>>[],
+    };
     for (final item in items) {
-      buckets
-          .putIfAbsent(_sectionLabel(item[timeKey] as String?), () => <Map<String, dynamic>>[])
-          .add(item);
+      buckets[_sectionLabel(item[timeKey] as String?)]!.add(item);
     }
-    final rows = <Object>[];
-    for (final label in const ['Today', 'Yesterday', 'This week', 'Earlier']) {
-      final bucket = buckets[label];
-      if (bucket == null) continue;
-      rows.add(label);
-      rows.addAll(bucket);
-    }
-    return rows;
+    buckets.removeWhere((_, bucket) => bucket.isEmpty);
+    return buckets;
   }
 
   @override
@@ -444,7 +438,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                         Expanded(
                           child: Text(
                             _mode == 0 ? 'Notifications' : 'Synchronization History',
-                            style: InsightTheme.poppins(17, w: FontWeight.w700),
+                            style: InsightTheme.urbanist(20, w: FontWeight.w700),
                           ),
                         ),
                         if ((_mode == 0 && _activity.isNotEmpty) || (_mode == 1 && _syncLogs.isNotEmpty))
@@ -464,7 +458,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                   Text(
                                     'Clear All',
                                     style: InsightTheme.inter(
-                                      12, w: FontWeight.w600,
+                                      12, w: FontWeight.w700,
                                       c: InsightTheme.redInk,
                                     ),
                                   ),
@@ -476,54 +470,41 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   ),
                 ),
 
-                // ── Controls row: Activity/Sync mode switch (left) and the
-                // Unread filter toggle (right). Both groups share one row
-                // to keep the page light, and the row scrolls instead of
-                // overflowing when width + text scale leave no room.
+                // ── Controls: Notifications / Sync history switch, then the
+                // single Unread filter. No "All" chip: rows are already the
+                // full list when Unread is off.
                 SpringSlide(
                   animation: springFor(1),
                   beginOffset: const Offset(0, 16),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minWidth: (constraints.maxWidth - 40).clamp(0.0, double.infinity),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _TabPill(text: "Activity", isActive: _mode == 0, onTap: () => setState(() => _mode = 0)),
-                                const SizedBox(width: 8),
-                                _TabPill(text: "Sync", isActive: _mode == 1, onTap: () => setState(() => _mode = 1)),
-                              ],
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.only(left: 16),
-                              child: _TabPill(
-                                text: _mode == 0 ? "Unread · $_unreadCount" : "Unread · $_syncUnreadCount",
-                                isActive: _mode == 0 ? _activityUnreadOnly : _syncUnreadOnly,
-                                onTap: () => setState(() {
-                                  if (_mode == 0) {
-                                    _activityUnreadOnly = !_activityUnreadOnly;
-                                  } else {
-                                    _syncUnreadOnly = !_syncUnreadOnly;
-                                  }
-                                }),
-                              ),
-                            ),
-                          ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: _ModeSegment(
+                          mode: _mode,
+                          onChanged: (mode) => setState(() => _mode = mode),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: _UnreadFilterChip(
+                          count: _mode == 0 ? _unreadCount : _syncUnreadCount,
+                          isActive: _mode == 0 ? _activityUnreadOnly : _syncUnreadOnly,
+                          onTap: () => setState(() {
+                            if (_mode == 0) {
+                              _activityUnreadOnly = !_activityUnreadOnly;
+                            } else {
+                              _syncUnreadOnly = !_syncUnreadOnly;
+                            }
+                          }),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 4),
 
                 // ── List — Activity feed or Sync log, per _mode ──
                 Expanded(
@@ -538,93 +519,101 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Widget _buildActivityList(List<Map<String, dynamic>> visible) {
-    final rows = _withSectionHeaders(visible, 'occurred_at');
-    return _isLoading
-                      ? const Center(child: ImapsLoadingIndicator(size: 60))
-                      : _error != null
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 32),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(_error!, textAlign: TextAlign.center, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
-                                    const SizedBox(height: 12),
-                                    OutlinedButton(onPressed: _load, child: const Text('Try again')),
-                                  ],
-                                ),
-                              ),
-                            )
-                          : visible.isEmpty
-                              ? Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.notifications_none_rounded, size: 40, color: InsightTheme.ink3),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        _activityUnreadOnly ? 'No unread notifications.' : 'No notifications yet.',
-                                        style: InsightTheme.inter(13, c: InsightTheme.ink2),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              : RefreshIndicator(
-                                  onRefresh: _load,
-                                  child: ListView.builder(
-                                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                                    physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                                    itemCount: rows.length,
-                                    itemBuilder: (context, i) {
-                                      final row = rows[i];
-                                      if (row is String) {
-                                        return _SectionHeader(label: row, isFirst: i == 0);
-                                      }
-                                      final item = row as Map<String, dynamic>;
-                                      final theme = _eventTheme(item['event_type'] as String? ?? '');
-                                      return SpringSlide(
-                                        animation: springForKey(
-                                          item['id'] ?? i,
-                                          2 + (i % 6),
-                                        ),
-                                        beginOffset: const Offset(40, 0),
-                                        child: Dismissible(
-                                          key: ValueKey(item['id'] ?? i),
-                                          direction: DismissDirection.endToStart,
-                                          background: Container(
-                                            alignment: Alignment.centerRight,
-                                            padding: const EdgeInsets.only(right: 24),
-                                            margin: const EdgeInsets.only(bottom: 1),
-                                            decoration: BoxDecoration(
-                                              color: InsightTheme.redInk.withValues(alpha: 0.1),
-                                              borderRadius: BorderRadius.circular(16),
-                                            ),
-                                            child: const Icon(
-                                              Icons.delete_outline_rounded,
-                                              color: InsightTheme.redInk,
-                                              size: 24,
-                                            ),
-                                          ),
-                                          confirmDismiss: (direction) async {
-                                            return true;
-                                          },
-                                          onDismissed: (_) => _deleteOne(item),
-                                          child: _NotificationRow(
-                                            icon: theme['icon'] as IconData,
-                                            iconBgColor: theme['bg'] as Color,
-                                            iconColor: theme['fg'] as Color,
-                                            title: item['title'] as String? ?? 'Update',
-                                            subtitle: item['subtitle'] as String? ?? '',
-                                            time: _timeAgo(item['occurred_at'] as String?),
-                                            isUnread: item['is_read'] != true,
-                                            isLast: i == rows.length - 1,
-                                            onTap: () => _openNotificationDetail(item),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                );
+    if (_isLoading) {
+      return const Center(child: ImapsLoadingIndicator(size: 60));
+    }
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!, textAlign: TextAlign.center, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+              const SizedBox(height: 12),
+              OutlinedButton(onPressed: _load, child: const Text('Try again')),
+            ],
+          ),
+        ),
+      );
+    }
+    if (visible.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.notifications_none_rounded, size: 40, color: InsightTheme.ink3),
+            const SizedBox(height: 12),
+            Text(
+              _activityUnreadOnly ? 'No unread notifications.' : 'No notifications yet.',
+              style: InsightTheme.inter(13, c: InsightTheme.ink2),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final buckets = _bucketItems(visible, 'occurred_at');
+    final children = <Widget>[];
+    var bucketIndex = 0;
+    for (final bucket in buckets.entries) {
+      final rows = bucket.value;
+      children.add(_SectionHeader(
+        label: bucket.key,
+        count: rows.length,
+        isFirst: bucketIndex == 0,
+      ));
+      children.add(_ListCard(
+        children: [
+          for (var i = 0; i < rows.length; i++)
+            Builder(builder: (context) {
+              final item = rows[i];
+              final theme = _eventTheme(item['event_type'] as String? ?? '');
+              return SpringSlide(
+                animation: springForKey(item['id'] ?? i, 2 + (i % 6)),
+                beginOffset: const Offset(40, 0),
+                child: Dismissible(
+                  key: ValueKey(item['id'] ?? i),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 24),
+                    color: InsightTheme.redInk.withValues(alpha: 0.1),
+                    child: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: InsightTheme.redInk,
+                      size: 24,
+                    ),
+                  ),
+                  confirmDismiss: (direction) async => true,
+                  onDismissed: (_) => _deleteOne(item),
+                  child: _NotificationRow(
+                    icon: theme['icon'] as IconData,
+                    iconBgColor: theme['bg'] as Color,
+                    iconColor: theme['fg'] as Color,
+                    title: item['title'] as String? ?? 'Update',
+                    subtitle: item['subtitle'] as String? ?? '',
+                    time: _timeAgo(item['occurred_at'] as String?),
+                    isUnread: item['is_read'] != true,
+                    isLast: i == rows.length - 1,
+                    onTap: () => _openNotificationDetail(item),
+                  ),
+                ),
+              );
+            }),
+        ],
+      ));
+      bucketIndex++;
+    }
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        children: children,
+      ),
+    );
   }
 
   /// Phase 6 — Sync log list. Same paginated data-integrity guarantees as
@@ -647,114 +636,135 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       );
     }
     final visibleSyncLogs = _visibleSyncLogs;
-    final rows = _withSectionHeaders(visibleSyncLogs, 'created_at');
-    return RefreshIndicator(
-      onRefresh: () => _loadSyncLogs(reset: true),
-      child: visibleSyncLogs.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.sync_rounded, size: 40, color: InsightTheme.ink3),
-                  const SizedBox(height: 12),
-                  Text(
-                    _syncUnreadOnly ? 'No unread sync activity.' : 'No synchronization activity yet.',
-                    style: InsightTheme.inter(13, c: InsightTheme.ink2),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-              itemCount: rows.length + (_syncLogHasMore ? 1 : 0),
-              itemBuilder: (context, i) {
-          if (i == rows.length) {
-            // "Load more" footer — keeps this screen fast to open even
-            // with thousands of historical entries (Performance
-            // requirement from the Phase 6 spec).
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: OutlinedButton(
-                  onPressed: () => _loadSyncLogs(),
-                  child: const Text('Load more'),
-                ),
-              ),
-            );
-          }
-          final row = rows[i];
-          if (row is String) return _SectionHeader(label: row, isFirst: i == 0);
-          final entry = row as Map<String, dynamic>;
-          final theme = _syncResultTheme(entry['result'] as String? ?? 'info');
-          final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
-          final isEntryUnread = entry['is_read'] != true;
-          return Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: Container(
-              decoration: BoxDecoration(
-                border: (i == rows.length - 1 && !_syncLogHasMore)
-                    ? null
-                    : const Border(bottom: BorderSide(color: InsightTheme.line)),
-              ),
-              child: ExpansionTile(
-                enabled: hasDetails,
-                tilePadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                onExpansionChanged: (expanded) {
-                  if (expanded && isEntryUnread) {
-                    _markSyncEntryRead(entry);
-                  }
-                },
-                leading: Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(13)),
-                  child: Icon(theme['icon'] as IconData, size: 18, color: theme['fg'] as Color),
-                ),
-                title: Text(
-                  entry['message'] as String? ?? '',
-                  style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
-                ),
-                subtitle: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    _timeAgo(entry['created_at'] as String?),
-                    style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
-                  ),
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isEntryUnread)
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle),
-                      ),
-                    if (hasDetails)
-                      const SizedBox(width: 8),
-                    hasDetails
-                        ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
-                        : const SizedBox.shrink(),
-                  ],
-                ),
-                children: hasDetails
-                    ? [
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(4, 0, 4, 14),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              _formatTechnicalDetails(entry['technical_details'] as String?),
-                              style: InsightTheme.inter(11, c: InsightTheme.ink3, h: 1.5),
-                            ),
-                          ),
-                        ),
-                      ]
-                    : const [],
+    if (visibleSyncLogs.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.sync_rounded, size: 40, color: InsightTheme.ink3),
+            const SizedBox(height: 12),
+            Text(
+              _syncUnreadOnly ? 'No unread sync activity.' : 'No synchronization activity yet.',
+              style: InsightTheme.inter(13, c: InsightTheme.ink2),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final buckets = _bucketItems(visibleSyncLogs, 'created_at');
+    final children = <Widget>[];
+    var bucketIndex = 0;
+    for (final bucket in buckets.entries) {
+      final rows = bucket.value;
+      children.add(_SectionHeader(
+        label: bucket.key,
+        count: rows.length,
+        isFirst: bucketIndex == 0,
+      ));
+      final rowWidgets = <Widget>[];
+      for (var i = 0; i < rows.length; i++) {
+        final entry = rows[i];
+        final theme = _syncResultTheme(entry['result'] as String? ?? 'info');
+        final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
+        final isEntryUnread = entry['is_read'] != true;
+        rowWidgets.add(Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            enabled: hasDetails,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 13, vertical: 4),
+            childrenPadding: const EdgeInsets.fromLTRB(13, 0, 13, 12),
+            shape: const Border(),
+            collapsedShape: const Border(),
+            onExpansionChanged: (expanded) {
+              if (expanded && isEntryUnread) {
+                _markSyncEntryRead(entry);
+              }
+            },
+            leading: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(13)),
+              child: Icon(theme['icon'] as IconData, size: 18, color: theme['fg'] as Color),
+            ),
+            title: Text(
+              entry['message'] as String? ?? '',
+              style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
+            ),
+            subtitle: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _timeAgo(entry['created_at'] as String?),
+                style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
               ),
             ),
-          );
-        },
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isEntryUnread)
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle),
+                  ),
+                if (hasDetails)
+                  const SizedBox(width: 8),
+                hasDetails
+                    ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
+                    : const SizedBox.shrink(),
+              ],
+            ),
+            children: hasDetails
+                ? [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _formatTechnicalDetails(entry['technical_details'] as String?),
+                        style: InsightTheme.inter(11, c: InsightTheme.ink3, h: 1.5),
+                      ),
+                    ),
+                  ]
+                : const [],
+          ),
+        ));
+        if (i != rows.length - 1) {
+          rowWidgets.add(const Divider(
+            height: 1,
+            color: InsightTheme.line,
+            indent: 65,
+          ));
+        }
+      }
+      children.add(_ListCard(children: rowWidgets));
+      bucketIndex++;
+    }
+
+    if (_syncLogHasMore) {
+      children.add(Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: () => _loadSyncLogs(),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(48, 44),
+              side: const BorderSide(color: InsightTheme.lineStrong),
+              shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
+            ),
+            child: Text(
+              'Load more',
+              style: InsightTheme.inter(12.5, w: FontWeight.w700, c: InsightTheme.ink2),
+            ),
+          ),
+        ),
+      ));
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => _loadSyncLogs(reset: true),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        children: children,
       ),
     );
   }
@@ -796,7 +806,7 @@ class _NotificationRow extends StatelessWidget {
       },
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 13),
         decoration: BoxDecoration(
           border: isLast ? null : const Border(bottom: BorderSide(color: InsightTheme.line)),
         ),
@@ -813,7 +823,14 @@ class _NotificationRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink)),
+                  Text(
+                    title,
+                    style: InsightTheme.inter(
+                      13.5,
+                      w: isUnread ? FontWeight.w800 : FontWeight.w600,
+                      c: InsightTheme.ink,
+                    ),
+                  ),
                   if (subtitle.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(subtitle, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
@@ -842,40 +859,184 @@ class _NotificationRow extends StatelessWidget {
   }
 }
 
-class _TabPill extends StatelessWidget {
-  final String text;
-  final bool isActive;
-  final VoidCallback onTap;
+class _ModeSegment extends StatelessWidget {
+  final int mode;
+  final ValueChanged<int> onChanged;
 
-  const _TabPill({required this.text, required this.isActive, required this.onTap});
+  const _ModeSegment({required this.mode, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        decoration: BoxDecoration(
-          gradient: isActive ? const LinearGradient(
-            colors: [InsightTheme.blue1, InsightTheme.blue2],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
-          ) : null,
-          color: isActive ? null : InsightTheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: isActive ? null : Border.all(color: InsightTheme.line),
-          boxShadow: isActive ? [
-            BoxShadow(color: InsightTheme.blue1.withValues(alpha: 0.28), blurRadius: 18, offset: const Offset(0, 8))
-          ] : [
-            const BoxShadow(color: InsightTheme.line, blurRadius: 2, offset: Offset(0, 1))
-          ],
-        ),
-        child: Text(
-          text,
-          style: InsightTheme.inter(12, w: FontWeight.w600, c: isActive ? Colors.white : InsightTheme.ink2),
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface2,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _ModeTab(
+              label: 'Notifications',
+              isActive: mode == 0,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onChanged(0);
+              },
+            ),
+          ),
+          const SizedBox(width: 2),
+          Expanded(
+            child: _ModeTab(
+              label: 'Sync history',
+              isActive: mode == 1,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onChanged(1);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ModeTab extends StatelessWidget {
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _ModeTab({required this.label, required this.isActive, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: isActive,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          constraints: const BoxConstraints(minHeight: 44),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          decoration: BoxDecoration(
+            color: isActive ? InsightTheme.surface : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+            boxShadow: isActive
+                ? const [BoxShadow(color: Color(0x0F0F172A), blurRadius: 3, offset: Offset(0, 1))]
+                : null,
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: InsightTheme.inter(
+              12,
+              w: isActive ? FontWeight.w700 : FontWeight.w600,
+              c: isActive ? InsightTheme.ink : InsightTheme.ink3,
+            ),
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _UnreadFilterChip extends StatelessWidget {
+  final int count;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _UnreadFilterChip({
+    required this.count,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: isActive,
+      child: Material(
+        key: const ValueKey('unread-filter'),
+        color: isActive ? InsightTheme.blueTint : InsightTheme.surface,
+        shape: StadiumBorder(
+          side: BorderSide(
+            color: isActive
+                ? InsightTheme.blue1.withValues(alpha: 0.34)
+                : InsightTheme.lineStrong,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTap();
+          },
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 44),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Unread',
+                    style: InsightTheme.inter(
+                      11.5,
+                      w: isActive ? FontWeight.w700 : FontWeight.w600,
+                      c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? InsightTheme.blue1.withValues(alpha: 0.12)
+                          : InsightTheme.surface2,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      key: const ValueKey('unread-count'),
+                      style: InsightTheme.inter(
+                        10,
+                        w: FontWeight.w700,
+                        c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ListCard extends StatelessWidget {
+  final List<Widget> children;
+
+  const _ListCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: InsightTheme.roundedMd,
+        border: Border.all(color: InsightTheme.line),
+        boxShadow: InsightTheme.cardShadow,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: children),
     );
   }
 }
@@ -884,17 +1045,32 @@ class _TabPill extends StatelessWidget {
 /// non-empty section in both the Activity and Sync lists.
 class _SectionHeader extends StatelessWidget {
   final String label;
+  final int count;
   final bool isFirst;
 
-  const _SectionHeader({required this.label, this.isFirst = false});
+  const _SectionHeader({
+    required this.label,
+    required this.count,
+    this.isFirst = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(4, isFirst ? 4 : 18, 4, 6),
-      child: Text(
-        label.toUpperCase(),
-        style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.8),
+      padding: EdgeInsets.fromLTRB(4, isFirst ? 4 : 18, 4, 7),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label.toUpperCase(),
+              style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.8),
+            ),
+          ),
+          Text(
+            '$count',
+            style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3),
+          ),
+        ],
       ),
     );
   }

@@ -13,6 +13,7 @@ import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/widgets/insight_bottom_nav.dart';
 import 'package:imaps_fieldsync/core/widgets/quick_actions_sheet.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/compass_preview_screen.dart';
+import 'package:imaps_fieldsync/modules/profile_settings/screens/help_faq_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/models/analytics_activity_range.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/widgets/dashboard_widgets.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
@@ -23,6 +24,29 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   late Database db;
+  final jobs = [
+    for (final status in ['assigned', 'in_progress', 'completed'])
+      {
+        'id': 'legibility-$status',
+        'status': status,
+        'assigned_inspector_id': 'legibility-inspector',
+        'scheduled_date': status == 'assigned'
+            ? ''
+            : DateTime.now()
+                  .add(const Duration(days: 2))
+                  .toIso8601String(),
+        'deadline_date': DateTime.now()
+            .add(const Duration(days: 10))
+            .toIso8601String(),
+        'is_self_scheduled': false,
+        'created_at': DateTime.now().toIso8601String(),
+        'supabase_zoning_applications': {
+          'applicant_name': '$status applicant',
+          'barangay': 'San Carlos',
+          'reference_number': 'LEGIBILITY-001',
+        },
+      },
+  ];
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
     GoogleFonts.config.allowRuntimeFetching = false;
@@ -94,6 +118,8 @@ void main() {
       await db.execute(statement.group(0)!);
     }
     DBHelper.useDatabaseForTesting(db);
+    DBHelper.inspectorIdForTesting = 'legibility-inspector';
+    await DBHelper.cacheJobs(jobs);
     await Supabase.initialize(
       url: 'https://legibility.test',
       publishableKey: 'isolated-test-key',
@@ -104,29 +130,7 @@ void main() {
       ),
       httpClient: MockClient(
         (request) async => http.Response(
-          jsonEncode([
-            for (final status in ['assigned', 'in_progress', 'completed'])
-              {
-                'id': 'legibility-$status',
-                'status': status,
-                'assigned_inspector_id': 'legibility-inspector',
-                'scheduled_date': status == 'assigned'
-                    ? ''
-                    : DateTime.now()
-                          .add(const Duration(days: 2))
-                          .toIso8601String(),
-                'deadline_date': DateTime.now()
-                    .add(const Duration(days: 10))
-                    .toIso8601String(),
-                'is_self_scheduled': false,
-                'created_at': DateTime.now().toIso8601String(),
-                'supabase_zoning_applications': {
-                  'applicant_name': '$status applicant',
-                  'barangay': 'San Carlos',
-                  'reference_number': 'LEGIBILITY-001',
-                },
-              },
-          ]),
+          jsonEncode(jobs),
           200,
           request: request,
           headers: {'content-type': 'application/json'},
@@ -410,6 +414,42 @@ void main() {
     },
   );
 
+  for (final (pageName, label) in [
+    ('Tasks', 'Search tasks'),
+    ('English Help', 'Search the guide'),
+    ('Tagalog Help', 'Maghanap sa gabay'),
+  ]) {
+    testWidgets('$pageName search retains its accessible name after typing', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await mount(
+          tester,
+          pageName == 'Tasks'
+              ? TasksScreen(profile: UserProfile(
+                  id: 'legibility-inspector',
+                  fullName: 'Test Inspector',
+                  role: 'inspector',
+                ))
+              : const HelpFaqScreen(),
+          const Size(390, 844),
+          scale: 1,
+        );
+        if (pageName == 'Tagalog Help') {
+          await tester.tap(find.text('Tagalog'));
+          await tester.pumpAndSettle();
+        }
+        await tester.enterText(find.byType(TextField), 'query');
+        await tester.pumpAndSettle();
+        expect(find.bySemanticsLabel(label), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        semantics.dispose();
+      }
+    });
+  }
+
   testWidgets('Tasks categories retain chosen text size and remain tappable', (
     tester,
   ) async {
@@ -469,8 +509,8 @@ void main() {
       padding: const FakeViewPadding(left: 32, right: 24, top: 24, bottom: 24),
     );
     expect(tester.takeException(), isNull);
-    final counter = tester.getRect(find.text('ASSIGNED'));
-    expect(counter.right, lessThanOrEqualTo(640 - 24 - 16));
+    final filter = tester.getRect(find.byIcon(Icons.tune_rounded));
+    expect(filter.right, lessThanOrEqualTo(640 - 24 - 16));
     expect(
       tester.getRect(find.text('My Tasks')).left,
       greaterThanOrEqualTo(32 + 16),

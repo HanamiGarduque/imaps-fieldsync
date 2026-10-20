@@ -76,12 +76,20 @@ Finder railFinder() => find.byWidgetPredicate(
 double railWidth(WidgetTester tester) => tester.getRect(railFinder()).width;
 
 void main() {
-  group('N1. phone portrait keeps the accepted full-bleed design', () {
-    testWidgets('rail fills the available width exactly as before',
+  group('N1. phone portrait keeps the reference rail', () {
+    testWidgets('rail hugs its own items instead of stretching edge to edge',
         (tester) async {
       await pumpNav(tester, const Size(390, 844));
-      // 390 - 14*2 outer padding = 362: the accepted full-bleed width.
-      expect(railWidth(tester), 362);
+      final rail = tester.getRect(railFinder());
+      final screen = tester.getRect(find.byType(Scaffold));
+      // The reference rail is content-width (`width:max-content`) and centred,
+      // so it is clearly narrower than the space it sits in.
+      expect(rail.width, lessThan(screen.width - 28),
+          reason: 'the rail must not stretch edge to edge');
+      expect(rail.width, greaterThan(240), reason: 'the rail still holds its items');
+      // Equal gutters on both sides = centred.
+      expect((rail.left - screen.left), closeTo(screen.right - rail.right, 1),
+          reason: 'centred in the viewport');
     });
 
     testWidgets('no overflow at the accepted size', (tester) async {
@@ -89,9 +97,36 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('every item stays inside the rail', (tester) async {
+      for (final size in [
+        const Size(320, 640),
+        const Size(360, 800),
+        const Size(390, 844),
+        const Size(430, 932),
+      ]) {
+        await pumpNav(tester, size);
+        final rail = tester.getRect(railFinder());
+        for (final icon in [
+          Icons.home_rounded,
+          Icons.assignment_rounded,
+          Icons.sync_rounded,
+          Icons.person_rounded,
+        ]) {
+          final box = tester.getRect(find.byIcon(icon));
+          expect(rail.contains(box.topLeft), isTrue,
+              reason: '$icon inside the rail at $size');
+          expect(rail.contains(box.bottomRight), isTrue,
+              reason: '$icon inside the rail at $size');
+        }
+      }
+    });
+
     testWidgets('large phone portrait is also untouched', (tester) async {
       await pumpNav(tester, const Size(430, 932));
-      expect(railWidth(tester), 430 - 28);
+      final rail = tester.getRect(railFinder());
+      final screen = tester.getRect(find.byType(Scaffold));
+      expect(rail.width, lessThan(screen.width - 28));
+      expect((rail.left - screen.left), closeTo(screen.right - rail.right, 1));
       expect(tester.takeException(), isNull);
     });
   });
@@ -144,7 +179,16 @@ void main() {
       expect(find.byIcon(Icons.assignment_rounded), findsOneWidget);
       expect(find.byIcon(Icons.sync_rounded), findsOneWidget);
       expect(find.byIcon(Icons.person_rounded), findsOneWidget);
-      expect(rail.width, greaterThanOrEqualTo(300));
+      for (final icon in [
+        Icons.home_rounded,
+        Icons.assignment_rounded,
+        Icons.sync_rounded,
+        Icons.person_rounded,
+      ]) {
+        final box = tester.getRect(find.byIcon(icon));
+        expect(rail.contains(box.topLeft), isTrue, reason: '$icon inside the rail');
+        expect(rail.contains(box.bottomRight), isTrue, reason: '$icon inside the rail');
+      }
     });
 
     testWidgets('a text-scaled label grows the rail instead of clipping',
@@ -204,6 +248,24 @@ void main() {
       }
       // The glyph itself is intentionally smaller than the target.
       expect(tester.getRect(find.byIcon(Icons.home_rounded)).width, kIconSize);
+    });
+
+    testWidgets('a held tab paints the reference pressed state', (tester) async {
+      await pumpNav(tester, const Size(390, 844));
+      final icon = find.byIcon(Icons.sync_rounded);
+      final before = tester.getRect(icon);
+      final gesture = await tester.startGesture(tester.getCenter(icon));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      final pressed = tester.getRect(icon);
+      expect(pressed.width, lessThan(before.width),
+          reason: 'a held tab sinks to 0.97');
+      expect(before.width - pressed.width, closeTo(before.width * 0.03, 0.2));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      final released = tester.getRect(icon);
+      expect(released.width, closeTo(before.width, 0.1),
+          reason: 'the chip returns to its resting size');
     });
 
     testWidgets('tapping an item still reports the selection', (tester) async {
@@ -295,9 +357,10 @@ void main() {
 
     test('phone portrait width sits under the cap, so portrait is unchanged',
         () {
-      // 390 - 28 padding = 362 available, but portrait takes the null-width
-      // path. This documents why 360 does not alter portrait.
+      // 390 - 28 padding = 362 available. The rail is content-width and
+      // centred, so it stays under the 360 cap and under the room it has.
       expect(390 - 28, greaterThan(300));
+      expect(kInsightBottomNavMaxWidth, lessThanOrEqualTo(390 - 28));
     });
   });
 }

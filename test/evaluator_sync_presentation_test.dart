@@ -213,14 +213,18 @@ void main() {
     ),
   );
 
-  Future<void> showSyncText(WidgetTester tester, Finder target) async {
+  Future<void> showSyncText(
+    WidgetTester tester,
+    Finder target, {
+    double delta = 200,
+  }) async {
     final scroll = find.descendant(
       of: find.byKey(const ValueKey('sync_body')),
       matching: find.byType(Scrollable),
     );
     await tester.scrollUntilVisible(
       target,
-      200,
+      delta,
       scrollable: scroll,
       maxScrolls: 40,
     );
@@ -310,6 +314,7 @@ void main() {
       );
       await open(tester, syncScreen());
       expect(find.text('No queued updates'), findsOneWidget);
+      expect(find.text('1 recent receipt'), findsOneWidget);
       expect(
         find.text('Last successful action: 2026-02-03 04:05:06 (device time)'),
         findsOneWidget,
@@ -345,6 +350,7 @@ void main() {
       expect(find.text('No queued updates'), findsOneWidget);
       expect(find.text('Last successful action: Not recorded'), findsOneWidget);
       expect(find.text('All Synced'), findsNothing);
+      expect(find.text('Everything is synced'), findsNothing);
       await showSyncText(
         tester,
         find.textContaining('No received updates recorded for this account'),
@@ -368,7 +374,15 @@ void main() {
       await reconnect(tester);
       expect((await db.query('pending_actions')).single['status'], 'synced');
       expect(patches, 1);
-      expect(find.text('No queued updates'), findsOneWidget);
+      await showSyncText(
+        tester,
+        find.text('No queued updates'),
+        delta: -200,
+      );
+      expect(
+        find.text('No queued updates'),
+        findsOneWidget,
+      );
       await showSyncText(
         tester,
         find.textContaining('FieldSync-Supabase received'),
@@ -472,8 +486,12 @@ void main() {
           error: state.error,
         );
         await open(tester, syncScreen());
-        await showSyncText(tester, find.textContaining(state.text));
-        expect(find.textContaining(state.text), findsOneWidget);
+        final guidance = find.descendant(
+          of: find.byKey(const ValueKey('linked_group_$job')),
+          matching: find.textContaining(state.text),
+        );
+        await showSyncText(tester, guidance);
+        expect(guidance, findsOneWidget);
         expect(find.textContaining(privateText), findsNothing);
         expect(
           find.textContaining('FieldSync-Supabase received'),
@@ -502,7 +520,10 @@ void main() {
       expect((await db.query('pending_actions')).single['status'], 'paused');
       await showSyncText(
         tester,
-        find.textContaining('Paused — server rejected this update'),
+        find.descendant(
+          of: find.byKey(const ValueKey('linked_group_$job')),
+          matching: find.textContaining('Paused — server rejected this update'),
+        ),
       );
       expect(find.textContaining(privateText), findsNothing);
       expect(find.textContaining('FieldSync-Supabase received'), findsNothing);

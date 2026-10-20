@@ -118,15 +118,14 @@ void main() {
       }).toList();
 
   // ==========================================================================
-  // PART A — My Tasks: the header lives in pinned AppBar chrome
+  // PART A — My Tasks: one scrolling header card
   //
-  // Why asserted this way: a Scaffold `appBar` (and its `bottom`) is chrome and
-  // is never scrolled by the body, so "is this widget inside the AppBar" is a
-  // direct, behavioural proof that it stays put — stronger than sampling
-  // pixels after a drag, and it does not depend on the list having loaded.
+  // The approved sample folds the title, live sync state, summary, Search /
+  // Filter and the Pending / Ongoing / Completed selector into one card at the
+  // top of the scroll view. Task cards below are untouched.
   // ==========================================================================
 
-  group('MY TASKS — pinned title + category selector', () {
+  group('MY TASKS — header card and category selector', () {
     late String src;
 
     setUpAll(() {
@@ -135,19 +134,15 @@ void main() {
       ).readAsStringSync();
     });
 
-    testWidgets('1. My Tasks title exists and is pinned chrome', (
+    testWidgets('1. My Tasks title exists in the scrolling header card', (
       tester,
     ) async {
       await pumpTasks(tester);
       expect(find.text('My Tasks'), findsOneWidget);
       expect(
-        find.descendant(
-          of: find.byType(AppBar),
-          matching: find.text('My Tasks'),
-        ),
-        findsOneWidget,
-        reason:
-            'the title lives in Scaffold appBar chrome, which never scrolls',
+        find.byType(AppBar),
+        findsNothing,
+        reason: 'the approved header is a card in the scroll view, not chrome',
       );
     });
 
@@ -166,56 +161,70 @@ void main() {
     });
 
     test(
-      '3 + 4. the selector is a PINNED sliver, so it cannot scroll away',
+      '3 + 4. the whole header card scrolls; nothing is a pinned sliver',
       () {
-        expect(src, contains('SliverPersistentHeader('));
+        expect(src, isNot(contains('SliverPersistentHeader(')));
         expect(
-          RegExp(
-            'SliverPersistentHeader\\(\\s*\\n\\s*pinned: true',
-          ).hasMatch(src),
-          isTrue,
-          reason: 'the category bar must be pinned',
+          src,
+          contains('SliverToBoxAdapter('),
+          reason: 'the header card is the first scrolling sliver',
         );
         expect(
-          RegExp('delegate: _CategoryBarHeaderDelegate').hasMatch(src),
-          isTrue,
-          reason: 'the pinned sliver hosts the category bar',
+          src,
+          contains('child: _buildHeaderCard('),
+          reason: 'the one card owns title, search, filter and segments',
         );
       },
     );
 
     test(
-      '5 + 6. Search/Filter are NOT pinned — they stay in the scroll view',
+      '5 + 6. Search and Filter live in the header card, never a pinned bar',
       () {
-        // The pinned header is built only from the category bar, so no TextField
-        // can be inside it; Search therefore scrolls up and passes behind it.
-        final method = src.substring(src.indexOf('Widget _buildCategoryBar'));
+        final method = src.substring(src.indexOf('Widget _buildHeaderCard'));
         final nextIdx = method.indexOf('\n  Widget ');
-        final categoryBar = nextIdx < 0 ? method : method.substring(0, nextIdx);
+        final header = nextIdx < 0 ? method : method.substring(0, nextIdx);
         expect(
-          categoryBar,
-          isNot(contains('TextField')),
-          reason: 'Search must never be inside the pinned bar',
+          header,
+          contains('hintText:'),
+          reason: 'Search is in the header card',
         );
         expect(
-          categoryBar,
-          isNot(contains('Icons.tune_rounded')),
-          reason: 'Filter must never be inside the pinned bar',
+          header,
+          contains('Icons.tune_rounded'),
+          reason: 'Filter is in the header card',
         );
-        expect(src, contains('hintText:'));
+        expect(
+          header,
+          contains('_buildCategoryBar('),
+          reason: 'the selector closes the same card',
+        );
       },
     );
 
     test(
-      '5b. original order preserved: Search/Filter precede the category bar',
+      '5b. internal order: title, search/filter, then the category bar',
       () {
-        final searchIdx = src.indexOf('SliverToBoxAdapter(');
-        final pinnedIdx = src.indexOf('SliverPersistentHeader(');
-        expect(searchIdx, greaterThanOrEqualTo(0));
+        final header = src.substring(
+          src.indexOf('Widget _buildHeaderCard'),
+          src.indexOf('Widget _buildCategoryBar('),
+        );
+        for (final marker in [
+          "'My Tasks'",
+          'hintText:',
+          'Icons.tune_rounded',
+          '_buildCategoryBar(',
+        ]) {
+          expect(header, contains(marker), reason: '$marker missing');
+        }
         expect(
-          pinnedIdx,
-          greaterThan(searchIdx),
-          reason: 'Search/Filter must stay above the category bar',
+          header.indexOf('hintText:'),
+          lessThan(header.indexOf('Icons.tune_rounded')),
+          reason: 'Search precedes Filter',
+        );
+        expect(
+          header.indexOf('Icons.tune_rounded'),
+          lessThan(header.indexOf('_buildCategoryBar(')),
+          reason: 'Filter precedes the selector',
         );
       },
     );
@@ -234,7 +243,7 @@ void main() {
         2,
         reason: 'one declaration + one call site only',
       );
-      expect(RegExp('SliverPersistentHeader\\(').allMatches(src).length, 1);
+      expect(RegExp('SliverPersistentHeader\\(').allMatches(src).length, 0);
     });
 
     testWidgets('10. no overflow at a narrow width', (tester) async {
@@ -262,11 +271,16 @@ void main() {
     });
 
     test(
-      '10c. the pinned band uses one non-zero extent for the chosen text size',
+      '10c. the header card is a single rounded surface with no second header',
       () {
-        expect(kCategoryBarHeight, greaterThan(0));
-        expect(src, contains('double get minExtent => extent'));
-        expect(src, contains('double get maxExtent => extent'));
+        expect(src, contains('borderRadius: InsightTheme.roundedLg'));
+        expect(src, contains('boxShadow: InsightTheme.cardShadow'));
+        expect(
+          RegExp(r"Text\(\s*'My Tasks'").allMatches(src).length,
+          1,
+          reason: 'the title renders once',
+        );
+        expect(RegExp('SliverPersistentHeader\\(').allMatches(src).length, 0);
       },
     );
 
@@ -282,23 +296,16 @@ void main() {
   });
 
   // ==========================================================================
-  // PART B — Sync Center: the ORIGINAL header group is pinned whole
+  // PART B — Sync Center: one header card, one status card, queue first
   //
-  // The pre-change layout already bundled "Sync Center", the connectivity /
-  // last-sync line and the queue control into ONE opaque container that
-  // was the first child of the scroll view. That composition is the visual
-  // truth and is preserved exactly: only the group's role changed, from
-  // "scrolls away with the content" to "pinned". It now sits in a Column above
-  // the scroll view, so the whole group stays put and everything below scrolls.
-  // The control's label is truthful queue wording ("No queued updates"), not a
-  // completion claim.
-  //
-  // UpdatesScreen cannot be mounted in this harness — it starts a repeating
-  // sync poll, so no quiescent frame is ever reached — so pinning is asserted
-  // structurally on the real source. Device verification covers the rendering.
+  // The approved layout keeps the title/connectivity/help group outside the
+  // scroll view, moves the live queue count and Sync now action into a single
+  // status card, and places the queue above history and storage. UpdatesScreen
+  // cannot be mounted in this harness (it starts a repeating sync poll), so the
+  // composition is asserted structurally on the real source.
   // ==========================================================================
 
-  group('SYNC CENTER — the whole original header group is pinned', () {
+  group('SYNC CENTER — header card and status card composition', () {
     late String sync;
 
     setUpAll(() {
@@ -309,42 +316,23 @@ void main() {
       ).readAsStringSync().replaceAll('\r\n', '\n');
     });
 
-    /// Absolute index where the pinned Column opens. Anchored off the header
-    /// container's own key so whole-file re-indentation cannot break it.
-    int groupStart() {
-      final header = sync.indexOf("key: const ValueKey('sync_header')");
+    /// The header card: from its own key to the start of the scrolling body.
+    String headerCard() {
+      final start = sync.indexOf("key: const ValueKey('sync_header')");
       expect(
-        header,
+        start,
         greaterThanOrEqualTo(0),
-        reason: 'the pinned header container exists',
+        reason: 'the header card exists',
       );
-      final i = sync.lastIndexOf(': Column(', header);
-      expect(i, greaterThanOrEqualTo(0), reason: 'the pinned Column exists');
-      return i;
+      final end = sync.indexOf('child: RefreshIndicator(', start);
+      expect(end, greaterThan(start), reason: 'the scroll view follows');
+      return sync.substring(start, end);
     }
 
-    /// Absolute index where the pinned group ends and the scroll view begins.
-    /// Anchored on the RefreshIndicator itself, because the header group
-    /// contains other Expanded widgets of its own.
-    int groupEnd() {
-      final e = sync.indexOf('child: RefreshIndicator(', groupStart());
-      expect(
-        e,
-        greaterThan(groupStart()),
-        reason: 'the scroll view follows the pinned group',
-      );
-      return e;
-    }
-
-    /// Exactly the pinned header region: everything between the Column's
-    /// children list and the Expanded scroll view.
-    String pinnedGroup() => sync.substring(groupStart(), groupEnd());
-
-    test('11. the original header group is declared once, in full', () {
-      for (final marker in ['Sync Center', 'Last sync:', 'No queued updates']) {
+    test('11. the header card is declared once, in full', () {
+      for (final marker in ['Sync Center', 'Last sync:', '_sectionHelpButton']) {
         expect(sync, contains(marker), reason: '$marker still present');
       }
-      // One visible title label, plus the pre-existing help dialog beside it.
       expect(
         RegExp("Text\\(\\s*'Sync Center',").allMatches(sync).length,
         1,
@@ -355,68 +343,41 @@ void main() {
         1,
         reason: 'the header help dialog is unchanged',
       );
+      expect(sync, isNot(contains('Everything is synced')));
     });
 
-    test('12. the WHOLE header group is pinned, above the scroll view', () {
-      final group = pinnedGroup();
-      // Title, connectivity/last-sync status and the queue control are
-      // all in the pinned region — the group was not split apart.
-      for (final marker in ['Sync Center', 'Last sync:', 'No queued updates']) {
-        expect(
-          group,
-          contains(marker),
-          reason: '$marker stays in the pinned header group',
-        );
+    test('12. queue follows the status card and precedes history/storage', () {
+      final body = sync.substring(sync.indexOf('child: RefreshIndicator('));
+      final statusIdx = body.indexOf('child: _buildSyncStatusCard()');
+      final queueIdx = body.indexOf('child: _buildQueueSection()');
+      final historyIdx = body.indexOf("'Synchronization history'");
+      final storageIdx = body.indexOf("'Offline storage'");
+      for (final entry in {
+        'status': statusIdx,
+        'queue': queueIdx,
+        'history': historyIdx,
+        'storage': storageIdx,
+      }.entries) {
+        expect(entry.value, greaterThanOrEqualTo(0), reason: entry.key);
       }
+      expect(statusIdx, lessThan(queueIdx));
+      expect(queueIdx, lessThan(historyIdx));
+      expect(historyIdx, lessThan(storageIdx));
       expect(
-        group,
-        contains('Expanded('),
-        reason: 'the pinned group is followed by an Expanded scroll view',
-      );
-      // The help control belongs to the same group, so the group was not
-      // split into "pinned title" + "scrolling detail".
-      expect(
-        group,
-        contains('_sectionHelpButton'),
-        reason: 'the header help control stays in the pinned group',
-      );
-      expect(
-        sync.indexOf('child: ListView(', groupStart()),
-        greaterThan(groupEnd()),
-        reason: 'the scrolling body starts after the pinned header group',
+        body,
+        isNot(contains('WAITING TO SYNC')),
+        reason: 'the old uppercase queue band is gone',
       );
     });
 
-    test(
-      '13. the pinned group is the original opaque container, unchanged',
-      () {
-        final group = pinnedGroup();
-        // Same surface + 1px line divider as the pre-change header, so the
-        // cards below cannot bleed through behind it.
-        expect(group, contains('width: double.infinity'));
-        expect(group, contains('color: InsightTheme.surface'));
-        expect(
-          group,
-          contains('InsightTheme.line'),
-          reason: 'the 1px hairline divider stays on the surface colour',
-        );
-        expect(
-          RegExp(
-            r'BorderSide\(\s*color: InsightTheme\.line,\s*width: 1,?\s*\)',
-          ).hasMatch(group),
-          isTrue,
-          reason: 'the divider is still exactly 1px, whatever the formatting',
-        );
-        // Still the original single header container, first in the group.
-        expect(
-          RegExp(
-            'Container\\(\\s*\\n\\s*width: double.infinity',
-          ).hasMatch(group),
-          isTrue,
-          reason: 'the original header container is the group’s first child',
-        );
-      },
-    );
+    test('13. the header is a rounded card, not a full-bleed bar', () {
+      final header = headerCard();
+      expect(header, contains('InsightTheme.surface'));
+      expect(header, contains('InsightTheme.roundedLg'));
+      expect(header, contains('InsightTheme.cardShadow'));
+      expect(header, contains('_sectionHelpButton'));
+      expect(header, contains('Last sync:'));
+    });
 
     test('15b. no doubled status-bar inset is introduced', () {
       // No Scaffold appBar was added, so the body's SafeArea remains the one
@@ -493,15 +454,10 @@ void main() {
       tester,
     ) async {
       await pumpTasks(tester);
-      // Brand blue survives on real UI: the ASSIGNED counter in the live
-      // widget is the proof, and the theme tokens themselves are untouched.
-      expect(
-        find.descendant(
-          of: find.byType(AppBar),
-          matching: find.byType(Container),
-        ),
-        findsWidgets,
-      );
+      // Brand blue survives on real UI: the active selector / filter controls
+      // and the theme tokens themselves are untouched.
+      expect(find.text('My Tasks'), findsOneWidget);
+      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
       expect(InsightTheme.blue1, const Color(0xFF2563EB));
       expect(InsightTheme.blueTint, const Color(0xFFEFF6FF));
       expect(tester.takeException(), isNull);
@@ -509,21 +465,15 @@ void main() {
   });
 
   // ==========================================================================
-  // PART A2 — the My Tasks header GROUP stays pinned whole
+  // PART A2 — the My Tasks header card is one unit
   //
-  // "My Tasks" and the ASSIGNED counter are ONE header
-  // group, and both live in Scaffold appBar
-  // chrome, which the body can never scroll. Search/Filter are the only part
-  // that scrolls away; the pinned category sliver then parks directly beneath
-  // the complete header.
-  //
-  // "Scrolls away" is asserted on the LIVE widget: anything absent from the
-  // AppBar chrome and absent from the pinned sliver cannot survive a scroll.
-  // Same guarantee a post-drag assertion gives, without needing the task list
-  // to load (this dependency set exposes no connectivity test seam).
+  // Title, summary, Search / Filter and the selector share one card, so there
+  // is no second header to keep in sync. These assertions are structural
+  // because this dependency set exposes no connectivity test seam that would
+  // load the task slivers deterministically.
   // ==========================================================================
 
-  group('MY TASKS — the whole header group stays pinned', () {
+  group('MY TASKS — the whole header card scrolls', () {
     late String src;
 
     setUpAll(() {
@@ -532,157 +482,94 @@ void main() {
       ).readAsStringSync();
     });
 
-    testWidgets('TOP — the whole header group is pinned chrome', (
+    testWidgets('TOP — the card renders title and live sync control', (
       tester,
     ) async {
       await pumpTasks(tester);
       expect(find.text('My Tasks'), findsOneWidget);
-      for (final marker in ['My Tasks', 'ASSIGNED']) {
-        expect(
-          find.descendant(of: find.byType(AppBar), matching: find.text(marker)),
-          findsOneWidget,
-          reason: '$marker is pinned chrome, so it never scrolls away',
-        );
-      }
+      expect(
+        find.byKey(const ValueKey('task-sync-indicator')),
+        findsOneWidget,
+        reason: 'the cloud status control stays beside the title',
+      );
+      expect(find.text('ASSIGNED'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets(
-      'TOP — title and counter remain pinned without Active Monitoring',
-      (tester) async {
-        await pumpTasks(tester, width: 800);
-        expect(
-          tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight,
-          lessThan(85),
-        );
-        for (final label in ['My Tasks', 'ASSIGNED']) {
-          expect(
-            find.text(label),
-            findsOneWidget,
-            reason: '$label is not duplicated in the scrolling content.',
-          );
-          expect(
-            find.descendant(
-              of: find.byType(AppBar),
-              matching: find.text(label),
-            ),
-            findsOneWidget,
-          );
-        }
-        expect(find.text('ACTIVE MONITORING'), findsNothing);
-        final title = tester.getRect(find.text('My Tasks'));
-        final counter = tester.getRect(find.text('ASSIGNED'));
-        expect(
-          counter.left,
-          greaterThan(title.right),
-          reason: 'the counter sits beside the title when space permits.',
-        );
-        expect(tester.takeException(), isNull);
-      },
-    );
-
-    test('SCROLLED — Search / Filter scroll away behind the pinned bar', () {
-      // The pinned sliver hosts only the category bar, so neither control can
-      // survive inside it; they must therefore pass behind it.
-      final method = src.substring(src.indexOf('Widget _buildCategoryBar'));
-      final nextIdx = method.indexOf('\n  Widget ');
-      final bar = nextIdx < 0 ? method : method.substring(0, nextIdx);
-      expect(bar, isNot(contains('TextField')), reason: 'Search scrolls away');
-      expect(
-        bar,
-        isNot(contains('Icons.tune_rounded')),
-        reason: 'Filter scrolls away',
+    testWidgets('TOP — title and summary share the card at wide width', (
+      tester,
+    ) async {
+      await pumpTasks(tester, width: 800);
+      expect(find.text('My Tasks'), findsOneWidget);
+      final summary = find.textContaining(
+        RegExp('assigned ·|Loading tasks|Saved tasks'),
       );
-      // Both are still on the page, inside the scrolling body.
-      final body = src.substring(src.indexOf('body: SafeArea('));
-      expect(body, contains('hintText:'), reason: 'Search still present');
+      expect(summary, findsOneWidget);
+      expect(find.text('ASSIGNED'), findsNothing);
+      expect(find.text('ACTIVE MONITORING'), findsNothing);
+      final title = tester.getRect(find.text('My Tasks'));
+      final summaryRect = tester.getRect(summary);
       expect(
-        body,
+        summaryRect.top,
+        greaterThan(title.top),
+        reason: 'the summary sits under the title in the same card',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    test('SCROLLED — Search and Filter sit inside the one header card', () {
+      final header = src.substring(
+        src.indexOf('Widget _buildHeaderCard'),
+        src.indexOf('Widget _buildCategoryBar('),
+      );
+      expect(header, contains('hintText:'), reason: 'Search is in the card');
+      expect(
+        header,
         contains('Icons.tune_rounded'),
-        reason: 'Filter still present',
+        reason: 'Filter is in the card',
+      );
+      expect(
+        src,
+        isNot(contains('SliverPersistentHeader(')),
+        reason: 'no second pinned header may duplicate the card',
       );
     });
 
-    testWidgets('SCROLLED — Search / Filter are in neither pinned region', (
+    testWidgets('SCROLLED — one mounted header, no pinned regions', (
       tester,
     ) async {
       await pumpTasks(tester);
-      expect(
-        find.descendant(
-          of: find.byType(AppBar),
-          matching: find.byType(TextField),
-        ),
-        findsNothing,
-        reason: 'Search cannot survive a scroll',
-      );
-      expect(
-        find.descendant(
-          of: find.byType(AppBar),
-          matching: find.byIcon(Icons.tune_rounded),
-        ),
-        findsNothing,
-        reason: 'Filter cannot survive a scroll',
-      );
-      expect(
-        find.descendant(
-          of: find.byType(SliverPersistentHeader),
-          matching: find.byType(TextField),
-        ),
-        findsNothing,
-        reason: 'Search is not in the pinned category sliver',
-      );
-      expect(
-        find.descendant(
-          of: find.byType(SliverPersistentHeader),
-          matching: find.byIcon(Icons.tune_rounded),
-        ),
-        findsNothing,
-        reason: 'Filter is not in the pinned category sliver',
-      );
-      // The header group, by contrast, is still mounted in chrome.
-      expect(
-        find.descendant(
-          of: find.byType(AppBar),
-          matching: find.text('My Tasks'),
-        ),
-        findsOneWidget,
-        reason: 'the header group survives scrolling',
-      );
+      expect(find.byType(AppBar), findsNothing);
+      expect(find.byType(SliverPersistentHeader), findsNothing);
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
+      expect(find.text('My Tasks'), findsOneWidget);
     });
 
-    test('SCROLLED — the category bar pins directly below the full header', () {
-      // Header = AppBar chrome. Category bar = the pinned sliver, which is the
-      // next element down the page and sits after Search/Filter in normal
-      // flow. Once Search/Filter scroll away it parks under the full header.
-      final pinnedIdx = src.indexOf('SliverPersistentHeader(');
-      expect(pinnedIdx, greaterThanOrEqualTo(0));
+    test('SCROLLED — the selector sits at the bottom of the same card', () {
+      final headerStart = src.indexOf('Widget _buildHeaderCard');
+      final searchIdx = src.indexOf('hintText:', headerStart);
+      final barIdx = src.indexOf('_buildCategoryBar(', searchIdx);
+      expect(searchIdx, greaterThanOrEqualTo(0));
+      expect(barIdx, greaterThan(searchIdx));
       expect(
-        RegExp(
-          'SliverPersistentHeader\\(\\s*\\n\\s*pinned: true',
-        ).hasMatch(src),
-        isTrue,
-        reason: 'the category bar must be pinned',
+        src,
+        contains('color: InsightTheme.surface2'),
+        reason: 'the selector keeps its segmented track',
       );
-      expect(src, contains('delegate: _CategoryBarHeaderDelegate'));
-      final bodyStart = src.indexOf('body: SafeArea(');
-      final searchIdx = src.indexOf('hintText:', bodyStart);
-      expect(searchIdx, greaterThanOrEqualTo(0), reason: 'Search is declared');
-      expect(
-        searchIdx,
-        lessThan(pinnedIdx),
-        reason: 'Search/Filter appear above the category bar at the top',
-      );
-      // Opaque band, so task cards cannot bleed through behind the pinned bar.
-      expect(src, contains('color: InsightTheme.surface'));
-      expect(kCategoryBarHeight, greaterThan(0));
+      expect(RegExp('SliverPersistentHeader\\(').allMatches(src).length, 0);
     });
 
-    testWidgets('the restored header group does not overflow', (tester) async {
+    testWidgets('the header card does not overflow', (tester) async {
       await pumpTasks(tester, width: 320);
       expect(tester.takeException(), isNull);
       expect(find.text('My Tasks'), findsOneWidget);
+      expect(
+        find.textContaining(RegExp('assigned ·|Loading tasks|Saved tasks')),
+        findsOneWidget,
+      );
       expect(find.text('ACTIVE MONITORING'), findsNothing);
-      expect(find.text('ASSIGNED'), findsOneWidget);
+      expect(find.text('ASSIGNED'), findsNothing);
     });
   });
 
@@ -710,12 +597,9 @@ void main() {
 
         expect(find.text('Offline mode'), findsOneWidget);
         expect(
-          find.descendant(
-            of: find.byType(AppBar),
-            matching: find.text('My Tasks'),
-          ),
+          find.text('My Tasks'),
           findsOneWidget,
-          reason: 'the pinned title still renders beneath the offline banner',
+          reason: 'the header card still renders beneath the offline banner',
         );
         expect(tester.takeException(), isNull);
       },
@@ -770,11 +654,9 @@ void main() {
       // SafeArea must not add another.
       expect(find.text('Offline mode'), findsOneWidget);
       expect(
-        find.descendant(
-          of: find.byType(AppBar),
-          matching: find.text('My Tasks'),
-        ),
+        find.text('My Tasks'),
         findsOneWidget,
+        reason: 'the header card survives under the single top inset',
       );
       expect(tester.takeException(), isNull);
     });

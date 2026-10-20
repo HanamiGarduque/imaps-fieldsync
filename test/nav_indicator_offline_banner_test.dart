@@ -400,6 +400,51 @@ void main() {
       expect(tasksDot, findsNothing);
     });
 
+    testWidgets('a badge keeps the colour its owner gives it', (tester) async {
+      // The Sync tab's running-progress dot is blue, not amber: amber means
+      // "needs attention" and only the Tasks tab owns that.
+      const runningBlue = Color(0xFF2563EB);
+      Finder dotWith(Color color) => find.byWidgetPredicate(
+            (w) =>
+                w is Container &&
+                w.decoration is BoxDecoration &&
+                (w.decoration as BoxDecoration).shape == BoxShape.circle &&
+                (w.decoration as BoxDecoration).color == color,
+          );
+
+      await tester.pumpWidget(withStatusBar(MaterialApp(
+        home: Scaffold(
+          bottomNavigationBar: InsightBottomNav(
+            currentIndex: 0,
+            onTap: (_) {},
+            items: const [
+              InsightNavItem(icon: Icons.home_rounded, label: 'Home'),
+              InsightNavItem(
+                icon: Icons.assignment_outlined,
+                label: 'Tasks',
+                showBadge: true,
+              ),
+              InsightNavItem(
+                icon: Icons.sync_rounded,
+                label: 'Sync',
+                showBadge: true,
+                badgeColor: runningBlue,
+              ),
+              InsightNavItem(
+                icon: Icons.person_outline_rounded,
+                label: 'Profile',
+              ),
+            ],
+          ),
+        ),
+      )));
+      await tester.pumpAndSettle();
+      expect(tasksDot, findsOneWidget,
+          reason: 'the Tasks dot keeps the amber attention colour');
+      expect(dotWith(runningBlue), findsOneWidget,
+          reason: 'the running-sync dot is painted blue');
+    });
+
     testWidgets('never replaces the Tasks label (accessibility)',
         (tester) async {
       await tester.pumpWidget(nav(showBadge: true));
@@ -447,6 +492,25 @@ void main() {
         src,
         isNot(contains('showBadge: !_tasksVisitedThisSession')),
         reason: 'the old session-only proxy is the stale-dot bug',
+      );
+    });
+
+    test('11b2. one owner per dot colour', () {
+      // Amber means "needs attention" — a new assignment on Tasks. Routine
+      // progress (a sync that is running) must not reuse the same amber.
+      expect(src, contains('badgeColor: InsightTheme.blue1'),
+          reason: 'the running-sync dot uses the app blue');
+      expect(
+        RegExp(
+          r'showBadge: syncProgress != null,[\s\S]{0,240}?badgeColor: InsightTheme\.blue1,',
+        ).hasMatch(src),
+        isTrue,
+        reason: 'the blue badge belongs to the Sync tab',
+      );
+      expect(
+        'badgeColor: InsightTheme.blue1'.allMatches(src).length,
+        1,
+        reason: 'only the Sync tab overrides the attention colour',
       );
     });
 
