@@ -199,14 +199,14 @@ class SecurePrefsService {
   // ── Biometric behaviour toggles ─────────────────────────────────────────
 
   static Future<bool> getBioRequireOnOpen() async =>
-      (await _storage.read(key: _kBioRequireOnOpen)) == 'true';
+      (await _read(_kBioRequireOnOpen)) == 'true';
 
   static Future<void> setBioRequireOnOpen(bool v) =>
-      _storage.write(key: _kBioRequireOnOpen, value: v ? 'true' : 'false');
+      _write(_kBioRequireOnOpen, v ? 'true' : 'false');
 
   /// Auto-lock minutes: 0=never, 1=1min, 5=5min, 10=10min, -1=immediately.
   static Future<int> getBioAutoLockMins() async {
-    final raw = await _storage.read(key: _kBioAutoLockMins);
+    final raw = await _read(_kBioAutoLockMins);
     return int.tryParse(raw ?? '0') ?? 0;
   }
 
@@ -220,7 +220,7 @@ class SecurePrefsService {
   }
 
   static Future<void> setBioAutoLockMins(int minutes) =>
-      _storage.write(key: _kBioAutoLockMins, value: minutes.toString());
+      _write(_kBioAutoLockMins, minutes.toString());
 
   // ── Soft logout flag ─────────────────────────────────────────────────────
   // Replaces an earlier (broken) design that tried to save a copy of the

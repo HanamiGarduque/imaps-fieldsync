@@ -11,6 +11,7 @@ import './modules/inspection/providers/inspection_provider.dart';
 import 'modules/auth_startup/screens/splash_screen.dart';
 import 'modules/auth_startup/services/screen_protection_service.dart';
 import 'modules/auth_startup/services/screen_protection_observer.dart';
+import 'modules/auth_startup/widgets/auto_lock_activity_host.dart';
 import 'core/widgets/sensitive_screen.dart';
 import 'core/theme/insight_theme.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -108,8 +109,10 @@ class _MyAppState extends State<MyApp> {
         ),
       ),
       home: const SplashScreen(),
-      builder: (context, child) => ScreenProtectionHost(
-        child: child ?? const SizedBox.shrink(),
+      builder: (context, child) => AutoLockActivityHost(
+        child: ScreenProtectionHost(
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
   }

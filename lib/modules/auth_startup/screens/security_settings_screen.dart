@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/models/user_profile.dart';
 import '../services/biometric_service.dart';
 import '../services/secure_prefs_service.dart';
+import '../services/auto_lock_controller.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
@@ -59,6 +60,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       _autoLockMins = autoLock;
       _loading = false;
     });
+    _publishAutoLockPolicy();
   }
 
   Future<void> _toggleBiometric(bool value) async {
@@ -75,6 +77,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           _bioConfirmed = false;
           _requireOnOpen = true;
         });
+        _publishAutoLockPolicy();
         await SupabaseService.logActivity(
           eventType: 'security_updated',
           title: 'Biometric login enabled',
@@ -88,8 +91,11 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
       await BiometricService.clearEnrollment();
       setState(() {
         _bioEnrolled = false;
+        _bioConfirmed = false;
         _requireOnOpen = false;
+        _autoLockMins = 0;
       });
+      _publishAutoLockPolicy();
       await SupabaseService.logActivity(
         eventType: 'security_updated',
         title: 'Biometric login disabled',
@@ -107,6 +113,16 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
     } else {
       _showFeedback('Biometric scan failed or canceled.', success: false);
     }
+  }
+
+  void _publishAutoLockPolicy() {
+    AutoLockController.instance.updatePolicy(
+      AutoLockPolicy(
+        requireOnOpen: _requireOnOpen,
+        minutes: _autoLockMins,
+        biometricReady: _bioEnrolled && _bioConfirmed,
+      ),
+    );
   }
 
   void _showFeedback(String msg, {bool success = true}) {
@@ -217,6 +233,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                       onChanged: (v) async {
                         await SecurePrefsService.setBioRequireOnOpen(v);
                         setState(() => _requireOnOpen = v);
+                        _publishAutoLockPolicy();
                         await SupabaseService.logActivity(
                           eventType: 'security_updated',
                           title: 'App opening protection updated',
@@ -233,7 +250,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        'Prompt biometric verification on app launch',
+                        'Lock on app launch and whenever you return from the background',
                         style: InsightTheme.inter(12, c: _Colors.ink2),
                       ),
                     ),
@@ -256,12 +273,12 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        'Lock app after period in background or idle',
+                        'Lock after this much inactivity in the foreground or background',
                         style: InsightTheme.inter(12, c: _Colors.ink2),
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                       child: Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -272,6 +289,15 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                           _lockChip('10 Minutes', 10),
                           _lockChip('Never', 0),
                         ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Text(
+                        'Opening protection locks whenever you return. '
+                        'Without it, 1/5/10 minutes of idle time (including background) locks. '
+                        'Immediately locks on return; Never disables only the idle timer.',
+                        style: InsightTheme.inter(11.5, c: _Colors.ink3, h: 1.4),
                       ),
                     ),
                   ]),
@@ -404,6 +430,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
         if (val) {
           await SecurePrefsService.setBioAutoLockMins(mins);
           setState(() => _autoLockMins = mins);
+          _publishAutoLockPolicy();
           await SupabaseService.logActivity(
             eventType: 'security_updated',
             title: 'Auto-lock period updated',

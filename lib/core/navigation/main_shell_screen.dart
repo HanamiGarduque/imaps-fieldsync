@@ -7,7 +7,7 @@ import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../services/auth_failure.dart';
 import '../services/supabase_service.dart';
-import '../../modules/auth_startup/services/biometric_service.dart';
+import '../../modules/auth_startup/services/auto_lock_controller.dart';
 import '../../modules/auth_startup/services/secure_prefs_service.dart';
 import '../widgets/sensitive_screen.dart';
 import '../services/sync_outbox_service.dart';
@@ -47,7 +47,7 @@ class MainShellScreen extends StatefulWidget {
   State<MainShellScreen> createState() => _MainShellScreenState();
 }
 
-class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingObserver {
+class _MainShellScreenState extends State<MainShellScreen> {
   late int _currentIndex;
   late UserProfile _currentProfile;
 
@@ -65,22 +65,13 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
       return;
     }
     _sessionRedirecting = true;
+    AutoLockController.instance.stop();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => LoginScreen(initialFailure: refused
           ? AuthFailure.profileUnavailable : AuthFailure.sessionRestoreFailed)),
       (_) => false,
     );
   }
-
-  // ── App-resume lock (see AUTH_SECURITY_MASTER_DOC.md §5d) ───────────────
-  // _pausedAt is set the moment the app leaves the foreground and cleared
-  // the next time it resumes — it only needs to survive within this one
-  // process lifetime, since a full app kill already goes through the
-  // splash-screen/session-check flow separately (see splash_screen.dart).
-  DateTime? _pausedAt;
-  bool _lockShowing = false;
-  Timer? _idleLockTimer;
-  int _idleTimerGeneration = 0;
 
   // ── Quick Actions sheet ───────────────────────────────────────────────
   bool _quickActionsOpen = false;
@@ -204,8 +195,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
         }
       }
     });
-    WidgetsBinding.instance.addObserver(this);
-    _resetIdleLockTimer();
+    _startAutoLock();
   }
 
   Future<void> _checkInitialConnectivity() async {
@@ -235,52 +225,33 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     _connectivitySubscription?.cancel();
     _authSubscription?.cancel();
     AuthService.profileRefusedOwner.removeListener(_checkSessionAccess);
-    WidgetsBinding.instance.removeObserver(this);
-    _idleLockTimer?.cancel();
+    AutoLockController.instance.stop();
     super.dispose();
   }
 
-  void _resetIdleLockTimer([PointerEvent? _]) {
-    _idleTimerGeneration++;
-    _idleLockTimer?.cancel();
-    _idleLockTimer = null;
-    if (_lockShowing) return;
-    _scheduleIdleLockTimer(_idleTimerGeneration);
+  Future<void> _startAutoLock() async {
+    final policy = await AutoLockPolicy.load();
+    if (!mounted) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    AutoLockController.instance.start(
+      policy: policy,
+      onLockRequested: _presentAutoLock,
+      backgrounded: lifecycle == AppLifecycleState.paused ||
+          lifecycle == AppLifecycleState.hidden,
+    );
   }
 
-  Future<void> _scheduleIdleLockTimer(int generation) async {
-    final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
-    final mins = await SecurePrefsService.getBioAutoLockMins();
-    if (!mounted || generation != _idleTimerGeneration || _lockShowing || !requireOnOpen || mins <= 0) {
-      return;
-    }
-
-    _idleLockTimer = Timer(Duration(minutes: mins), _showIdleLock);
-  }
-
-  Future<void> _showIdleLock() async {
-    if (!mounted || _lockShowing) {
-      return;
-    }
-    final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
-    final mins = await SecurePrefsService.getBioAutoLockMins();
-    final enrolled = await BiometricService.isEnrolled();
-    final confirmed = await BiometricService.isConfirmed();
-    if (!mounted || !requireOnOpen || mins <= 0 || !enrolled || !confirmed) {
-      return;
-    }
-
-    _lockShowing = true;
-    _idleLockTimer?.cancel();
-    _idleLockTimer = null;
+  Future<void> _presentAutoLock() async {
+    if (!mounted) return;
+    // Let the current lifecycle callback/frame finish before pushing.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const AppResumeLockScreen(),
         fullscreenDialog: true,
       ),
     );
-    _lockShowing = false;
-    _resetIdleLockTimer();
   }
 
   void _toggleQuickActions() {
@@ -362,69 +333,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
     ];
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Deliberately NOT tracking AppLifecycleState.inactive here. On Android,
-    // showing the native biometric prompt itself (BiometricPrompt) briefly
-    // puts the app into `inactive` — the same transient state used for
-    // things like a notification shade pull or an incoming call — even
-    // though the user never actually left the app. Treating `inactive` as
-    // "backgrounded" meant every biometric prompt anywhere in the app
-    // (including Security Settings' "Test/Re-verify Sensor") looked
-    // indistinguishable from a real app-switch, which re-triggered this
-    // very lock screen right after using biometric for anything —
-    // including the lock screen's own auto-prompt, compounding into a
-    // loop. `paused`/`hidden` are the states that actually mean "the app
-    // is no longer visible," which is the only thing that should count.
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
-      _idleLockTimer?.cancel();
-      _idleLockTimer = null;
-      _pausedAt ??= DateTime.now();
-    } else if (state == AppLifecycleState.resumed) {
-      _maybeShowResumeLock();
-      _resetIdleLockTimer();
-    }
-  }
-
-  Future<void> _maybeShowResumeLock() async {
-    final pausedAt = _pausedAt;
-    _pausedAt = null;
-    if (pausedAt == null || _lockShowing) return;
-
-    final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
-    if (!requireOnOpen) return;
-
-    final enrolled = await BiometricService.isEnrolled();
-    if (!enrolled) return; // nothing to gate with if biometric isn't set up
-
-    // New request: don't gate behind an unconfirmed biometric — someone
-    // who just enrolled but hasn't done their one confirmation password
-    // login yet would otherwise get locked out with no way through (this
-    // lock screen has no password field by design). See
-    // BiometricService.isConfirmed() / splash_screen.dart's cold-start gate
-    // for the matching check.
-    final confirmed = await BiometricService.isConfirmed();
-    if (!confirmed) return;
-
-    final mins = await SecurePrefsService.getBioAutoLockMins();
-    // The stored values are -1=immediately, 0=never, or 1/5/10 minutes.
-    final elapsed = DateTime.now().difference(pausedAt);
-    final shouldLock = SecurePrefsService.shouldLockAfterElapsed(
-      minutes: mins,
-      elapsed: elapsed,
-    );
-    if (!shouldLock || !mounted) return;
-
-    _lockShowing = true;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const AppResumeLockScreen(),
-        fullscreenDialog: true,
-      ),
-    );
-    _lockShowing = false;
-  }
-
   Widget _buildPage(int index) {
     switch (index) {
       case 0:
@@ -464,9 +372,7 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerDown: _resetIdleLockTimer,
-      child: Scaffold(
+    return Scaffold(
         extendBody: true,
         body: Stack(
         children: [
@@ -635,7 +541,6 @@ class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingOb
           );
         },
         ),
-      ),
     );
   }
 }
