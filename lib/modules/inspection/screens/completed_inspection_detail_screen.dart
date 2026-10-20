@@ -31,21 +31,28 @@ import '../widgets/photo_viewer.dart';
 /// When set, it replaces `SupabaseService.fetchJobDetail` so the cached
 /// fallback can be exercised deterministically without a network. Production
 /// always runs the real service path; this is never assigned at runtime.
-typedef CompletedDetailFetcher = Future<Map<String, dynamic>?> Function(String jobId);
+typedef CompletedDetailFetcher =
+    Future<Map<String, dynamic>?> Function(String jobId);
 CompletedDetailFetcher? completedDetailFetcherOverride;
 
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
   final bool historicalReadOnly;
   final TaskSubmission? submission;
-  const CompletedInspectionDetailScreen({super.key, required this.task, this.historicalReadOnly = false, this.submission});
+  const CompletedInspectionDetailScreen({
+    super.key,
+    required this.task,
+    this.historicalReadOnly = false,
+    this.submission,
+  });
 
   @override
   State<CompletedInspectionDetailScreen> createState() =>
       _CompletedInspectionDetailScreenState();
 }
 
-class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDetailScreen> {
+class _CompletedInspectionDetailScreenState
+    extends State<CompletedInspectionDetailScreen> {
   TaskItem? _fullTask;
   bool _isLoading = true;
   String? _error;
@@ -54,8 +61,11 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   int _detailRequestId = 0;
   bool _retired = false;
   bool get _savedSubmissionMode => widget.submission != null;
-  bool get _awaitingAcceptance => _submission?.isSynced == false || _fullTask?.category != 'Completed';
-  bool get _readOnly => _savedSubmissionMode || widget.historicalReadOnly ||
+  bool get _awaitingAcceptance =>
+      _submission?.isSynced == false || _fullTask?.category != 'Completed';
+  bool get _readOnly =>
+      _savedSubmissionMode ||
+      widget.historicalReadOnly ||
       widget.task.planningReview?.decision == 'Requires Reinspection' ||
       _fullTask?.planningReview?.decision == 'Requires Reinspection';
 
@@ -75,7 +85,9 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     super.initState();
     if (_savedSubmissionMode) {
       _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen(
-        (_) => _retireIfOwnerChanged(), onError: (Object _) => _retireIfOwnerChanged());
+        (_) => _retireIfOwnerChanged(),
+        onError: (Object _) => _retireIfOwnerChanged(),
+      );
       SyncOutboxService.drainCompleted.addListener(_loadFullDetail);
       SyncOutboxService.progress.addListener(_loadFullDetail);
     }
@@ -92,7 +104,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
 
   bool _retireIfOwnerChanged() {
     if (!_savedSubmissionMode) return false;
-    if (!_retired && DBHelper.currentInspectorId == widget.submission!.inspectorId) return false;
+    if (!_retired &&
+        DBHelper.currentInspectorId == widget.submission!.inspectorId) {
+      return false;
+    }
     if (mounted) {
       setState(() {
         _retired = true;
@@ -114,13 +129,24 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     try {
       final snapshot = await DBHelper.getTaskPresentationSnapshot();
       final row = snapshot.jobs.singleWhere((r) => r['id'] == widget.task.id);
-      final actions = snapshot.submissions.where((r) => r['job_id'] == widget.task.id);
-      final submission = actions.isEmpty ? null : TaskSubmission.fromRow(actions.first);
-      final task = TaskItem.fromCachedJob({...row, ...?submission?.evidenceFields});
+      final actions = snapshot.submissions.where(
+        (r) => r['job_id'] == widget.task.id,
+      );
+      final submission = actions.isEmpty
+          ? null
+          : TaskSubmission.fromRow(actions.first);
+      final task = TaskItem.fromCachedJob({
+        ...row,
+        ...?submission?.evidenceFields,
+      });
       if (submission == null && task.category != 'Completed') {
         throw StateError('Saved final submission is unavailable');
       }
-      if (!mounted || requestId != _detailRequestId || _retireIfOwnerChanged()) return;
+      if (!mounted ||
+          requestId != _detailRequestId ||
+          _retireIfOwnerChanged()) {
+        return;
+      }
       setState(() {
         _fullTask = task;
         _submission = submission;
@@ -128,11 +154,16 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         _error = null;
       });
     } catch (_) {
-      if (!mounted || requestId != _detailRequestId || _retireIfOwnerChanged()) return;
+      if (!mounted ||
+          requestId != _detailRequestId ||
+          _retireIfOwnerChanged()) {
+        return;
+      }
       setState(() {
         _fullTask = null;
         _isLoading = false;
-        _error = 'Could not read the saved submission. Try again from My Tasks.';
+        _error =
+            'Could not read the saved submission. Try again from My Tasks.';
       });
     }
   }
@@ -173,7 +204,8 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
   /// field is invented, no lifecycle value is altered, and nothing is written.
   Future<void> _applyCachedFallback(Object? failure) async {
     final cached = widget.task;
-    final hasCachedTask = cached.id.isNotEmpty && (cached.status?.isNotEmpty ?? false);
+    final hasCachedTask =
+        cached.id.isNotEmpty && (cached.status?.isNotEmpty ?? false);
 
     // Case B: neither a remote detail nor a usable cached task. Keep the
     // existing safe error state.
@@ -190,8 +222,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
 
     // Connectivity only refines the wording of an already-decided fallback; it
     // must never gate rendering, so it is bounded and treated as unknown.
-    final online = await _hasConnectivity()
-        .timeout(const Duration(milliseconds: 500), onTimeout: () => false);
+    final online = await _hasConnectivity().timeout(
+      const Duration(milliseconds: 500),
+      onTimeout: () => false,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -227,7 +261,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
       builder: (ctx) => AlertDialog(
         backgroundColor: InsightTheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Rework this step?', style: InsightTheme.poppins(18, w: FontWeight.w600)),
+        title: Text(
+          'Rework this step?',
+          style: InsightTheme.poppins(18, w: FontWeight.w600),
+        ),
         content: Text(
           'Only "${InspectionProgress.stepTitles[step - 1]}" needs to be '
           'redone. The rest of the submitted inspection stays as-is until '
@@ -237,16 +274,32 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink3)),
+            child: Text(
+              'Cancel',
+              style: InsightTheme.inter(
+                14,
+                w: FontWeight.w600,
+                c: InsightTheme.ink3,
+              ),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: InsightTheme.blue1,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
               elevation: 0,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Rework', style: InsightTheme.inter(14, w: FontWeight.w600, c: Colors.white)),
+            child: Text(
+              'Rework',
+              style: InsightTheme.inter(
+                14,
+                w: FontWeight.w600,
+                c: Colors.white,
+              ),
+            ),
           ),
         ],
       ),
@@ -256,20 +309,28 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     HapticFeedback.mediumImpact();
 
     try {
-      await SupabaseService.reopenForRework(jobId: task.id, locationLabel: task.location);
-      
+      await SupabaseService.reopenForRework(
+        jobId: task.id,
+        locationLabel: task.location,
+      );
+
       // FIXED: Moved mounted check above the context usage across the async gap
       if (!mounted) return;
-      
+
       context.read<InspectionProvider>().hydrateForRework(task);
       await context.read<InspectionProvider>().restorePendingFindings();
       if (!mounted) return;
-      InspectionProgress.instance.unlockAllForReview(task.id, label: task.location);
+      InspectionProgress.instance.unlockAllForReview(
+        task.id,
+        label: task.location,
+      );
 
       _navigateToStep(step, task);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not reopen: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not reopen: $e')));
     }
   }
 
@@ -311,38 +372,47 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     // reflects it. Leaving that step WITHOUT pressing Save persists nothing;
     // that text is shown from _draftFindings instead, so the summary never
     // claims unsaved evidence is on file.
-    Navigator.push(context, MaterialPageRoute(builder: (_) => target))
-        .then((_) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => target)).then((
+      _,
+    ) {
       if (mounted) _loadFullDetail();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return SensitiveScreen(child: Scaffold(
-      backgroundColor: InsightTheme.bg,
-      appBar: AppBar(
-        backgroundColor: InsightTheme.surface,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        iconTheme: const IconThemeData(color: InsightTheme.ink),
-        title: Text('Inspection Summary', style: InsightTheme.poppins(16, w: FontWeight.w600)),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1.0),
-          child: Container(color: InsightTheme.line, height: 1.0),
+    return SensitiveScreen(
+      child: Scaffold(
+        backgroundColor: InsightTheme.bg,
+        appBar: AppBar(
+          backgroundColor: InsightTheme.surface,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          iconTheme: const IconThemeData(color: InsightTheme.ink),
+          title: Text(
+            'Inspection Summary',
+            style: InsightTheme.poppins(16, w: FontWeight.w600),
+          ),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1.0),
+            child: Container(color: InsightTheme.line, height: 1.0),
+          ),
         ),
-      ),
-      body: _isLoading
-          ? const Center(child: ImapsLoadingIndicator(size: 60))
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_error!, style: InsightTheme.inter(14, c: InsightTheme.ink2)),
+        body: _isLoading
+            ? const Center(child: ImapsLoadingIndicator(size: 60))
+            : _error != null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    _error!,
+                    style: InsightTheme.inter(14, c: InsightTheme.ink2),
                   ),
-                )
-              : _buildBody(_fullTask!),
-    ));
+                ),
+              )
+            : _buildBody(_fullTask!),
+      ),
+    );
   }
 
   Widget _buildBody(TaskItem task) {
@@ -350,25 +420,50 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
       children: [
         if (_savedSubmissionMode) ...[
-          Text('Saved submission — Read only', style: InsightTheme.inter(13, w: FontWeight.w700)),
+          Text(
+            'Saved submission — Read only',
+            style: InsightTheme.inter(13, w: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           Container(
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: InsightTheme.surface2,
-              border: Border.all(color: InsightTheme.line), borderRadius: BorderRadius.circular(8)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_submission?.badge(canonicalCompleted: task.category == 'Completed') ?? 'Completed — Synced',
-                style: InsightTheme.inter(13, w: FontWeight.w700,
-                  c: _awaitingAcceptance ? InsightTheme.orangeInk : InsightTheme.green)),
-              const SizedBox(height: 8),
-              Text(_awaitingAcceptance
-                ? 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
-                : 'The server has confirmed this inspection.', style: InsightTheme.inter(12, c: InsightTheme.ink2)),
-            ]),
+            decoration: BoxDecoration(
+              color: InsightTheme.surface2,
+              border: Border.all(color: InsightTheme.line),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _submission?.badge(
+                        canonicalCompleted: task.category == 'Completed',
+                      ) ??
+                      'Completed — Synced',
+                  style: InsightTheme.inter(
+                    13,
+                    w: FontWeight.w700,
+                    c: _awaitingAcceptance
+                        ? InsightTheme.orangeInk
+                        : InsightTheme.green,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _awaitingAcceptance
+                      ? 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
+                      : 'The server has confirmed this inspection.',
+                  style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                ),
+              ],
+            ),
           ),
         ] else if (_readOnly) ...[
-          Text('Historical inspection — Read only', style: InsightTheme.inter(13, w: FontWeight.w700)),
+          Text(
+            'Historical inspection — Read only',
+            style: InsightTheme.inter(13, w: FontWeight.w700),
+          ),
           const SizedBox(height: 12),
         ],
         if (_isCachedFallback) _buildSavedDataNotice(),
@@ -376,7 +471,15 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         const SizedBox(height: 24),
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 12),
-          child: Text('INSPECTION DATA', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.2)),
+          child: Text(
+            'INSPECTION DATA',
+            style: InsightTheme.inter(
+              11,
+              w: FontWeight.w700,
+              c: InsightTheme.ink3,
+              ls: 1.2,
+            ),
+          ),
         ),
         if (task.assignmentInstructions?.trim().isNotEmpty == true) ...[
           Container(
@@ -385,7 +488,11 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
               color: InsightTheme.surface,
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
-                BoxShadow(color: const Color(0xFF000000).withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))
+                BoxShadow(
+                  color: const Color(0xFF000000).withValues(alpha: 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
               ],
             ),
             child: Padding(
@@ -395,9 +502,20 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.assignment_ind_outlined, size: 20, color: InsightTheme.ink2),
+                      const Icon(
+                        Icons.assignment_ind_outlined,
+                        size: 20,
+                        color: InsightTheme.ink2,
+                      ),
                       const SizedBox(width: 8),
-                      Text('Assignment Instructions', style: InsightTheme.poppins(14, w: FontWeight.w600, c: InsightTheme.ink)),
+                      Text(
+                        'Assignment Instructions',
+                        style: InsightTheme.poppins(
+                          14,
+                          w: FontWeight.w600,
+                          c: InsightTheme.ink,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -408,7 +526,14 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                       color: InsightTheme.surface2,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(task.assignmentInstructions!, style: InsightTheme.inter(13, w: FontWeight.w400, c: InsightTheme.ink2)),
+                    child: Text(
+                      task.assignmentInstructions!,
+                      style: InsightTheme.inter(
+                        13,
+                        w: FontWeight.w400,
+                        c: InsightTheme.ink2,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -424,22 +549,44 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
               color: InsightTheme.surface,
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
-                BoxShadow(color: const Color(0xFF000000).withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))
+                BoxShadow(
+                  color: const Color(0xFF000000).withValues(alpha: 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
               ],
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  const Icon(Icons.person_outline_rounded, size: 20, color: InsightTheme.ink2),
+                  const Icon(
+                    Icons.person_outline_rounded,
+                    size: 20,
+                    color: InsightTheme.ink2,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Assigned by', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink3)),
+                        Text(
+                          'Assigned by',
+                          style: InsightTheme.inter(
+                            11,
+                            w: FontWeight.w600,
+                            c: InsightTheme.ink3,
+                          ),
+                        ),
                         const SizedBox(height: 2),
-                        Text(task.assignedByName!, style: InsightTheme.poppins(14, w: FontWeight.w600, c: InsightTheme.ink)),
+                        Text(
+                          task.assignedByName!,
+                          style: InsightTheme.poppins(
+                            14,
+                            w: FontWeight.w600,
+                            c: InsightTheme.ink,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -465,8 +612,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           icon: Icons.satellite_alt_outlined,
           onRework: _readOnly ? null : () => _reworkStep(2),
           content: _buildDetailRows({
-            'Confirmed latitude': task.confirmedLatitude?.toStringAsFixed(6) ?? '—',
-            'Confirmed longitude': task.confirmedLongitude?.toStringAsFixed(6) ?? '—',
+            'Confirmed latitude':
+                task.confirmedLatitude?.toStringAsFixed(6) ?? '—',
+            'Confirmed longitude':
+                task.confirmedLongitude?.toStringAsFixed(6) ?? '—',
             'Accuracy (m)': task.gpsAccuracyM?.toStringAsFixed(1) ?? '—',
             'Confirmed at': task.gpsConfirmedAt ?? '—',
           }),
@@ -484,7 +633,8 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           icon: Icons.checklist_rtl_rounded,
           onRework: _readOnly ? null : () => _reworkStep(4),
           content: _buildDetailRows({
-            'Completed': '${task.checklistCompletedCount} of ${task.checklistTotalCount} verified',
+            'Completed':
+                '${task.checklistCompletedCount} of ${task.checklistTotalCount} verified',
           }),
         ),
         _CollapsibleStepCard(
@@ -493,10 +643,18 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           icon: Icons.edit_document,
           onRework: _readOnly ? null : () => _reworkStep(5),
           content: _buildDetailRows({
-            'Observations': task.observations?.isNotEmpty == true ? task.observations! : 'None recorded',
-            'Discrepancies': task.discrepancies?.isNotEmpty == true ? task.discrepancies! : 'None recorded',
-            'Recommendations': task.recommendations?.isNotEmpty == true ? task.recommendations! : 'None recorded',
-            'Inspector notes': task.inspectorNotes?.isNotEmpty == true ? task.inspectorNotes! : 'None recorded',
+            'Observations': task.observations?.isNotEmpty == true
+                ? task.observations!
+                : 'None recorded',
+            'Discrepancies': task.discrepancies?.isNotEmpty == true
+                ? task.discrepancies!
+                : 'None recorded',
+            'Recommendations': task.recommendations?.isNotEmpty == true
+                ? task.recommendations!
+                : 'None recorded',
+            'Inspector notes': task.inspectorNotes?.isNotEmpty == true
+                ? task.inspectorNotes!
+                : 'None recorded',
             // Leaving a rework step with unsaved text used to persist it on the
             // way out. It is now a draft only, so the summary shows it while
             // the rework session is open instead of claiming it is on file.
@@ -509,11 +667,20 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           icon: Icons.verified_outlined,
           onRework: _readOnly ? null : () => _reworkStep(6),
           content: _buildDetailRows({
-            'Result': task.inspectionResult ?? '—',
-            'Compliant': task.isCompliant == null ? '—' : (task.isCompliant! ? 'Yes' : 'No (Discrepancy Found)'),
+            // The four-state assessment is the authoritative reading. The
+            // legacy boolean cannot separate a procedural For Review /
+            // Requires Reinspection from a non-compliance finding, so it is
+            // never rendered as a verdict here.
+            'Inspector assessment': task.inspectionResult?.isNotEmpty == true
+                ? task.inspectionResult!
+                : 'Not recorded',
+            'Assessment explanation': task.discrepancies?.isNotEmpty == true
+                ? task.discrepancies!
+                : 'None recorded',
             if (_savedSubmissionMode && _awaitingAcceptance)
               'Saved on device at': _submission?.savedAt ?? '—'
-            else 'Submitted at': task.submittedAt ?? '—',
+            else
+              'Submitted at': task.submittedAt ?? '—',
           }),
         ),
         // Loop 8 — read-only Planning Review metadata for THIS exact round.
@@ -524,7 +691,15 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           const SizedBox(height: 24),
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 12),
-            child: Text('PLANNING REVIEW', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.2)),
+            child: Text(
+              'PLANNING REVIEW',
+              style: InsightTheme.inter(
+                11,
+                w: FontWeight.w700,
+                c: InsightTheme.ink3,
+                ls: 1.2,
+              ),
+            ),
           ),
           _buildPlanningReviewCard(task),
         ],
@@ -553,7 +728,11 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(color: const Color(0xFF000000).withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(
+            color: const Color(0xFF000000).withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Padding(
@@ -563,9 +742,20 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           children: [
             Row(
               children: [
-                const Icon(Icons.rate_review_outlined, size: 20, color: InsightTheme.ink2),
+                const Icon(
+                  Icons.rate_review_outlined,
+                  size: 20,
+                  color: InsightTheme.ink2,
+                ),
                 const SizedBox(width: 8),
-                Text('Planning Review', style: InsightTheme.poppins(14, w: FontWeight.w600, c: InsightTheme.ink)),
+                Text(
+                  'Planning Review',
+                  style: InsightTheme.poppins(
+                    14,
+                    w: FontWeight.w600,
+                    c: InsightTheme.ink,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -608,7 +798,10 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           Icon(Icons.cloud_off_rounded, size: 16, color: InsightTheme.ink3),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(message, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+            child: Text(
+              message,
+              style: InsightTheme.inter(12, c: InsightTheme.ink2),
+            ),
           ),
         ],
       ),
@@ -622,7 +815,13 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: InsightTheme.line),
-        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x04000000),
+            blurRadius: 4,
+            offset: Offset(0, 1),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -630,11 +829,20 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: _savedSubmissionMode && _awaitingAcceptance ? InsightTheme.orangeTint : InsightTheme.greenTint,
+              color: _savedSubmissionMode && _awaitingAcceptance
+                  ? InsightTheme.orangeTint
+                  : InsightTheme.greenTint,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(_savedSubmissionMode && _awaitingAcceptance ? Icons.cloud_upload_outlined : Icons.check_circle_rounded,
-              color: _savedSubmissionMode && _awaitingAcceptance ? InsightTheme.orangeInk : InsightTheme.green, size: 24),
+            child: Icon(
+              _savedSubmissionMode && _awaitingAcceptance
+                  ? Icons.cloud_upload_outlined
+                  : Icons.check_circle_rounded,
+              color: _savedSubmissionMode && _awaitingAcceptance
+                  ? InsightTheme.orangeInk
+                  : InsightTheme.green,
+              size: 24,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -645,7 +853,11 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                   children: [
                     Text(
                       task.inspectionNo,
-                      style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3),
+                      style: InsightTheme.inter(
+                        11,
+                        w: FontWeight.w700,
+                        c: InsightTheme.ink3,
+                      ),
                     ),
                     // Enhancement (Inspection Summary, 2026-07): surfaces
                     // the same signal already used by the Completed list
@@ -657,14 +869,21 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                     if (task.reworkStartedAt != null) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: InsightTheme.orangeTint,
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           'Modified',
-                          style: InsightTheme.inter(9.5, w: FontWeight.w700, c: const Color(0xFFB45309)),
+                          style: InsightTheme.inter(
+                            9.5,
+                            w: FontWeight.w700,
+                            c: const Color(0xFFB45309),
+                          ),
                         ),
                       ),
                     ],
@@ -672,12 +891,19 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                 ),
                 if (task.roundLabel != null) ...[
                   const SizedBox(height: 4),
-                  Text(task.roundLabel!, style: InsightTheme.inter(13, w: FontWeight.w700)),
+                  Text(
+                    task.roundLabel!,
+                    style: InsightTheme.inter(13, w: FontWeight.w700),
+                  ),
                 ],
                 const SizedBox(height: 2),
                 Text(
                   task.location,
-                  style: InsightTheme.poppins(15, w: FontWeight.w600, c: InsightTheme.ink),
+                  style: InsightTheme.poppins(
+                    15,
+                    w: FontWeight.w600,
+                    c: InsightTheme.ink,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -694,11 +920,16 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                 // so it reflects rework edits too) and falls back to
                 // submitted_at for older rows fetched before this field
                 // existed on the client.
-                if (!_savedSubmissionMode && (task.updatedAt ?? task.submittedAt) != null) ...[
+                if (!_savedSubmissionMode &&
+                    (task.updatedAt ?? task.submittedAt) != null) ...[
                   const SizedBox(height: 6),
                   Text(
                     'Last saved: ${_formatTimestamp(task.updatedAt ?? task.submittedAt)}',
-                    style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.ink3),
+                    style: InsightTheme.inter(
+                      11,
+                      w: FontWeight.w500,
+                      c: InsightTheme.ink3,
+                    ),
                   ),
                 ],
               ],
@@ -718,8 +949,18 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     final dt = DateTime.tryParse(iso)?.toLocal();
     if (dt == null) return '—';
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
     final minute = dt.minute.toString().padLeft(2, '0');
@@ -766,9 +1007,24 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(e.key.toUpperCase(), style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.5)),
+              Text(
+                e.key.toUpperCase(),
+                style: InsightTheme.inter(
+                  10,
+                  w: FontWeight.w700,
+                  c: InsightTheme.ink3,
+                  ls: 0.5,
+                ),
+              ),
               const SizedBox(height: 4),
-              Text(e.value, style: InsightTheme.inter(13, w: FontWeight.w500, c: InsightTheme.ink)),
+              Text(
+                e.value,
+                style: InsightTheme.inter(
+                  13,
+                  w: FontWeight.w500,
+                  c: InsightTheme.ink,
+                ),
+              ),
             ],
           ),
         );
@@ -783,7 +1039,9 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
     // Falls back to photoPaths so older cached job data (fetched before
     // this fix) still renders photos, just without a note caption.
     final hasDetails = task.photoDetails.isNotEmpty;
-    final int count = hasDetails ? task.photoDetails.length : task.photoPaths.length;
+    final int count = hasDetails
+        ? task.photoDetails.length
+        : task.photoPaths.length;
     if (count == 0) {
       // Loop 7 rule: never render a stale signed URL or an invented grid.
       // Signed URLs are deliberately never cached, so on the cached fallback
@@ -797,7 +1055,9 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
       );
     }
     final urls = hasDetails
-        ? task.photoDetails.map((p) => (p['photo_url'] as String?) ?? '').toList()
+        ? task.photoDetails
+              .map((p) => (p['photo_url'] as String?) ?? '')
+              .toList()
         : task.photoPaths;
 
     // Redesign (photo-notes clarity pass, 2026-07): each photo + its note
@@ -808,7 +1068,9 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
       crossAxisAlignment: CrossAxisAlignment.start,
       children: List.generate(count, (i) {
         final url = urls[i];
-        final note = hasDetails ? (task.photoDetails[i]['notes'] as String?) : null;
+        final note = hasDetails
+            ? (task.photoDetails[i]['notes'] as String?)
+            : null;
         final hasNote = note != null && note.trim().isNotEmpty;
         return Padding(
           padding: EdgeInsets.only(bottom: i == count - 1 ? 0 : 10),
@@ -830,18 +1092,22 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                       width: 80,
                       height: 80,
                       child: AdaptivePhotoImage(
-                      path: url,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context) => Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: InsightTheme.surface,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: InsightTheme.line),
+                        path: url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context) => Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: InsightTheme.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: InsightTheme.line),
+                          ),
+                          child: const Icon(
+                            Icons.broken_image_outlined,
+                            size: 22,
+                            color: InsightTheme.ink3,
+                          ),
                         ),
-                        child: const Icon(Icons.broken_image_outlined, size: 22, color: InsightTheme.ink3),
-                      ),
                       ),
                     ),
                   ),
@@ -853,18 +1119,30 @@ class _CompletedInspectionDetailScreenState extends State<CompletedInspectionDet
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.photo_camera_outlined, size: 12, color: InsightTheme.ink3),
+                          Icon(
+                            Icons.photo_camera_outlined,
+                            size: 12,
+                            color: InsightTheme.ink3,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             'Photo ${i + 1} of $count',
-                            style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.4),
+                            style: InsightTheme.inter(
+                              9.5,
+                              w: FontWeight.w700,
+                              c: InsightTheme.ink3,
+                              ls: 0.4,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 4),
                       Text(
                         hasNote ? note : 'No inspection note for this photo.',
-                        style: InsightTheme.inter(12.5, c: hasNote ? InsightTheme.ink2 : InsightTheme.ink3),
+                        style: InsightTheme.inter(
+                          12.5,
+                          c: hasNote ? InsightTheme.ink2 : InsightTheme.ink3,
+                        ),
                       ),
                     ],
                   ),
@@ -909,7 +1187,13 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: InsightTheme.line),
-        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x04000000),
+            blurRadius: 4,
+            offset: Offset(0, 1),
+          ),
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
@@ -923,7 +1207,10 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
               },
               behavior: HitTestBehavior.opaque,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
                 child: Row(
                   children: [
                     Container(
@@ -935,14 +1222,25 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                         border: Border.all(color: InsightTheme.line),
                       ),
                       child: Center(
-                        child: Text('${widget.step}', style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink)),
+                        child: Text(
+                          '${widget.step}',
+                          style: InsightTheme.inter(
+                            11,
+                            w: FontWeight.w700,
+                            c: InsightTheme.ink,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         widget.title,
-                        style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink),
+                        style: InsightTheme.inter(
+                          14,
+                          w: FontWeight.w600,
+                          c: InsightTheme.ink,
+                        ),
                       ),
                     ),
                     // Enhancement (Inspection Summary, 2026-07): per-step
@@ -954,7 +1252,10 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                     // fact. The task-level Modified badge already lives on
                     // the header above for that reason.
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       margin: const EdgeInsets.only(right: 8),
                       decoration: BoxDecoration(
                         color: InsightTheme.greenTint,
@@ -963,14 +1264,27 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.check_circle_rounded, size: 11, color: InsightTheme.green),
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            size: 11,
+                            color: InsightTheme.green,
+                          ),
                           const SizedBox(width: 3),
-                          Text('Saved', style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.green)),
+                          Text(
+                            'Saved',
+                            style: InsightTheme.inter(
+                              9.5,
+                              w: FontWeight.w700,
+                              c: InsightTheme.green,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     Icon(
-                      _isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                      _isExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
                       color: InsightTheme.ink3,
                       size: 20,
                     ),
@@ -987,31 +1301,48 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                   children: [
                     widget.content,
                     const SizedBox(height: 16),
-                    if (widget.onRework != null) GestureDetector(
-                      onTap: widget.onRework,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: InsightTheme.blueTint,
-                          // FIXED: Replaced  with 8)
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.2)),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.refresh_rounded, color: InsightTheme.blue2, size: 16),
+                    if (widget.onRework != null)
+                      GestureDetector(
+                        onTap: widget.onRework,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: InsightTheme.blueTint,
                             // FIXED: Replaced  with 8)
-                            const SizedBox(width: 8),
-                            Text('Rework this step', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blue2)),
-                          ],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: InsightTheme.blue1.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.refresh_rounded,
+                                color: InsightTheme.blue2,
+                                size: 16,
+                              ),
+                              // FIXED: Replaced  with 8)
+                              const SizedBox(width: 8),
+                              Text(
+                                'Rework this step',
+                                style: InsightTheme.inter(
+                                  12,
+                                  w: FontWeight.w600,
+                                  c: InsightTheme.blue2,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),
-            ]
+            ],
           ],
         ),
       ),

@@ -21,41 +21,67 @@ typedef TaskPresentationSnapshot = ({
 
 class DBHelper {
   static const inspectionDraftFindingsKey = '_draft_findings';
+
   /// Local-only fixtures explicitly supply an authenticated identity. Production
   /// never falls back to a preference, assignment, name, or legacy NULL owner.
   @visibleForTesting
   static String? inspectorIdForTesting;
   static String? get currentInspectorId {
     if (inspectorIdForTesting != null) return inspectorIdForTesting;
-    try { return SupabaseService.client.auth.currentUser?.id; }
-    catch (_) { return null; }
+    try {
+      return SupabaseService.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
   }
 
   static String requireInspector() {
     final uid = currentInspectorId;
-    if (uid == null || uid.isEmpty) throw StateError('Authenticated inspector required');
+    if (uid == null || uid.isEmpty) {
+      throw StateError('Authenticated inspector required');
+    }
     return uid;
   }
 
   static void requireSameInspector(String uid) {
-    if (currentInspectorId != uid) throw StateError('Inspector session changed');
+    if (currentInspectorId != uid) {
+      throw StateError('Inspector session changed');
+    }
   }
 
-  static Future<void> _requireOwnedRow(DatabaseExecutor db, String table,
-      String key, String id, String uid) async {
+  static Future<void> _requireOwnedRow(
+    DatabaseExecutor db,
+    String table,
+    String key,
+    String id,
+    String uid,
+  ) async {
     requireSameInspector(uid);
-    final rows = await db.query(table, columns: ['inspector_id'],
-      where: '$key = ?', whereArgs: [id]);
+    final rows = await db.query(
+      table,
+      columns: ['inspector_id'],
+      where: '$key = ?',
+      whereArgs: [id],
+    );
     if (rows.any((r) => r['inspector_id'] != uid)) {
-      throw StateError('Local evidence belongs to another or unknown inspector');
+      throw StateError(
+        'Local evidence belongs to another or unknown inspector',
+      );
     }
   }
 
   /// All job-keyed evidence participates: a replacement assignee cannot create
   /// a new draft over a retained legacy/foreign round on this device.
-  static Future<void> requireOwnedJob(DatabaseExecutor db, String jobId, String uid) async {
-    if (await classifyJobOwnership(db, jobId, uid) != LocalOwnershipResult.current) {
-      throw StateError('Local evidence belongs to another or unknown inspector');
+  static Future<void> requireOwnedJob(
+    DatabaseExecutor db,
+    String jobId,
+    String uid,
+  ) async {
+    if (await classifyJobOwnership(db, jobId, uid) !=
+        LocalOwnershipResult.current) {
+      throw StateError(
+        'Local evidence belongs to another or unknown inspector',
+      );
     }
     requireSameInspector(uid);
   }
@@ -63,23 +89,38 @@ class DBHelper {
   /// Read-only local classification, never remote authority or legacy adoption.
   /// An empty graph permits the existing fresh-write flow; it proves no history.
   static Future<LocalOwnershipResult> classifyJobOwnership(
-      DatabaseExecutor db, String jobId, String uid) async {
+    DatabaseExecutor db,
+    String jobId,
+    String uid,
+  ) async {
     requireSameInspector(uid);
     final owners = <String?>{};
     for (final entry in {
-      'local_jobs': 'id', 'local_inspections': 'id', 'local_photos': 'job_id',
-      'inspection_job_retention': 'job_id', 'pending_actions': 'job_id',
+      'local_jobs': 'id',
+      'local_inspections': 'id',
+      'local_photos': 'job_id',
+      'inspection_job_retention': 'job_id',
+      'pending_actions': 'job_id',
     }.entries) {
-      final rows = await db.query(entry.key, columns: ['inspector_id'],
-        where: '${entry.value} = ?', whereArgs: [jobId]);
+      final rows = await db.query(
+        entry.key,
+        columns: ['inspector_id'],
+        where: '${entry.value} = ?',
+        whereArgs: [jobId],
+      );
       requireSameInspector(uid);
       owners.addAll(rows.map((row) => row['inspector_id'] as String?));
     }
     if (owners.any((owner) => owner != null && owner != uid)) {
-      return owners.length == 1 ? LocalOwnershipResult.foreign : LocalOwnershipResult.mixed;
+      return owners.length == 1
+          ? LocalOwnershipResult.foreign
+          : LocalOwnershipResult.mixed;
     }
-    return owners.contains(null) ? LocalOwnershipResult.legacyUnknown : LocalOwnershipResult.current;
+    return owners.contains(null)
+        ? LocalOwnershipResult.legacyUnknown
+        : LocalOwnershipResult.current;
   }
+
   static Database? _database;
 
   /// The in-flight `_initDB()` future, memoised.
@@ -581,11 +622,10 @@ class DBHelper {
         final effective = _projectPendingCompletions([
           fetchedJob,
         ], await _pendingCompletionJobIds(txn)).single;
-        await txn.insert(
-          'local_jobs',
-          {..._cachedJobRow(effective), 'inspector_id': uid},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await txn.insert('local_jobs', {
+          ..._cachedJobRow(effective),
+          'inspector_id': uid,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       final rows = await txn.query(
         'local_jobs',
@@ -620,8 +660,10 @@ class DBHelper {
   /// Called only after confirmed online acceptance, outside the business
   /// submission catch. Failure leaves retention intact for recovery via cache.
   /// Returning false reports cleanup failure without resubmitting remote work.
-  static Future<bool> finalizeAcceptedOnlineInspection(String jobId, {
-    InspectionAuthorityResult remoteResult = InspectionAuthorityResult.offlineOrUnverifiable,
+  static Future<bool> finalizeAcceptedOnlineInspection(
+    String jobId, {
+    InspectionAuthorityResult remoteResult =
+        InspectionAuthorityResult.offlineOrUnverifiable,
   }) async {
     if (remoteResult != InspectionAuthorityResult.authorized) return false;
     try {
@@ -663,7 +705,8 @@ class DBHelper {
   static Future<Set<String>> _pendingCompletionJobIds(
     DatabaseExecutor db,
   ) async {
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
       SELECT j.id FROM local_jobs j
       WHERE j.status IN ('completed', 'Completed', 'submitted')
       AND j.inspector_id = ?
@@ -672,7 +715,9 @@ class DBHelper {
         WHERE a.job_id = j.id AND a.type = 'submit_inspection'
         AND a.status IN ('pending', 'failed', 'syncing', 'conflict')
       )
-    ''', [currentInspectorId]);
+    ''',
+      [currentInspectorId],
+    );
     return rows.map((row) => row['id'] as String).toSet();
   }
 
@@ -717,8 +762,9 @@ class DBHelper {
 
   /// Additive cache upgrade; legacy rows retain NULL context and all evidence.
   static Future<void> applyV18(DatabaseExecutor db) async {
-    final existing = (await db.rawQuery('PRAGMA table_info(local_jobs)'))
-        .map((row) => row['name']).toSet();
+    final existing = (await db.rawQuery(
+      'PRAGMA table_info(local_jobs)',
+    )).map((row) => row['name']).toSet();
     for (final column in const {
       'inspection_round_number': 'INTEGER',
       'previous_site_inspection_id': 'INTEGER',
@@ -726,7 +772,9 @@ class DBHelper {
       'reinspection_reviewed_at': 'TEXT',
     }.entries) {
       if (!existing.contains(column.key)) {
-        await db.execute('ALTER TABLE local_jobs ADD COLUMN ${column.key} ${column.value}');
+        await db.execute(
+          'ALTER TABLE local_jobs ADD COLUMN ${column.key} ${column.value}',
+        );
       }
     }
   }
@@ -837,7 +885,8 @@ class DBHelper {
     });
   }
 
-  static Future<bool> cacheJobs(List<Map<String, dynamic>> jobs, {
+  static Future<bool> cacheJobs(
+    List<Map<String, dynamic>> jobs, {
     JobCacheRefresh? refresh,
   }) async {
     final uid = currentInspectorId;
@@ -846,7 +895,8 @@ class DBHelper {
   }
 
   static Future<bool> _replaceCachedJobs(
-    List<Map<String, dynamic>> jobs, JobCacheRefresh refresh,
+    List<Map<String, dynamic>> jobs,
+    JobCacheRefresh refresh,
   ) async {
     final uid = refresh.owner;
     if (currentInspectorId != uid) return false;
@@ -890,8 +940,12 @@ class DBHelper {
       }
 
       for (final job in effectiveJobs) {
-        final existingOwner = await txn.query('local_jobs', columns: ['inspector_id'],
-          where: 'id = ?', whereArgs: [job['id']]);
+        final existingOwner = await txn.query(
+          'local_jobs',
+          columns: ['inspector_id'],
+          where: 'id = ?',
+          whereArgs: [job['id']],
+        );
         if (existingOwner.any((r) => r['inspector_id'] != uid)) continue;
         final incoming = Map<String, dynamic>.of(job);
         final existingRows = await txn.query(
@@ -916,11 +970,10 @@ class DBHelper {
           // legacy completed equivalents and unsupported diagnostic states.
           incoming['status'] = 'completed';
         }
-        batch.insert(
-          'local_jobs',
-          {..._cachedJobRow(incoming), 'inspector_id': uid},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        batch.insert('local_jobs', {
+          ..._cachedJobRow(incoming),
+          'inspector_id': uid,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await batch.commit(noResult: true);
       requireSameInspector(uid);
@@ -935,7 +988,11 @@ class DBHelper {
     if (uid == null || uid.isEmpty) return [];
     final db = await database;
     requireSameInspector(uid);
-    final rows = await db.query('local_jobs', where: 'inspector_id = ?', whereArgs: [uid]);
+    final rows = await db.query(
+      'local_jobs',
+      where: 'inspector_id = ?',
+      whereArgs: [uid],
+    );
     requireSameInspector(uid);
     return rows;
   }
@@ -946,18 +1003,27 @@ class DBHelper {
   static Future<TaskPresentationSnapshot> getTaskPresentationSnapshot() async {
     final uid = currentInspectorId;
     if (uid == null || uid.isEmpty) {
-      return (jobs: <Map<String, dynamic>>[], submissions: <Map<String, dynamic>>[]);
+      return (
+        jobs: <Map<String, dynamic>>[],
+        submissions: <Map<String, dynamic>>[],
+      );
     }
     final db = await database;
     return db.transaction((txn) async {
       requireSameInspector(uid);
-      final jobs = await txn.query('local_jobs',
-          where: 'inspector_id = ?', whereArgs: [uid]);
-      final submissions = await txn.query('pending_actions',
-          where: "type = 'submit_inspection' AND inspector_id = ?",
-          whereArgs: [uid],
-          // Any unacknowledged legacy duplicate takes precedence over a receipt.
-          orderBy: "CASE WHEN status = 'synced' THEN 1 ELSE 0 END, created_at DESC, rowid DESC");
+      final jobs = await txn.query(
+        'local_jobs',
+        where: 'inspector_id = ?',
+        whereArgs: [uid],
+      );
+      final submissions = await txn.query(
+        'pending_actions',
+        where: "type = 'submit_inspection' AND inspector_id = ?",
+        whereArgs: [uid],
+        // Any unacknowledged legacy duplicate takes precedence over a receipt.
+        orderBy:
+            "CASE WHEN status = 'synced' THEN 1 ELSE 0 END, created_at DESC, rowid DESC",
+      );
       requireSameInspector(uid);
       return (jobs: jobs, submissions: submissions);
     });
@@ -1039,36 +1105,53 @@ class DBHelper {
     required String boundaryStatus,
     int currentStep = 0,
     Map<String, dynamic>? findings,
+    String? expectedInspectorId,
   }) async {
     final uid = requireInspector();
+    // A caller that captured its owner earlier must not write this snapshot
+    // under a session that changed while it was in flight.
+    if (expectedInspectorId != null && expectedInspectorId != uid) {
+      throw StateError('Local save belongs to a different session');
+    }
     final db = await database;
     await db.transaction((txn) async {
-    await requireOwnedJob(txn, jobId, uid);
-    final previous = await txn.query('local_inspections',
-      where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, uid]);
-    final values = <String, Object?>{
-      'id': jobId,
-      'inspector_id': uid,
-      'actual_land_use': actualLandUse,
-      'notes': notes,
-      'is_compliant': isCompliant ? 1 : 0,
-      'inspection_result': inspectionResult,
-      'checklist_json': jsonEncode({...checklist,
-        inspectionDraftFindingsKey: ?findings}),
-      'boundary_status': boundaryStatus,
-      'current_step': max(currentStep,
-        previous.isEmpty ? 0 : (previous.single['current_step'] as int? ?? 0)),
-      'is_synced': 0,
-      'updated_at': DateTime.now().toIso8601String(),
-    };
-    if (previous.isEmpty) {
-      await txn.insert('local_inspections', values);
-    } else {
-      // An older in-memory step cannot erase durable progress/timestamps.
-      await txn.update('local_inspections', values,
-        where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, uid]);
-    }
-    requireSameInspector(uid);
+      await requireOwnedJob(txn, jobId, uid);
+      final previous = await txn.query(
+        'local_inspections',
+        where: 'id = ? AND inspector_id = ?',
+        whereArgs: [jobId, uid],
+      );
+      final values = <String, Object?>{
+        'id': jobId,
+        'inspector_id': uid,
+        'actual_land_use': actualLandUse,
+        'notes': notes,
+        'is_compliant': isCompliant ? 1 : 0,
+        'inspection_result': inspectionResult,
+        'checklist_json': jsonEncode({
+          ...checklist,
+          inspectionDraftFindingsKey: ?findings,
+        }),
+        'boundary_status': boundaryStatus,
+        'current_step': max(
+          currentStep,
+          previous.isEmpty ? 0 : (previous.single['current_step'] as int? ?? 0),
+        ),
+        'is_synced': 0,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (previous.isEmpty) {
+        await txn.insert('local_inspections', values);
+      } else {
+        // An older in-memory step cannot erase durable progress/timestamps.
+        await txn.update(
+          'local_inspections',
+          values,
+          where: 'id = ? AND inspector_id = ?',
+          whereArgs: [jobId, uid],
+        );
+      }
+      requireSameInspector(uid);
     });
   }
 
@@ -1083,14 +1166,21 @@ class DBHelper {
     return results.first;
   }
 
-  static Future<void> saveInspectionStep(String jobId, int step,
-      Map<String, String> timestamps, String inspectorId) async {
+  static Future<void> saveInspectionStep(
+    String jobId,
+    int step,
+    Map<String, String> timestamps,
+    String inspectorId,
+  ) async {
     requireSameInspector(inspectorId);
     final db = await database;
     await db.transaction((txn) async {
       await requireOwnedJob(txn, jobId, inspectorId);
-      final previous = await txn.query('local_inspections',
-        where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, inspectorId]);
+      final previous = await txn.query(
+        'local_inspections',
+        where: 'id = ? AND inspector_id = ?',
+        whereArgs: [jobId, inspectorId],
+      );
       final prior = previous.isEmpty ? null : previous.single;
       final values = {
         'current_step': max(step, prior?['current_step'] as int? ?? 0),
@@ -1099,13 +1189,22 @@ class DBHelper {
             ...jsonDecode(prior!['step_timestamps'] as String) as Map,
           ...timestamps,
         }),
-        'updated_at': DateTime.now().toIso8601String(), 'is_synced': 0,
+        'updated_at': DateTime.now().toIso8601String(),
+        'is_synced': 0,
       };
-      final updated = await txn.update('local_inspections', values,
-        where:'id = ? AND inspector_id = ?', whereArgs:[jobId, inspectorId]);
+      final updated = await txn.update(
+        'local_inspections',
+        values,
+        where: 'id = ? AND inspector_id = ?',
+        whereArgs: [jobId, inspectorId],
+      );
       if (updated == 0) {
         requireSameInspector(inspectorId);
-        await txn.insert('local_inspections', {'id':jobId, 'inspector_id':inspectorId, ...values});
+        await txn.insert('local_inspections', {
+          'id': jobId,
+          'inspector_id': inspectorId,
+          ...values,
+        });
       }
       requireSameInspector(inspectorId);
     });
@@ -1113,8 +1212,11 @@ class DBHelper {
 
   static Future<List<Map<String, dynamic>>> getPendingInspections() async {
     final db = await database;
-    return await db.query('local_inspections', where: 'is_synced = 0 AND inspector_id = ?',
-      whereArgs: [currentInspectorId]);
+    return await db.query(
+      'local_inspections',
+      where: 'is_synced = 0 AND inspector_id = ?',
+      whereArgs: [currentInspectorId],
+    );
   }
 
   static Future<void> markInspectionSynced(String jobId) async {
@@ -1141,31 +1243,39 @@ class DBHelper {
     final uid = requireInspector();
     final db = await database;
     await db.transaction((txn) async {
-    await requireOwnedJob(txn, jobId, uid);
-    await _requireOwnedRow(txn, 'local_photos', 'id', photoId, uid);
-    final previous = await txn.query('local_photos',
-      where: 'id = ? AND inspector_id = ?', whereArgs: [photoId, uid]);
-    if (previous.isNotEmpty && previous.single['job_id'] != jobId) {
-      throw StateError('A captured photo cannot move between inspection rounds');
-    }
-    await txn.insert('local_photos', {
-      'id': photoId,
-      'inspector_id': uid,
-      'job_id': jobId,
-      'photo_path': photoPath,
-      'notes': notes,
-      'latitude': latitude,
-      'longitude': longitude,
-      'captured_at': previous.isNotEmpty ? previous.single['captured_at']
-          : capturedAt ?? DateTime.now().toIso8601String(),
-      'is_synced': previous.isNotEmpty &&
-          previous.single['photo_path'] == photoPath &&
-          previous.single['notes'] == notes &&
-          previous.single['latitude'] == latitude &&
-          previous.single['longitude'] == longitude
-          ? previous.single['is_synced'] : 0,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-    requireSameInspector(uid);
+      await requireOwnedJob(txn, jobId, uid);
+      await _requireOwnedRow(txn, 'local_photos', 'id', photoId, uid);
+      final previous = await txn.query(
+        'local_photos',
+        where: 'id = ? AND inspector_id = ?',
+        whereArgs: [photoId, uid],
+      );
+      if (previous.isNotEmpty && previous.single['job_id'] != jobId) {
+        throw StateError(
+          'A captured photo cannot move between inspection rounds',
+        );
+      }
+      await txn.insert('local_photos', {
+        'id': photoId,
+        'inspector_id': uid,
+        'job_id': jobId,
+        'photo_path': photoPath,
+        'notes': notes,
+        'latitude': latitude,
+        'longitude': longitude,
+        'captured_at': previous.isNotEmpty
+            ? previous.single['captured_at']
+            : capturedAt ?? DateTime.now().toIso8601String(),
+        'is_synced':
+            previous.isNotEmpty &&
+                previous.single['photo_path'] == photoPath &&
+                previous.single['notes'] == notes &&
+                previous.single['latitude'] == latitude &&
+                previous.single['longitude'] == longitude
+            ? previous.single['is_synced']
+            : 0,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      requireSameInspector(uid);
     });
   }
 
@@ -1180,8 +1290,11 @@ class DBHelper {
 
   static Future<List<Map<String, dynamic>>> getPendingPhotos() async {
     final db = await database;
-    return await db.query('local_photos', where: 'is_synced = 0 AND inspector_id = ?',
-      whereArgs: [currentInspectorId]);
+    return await db.query(
+      'local_photos',
+      where: 'is_synced = 0 AND inspector_id = ?',
+      whereArgs: [currentInspectorId],
+    );
   }
 
   static Future<void> markPhotoSynced(String photoId) async {
@@ -1236,8 +1349,11 @@ class DBHelper {
   }) async {
     final uid = requireInspector();
     final db = await database;
-    final rows = await db.query('local_photos', where: 'id = ? AND inspector_id = ?',
-      whereArgs: [photoId, uid]);
+    final rows = await db.query(
+      'local_photos',
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [photoId, uid],
+    );
     if (rows.isEmpty) return;
     if (photoPath != null && photoPath != rows.single['photo_path']) {
       throw StateError('Photo path does not match owned evidence');
@@ -1247,7 +1363,11 @@ class DBHelper {
       if (await file.exists()) await file.delete();
     }
     requireSameInspector(uid);
-    await db.delete('local_photos', where: 'id = ? AND inspector_id = ?', whereArgs: [photoId, uid]);
+    await db.delete(
+      'local_photos',
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [photoId, uid],
+    );
   }
 
   // --- PENDING ACTIONS OUTBOX (FieldSync) ---
@@ -1255,6 +1375,90 @@ class DBHelper {
   // One generic queue for every offline-capable write, instead of
   // per-screen offline logic. `payload` is a JSON-encoded map — its shape
   // depends on `type` (e.g. 'gps_confirm' payload has lat/lng/accuracy).
+
+  static bool _isNormalDraft(String type, Map payload) =>
+      const {'checklist_update', 'findings_update'}.contains(type) &&
+      payload['isRework'] != true &&
+      payload['activityId'] is! String;
+
+  static Future<bool> _finalOwnsEvidence(
+    DatabaseExecutor db,
+    String jobId,
+    String uid,
+  ) async {
+    final finalRows = await db.query(
+      'pending_actions',
+      columns: ['id'],
+      where: "job_id = ? AND inspector_id = ? AND type = 'submit_inspection'",
+      whereArgs: [jobId, uid],
+      limit: 1,
+    );
+    if (finalRows.isNotEmpty) return true;
+    // Accepted completion outlives the capped outbox receipt history.
+    final jobs = await db.query(
+      'local_jobs',
+      columns: ['status'],
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [jobId, uid],
+    );
+    return jobs.any(
+      (j) =>
+          const ['completed', 'Completed', 'submitted'].contains(j['status']),
+    );
+  }
+
+  static Future<void> _logSupersededDraft(
+    DatabaseExecutor db,
+    Map<String, dynamic> row,
+    String uid,
+  ) => db
+      .insert('sync_log_entries', {
+        'id': const Uuid().v4(),
+        'inspector_id': uid,
+        'pending_action_id': row['id'],
+        'job_id': row['job_id'],
+        'event_type': 'draft_superseded',
+        'result': 'info',
+        'message':
+            'Local draft retained but not sent: final submission owns this evidence.',
+        'technical_details': jsonEncode({'actionType': row['type']}),
+        'created_at': DateTime.now().toIso8601String(),
+      })
+      .then((_) {});
+
+  static Future<void> _supersedeNormalDrafts(
+    DatabaseExecutor db,
+    String jobId,
+    String uid,
+  ) async {
+    final rows = await db.query(
+      'pending_actions',
+      where:
+          "job_id = ? AND inspector_id = ? AND type IN ('checklist_update', 'findings_update') "
+          "AND status IN ('pending', 'failed', 'paused')",
+      whereArgs: [jobId, uid],
+    );
+    for (final row in rows) {
+      final Map payload;
+      try {
+        payload = jsonDecode(row['payload'] as String) as Map;
+      } catch (_) {
+        continue;
+      } // Preserve unreadable/conflicted evidence for review.
+      if (!_isNormalDraft(row['type'] as String, payload)) continue;
+      await db.update(
+        'pending_actions',
+        {
+          'status': 'superseded',
+          'last_error': 'Local draft retained; final submission owns delivery.',
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ? AND inspector_id = ?',
+        whereArgs: [row['id'], uid],
+      );
+      await _logSupersededDraft(db, row, uid);
+    }
+  }
 
   static Future<void> enqueueAction({
     required String id,
@@ -1272,43 +1476,92 @@ class DBHelper {
       await requireOwnedJob(txn, jobId, uid);
       await _requireOwnedRow(txn, 'pending_actions', 'id', id, uid);
       if (type == 'submit_inspection') {
-        final preserved = await txn.query('pending_actions',
-          where: "type = 'submit_inspection' AND job_id = ? AND inspector_id = ? AND status != 'synced'",
-          whereArgs: [jobId, uid], orderBy: 'created_at DESC, rowid DESC', limit: 1);
+        final preserved = await txn.query(
+          'pending_actions',
+          where:
+              "type = 'submit_inspection' AND job_id = ? AND inspector_id = ? AND status != 'synced'",
+          whereArgs: [jobId, uid],
+          orderBy: 'created_at DESC, rowid DESC',
+          limit: 1,
+        );
         if (preserved.isNotEmpty) {
-          final prior = jsonDecode(preserved.single['payload'] as String) as Map;
+          final prior =
+              jsonDecode(preserved.single['payload'] as String) as Map;
           // Compare evidence conservatively; recovery/clock metadata is not a
           // new submit. Never replace a pending or already-claimed intent.
           final identical = payload.entries
               .where((e) => e.key != 'cachedUpdatedAtSnapshot')
-              .every((e) => prior.containsKey(e.key) &&
-                jsonEncode(prior[e.key]) == jsonEncode(e.value));
+              .every(
+                (e) =>
+                    prior.containsKey(e.key) &&
+                    jsonEncode(prior[e.key]) == jsonEncode(e.value),
+              );
           if (!identical) {
-            throw StateError('A final submission is already preserved. Review it in Sync Center before submitting different evidence.');
+            throw StateError(
+              'A final submission is already preserved. Review it in Sync Center before submitting different evidence.',
+            );
           }
           requireSameInspector(uid);
           return;
         }
       }
+      final superseded =
+          _isNormalDraft(type, payload) &&
+          await _finalOwnsEvidence(txn, jobId, uid);
+      // A late autosave may arrive after the drain claimed the same
+      // deterministic row, or after that row became an actionable conflict.
+      // Read the current row for every normal draft, not only after a final
+      // submission exists, so the replacement cannot inherit the claim.
+      final previous = _isNormalDraft(type, payload)
+          ? await txn.query(
+              'pending_actions',
+              columns: ['status'],
+              where: 'id = ? AND inspector_id = ?',
+              whereArgs: [id, uid],
+            )
+          : const [];
+      // A late autosave must not replace an outstanding conflict/live claim.
+      final actionId =
+          previous.any(
+            (row) => const ['conflict', 'syncing'].contains(row['status']),
+          )
+          ? const Uuid().v4()
+          : id;
       final action = <String, Object?>{
-        'id': id,
+        'id': actionId,
         'inspector_id': uid,
         'type': type,
         'job_id': jobId,
         'payload': jsonEncode(payload),
-        'status': preserveOnly ? 'conflict' : 'pending',
+        'status': superseded
+            ? 'superseded'
+            : preserveOnly
+            ? 'conflict'
+            : 'pending',
         'retry_count': 0,
-        'last_error': null,
+        'last_error': superseded
+            ? 'Local draft retained; final submission owns delivery.'
+            : null,
         'created_at': now,
         'updated_at': now,
       };
-      await txn.insert('pending_actions', action,
-        conflictAlgorithm: ConflictAlgorithm.replace);
-      final stored = await txn.query('pending_actions',
-        where: 'id = ? AND inspector_id = ?', whereArgs: [id, uid]);
+      await txn.insert(
+        'pending_actions',
+        action,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      final stored = await txn.query(
+        'pending_actions',
+        where: 'id = ? AND inspector_id = ?',
+        whereArgs: [actionId, uid],
+      );
       if (stored.length != 1 ||
           !action.entries.every((e) => stored.single[e.key] == e.value)) {
         throw StateError('Offline action was not durably saved');
+      }
+      if (superseded) await _logSupersededDraft(txn, action, uid);
+      if (type == 'submit_inspection') {
+        await _supersedeNormalDrafts(txn, jobId, uid);
       }
       if (type == 'gps_confirm' || type == 'mark_ongoing') {
         // A durable start action, not retention or a network failure, accepts
@@ -1404,34 +1657,54 @@ class DBHelper {
   /// The latest explicit Save is the local findings baseline until all of its
   /// components sync. Autosaves have no activity identity and are not rework
   /// Save intent. Reads remain scoped to the exact inspector and field job.
-  static Future<Map<String, dynamic>?> getPendingFindingsSave(String jobId) async {
+  static Future<Map<String, dynamic>?> getPendingFindingsSave(
+    String jobId,
+  ) async {
     final uid = requireInspector();
     final db = await database;
-    final rows = await db.query('pending_actions',
+    final rows = await db.query(
+      'pending_actions',
       where: "type = 'findings_update' AND job_id = ? AND inspector_id = ?",
-      whereArgs: [jobId, uid], orderBy: 'created_at DESC, rowid DESC');
+      whereArgs: [jobId, uid],
+      orderBy: 'created_at DESC, rowid DESC',
+    );
     requireSameInspector(uid);
     for (final row in rows) {
-      final payload = Map<String, dynamic>.from(jsonDecode(row['payload'] as String) as Map);
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row['payload'] as String) as Map,
+      );
       // A newer fully accepted Save supersedes older activity-only retries
       // for presentation, without deleting or acknowledging those retries.
-      if (payload['activityId'] is String) return row['status'] == 'synced' ? null : payload;
+      if (payload['activityId'] is String) {
+        return row['status'] == 'synced' ? null : payload;
+      }
     }
     return null;
   }
 
   /// Normal-workflow recovery also includes autosaves and final intent. This
   /// never acknowledges, removes, or delivers an action; ownership stays exact.
-  static Future<Map<String, dynamic>?> getLocalFindingsIntent(String jobId) async {
+  static Future<Map<String, dynamic>?> getLocalFindingsIntent(
+    String jobId,
+  ) async {
     final uid = requireInspector();
     final db = await database;
-    final rows = await db.query('pending_actions',
-      where: "type IN ('findings_update', 'submit_inspection') AND job_id = ? AND inspector_id = ?",
-      whereArgs: [jobId, uid], orderBy: 'created_at DESC, rowid DESC', limit: 1);
+    final rows = await db.query(
+      'pending_actions',
+      where:
+          "type IN ('findings_update', 'submit_inspection') AND job_id = ? AND inspector_id = ?",
+      whereArgs: [jobId, uid],
+      orderBy: 'created_at DESC, rowid DESC',
+      limit: 1,
+    );
     requireSameInspector(uid);
     if (rows.isEmpty) return null;
-    return {...Map<String, dynamic>.from(jsonDecode(rows.single['payload'] as String) as Map),
-      'localCreatedAt': rows.single['created_at']};
+    return {
+      ...Map<String, dynamic>.from(
+        jsonDecode(rows.single['payload'] as String) as Map,
+      ),
+      'localCreatedAt': rows.single['created_at'],
+    };
   }
 
   /// Commit a component receipt and this device's accepted revision together.
@@ -1449,42 +1722,75 @@ class DBHelper {
     requireSameInspector(inspectorId);
     final db = await database;
     return db.transaction((txn) async {
-      final rows = await txn.query('pending_actions',
-        where: "id = ? AND job_id = ? AND inspector_id = ? "
+      final rows = await txn.query(
+        'pending_actions',
+        where:
+            "id = ? AND job_id = ? AND inspector_id = ? "
             "AND type = 'findings_update' AND status = 'syncing'",
-        whereArgs: [actionId, jobId, inspectorId]);
-      if (rows.length != 1) throw StateError('Findings action is no longer claimed');
+        whereArgs: [actionId, jobId, inspectorId],
+      );
+      if (rows.length != 1) {
+        throw StateError('Findings action is no longer claimed');
+      }
       final raw = rows.single['payload'] as String;
-      final payload = Map<String, dynamic>.from(jsonDecode(raw) as Map)..addAll(components);
-      if (acceptedUpdatedAt != null) payload['findingsAcceptedUpdatedAt'] = acceptedUpdatedAt;
-      final changed = await txn.update('pending_actions', {'payload': jsonEncode(payload)},
-        where: "id = ? AND inspector_id = ? AND status = 'syncing' AND payload = ?",
-        whereArgs: [actionId, inspectorId, raw]);
+      final payload = Map<String, dynamic>.from(jsonDecode(raw) as Map)
+        ..addAll(components);
+      if (acceptedUpdatedAt != null) {
+        payload['findingsAcceptedUpdatedAt'] = acceptedUpdatedAt;
+      }
+      final changed = await txn.update(
+        'pending_actions',
+        {'payload': jsonEncode(payload)},
+        where:
+            "id = ? AND inspector_id = ? AND status = 'syncing' AND payload = ?",
+        whereArgs: [actionId, inspectorId, raw],
+      );
       if (changed != 1) throw StateError('Findings receipt was not persisted');
       if (acceptedUpdatedAt != null && previousUpdatedAt != null) {
         final previous = DateTime.tryParse(previousUpdatedAt);
-        bool sameRevision(dynamic value) => value == previousUpdatedAt ||
-            (previous != null && value is String &&
+        bool sameRevision(dynamic value) =>
+            value == previousUpdatedAt ||
+            (previous != null &&
+                value is String &&
                 DateTime.tryParse(value)?.isAtSameMomentAs(previous) == true);
-        final cached = await txn.query('local_jobs', columns: ['cached_updated_at'],
-          where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, inspectorId]);
-        if (cached.length == 1 && sameRevision(cached.single['cached_updated_at'])) {
-          await txn.update('local_jobs', {'cached_updated_at': acceptedUpdatedAt},
-            where: 'id = ? AND inspector_id = ?', whereArgs: [jobId, inspectorId]);
+        final cached = await txn.query(
+          'local_jobs',
+          columns: ['cached_updated_at'],
+          where: 'id = ? AND inspector_id = ?',
+          whereArgs: [jobId, inspectorId],
+        );
+        if (cached.length == 1 &&
+            sameRevision(cached.single['cached_updated_at'])) {
+          await txn.update(
+            'local_jobs',
+            {'cached_updated_at': acceptedUpdatedAt},
+            where: 'id = ? AND inspector_id = ?',
+            whereArgs: [jobId, inspectorId],
+          );
         }
-        final siblings = await txn.query('pending_actions',
-          where: "job_id = ? AND inspector_id = ? AND id != ? "
+        final siblings = await txn.query(
+          'pending_actions',
+          where:
+              "job_id = ? AND inspector_id = ? AND id != ? "
               "AND type = 'findings_update' AND status IN ('pending', 'failed', 'paused')",
-          whereArgs: [jobId, inspectorId, actionId]);
+          whereArgs: [jobId, inspectorId, actionId],
+        );
         for (final sibling in siblings) {
-          final next = Map<String, dynamic>.from(jsonDecode(sibling['payload'] as String) as Map);
-          if (next['activityId'] is! String || next['findingsEvidenceAccepted'] == true ||
+          final next = Map<String, dynamic>.from(
+            jsonDecode(sibling['payload'] as String) as Map,
+          );
+          if (next['activityId'] is! String ||
+              next['findingsEvidenceAccepted'] == true ||
               !sameRevision(next['cachedUpdatedAtSnapshot'])) {
             continue;
           }
           next['cachedUpdatedAtSnapshot'] = acceptedUpdatedAt;
-          await txn.update('pending_actions', {'payload': jsonEncode(next)},
-            where: 'id = ? AND inspector_id = ?', whereArgs: [sibling['id'], inspectorId]);
+          await txn.update(
+            'pending_actions',
+            {'payload': jsonEncode(next)},
+            where: 'id = ? AND inspector_id = ?',
+            whereArgs: [sibling['id'], inspectorId],
+          );
         }
       }
       requireSameInspector(inspectorId);
@@ -1500,10 +1806,11 @@ class DBHelper {
     final db = await database;
     return await db.query(
       'pending_actions',
-      where: "status IN ('pending', 'failed'${includePaused ? ", 'paused'" : ''}) "
+      where:
+          "status IN ('pending', 'failed'${includePaused ? ", 'paused'" : ''}) "
           'AND inspector_id = ?',
       whereArgs: [currentInspectorId],
-      orderBy: 'created_at ASC',
+      orderBy: 'created_at ASC, rowid ASC',
     );
   }
 
@@ -1511,7 +1818,8 @@ class DBHelper {
     final db = await database;
     return await db.query(
       'pending_actions',
-      where: "status IN ('pending', 'failed', 'syncing', 'conflict', 'paused') AND inspector_id = ?",
+      where:
+          "status IN ('pending', 'failed', 'syncing', 'conflict', 'paused') AND inspector_id = ?",
       whereArgs: [currentInspectorId],
       orderBy: 'created_at ASC',
     );
@@ -1526,14 +1834,75 @@ class DBHelper {
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
-  static Future<void> markActionSyncing(String id) async {
+  /// Read one durable receipt under the current owner, never another session.
+  static Future<Map<String, dynamic>?> getOwnedAction(String id) async {
+    final uid = currentInspectorId;
+    if (uid == null || uid.isEmpty) return null;
     final db = await database;
-    await db.update(
+    requireSameInspector(uid);
+    final rows = await db.query(
       'pending_actions',
-      {'status': 'syncing', 'updated_at': DateTime.now().toIso8601String()},
       where: 'id = ? AND inspector_id = ?',
-      whereArgs: [id, currentInspectorId],
+      whereArgs: [id, uid],
+      limit: 1,
     );
+    requireSameInspector(uid);
+    return rows.isEmpty ? null : rows.single;
+  }
+
+  /// Claim only the selected revision. Coalescing before the claim is not
+  /// permission to execute an old payload and acknowledge the replacement.
+  static Future<bool> markActionSyncing(
+    String id, {
+    Map<String, dynamic>? expected,
+  }) async {
+    final uid = requireInspector();
+    final db = await database;
+    return db.transaction((txn) async {
+      requireSameInspector(uid);
+      final rows = await txn.query(
+        'pending_actions',
+        where: 'id = ? AND inspector_id = ?',
+        whereArgs: [id, uid],
+      );
+      if (rows.length != 1) return false;
+      final row = rows.single;
+      if (expected != null &&
+          !const [
+            'inspector_id',
+            'payload',
+            'status',
+            'updated_at',
+          ].every((key) => row[key] == expected[key])) {
+        return false;
+      }
+      if (expected != null &&
+          !const ['pending', 'failed', 'paused'].contains(row['status'])) {
+        return false;
+      }
+      Map? payload;
+      try {
+        payload = jsonDecode(row['payload'] as String) as Map;
+      } catch (
+        _
+      ) {} // Claim normally so execution records the malformed action's failure.
+      if (payload != null &&
+          _isNormalDraft(row['type'] as String, payload) &&
+          await _finalOwnsEvidence(txn, row['job_id'] as String, uid)) {
+        await _supersedeNormalDrafts(txn, row['job_id'] as String, uid);
+        requireSameInspector(uid);
+        return false;
+      }
+      final changed = await txn.update(
+        'pending_actions',
+        {'status': 'syncing', 'updated_at': DateTime.now().toIso8601String()},
+        where:
+            'id = ? AND inspector_id = ? AND payload = ? AND status = ? AND updated_at = ?',
+        whereArgs: [id, uid, row['payload'], row['status'], row['updated_at']],
+      );
+      requireSameInspector(uid);
+      return changed == 1;
+    });
   }
 
   static Future<void> markActionSynced(String id) async {
@@ -1547,14 +1916,17 @@ class DBHelper {
       where: "id = ? AND status = 'syncing' AND inspector_id = ?",
       whereArgs: [id, currentInspectorId],
     );
-    await db.rawDelete('''
+    await db.rawDelete(
+      '''
       DELETE FROM pending_actions
       WHERE status = 'synced' AND inspector_id = ? AND id NOT IN (
         SELECT id FROM pending_actions
         WHERE status = 'synced' AND inspector_id = ?
         ORDER BY updated_at DESC LIMIT 50
       )
-    ''', [currentInspectorId, currentInspectorId]);
+    ''',
+      [currentInspectorId, currentInspectorId],
+    );
   }
 
   /// Real completed-sync history for the Sync Center's audit log —
@@ -1572,13 +1944,40 @@ class DBHelper {
     );
   }
 
-  static Future<void> markActionFailed(String id, String error) async {
+  static Future<void> markActionFailed(
+    String id,
+    String error, {
+    bool reconciliationRequired = false,
+  }) async {
+    final uid = requireInspector();
     final db = await database;
-    await db.rawUpdate(
-      "UPDATE pending_actions SET status = 'failed', retry_count = retry_count + 1, "
-      "last_error = ?, updated_at = ? WHERE id = ? AND status = 'syncing' AND inspector_id = ?",
-      [error, DateTime.now().toIso8601String(), id, currentInspectorId],
-    );
+    await db.transaction((txn) async {
+      requireSameInspector(uid);
+      if (reconciliationRequired) {
+        final rows = await txn.query(
+          'pending_actions',
+          columns: ['payload'],
+          where: "id = ? AND inspector_id = ? AND status = 'syncing'",
+          whereArgs: [id, uid],
+        );
+        if (rows.isEmpty) return;
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(rows.single['payload'] as String) as Map,
+        )..['r4RecoveryRequired'] = true;
+        await txn.update(
+          'pending_actions',
+          {'payload': jsonEncode(payload)},
+          where: "id = ? AND inspector_id = ? AND status = 'syncing'",
+          whereArgs: [id, uid],
+        );
+      }
+      await txn.rawUpdate(
+        "UPDATE pending_actions SET status = 'failed', retry_count = retry_count + 1, "
+        "last_error = ?, updated_at = ? WHERE id = ? AND status = 'syncing' AND inspector_id = ?",
+        [error, DateTime.now().toIso8601String(), id, uid],
+      );
+      requireSameInspector(uid);
+    });
   }
 
   /// Terminal "needs attention" state: automatic retries have stopped or the
@@ -1665,21 +2064,21 @@ class DBHelper {
     if (uid == null || uid.isEmpty) return;
     final db = await database;
     await db.transaction((txn) async {
-    requireSameInspector(uid);
-    await txn.insert('sync_log_entries', {
-      'id': const Uuid().v4(),
-      'inspector_id': uid,
-      'pending_action_id': pendingActionId,
-      'job_id': jobId,
-      'event_type': eventType,
-      'result': result,
-      'message': message,
-      'technical_details': technicalDetails != null
-          ? jsonEncode(technicalDetails)
-          : null,
-      'created_at': DateTime.now().toIso8601String(),
-    });
-    requireSameInspector(uid);
+      requireSameInspector(uid);
+      await txn.insert('sync_log_entries', {
+        'id': const Uuid().v4(),
+        'inspector_id': uid,
+        'pending_action_id': pendingActionId,
+        'job_id': jobId,
+        'event_type': eventType,
+        'result': result,
+        'message': message,
+        'technical_details': technicalDetails != null
+            ? jsonEncode(technicalDetails)
+            : null,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      requireSameInspector(uid);
     });
   }
 
@@ -1711,65 +2110,66 @@ class DBHelper {
 
       if (totalLogs == 0) {
         await db.transaction((txn) async {
-        requireSameInspector(uid);
-        // Backfill from pending_actions so past sync history is visible
-        final pastActions = await txn.query(
-          'pending_actions',
-          where: 'inspector_id = ?', whereArgs: [uid],
-          orderBy: 'updated_at DESC',
-          limit: 50,
-        );
-        for (final a in pastActions) {
-          final type = a['type'] as String? ?? 'action';
-          final status = a['status'] as String? ?? 'synced';
-          final lastError = a['last_error'] as String?;
-          final updatedAt =
-              a['updated_at'] as String? ??
-              a['created_at'] as String? ??
-              DateTime.now().toIso8601String();
+          requireSameInspector(uid);
+          // Backfill from pending_actions so past sync history is visible
+          final pastActions = await txn.query(
+            'pending_actions',
+            where: 'inspector_id = ?',
+            whereArgs: [uid],
+            orderBy: 'updated_at DESC',
+            limit: 50,
+          );
+          for (final a in pastActions) {
+            final type = a['type'] as String? ?? 'action';
+            final status = a['status'] as String? ?? 'synced';
+            final lastError = a['last_error'] as String?;
+            final updatedAt =
+                a['updated_at'] as String? ??
+                a['created_at'] as String? ??
+                DateTime.now().toIso8601String();
 
-          String result = 'success';
-          if (status == 'failed') result = 'error';
-          if (status == 'conflict') result = 'warning';
-          if (status == 'pending' || status == 'syncing') result = 'info';
+            String result = 'success';
+            if (status == 'failed') result = 'error';
+            if (status == 'conflict') result = 'warning';
+            if (status == 'pending' || status == 'syncing') result = 'info';
 
-          String actionTitle = 'Data Sync';
-          if (type == 'gps_confirm') actionTitle = 'GPS Confirmation';
-          if (type == 'checklist_update') actionTitle = 'Checklist Update';
-          if (type == 'submit_inspection') {
-            actionTitle = 'Inspection Submission';
+            String actionTitle = 'Data Sync';
+            if (type == 'gps_confirm') actionTitle = 'GPS Confirmation';
+            if (type == 'checklist_update') actionTitle = 'Checklist Update';
+            if (type == 'submit_inspection') {
+              actionTitle = 'Inspection Submission';
+            }
+            if (type == 'status_change') actionTitle = 'Status Update';
+
+            final message = status == 'synced'
+                ? '$actionTitle synchronized successfully.'
+                : (status == 'failed'
+                      ? '$actionTitle sync failed: ${lastError ?? "Network error"}'
+                      : (status == 'conflict'
+                            ? '$actionTitle conflict detected.'
+                            : '$actionTitle queued for sync.'));
+
+            await txn.insert('sync_log_entries', {
+              'id': a['id'] ?? const Uuid().v4(),
+              'inspector_id': uid,
+              'pending_action_id': a['id'],
+              'job_id': a['job_id'],
+              'event_type': 'sync_$status',
+              'result': result,
+              'message': message,
+              // Sanitization rule (Sync DB audit): never copy the raw outbox
+              // payload here — it holds inspector notes, findings text,
+              // checklist data, and photo metadata/local file paths (PII).
+              // Log only non-personal action metadata.
+              'technical_details': jsonEncode({
+                'actionType': type,
+                'retryCount': a['retry_count'] ?? 0,
+                'lastError': ?lastError,
+              }),
+              'created_at': updatedAt,
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
           }
-          if (type == 'status_change') actionTitle = 'Status Update';
-
-          final message = status == 'synced'
-              ? '$actionTitle synchronized successfully.'
-              : (status == 'failed'
-                    ? '$actionTitle sync failed: ${lastError ?? "Network error"}'
-                    : (status == 'conflict'
-                          ? '$actionTitle conflict detected.'
-                          : '$actionTitle queued for sync.'));
-
-          await txn.insert('sync_log_entries', {
-            'id': a['id'] ?? const Uuid().v4(),
-            'inspector_id': uid,
-            'pending_action_id': a['id'],
-            'job_id': a['job_id'],
-            'event_type': 'sync_$status',
-            'result': result,
-            'message': message,
-            // Sanitization rule (Sync DB audit): never copy the raw outbox
-            // payload here — it holds inspector notes, findings text,
-            // checklist data, and photo metadata/local file paths (PII).
-            // Log only non-personal action metadata.
-            'technical_details': jsonEncode({
-              'actionType': type,
-              'retryCount': a['retry_count'] ?? 0,
-              'lastError': ?lastError,
-            }),
-            'created_at': updatedAt,
-          }, conflictAlgorithm: ConflictAlgorithm.ignore);
-        }
-        requireSameInspector(uid);
+          requireSameInspector(uid);
         });
       }
     } on StateError {
@@ -1800,8 +2200,8 @@ class DBHelper {
     try {
       final result = await db.rawQuery(
         jobId != null
-             ? 'SELECT COUNT(*) as c FROM sync_log_entries WHERE inspector_id = ? AND job_id = ?'
-             : 'SELECT COUNT(*) as c FROM sync_log_entries WHERE inspector_id = ?',
+            ? 'SELECT COUNT(*) as c FROM sync_log_entries WHERE inspector_id = ? AND job_id = ?'
+            : 'SELECT COUNT(*) as c FROM sync_log_entries WHERE inspector_id = ?',
         [currentInspectorId, ?jobId],
       );
       return Sqflite.firstIntValue(result) ?? 0;
@@ -1839,7 +2239,10 @@ class DBHelper {
 
     final jobsCount =
         Sqflite.firstIntValue(
-          await db.rawQuery('SELECT COUNT(*) as c FROM local_jobs WHERE inspector_id = ?', [currentInspectorId]),
+          await db.rawQuery(
+            'SELECT COUNT(*) as c FROM local_jobs WHERE inspector_id = ?',
+            [currentInspectorId],
+          ),
         ) ??
         0;
 
@@ -1891,7 +2294,11 @@ class DBHelper {
   static Future<int> clearSyncedPhotoCache() async {
     final db = await database;
     final uid = requireInspector();
-    final syncedRows = await db.query('local_photos', where: 'is_synced = 1 AND inspector_id = ?', whereArgs: [uid]);
+    final syncedRows = await db.query(
+      'local_photos',
+      where: 'is_synced = 1 AND inspector_id = ?',
+      whereArgs: [uid],
+    );
 
     var cleared = 0;
     for (final row in syncedRows) {
@@ -1913,7 +2320,11 @@ class DBHelper {
     }
 
     requireSameInspector(uid);
-    await db.delete('local_photos', where: 'is_synced = 1 AND inspector_id = ?', whereArgs: [uid]);
+    await db.delete(
+      'local_photos',
+      where: 'is_synced = 1 AND inspector_id = ?',
+      whereArgs: [uid],
+    );
 
     return cleared;
   }
@@ -1941,6 +2352,10 @@ class DBHelper {
 
   static Future<void> clearSyncLogEntries() async {
     final db = await database;
-    await db.delete('sync_log_entries', where: 'inspector_id = ?', whereArgs: [currentInspectorId]);
+    await db.delete(
+      'sync_log_entries',
+      where: 'inspector_id = ?',
+      whereArgs: [currentInspectorId],
+    );
   }
 }

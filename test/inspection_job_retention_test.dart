@@ -20,7 +20,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'offline_completion_persistence_test.dart' show submitFixture;
-import 'inspector_reassignment_test.dart' show signInInspector, inspectorA, inspectorB;
+import 'inspector_reassignment_test.dart'
+    show signInInspector, inspectorA, inspectorB;
 
 const jobA = '11111111-1111-4111-8111-111111111111';
 const jobB = '22222222-2222-4222-8222-222222222222';
@@ -58,16 +59,24 @@ void main() {
     // the real guard/query, with only its HTTP boundary supplied by the fixture.
     SharedPreferences.setMockInitialValues({});
     await Supabase.initialize(
-      url: 'https://retention.test', publishableKey: 'isolated-test-key',
-      authOptions: FlutterAuthClientOptions(autoRefreshToken: false,
-        detectSessionInUri: false, localStorage: EmptyLocalStorage()),
+      url: 'https://retention.test',
+      publishableKey: 'isolated-test-key',
+      authOptions: FlutterAuthClientOptions(
+        autoRefreshToken: false,
+        detectSessionInUri: false,
+        localStorage: EmptyLocalStorage(),
+      ),
       httpClient: MockClient((request) async {
         expect(request.method, 'GET');
         expect(request.url.path, '/rest/v1/field_jobs');
         expect(request.url.queryParameters['id'], 'eq.$jobA');
-        return http.Response(jsonEncode([{
-          'id': jobA, 'assigned_inspector_id': inspectorA,
-        }]), 200, request: request);
+        return http.Response(
+          jsonEncode([
+            {'id': jobA, 'assigned_inspector_id': inspectorA},
+          ]),
+          200,
+          request: request,
+        );
       }),
     );
     await signInInspector(inspectorA);
@@ -101,97 +110,163 @@ void main() {
   });
 
   for (final resume in [false, true]) {
-    testWidgets('real normal ParcelDetail entry with Dashboard payload, resume=$resume', (tester) async {
-      GoogleFonts.config.allowRuntimeFetching = false;
-      // Use an SDK font as an isolated rendering fixture, never fetch fonts.
-      final fontDirectory = Directory('${File(Platform.resolvedExecutable).parent.parent.parent.path}/material_fonts');
-      final fontFile = fontDirectory.listSync().whereType<File>().firstWhere((f) => f.path.endsWith('.ttf'));
-      final fontBytes = ByteData.sublistView(fontFile.readAsBytesSync());
-      final manifest = <String, Object>{};
-      for (final family in ['Inter', 'Poppins', 'Urbanist', 'JetBrainsMono', 'Roboto']) {
-        for (final weight in ['Regular', 'Medium', 'SemiBold', 'Bold', 'ExtraBold', 'Light']) {
-          final asset = '$family-$weight.ttf';
-          manifest[asset] = [{'asset': asset}];
+    testWidgets(
+      'real normal ParcelDetail entry with Dashboard payload, resume=$resume',
+      (tester) async {
+        GoogleFonts.config.allowRuntimeFetching = false;
+        // Use an SDK font as an isolated rendering fixture, never fetch fonts.
+        final fontDirectory = Directory(
+          '${File(Platform.resolvedExecutable).parent.parent.parent.path}/material_fonts',
+        );
+        final fontFile = fontDirectory.listSync().whereType<File>().firstWhere(
+          (f) => f.path.endsWith('.ttf'),
+        );
+        final fontBytes = ByteData.sublistView(fontFile.readAsBytesSync());
+        final manifest = <String, Object>{};
+        for (final family in [
+          'Inter',
+          'Poppins',
+          'Urbanist',
+          'JetBrainsMono',
+          'Roboto',
+        ]) {
+          for (final weight in [
+            'Regular',
+            'Medium',
+            'SemiBold',
+            'Bold',
+            'ExtraBold',
+            'Light',
+          ]) {
+            final asset = '$family-$weight.ttf';
+            manifest[asset] = [
+              {'asset': asset},
+            ];
+          }
         }
-      }
-      tester.binding.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (message) async {
-        final asset = const StringCodec().decodeMessage(message)!;
-        if (asset == 'AssetManifest.bin') return const StandardMessageCodec().encodeMessage(manifest);
-        if (asset.endsWith('.ttf')) return fontBytes;
-        return null;
-      });
-      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', null));
-      tester.view.resetPhysicalSize();
-      await tester.binding.setSurfaceSize(const Size(1000, 1600));
-      final payload = fetchedJob(jobA, status: 'assigned')..['current_step'] = 5;
-      // Step 6 is an unlocked normal step on this remotely-progressed fixture;
-      // using it avoids unrelated GPS/map platform I/O in this entry test.
-      if (resume) {
-        await tester.runAsync(() async {
-          await DBHelper.saveInspectionLocally(jobId: jobA, actualLandUse: 'Residential',
-            notes: 'Unfinished restored notes', isCompliant: true,
-            inspectionResult: 'Compliant', checklist: {}, boundaryStatus: 'Compliant', currentStep: 5);
-        });
-      }
-      final provider = InspectionProvider();
-      await tester.pumpWidget(ChangeNotifierProvider.value(
-        value: provider,
-        child: MaterialApp(home: ParcelDetailScreen(
-          task: TaskItem.fromJob(payload), fetchedJob: payload,
-        )),
-      ));
-      // Entry now also proves local ownership before hydrating the draft, so wait
-      // for the observable hydration instead of a fixed delay.
-      for (var i = 0; i < 100 && provider.activeTask?.id != jobA; i++) {
-        await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 20)));
-        await tester.pump(const Duration(milliseconds: 20));
-      }
-      if (resume) {
-        for (var i = 0; i < 100 && provider.notes != 'Unfinished restored notes'; i++) {
-          await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 20)));
+        tester.binding.defaultBinaryMessenger.setMockMessageHandler(
+          'flutter/assets',
+          (message) async {
+            final asset = const StringCodec().decodeMessage(message)!;
+            if (asset == 'AssetManifest.bin') {
+              return const StandardMessageCodec().encodeMessage(manifest);
+            }
+            if (asset.endsWith('.ttf')) return fontBytes;
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMessageHandler(
+            'flutter/assets',
+            null,
+          ),
+        );
+        tester.view.resetPhysicalSize();
+        await tester.binding.setSurfaceSize(const Size(1000, 1600));
+        final payload = fetchedJob(jobA, status: 'assigned')
+          ..['current_step'] = 5;
+        // Step 6 is an unlocked normal step on this remotely-progressed fixture;
+        // using it avoids unrelated GPS/map platform I/O in this entry test.
+        if (resume) {
+          await tester.runAsync(() async {
+            await DBHelper.saveInspectionLocally(
+              jobId: jobA,
+              actualLandUse: 'Residential',
+              notes: 'Unfinished restored notes',
+              isCompliant: true,
+              inspectionResult: 'Compliant',
+              checklist: {},
+              boundaryStatus: 'Compliant',
+              currentStep: 5,
+            );
+          });
+        }
+        final provider = InspectionProvider();
+        await tester.pumpWidget(
+          ChangeNotifierProvider.value(
+            value: provider,
+            child: MaterialApp(
+              home: ParcelDetailScreen(
+                task: TaskItem.fromJob(payload),
+                fetchedJob: payload,
+              ),
+            ),
+          ),
+        );
+        // Entry now also proves local ownership before hydrating the draft, so wait
+        // for the observable hydration instead of a fixed delay.
+        for (var i = 0; i < 100 && provider.activeTask?.id != jobA; i++) {
+          await tester.runAsync(
+            () async => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
           await tester.pump(const Duration(milliseconds: 20));
         }
-      }
-      await tester.pumpAndSettle();
-      await tester.runAsync(() async {
-        expect(await DBHelper.getCachedJobs(), isEmpty);
-        expect(await db.query('inspection_job_retention'), isEmpty);
-      });
-      if (resume) {
-        expect(provider.notes, 'Unfinished restored notes');
-      }
-      final step = find.text('Review & Submit');
-      await tester.ensureVisible(step);
-      await tester.tap(step);
-      // The real entry now includes an authenticated read plus SQLite work.
-      // Await the observable route rather than assuming 150ms finishes FFI I/O.
-      for (var i = 0; i < 100 && find.byType(ReviewSubmitScreen).evaluate().isEmpty; i++) {
-        await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 50)));
-        await tester.pump(const Duration(milliseconds: 50));
-      }
-      await tester.pumpAndSettle();
-      expect(find.byType(ReviewSubmitScreen), findsOneWidget);
-      expect(find.byType(TasksScreen), findsNothing);
-      await tester.runAsync(() async {
-        final row = (await DBHelper.getCachedJobs()).single;
-        expect(row['id'], jobA);
-        expect(row['status'], 'assigned');
-        expect(row['applicant_name'], 'Isolated applicant');
-        expect(row['parcel_lat'], 14.5);
-        expect(row['local_inspection_id'], 123);
-        expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
-        await submitFixture(jobA);
-        // Queued submission is preserved intent, not proven completion.
-        expect((await DBHelper.getCachedJobs()).single['status'], 'assigned');
-        expect(await db.query('inspection_job_retention'), hasLength(1));
-        expect((await DBHelper.getActionableActions()).single['job_id'], jobA);
-      });
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
-      provider.dispose();
-      InspectionProgress.instance.reset();
-      await tester.binding.setSurfaceSize(null);
-    });
+        if (resume) {
+          for (
+            var i = 0;
+            i < 100 && provider.notes != 'Unfinished restored notes';
+            i++
+          ) {
+            await tester.runAsync(
+              () async =>
+                  Future<void>.delayed(const Duration(milliseconds: 20)),
+            );
+            await tester.pump(const Duration(milliseconds: 20));
+          }
+        }
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          expect(await DBHelper.getCachedJobs(), isEmpty);
+          expect(await db.query('inspection_job_retention'), isEmpty);
+        });
+        if (resume) {
+          expect(provider.notes, 'Unfinished restored notes');
+        }
+        final step = find.text('Review & Submit');
+        await tester.ensureVisible(step);
+        await tester.tap(step);
+        // The real entry now includes an authenticated read plus SQLite work.
+        // Await the observable route rather than assuming 150ms finishes FFI I/O.
+        for (
+          var i = 0;
+          i < 100 && find.byType(ReviewSubmitScreen).evaluate().isEmpty;
+          i++
+        ) {
+          await tester.runAsync(
+            () async => Future<void>.delayed(const Duration(milliseconds: 50)),
+          );
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await tester.pumpAndSettle();
+        expect(find.byType(ReviewSubmitScreen), findsOneWidget);
+        expect(find.byType(TasksScreen), findsNothing);
+        await tester.runAsync(() async {
+          final row = (await DBHelper.getCachedJobs()).single;
+          expect(row['id'], jobA);
+          expect(row['status'], 'assigned');
+          expect(row['applicant_name'], 'Isolated applicant');
+          expect(row['parcel_lat'], 14.5);
+          expect(row['local_inspection_id'], 123);
+          expect(
+            (await db.query('inspection_job_retention')).single['job_id'],
+            jobA,
+          );
+          await submitFixture(jobA);
+          // Queued submission is preserved intent, not proven completion.
+          expect((await DBHelper.getCachedJobs()).single['status'], 'assigned');
+          expect(await db.query('inspection_job_retention'), hasLength(1));
+          expect(
+            (await DBHelper.getActionableActions()).single['job_id'],
+            jobA,
+          );
+        });
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        provider.dispose();
+        InspectionProgress.instance.reset();
+        await tester.binding.setSurfaceSize(null);
+      },
+    );
   }
 
   // Superseded: this test used to forbid the Dashboard from caching its payload
@@ -204,18 +279,46 @@ void main() {
   // proof of the same ordering rule is
   // test/offline_first_review_regression_test.dart: "review: older Home response
   // cannot erase newer Tasks cache".
-  test('Dashboard forwards actual payload with owner-scoped passive caching; rework excluded', () async {
-    final home = await File('lib/modules/analytics_dashboard/screens/home_dashboard_screen.dart').readAsString();
-    expect(home, contains("job['id'] as String: job"));
-    expect(home, contains('fetchedJob: _entryJobs[_upcomingTasks[index].id]'));
-    final completed = await File('lib/modules/inspection/screens/completed_inspection_detail_screen.dart').readAsString();
-    final provider = await File('lib/modules/inspection/providers/inspection_provider.dart').readAsString();
-    expect(completed, isNot(contains('retainInspectionJob')));
-    expect(provider, isNot(contains('retainInspectionJob')));
-    final review = await File('lib/modules/inspection/screens/review_submit_screen.dart').readAsString();
-    expect(review, contains('if (!queuedOffline && !provider.isReworkMode)'));
-    expect(review.indexOf('finalizeAcceptedOnlineInspection'), greaterThan(review.indexOf('queuedOffline = true')));
-  });
+  test(
+    'Dashboard forwards actual payload with owner-scoped passive caching; rework excluded',
+    () async {
+      final home = await File(
+        'lib/modules/analytics_dashboard/screens/home_dashboard_screen.dart',
+      ).readAsString();
+      expect(home, contains("job['id'] as String: job"));
+      expect(
+        home,
+        contains('fetchedJob: _entryJobs[_upcomingTasks[index].id]'),
+      );
+      final completed = await File(
+        'lib/modules/inspection/screens/completed_inspection_detail_screen.dart',
+      ).readAsString();
+      final provider = await File(
+        'lib/modules/inspection/providers/inspection_provider.dart',
+      ).readAsString();
+      expect(completed, isNot(contains('retainInspectionJob')));
+      expect(provider, isNot(contains('retainInspectionJob')));
+      final review = await File(
+        'lib/modules/inspection/screens/review_submit_screen.dart',
+      ).readAsString();
+      final outbox = await File(
+        'lib/core/services/sync_outbox_service.dart',
+      ).readAsString();
+      // The screen must never finalize (release retention) before the server has
+      // accepted the submission; the proven drain does it after authority.
+      // The reconciliation path (an interrupted claim whose acceptance is
+      // re-proven by its own authoritative read) is a separate, earlier call —
+      // this pins the accepted-submission path that runs after requireAuthorized.
+      expect(review, isNot(contains('finalizeAcceptedOnlineInspection')));
+      expect(review, contains("receipt['status'] != 'synced'"));
+      final acceptedAt = outbox.indexOf('submission.requireAuthorized()');
+      expect(acceptedAt, greaterThan(-1));
+      expect(
+        outbox.lastIndexOf('finalizeAcceptedOnlineInspection'),
+        greaterThan(acceptedAt),
+      );
+    },
+  );
 
   // The Dashboard refresh now shares one commit boundary with every other cache
   // consumer: the ticket is captured before the remote read
@@ -223,141 +326,195 @@ void main() {
   // DBHelper.cacheJobs(..., refresh:). These tests drive that boundary against
   // real SQLite and prove, behaviorally, the four things the removed source-text
   // prohibition used to stand for.
-  group('dashboard cache refresh cannot damage retention, ownership, or canonical status', () {
-    test('dashboard refresh cannot delete retained inspection evidence', () async {
-      await DBHelper.cacheJobs([fetchedJob(jobA), fetchedJob(jobB)]);
-      await DBHelper.retainInspectionJob(jobA);
-      final retainedBefore = (await db.query('inspection_job_retention')).single;
-      final cachedBefore = (await DBHelper.getCachedJobs())
-          .firstWhere((job) => job['id'] == jobA);
+  group(
+    'dashboard cache refresh cannot damage retention, ownership, or canonical status',
+    () {
+      test(
+        'dashboard refresh cannot delete retained inspection evidence',
+        () async {
+          await DBHelper.cacheJobs([fetchedJob(jobA), fetchedJob(jobB)]);
+          await DBHelper.retainInspectionJob(jobA);
+          final retainedBefore = (await db.query(
+            'inspection_job_retention',
+          )).single;
+          final cachedBefore = (await DBHelper.getCachedJobs()).firstWhere(
+            (job) => job['id'] == jobA,
+          );
 
-      // The remote answer no longer lists the retained unfinished round.
-      final dashboardRefresh = DBHelper.beginJobsRefresh();
-      await DBHelper.cacheJobs([fetchedJob(jobB)], refresh: dashboardRefresh);
+          // The remote answer no longer lists the retained unfinished round.
+          final dashboardRefresh = DBHelper.beginJobsRefresh();
+          await DBHelper.cacheJobs([
+            fetchedJob(jobB),
+          ], refresh: dashboardRefresh);
 
-      // Retention and the unfinished cached round survive exactly as they were.
-      expect((await db.query('inspection_job_retention')).single, retainedBefore);
-      expect(
-        (await DBHelper.getCachedJobs()).firstWhere((job) => job['id'] == jobA),
-        cachedBefore,
+          // Retention and the unfinished cached round survive exactly as they were.
+          expect(
+            (await db.query('inspection_job_retention')).single,
+            retainedBefore,
+          );
+          expect(
+            (await DBHelper.getCachedJobs()).firstWhere(
+              (job) => job['id'] == jobA,
+            ),
+            cachedBefore,
+          );
+        },
       );
-    });
 
-    test('dashboard refresh cannot overwrite a newer owner-scoped snapshot', () async {
-      // Captured before the Dashboard's remote read, answered only afterwards.
-      final dashboardRefresh = DBHelper.beginJobsRefresh();
-      final newer = DBHelper.beginJobsRefresh();
-      expect(
-        await DBHelper.cacheJobs([
-          fetchedJob(jobA)..['deadline_date'] = '2026-10-01',
-        ], refresh: newer),
-        isTrue,
+      test(
+        'dashboard refresh cannot overwrite a newer owner-scoped snapshot',
+        () async {
+          // Captured before the Dashboard's remote read, answered only afterwards.
+          final dashboardRefresh = DBHelper.beginJobsRefresh();
+          final newer = DBHelper.beginJobsRefresh();
+          expect(
+            await DBHelper.cacheJobs([
+              fetchedJob(jobA)..['deadline_date'] = '2026-10-01',
+            ], refresh: newer),
+            isTrue,
+          );
+          expect(
+            await DBHelper.cacheJobs([
+              fetchedJob(jobA)..['deadline_date'] = '2026-11-11',
+            ], refresh: dashboardRefresh),
+            isFalse,
+          );
+          expect(
+            (await DBHelper.getCachedJobs()).single['deadline_date'],
+            '2026-10-01',
+          );
+
+          // A rejected answer never wedges the boundary: the next real snapshot lands.
+          expect(
+            await DBHelper.cacheJobs([
+              fetchedJob(jobA)..['deadline_date'] = '2026-12-12',
+            ], refresh: DBHelper.beginJobsRefresh()),
+            isTrue,
+          );
+          expect(
+            (await DBHelper.getCachedJobs()).single['deadline_date'],
+            '2026-12-12',
+          );
+        },
       );
-      expect(
-        await DBHelper.cacheJobs([
-          fetchedJob(jobA)..['deadline_date'] = '2026-11-11',
-        ], refresh: dashboardRefresh),
-        isFalse,
+
+      test('dashboard refresh cannot mix inspector data', () async {
+        await DBHelper.cacheJobs([fetchedJob(jobA)]);
+        final inspectorARow = (await db.query('local_jobs')).single;
+
+        // The Dashboard ticket belongs to A, but the device changed accounts
+        // before its answer arrived: the answer must change nothing.
+        final dashboardRefresh = DBHelper.beginJobsRefresh();
+        addTearDown(() => signInInspector(inspectorA));
+        await signInInspector(inspectorB);
+        expect(
+          await DBHelper.cacheJobs([
+            fetchedJob(jobB),
+          ], refresh: dashboardRefresh),
+          isFalse,
+        );
+        expect(await DBHelper.getCachedJobs(), isEmpty);
+
+        // Even a payload that reuses A's job id cannot hijack A's cached row.
+        expect(
+          await DBHelper.cacheJobs([
+            fetchedJob(jobA),
+          ], refresh: DBHelper.beginJobsRefresh()),
+          isTrue,
+        );
+        expect(await DBHelper.getCachedJobs(), isEmpty);
+        expect((await db.query('local_jobs')).single, inspectorARow);
+
+        // Each account keeps its own rows; neither read returns the other's.
+        expect(
+          await DBHelper.cacheJobs([
+            fetchedJob(jobB),
+          ], refresh: DBHelper.beginJobsRefresh()),
+          isTrue,
+        );
+        expect((await DBHelper.getCachedJobs()).single['id'], jobB);
+        await signInInspector(inspectorA);
+        expect((await DBHelper.getCachedJobs()).single, inspectorARow);
+        expect(
+          (await db.query(
+            'local_jobs',
+          )).map((row) => row['inspector_id']).toSet(),
+          {inspectorA, inspectorB},
+        );
+      });
+
+      test(
+        'dashboard refresh cannot change canonical completion status',
+        () async {
+          await DBHelper.retainInspectionJob(
+            jobA,
+            fetchedJob: fetchedJob(jobA),
+          );
+          await submitFixture(jobA);
+          // Unproven submission: preserved intent, unfinished lifecycle.
+          expect(
+            (await DBHelper.getCachedJobs()).single['status'],
+            'in_progress',
+          );
+          final action = (await DBHelper.getActionableActions()).single;
+          expect(action['type'], 'submit_inspection');
+
+          // Only proven acceptance completes the round and releases retention.
+          expect(
+            await DBHelper.finalizeAcceptedOnlineInspection(
+              jobA,
+              remoteResult: InspectionAuthorityResult.authorized,
+            ),
+            isTrue,
+          );
+          expect(
+            (await DBHelper.getCachedJobs()).single['status'],
+            'completed',
+          );
+          expect(await db.query('inspection_job_retention'), isEmpty);
+
+          // A stale Dashboard answer still calling it unfinished must not downgrade
+          // the canonically completed round or drop its unacknowledged intent.
+          final dashboardRefresh = DBHelper.beginJobsRefresh();
+          expect(
+            await DBHelper.cacheJobs([
+              fetchedJob(jobA, status: 'in_progress'),
+            ], refresh: dashboardRefresh),
+            isTrue,
+          );
+          expect(
+            (await DBHelper.getCachedJobs()).single['status'],
+            'completed',
+          );
+          expect(
+            (await DBHelper.getActionableActions()).single['id'],
+            action['id'],
+          );
+          expect(await db.query('inspection_job_retention'), isEmpty);
+        },
       );
-      expect((await DBHelper.getCachedJobs()).single['deadline_date'], '2026-10-01');
+    },
+  );
 
-      // A rejected answer never wedges the boundary: the next real snapshot lands.
-      expect(
-        await DBHelper.cacheJobs([
-          fetchedJob(jobA)..['deadline_date'] = '2026-12-12',
-        ], refresh: DBHelper.beginJobsRefresh()),
-        isTrue,
-      );
-      expect((await DBHelper.getCachedJobs()).single['deadline_date'], '2026-12-12');
-    });
-
-    test('dashboard refresh cannot mix inspector data', () async {
-      await DBHelper.cacheJobs([fetchedJob(jobA)]);
-      final inspectorARow = (await db.query('local_jobs')).single;
-
-      // The Dashboard ticket belongs to A, but the device changed accounts
-      // before its answer arrived: the answer must change nothing.
-      final dashboardRefresh = DBHelper.beginJobsRefresh();
-      addTearDown(() => signInInspector(inspectorA));
-      await signInInspector(inspectorB);
-      expect(
-        await DBHelper.cacheJobs([fetchedJob(jobB)], refresh: dashboardRefresh),
-        isFalse,
-      );
-      expect(await DBHelper.getCachedJobs(), isEmpty);
-
-      // Even a payload that reuses A's job id cannot hijack A's cached row.
-      expect(
-        await DBHelper.cacheJobs([fetchedJob(jobA)],
-            refresh: DBHelper.beginJobsRefresh()),
-        isTrue,
-      );
-      expect(await DBHelper.getCachedJobs(), isEmpty);
-      expect((await db.query('local_jobs')).single, inspectorARow);
-
-      // Each account keeps its own rows; neither read returns the other's.
-      expect(
-        await DBHelper.cacheJobs([fetchedJob(jobB)],
-            refresh: DBHelper.beginJobsRefresh()),
-        isTrue,
-      );
-      expect((await DBHelper.getCachedJobs()).single['id'], jobB);
-      await signInInspector(inspectorA);
-      expect((await DBHelper.getCachedJobs()).single, inspectorARow);
-      expect(
-        (await db.query('local_jobs')).map((row) => row['inspector_id']).toSet(),
-        {inspectorA, inspectorB},
-      );
-    });
-
-    test('dashboard refresh cannot change canonical completion status', () async {
-      await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
-      await submitFixture(jobA);
-      // Unproven submission: preserved intent, unfinished lifecycle.
-      expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
-      final action = (await DBHelper.getActionableActions()).single;
-      expect(action['type'], 'submit_inspection');
-
-      // Only proven acceptance completes the round and releases retention.
-      expect(
-        await DBHelper.finalizeAcceptedOnlineInspection(jobA,
-            remoteResult: InspectionAuthorityResult.authorized),
-        isTrue,
-      );
-      expect((await DBHelper.getCachedJobs()).single['status'], 'completed');
-      expect(await db.query('inspection_job_retention'), isEmpty);
-
-      // A stale Dashboard answer still calling it unfinished must not downgrade
-      // the canonically completed round or drop its unacknowledged intent.
-      final dashboardRefresh = DBHelper.beginJobsRefresh();
-      expect(
-        await DBHelper.cacheJobs([fetchedJob(jobA, status: 'in_progress')],
-            refresh: dashboardRefresh),
-        isTrue,
-      );
-      expect((await DBHelper.getCachedJobs()).single['status'], 'completed');
-      expect((await DBHelper.getActionableActions()).single['id'], action['id']);
-      expect(await db.query('inspection_job_retention'), isEmpty);
-    });
-  });
-
-  test('fresh schema and version 9->12 upgrade preserve all prior rows and current metadata', () async {
-    final legacyTemp = await Directory.systemTemp.createTemp('legacy-v9-');
-    addTearDown(() async {
-      if (legacyTemp.existsSync()) {
-        await legacyTemp.delete(recursive: true);
-      }
-    });
-    final legacyPath = '${legacyTemp.path}/legacy_v9_upgrade.db';
-    Database? legacyDb;
-    Database? upgradedDb;
-    try {
-      legacyDb = await databaseFactoryFfi.openDatabase(
-      legacyPath,
-      options: OpenDatabaseOptions(
-        version: 9,
-        onCreate: (database, version) async {
-          await database.execute('''
+  test(
+    'fresh schema and version 9->12 upgrade preserve all prior rows and current metadata',
+    () async {
+      final legacyTemp = await Directory.systemTemp.createTemp('legacy-v9-');
+      addTearDown(() async {
+        if (legacyTemp.existsSync()) {
+          await legacyTemp.delete(recursive: true);
+        }
+      });
+      final legacyPath = '${legacyTemp.path}/legacy_v9_upgrade.db';
+      Database? legacyDb;
+      Database? upgradedDb;
+      try {
+        legacyDb = await databaseFactoryFfi.openDatabase(
+          legacyPath,
+          options: OpenDatabaseOptions(
+            version: 9,
+            onCreate: (database, version) async {
+              await database.execute('''
             CREATE TABLE local_jobs(
               id TEXT PRIMARY KEY,
               local_inspection_id INTEGER,
@@ -379,7 +536,7 @@ void main() {
               parcel_address TEXT
             )
           ''');
-          await database.execute('''
+              await database.execute('''
             CREATE TABLE local_inspections(
               id TEXT PRIMARY KEY,
               actual_land_use TEXT,
@@ -394,7 +551,7 @@ void main() {
               updated_at TEXT
             )
           ''');
-          await database.execute('''
+              await database.execute('''
             CREATE TABLE pending_actions(
               id TEXT PRIMARY KEY,
               type TEXT NOT NULL,
@@ -407,104 +564,144 @@ void main() {
               updated_at TEXT NOT NULL
             )
           ''');
-          await database.insert('local_jobs', {
-            'id': jobA,
-            'status': 'in_progress',
-            'scheduled_date': '2026-10-01',
-            'supabase_parcel_id': 'parcel-a',
-            'applicant_name': 'Legacy applicant',
-            'barangay': 'Legacy barangay',
-            'reference_number': 'LEG-1',
-            'application_type': 'Residential',
-          });
-          await database.insert('local_inspections', {'id': jobA, 'notes': 'Saved draft'});
-          await database.insert('pending_actions', {
-            'id': 'prior-action', 'job_id': jobA, 'type': 'mark_ongoing',
-            'payload': '{}', 'created_at': 'prior', 'updated_at': 'prior',
-          });
-        },
-      ),
-    );
-      await legacyDb.close();
-      legacyDb = null;
-
-      upgradedDb = await databaseFactoryFfi.openDatabase(legacyPath, options: OpenDatabaseOptions(
-        version: 13,
-        onUpgrade: (database, oldVersion, newVersion) async {
-          expect(oldVersion, 9);
-          if (oldVersion < 10) {
-            await DBHelper.createInspectionRetentionTable(database);
-          }
-          if (oldVersion < 11) {
-            await database.execute(
-              'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT',
-            );
-            await database.execute(
-              'ALTER TABLE local_jobs ADD COLUMN assigned_by_imaps_user_id TEXT',
-            );
-            await database.execute(
-              'ALTER TABLE local_jobs ADD COLUMN assigned_by_name TEXT',
-            );
-          }
-          // Loop 8: an existing v11 install must gain the optional read-only
-          // Planning Review cache column without losing any cached task.
-          if (oldVersion < 12) {
-            await database.execute(
-              'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT',
-            );
-          }
-          // Offline/online list parity: the Completed category is sorted by
-          // submitted_at, so the cached column must exist after upgrade too.
-          if (oldVersion < 13) {
-            await database.execute(
-              'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT',
-            );
-          }
-        },
-      ));
-      DBHelper.useDatabaseForTesting(upgradedDb);
-
-      expect(await upgradedDb.getVersion(), 13);
-      expect(await upgradedDb.query('inspection_job_retention'), isEmpty);
-      expect((await upgradedDb.query('local_jobs')).single['id'], jobA);
-      expect((await upgradedDb.query('local_inspections')).single['notes'], 'Saved draft');
-      expect((await upgradedDb.query('pending_actions')).single['id'], 'prior-action');
-
-      final localJobColumns = (await upgradedDb.rawQuery('PRAGMA table_info(local_jobs)'))
-          .map((row) => row['name'] as String)
-          .toList();
-      expect(localJobColumns, containsAll([
-        'assignment_instructions',
-        'assigned_by_imaps_user_id',
-        'assigned_by_name',
-        'planning_review',
-        'submitted_at',
-      ]));
-
-      expect(source, contains('version: 18,'));
-      expect(source, contains('if (oldVersion < 10)'));
-      expect(source, contains('if (oldVersion < 11)'));
-      expect(source, contains('if (oldVersion < 12)'));
-      expect(source, contains('if (oldVersion < 13)'));
-      expect(source, contains('if (oldVersion < 14)'));
-      expect(source, contains('if (oldVersion < 15)'));
-        expect(source, contains('if (oldVersion < 16)'));
-      expect(source, contains('if (oldVersion < 17)'));
-      expect(source, contains('if (oldVersion < 18)'));
-      expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT').allMatches(source), hasLength(1));
-      expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT').allMatches(source), hasLength(1));
-      expect(RegExp(r'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT').allMatches(source), hasLength(1));
-      expect(RegExp(r'await createInspectionRetentionTable\(db\)').allMatches(source), hasLength(2));
-    } finally {
-      if (upgradedDb != null && upgradedDb.isOpen) {
-        await upgradedDb.close();
-      }
-      if (legacyDb != null && legacyDb.isOpen) {
+              await database.insert('local_jobs', {
+                'id': jobA,
+                'status': 'in_progress',
+                'scheduled_date': '2026-10-01',
+                'supabase_parcel_id': 'parcel-a',
+                'applicant_name': 'Legacy applicant',
+                'barangay': 'Legacy barangay',
+                'reference_number': 'LEG-1',
+                'application_type': 'Residential',
+              });
+              await database.insert('local_inspections', {
+                'id': jobA,
+                'notes': 'Saved draft',
+              });
+              await database.insert('pending_actions', {
+                'id': 'prior-action',
+                'job_id': jobA,
+                'type': 'mark_ongoing',
+                'payload': '{}',
+                'created_at': 'prior',
+                'updated_at': 'prior',
+              });
+            },
+          ),
+        );
         await legacyDb.close();
+        legacyDb = null;
+
+        upgradedDb = await databaseFactoryFfi.openDatabase(
+          legacyPath,
+          options: OpenDatabaseOptions(
+            version: 13,
+            onUpgrade: (database, oldVersion, newVersion) async {
+              expect(oldVersion, 9);
+              if (oldVersion < 10) {
+                await DBHelper.createInspectionRetentionTable(database);
+              }
+              if (oldVersion < 11) {
+                await database.execute(
+                  'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT',
+                );
+                await database.execute(
+                  'ALTER TABLE local_jobs ADD COLUMN assigned_by_imaps_user_id TEXT',
+                );
+                await database.execute(
+                  'ALTER TABLE local_jobs ADD COLUMN assigned_by_name TEXT',
+                );
+              }
+              // Loop 8: an existing v11 install must gain the optional read-only
+              // Planning Review cache column without losing any cached task.
+              if (oldVersion < 12) {
+                await database.execute(
+                  'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT',
+                );
+              }
+              // Offline/online list parity: the Completed category is sorted by
+              // submitted_at, so the cached column must exist after upgrade too.
+              if (oldVersion < 13) {
+                await database.execute(
+                  'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT',
+                );
+              }
+            },
+          ),
+        );
+        DBHelper.useDatabaseForTesting(upgradedDb);
+
+        expect(await upgradedDb.getVersion(), 13);
+        expect(await upgradedDb.query('inspection_job_retention'), isEmpty);
+        expect((await upgradedDb.query('local_jobs')).single['id'], jobA);
+        expect(
+          (await upgradedDb.query('local_inspections')).single['notes'],
+          'Saved draft',
+        );
+        expect(
+          (await upgradedDb.query('pending_actions')).single['id'],
+          'prior-action',
+        );
+
+        final localJobColumns = (await upgradedDb.rawQuery(
+          'PRAGMA table_info(local_jobs)',
+        )).map((row) => row['name'] as String).toList();
+        expect(
+          localJobColumns,
+          containsAll([
+            'assignment_instructions',
+            'assigned_by_imaps_user_id',
+            'assigned_by_name',
+            'planning_review',
+            'submitted_at',
+          ]),
+        );
+
+        expect(source, contains('version: 18,'));
+        expect(source, contains('if (oldVersion < 10)'));
+        expect(source, contains('if (oldVersion < 11)'));
+        expect(source, contains('if (oldVersion < 12)'));
+        expect(source, contains('if (oldVersion < 13)'));
+        expect(source, contains('if (oldVersion < 14)'));
+        expect(source, contains('if (oldVersion < 15)'));
+        expect(source, contains('if (oldVersion < 16)'));
+        expect(source, contains('if (oldVersion < 17)'));
+        expect(source, contains('if (oldVersion < 18)'));
+        expect(
+          RegExp(
+            r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT',
+          ).allMatches(source),
+          hasLength(1),
+        );
+        expect(
+          RegExp(
+            r'ALTER TABLE local_jobs ADD COLUMN planning_review TEXT',
+          ).allMatches(source),
+          hasLength(1),
+        );
+        expect(
+          RegExp(
+            r'ALTER TABLE local_jobs ADD COLUMN submitted_at TEXT',
+          ).allMatches(source),
+          hasLength(1),
+        );
+        expect(
+          RegExp(
+            r'await createInspectionRetentionTable\(db\)',
+          ).allMatches(source),
+          hasLength(2),
+        );
+      } finally {
+        if (upgradedDb != null && upgradedDb.isOpen) {
+          await upgradedDb.close();
+        }
+        if (legacyDb != null && legacyDb.isOpen) {
+          await legacyDb.close();
+        }
+        DBHelper.useDatabaseForTesting(null);
       }
-      DBHelper.useDatabaseForTesting(null);
-    }
-  });
+    },
+  );
 
   test('Tasks cache then repeated entry has one row and one marker', () async {
     await DBHelper.cacheJobs([fetchedJob(jobA, status: 'Pending')]);
@@ -516,75 +713,156 @@ void main() {
     expect((await db.query('inspection_job_retention')).single, first);
   });
 
-  test('unfinished retention survives leave restart and omission without lifecycle change', () async {
-    await DBHelper.cacheJobs([fetchedJob(jobA), fetchedJob(jobB)]);
-    await DBHelper.retainInspectionJob(jobA);
-    await reopen();
-    await DBHelper.cacheJobs([]);
-    expect((await DBHelper.getCachedJobs()).single['id'], jobA);
-    expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
-    expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
-  });
+  test(
+    'unfinished retention survives leave restart and omission without lifecycle change',
+    () async {
+      await DBHelper.cacheJobs([fetchedJob(jobA), fetchedJob(jobB)]);
+      await DBHelper.retainInspectionJob(jobA);
+      await reopen();
+      await DBHelper.cacheJobs([]);
+      expect((await DBHelper.getCachedJobs()).single['id'], jobA);
+      expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
+      expect(
+        (await db.query('inspection_job_retention')).single['job_id'],
+        jobA,
+      );
+    },
+  );
 
-  test('active remote metadata updates and canonical completion retires only A', () async {
-    await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
-    await DBHelper.retainInspectionJob(jobB, fetchedJob: fetchedJob(jobB));
-    final updated = fetchedJob(jobA)..['deadline_date'] = '2026-10-01';
-    await DBHelper.cacheJobs([updated]);
-    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['deadline_date'], '2026-10-01');
-    expect(await db.query('inspection_job_retention'), hasLength(2));
-    await DBHelper.cacheJobs([fetchedJob(jobA, status: 'completed')]);
-    expect((await db.query('inspection_job_retention')).single['job_id'], jobB);
-    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'], 'completed');
-  });
+  test(
+    'active remote metadata updates and canonical completion retires only A',
+    () async {
+      await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
+      await DBHelper.retainInspectionJob(jobB, fetchedJob: fetchedJob(jobB));
+      final updated = fetchedJob(jobA)..['deadline_date'] = '2026-10-01';
+      await DBHelper.cacheJobs([updated]);
+      expect(
+        (await DBHelper.getCachedJobs()).firstWhere(
+          (j) => j['id'] == jobA,
+        )['deadline_date'],
+        '2026-10-01',
+      );
+      expect(await db.query('inspection_job_retention'), hasLength(2));
+      await DBHelper.cacheJobs([fetchedJob(jobA, status: 'completed')]);
+      expect(
+        (await db.query('inspection_job_retention')).single['job_id'],
+        jobB,
+      );
+      expect(
+        (await DBHelper.getCachedJobs()).firstWhere(
+          (j) => j['id'] == jobA,
+        )['status'],
+        'completed',
+      );
+    },
+  );
 
-  test('offline queue failure rolls back without touching local evidence', () async {
-    await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
-    await db.execute('CREATE TRIGGER reject_write BEFORE INSERT ON pending_actions '
-        "BEGIN SELECT RAISE(ABORT, 'isolated failure'); END");
-    await expectLater(submitFixture(jobA), throwsA(isA<DatabaseException>()));
-    expect(await DBHelper.getActionableActions(), isEmpty);
-    expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
-    expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
-  });
+  test(
+    'offline queue failure rolls back without touching local evidence',
+    () async {
+      await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
+      await db.execute(
+        'CREATE TRIGGER reject_write BEFORE INSERT ON pending_actions '
+        "BEGIN SELECT RAISE(ABORT, 'isolated failure'); END",
+      );
+      await expectLater(submitFixture(jobA), throwsA(isA<DatabaseException>()));
+      expect(await DBHelper.getActionableActions(), isEmpty);
+      expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
+      expect(
+        (await db.query('inspection_job_retention')).single['job_id'],
+        jobA,
+      );
+    },
+  );
 
-  test('online cleanup is idempotent isolated and failure leaves recovery evidence', () async {
-    await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
-    await DBHelper.cacheJobs([fetchedJob(jobB)]);
-    await db.execute("CREATE TRIGGER reject_cleanup BEFORE DELETE ON inspection_job_retention BEGIN SELECT RAISE(ABORT, 'cleanup failure'); END");
-    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA,
-        remoteResult: InspectionAuthorityResult.authorized), isFalse);
-    expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
-    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'], 'in_progress');
-    expect(await DBHelper.getActionableActions(), isEmpty);
-    await db.execute('DROP TRIGGER reject_cleanup');
-    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA,
-        remoteResult: InspectionAuthorityResult.authorized), isTrue);
-    expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA,
-        remoteResult: InspectionAuthorityResult.authorized), isTrue);
-    expect(await db.query('inspection_job_retention'), isEmpty);
-    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobB)['status'], 'in_progress');
-  });
+  test(
+    'online cleanup is idempotent isolated and failure leaves recovery evidence',
+    () async {
+      await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
+      await DBHelper.cacheJobs([fetchedJob(jobB)]);
+      await db.execute(
+        "CREATE TRIGGER reject_cleanup BEFORE DELETE ON inspection_job_retention BEGIN SELECT RAISE(ABORT, 'cleanup failure'); END",
+      );
+      expect(
+        await DBHelper.finalizeAcceptedOnlineInspection(
+          jobA,
+          remoteResult: InspectionAuthorityResult.authorized,
+        ),
+        isFalse,
+      );
+      expect(
+        (await db.query('inspection_job_retention')).single['job_id'],
+        jobA,
+      );
+      expect(
+        (await DBHelper.getCachedJobs()).firstWhere(
+          (j) => j['id'] == jobA,
+        )['status'],
+        'in_progress',
+      );
+      expect(await DBHelper.getActionableActions(), isEmpty);
+      await db.execute('DROP TRIGGER reject_cleanup');
+      expect(
+        await DBHelper.finalizeAcceptedOnlineInspection(
+          jobA,
+          remoteResult: InspectionAuthorityResult.authorized,
+        ),
+        isTrue,
+      );
+      expect(
+        await DBHelper.finalizeAcceptedOnlineInspection(
+          jobA,
+          remoteResult: InspectionAuthorityResult.authorized,
+        ),
+        isTrue,
+      );
+      expect(await db.query('inspection_job_retention'), isEmpty);
+      expect(
+        (await DBHelper.getCachedJobs()).firstWhere(
+          (j) => j['id'] == jobB,
+        )['status'],
+        'in_progress',
+      );
+    },
+  );
 
-  test('unproven completion never releases retention or completes the cache', () async {
-    await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
-    for (final result in [
-      InspectionAuthorityResult.notAssignedOrUnavailable,
-      InspectionAuthorityResult.authRequired,
-      InspectionAuthorityResult.offlineOrUnverifiable,
-    ]) {
-      expect(await DBHelper.finalizeAcceptedOnlineInspection(jobA, remoteResult: result), isFalse);
-    }
-    expect((await db.query('inspection_job_retention')).single['job_id'], jobA);
-    expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
-  });
+  test(
+    'unproven completion never releases retention or completes the cache',
+    () async {
+      await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
+      for (final result in [
+        InspectionAuthorityResult.notAssignedOrUnavailable,
+        InspectionAuthorityResult.authRequired,
+        InspectionAuthorityResult.offlineOrUnverifiable,
+      ]) {
+        expect(
+          await DBHelper.finalizeAcceptedOnlineInspection(
+            jobA,
+            remoteResult: result,
+          ),
+          isFalse,
+        );
+      }
+      expect(
+        (await db.query('inspection_job_retention')).single['job_id'],
+        jobA,
+      );
+      expect((await DBHelper.getCachedJobs()).single['status'], 'in_progress');
+    },
+  );
 
-  test('missing or mismatched UUID rejects entry without marker or fake row', () async {
-    await expectLater(DBHelper.retainInspectionJob(jobA), throwsStateError);
-    await expectLater(DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobB)), throwsStateError);
-    expect(await DBHelper.getCachedJobs(), isEmpty);
-    expect(await db.query('inspection_job_retention'), isEmpty);
-  });
+  test(
+    'missing or mismatched UUID rejects entry without marker or fake row',
+    () async {
+      await expectLater(DBHelper.retainInspectionJob(jobA), throwsStateError);
+      await expectLater(
+        DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobB)),
+        throwsStateError,
+      );
+      expect(await DBHelper.getCachedJobs(), isEmpty);
+      expect(await db.query('inspection_job_retention'), isEmpty);
+    },
+  );
 
   test('offline submission keeps retention across restart until proven', () async {
     await DBHelper.retainInspectionJob(jobA, fetchedJob: fetchedJob(jobA));
@@ -593,8 +871,12 @@ void main() {
     await submitFixture(jobA);
     // Preserved intent: retention and the unfinished lifecycle both remain.
     expect(await db.query('inspection_job_retention'), hasLength(1));
-    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'],
-        'in_progress');
+    expect(
+      (await DBHelper.getCachedJobs()).firstWhere(
+        (j) => j['id'] == jobA,
+      )['status'],
+      'in_progress',
+    );
     final action = (await DBHelper.getActionableActions()).single;
     await reopen();
     await DBHelper.cacheJobs([fetchedJob(jobB)]);
@@ -604,13 +886,27 @@ void main() {
     expect((await DBHelper.getActionableActions()).single['id'], action['id']);
     expect(await db.query('inspection_job_retention'), hasLength(1));
     // A proven remote acceptance is the only thing that finalizes and releases.
-    await DBHelper.finalizeAcceptedOnlineInspection(jobA,
-        remoteResult: InspectionAuthorityResult.authorized);
-    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'],
-        'completed');
+    await DBHelper.finalizeAcceptedOnlineInspection(
+      jobA,
+      remoteResult: InspectionAuthorityResult.authorized,
+    );
+    expect(
+      (await DBHelper.getCachedJobs()).firstWhere(
+        (j) => j['id'] == jobA,
+      )['status'],
+      'completed',
+    );
     expect(await db.query('inspection_job_retention'), isEmpty);
-    await DBHelper.cacheJobs([fetchedJob(jobA, status: 'completed'), fetchedJob(jobB)]);
-    expect((await DBHelper.getCachedJobs()).firstWhere((j) => j['id'] == jobA)['status'], 'completed');
+    await DBHelper.cacheJobs([
+      fetchedJob(jobA, status: 'completed'),
+      fetchedJob(jobB),
+    ]);
+    expect(
+      (await DBHelper.getCachedJobs()).firstWhere(
+        (j) => j['id'] == jobA,
+      )['status'],
+      'completed',
+    );
     // The completed round stays protected while its submission is unacknowledged.
     await DBHelper.cacheJobs([fetchedJob(jobB)]);
     expect((await DBHelper.getCachedJobs()).map((j) => j['id']), [jobA, jobB]);

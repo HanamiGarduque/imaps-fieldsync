@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import 'package:flutter/services.dart';
@@ -30,16 +31,24 @@ class FieldFindingsScreen extends StatefulWidget {
   State<FieldFindingsScreen> createState() => _FieldFindingsScreenState();
 }
 
-class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
+class _FieldFindingsScreenState extends State<FieldFindingsScreen>
+    with WidgetsBindingObserver {
   bool _isSaving = false;
+  late final InspectionProvider _provider;
   late final TextEditingController _notesController;
   late final TextEditingController _discrepancyTitleController;
   late final TextEditingController _discrepancyDetailController;
   late final TextEditingController _recommendationsController;
+  // Normal (not rework) typing autosaves so a process interruption cannot
+  // discard field evidence that was never submitted. Rework keeps its
+  // explicit Save contract, where one Save is one deliberate revision.
+  Timer? _autosaveTimer;
+  bool _autosavePending = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // BUG FIX #4A — Global Data Persistence.
     // Controllers used to always start empty, even when InspectionProvider
     // already had real hydrated data (rework mode, or a resumed Ongoing
@@ -49,6 +58,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
     // the provider's current state instead — it's already correctly
     // seeded via hydrateForRework() / startInspection()'s local draft load.
     final provider = context.read<InspectionProvider>();
+    _provider = provider;
     _notesController = TextEditingController(text: provider.notes);
     _discrepancyTitleController = TextEditingController();
     _discrepancyDetailController = TextEditingController(
@@ -61,6 +71,10 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Flush whatever is still typed before the screen (and any later app
+    // kill) can drop it. Fire-and-forget: dispose cannot await.
+    _flushAutosave();
     _notesController.dispose();
     _discrepancyTitleController.dispose();
     _discrepancyDetailController.dispose();
@@ -68,16 +82,65 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
     super.dispose();
   }
 
-  void _handleContinue() {
-    HapticFeedback.selectionClick();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _flushAutosave();
+    }
+  }
 
-    _collectControllersIntoProvider();
+  void _scheduleAutosave() {
+    if (_isSaving || _provider.isReworkMode) return;
+    _autosavePending = true;
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(const Duration(milliseconds: 400), _flushAutosave);
+  }
+
+  void _flushAutosave() {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = null;
+    if (!_autosavePending || _isSaving) return;
+    _autosavePending = false;
+    unawaited(() async {
+      try {
+        _collectControllersIntoProvider();
+        final ok = await _provider.saveStepFindings();
+        if (!ok) _autosavePending = true;
+      } catch (e) {
+        // Ownership can change or local storage can fail while the debounce
+        // is pending. Keep the typed text on screen and let the next edit or
+        // lifecycle flush retry instead of throwing from a timer/dispose.
+        _autosavePending = true;
+        debugPrint('FieldFindings autosave deferred — $e');
+      }
+    }());
+  }
+
+  Future<void> _handleContinue() async {
+    if (_isSaving) return;
+    HapticFeedback.selectionClick();
+    setState(() => _isSaving = true);
+    var ok = false;
+    try {
+      ok = await _syncControllersAndSave();
+    } catch (_) {
+      // Keep the typed evidence visible if ownership or local storage fails.
+    }
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not save findings on this device. Keep this screen open, check available storage and try again.',
+          ),
+        ),
+      );
+      return;
+    }
     InspectionProgress.instance.markStepComplete(5);
-    // Issue 4 fix — same rationale as capture_photo_screen.dart's
-    // _finishAndContinue: findings never auto-saved on normal forward
-    // progress before, only on exit/rework-save/final-submit. Now has
-    // its own outbox fallback too (enqueueFindingsUpdate).
-    context.read<InspectionProvider>().saveStepFindings();
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)),
@@ -97,8 +160,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
             discrepancyTitle,
             discrepancyDetail,
           ].where((s) => s.isNotEmpty).join(' — ');
-    final provider = context.read<InspectionProvider>();
-    provider.updateFindings(
+    _provider.updateFindings(
       actualLandUse: widget.task.landUseClass,
       notes: _notesController.text.trim(),
       discrepancies: discrepancies,
@@ -106,7 +168,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
       // Carries forward whatever GpsVerificationScreen actually recorded
       // in Step 2 (e.g. "Verified on-site — 6m from declared location")
       // instead of hardcoding a status that may not reflect reality.
-      boundaryStatus: provider.boundaryStatus,
+      boundaryStatus: _provider.boundaryStatus,
     );
   }
 
@@ -143,9 +205,11 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
     return SensitiveScreen(
       child: PopScope(
         canPop:
+            !_isSaving &&
             !context.read<InspectionProvider>().isReworkMode &&
             InspectionProgress.instance.currentStep > 1,
         onPopInvokedWithResult: (didPop, _) {
+          if (_isSaving) return;
           if (didPop) {
             _onExit();
             return;
@@ -165,11 +229,15 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
               subtitle: widget.task.location,
               stepNumber: 5,
               stepSubtitle: 'LOG OBSERVATIONS',
-              onBack: () => handleInspectionExit(
-                context,
-                onSaveProgress: _onExit,
-                isReworkMode: context.read<InspectionProvider>().isReworkMode,
-              ),
+              onBack: () => _isSaving
+                  ? null
+                  : handleInspectionExit(
+                      context,
+                      onSaveProgress: _onExit,
+                      isReworkMode: context
+                          .read<InspectionProvider>()
+                          .isReworkMode,
+                    ),
             ),
             action: Row(
               children: [
@@ -193,7 +261,11 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                                 Navigator.pop(context);
                               } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Save failed.')),
+                                  const SnackBar(
+                                    content: Text(
+                                      'Could not save findings on this device. Keep this screen open, check available storage and try again.',
+                                    ),
+                                  ),
                                 );
                               }
                             },
@@ -203,7 +275,9 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
                   Expanded(
                     child: FieldPrimaryButton(
                       label: 'Continue to Review',
-                      onPressed: _handleContinue,
+                      busy: _isSaving,
+                      busyLabel: 'Saving on device…',
+                      onPressed: _isSaving ? null : _handleContinue,
                     ),
                   ),
                 ],
@@ -219,6 +293,8 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
               ),
               TextField(
                 controller: _notesController,
+                readOnly: _isSaving,
+                onChanged: (_) => _scheduleAutosave(),
                 maxLines: 4,
                 minLines: 3,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),
@@ -250,32 +326,37 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
               ],
               const SizedBox(height: 20),
               const FieldSectionHeading(
-                title: 'Discrepancies',
+                title: 'Discrepancies / assessment explanation',
                 hint:
-                    'Optional. Leave these fields blank if no issues were found.',
+                    'Optional. Leave these fields blank if no issues were found. Required for any non-Compliant assessment: describe what was observed and why it differs or needs review/reinspection.',
                 hintSize: 12.5,
                 bottomSpacing: 8,
               ),
               TextField(
                 controller: _discrepancyTitleController,
+                readOnly: _isSaving,
+                onChanged: (_) => _scheduleAutosave(),
                 maxLines: 2,
                 minLines: 1,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),
                 decoration: InsightTheme.compactFormInput.copyWith(
-                  labelText: 'Issue title',
+                  labelText: 'Issue title (optional)',
                   hintText: 'Brief description of the issue',
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _discrepancyDetailController,
+                readOnly: _isSaving,
+                onChanged: (_) => _scheduleAutosave(),
                 minLines: 2,
                 maxLines: 5,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),
                 decoration: InsightTheme.compactFormInput.copyWith(
                   labelText: 'Issue details',
                   alignLabelWithHint: true,
-                  hintText: 'Location and supporting details',
+                  hintText:
+                      'What was observed, where, and why it differs or needs follow-up',
                 ),
               ),
               const SizedBox(height: 20),
@@ -288,6 +369,8 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen> {
               ),
               TextField(
                 controller: _recommendationsController,
+                readOnly: _isSaving,
+                onChanged: (_) => _scheduleAutosave(),
                 maxLines: 3,
                 minLines: 2,
                 style: InsightTheme.inter(16, c: InsightTheme.ink),

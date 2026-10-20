@@ -38,6 +38,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   final TextEditingController _notesController = TextEditingController();
   CameraController? _cameraController;
   Future<void>? _initializeControllerFuture;
+  String? _cameraError;
   Position? _currentPosition;
   String? _capturedPhotoPath;
   bool _isCapturing = false;
@@ -68,7 +69,48 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint('Camera init error: $e');
+      if (mounted) {
+        setState(() {
+          _cameraError =
+              'Camera unavailable. Allow camera access for FieldSync in your '
+              'device settings, then try again, or add a photo from the gallery.';
+        });
+      }
     }
+  }
+
+  Widget _cameraUnavailable() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.no_photography_outlined,
+              size: 40,
+              color: InsightTheme.ink3,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _cameraError ??
+                  'Camera unavailable. Allow camera access for FieldSync in '
+                      'your device settings, then try again, or add a photo '
+                      'from the gallery.',
+              textAlign: TextAlign.center,
+              style: InsightTheme.openSans(13, c: InsightTheme.ink2, h: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () {
+                setState(() => _isCameraMode = false);
+              },
+              child: const Text('Use gallery instead'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _fetchLocation() async {
@@ -106,7 +148,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _capturePhoto() async {
-    if (_cameraController == null || !_cameraController!.value.isInitialized || _isCapturing) return;
+    if (_cameraController == null ||
+        !_cameraController!.value.isInitialized ||
+        _isCapturing) {
+      return;
+    }
     setState(() => _isCapturing = true);
     try {
       final xFile = await _cameraController!.takePicture();
@@ -125,7 +171,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       await savedFile.writeAsBytes(geotaggedBytes);
       if (mounted) setState(() => _capturedPhotoPath = savedFile.path);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      }
     } finally {
       if (mounted) setState(() => _isCapturing = false);
     }
@@ -430,7 +480,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
                 return SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                   padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: 16),
                   child: Column(
                     children: [
                       Padding(
@@ -482,7 +532,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                           height: previewHeight,
                           decoration: BoxDecoration(
                             color: Colors.black,
-                             borderRadius: InsightTheme.roundedLg,
+                            borderRadius: InsightTheme.roundedLg,
                             border: Border.all(
                               color: Colors.white.withValues(alpha: 0.14),
                               width: 1.2,
@@ -546,38 +596,51 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                           ),
                         ),
                       ),
-                       if (!hasCapturedPhoto && _initializeControllerFuture != null)
-                         Padding(
-                           padding: const EdgeInsets.only(top: 16),
-                           child: FutureBuilder<void>(
-                             future: _initializeControllerFuture,
-                             builder: (context, snapshot) => snapshot.connectionState != ConnectionState.done
-                                 ? const SizedBox.shrink()
-                                 : Semantics(
-                                     button: true,
-                                     label: 'Capture site photo',
-                                     child: GestureDetector(
-                                       onTap: _isCapturing ? null : _capturePhoto,
-                                       child: Container(
-                                         width: 78,
-                                         height: 78,
-                                         padding: const EdgeInsets.all(6),
-                                         decoration: BoxDecoration(
-                                           shape: BoxShape.circle,
-                                           border: Border.all(color: Colors.white, width: 4),
-                                         ),
-                                         child: _isCapturing
-                                             ? const CircularProgressIndicator(color: Colors.white)
-                                             : const DecoratedBox(decoration: BoxDecoration(
-                                                 color: Colors.white, shape: BoxShape.circle)),
-                                       ),
-                                     ),
-                                   ),
-                           ),
-                         ),
+                      if (!hasCapturedPhoto &&
+                          _initializeControllerFuture != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 16),
+                          child: FutureBuilder<void>(
+                            future: _initializeControllerFuture,
+                            builder: (context, snapshot) =>
+                                snapshot.connectionState != ConnectionState.done
+                                ? const SizedBox.shrink()
+                                : Semantics(
+                                    button: true,
+                                    label: 'Capture site photo',
+                                    child: GestureDetector(
+                                      onTap: _isCapturing
+                                          ? null
+                                          : _capturePhoto,
+                                      child: Container(
+                                        width: 78,
+                                        height: 78,
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 4,
+                                          ),
+                                        ),
+                                        child: _isCapturing
+                                            ? const CircularProgressIndicator(
+                                                color: Colors.white,
+                                              )
+                                            : const DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                        ),
                       if (hasCapturedPhoto) ...[
                         Padding(
-                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                           child: Container(
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(
@@ -615,14 +678,14 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                         Container(
-                           width: double.infinity,
-                           margin: const EdgeInsets.symmetric(horizontal: 16),
-                           padding: const EdgeInsets.all(16),
-                           decoration: BoxDecoration(
-                             color: InsightTheme.surface,
-                             borderRadius: InsightTheme.roundedMd,
-                             border: Border.all(color: InsightTheme.line),
+                        Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: InsightTheme.surface,
+                            borderRadius: InsightTheme.roundedMd,
+                            border: Border.all(color: InsightTheme.line),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -719,7 +782,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       );
     }
     if (_cameraController == null || _initializeControllerFuture == null) {
-      return const Center(child: ImapsLoadingIndicator(size: 60));
+      return _cameraUnavailable();
     }
     return FutureBuilder<void>(
       future: _initializeControllerFuture,
@@ -727,6 +790,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: ImapsLoadingIndicator(size: 60));
         }
+        if (snapshot.hasError) return _cameraUnavailable();
         return CameraPreview(_cameraController!);
       },
     );

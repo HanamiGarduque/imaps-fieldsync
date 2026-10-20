@@ -7,8 +7,6 @@ import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
-import '../../../core/services/supabase_service.dart';
-import '../../../core/services/sync_outbox_service.dart';
 import '../widgets/exit_confirm_dialog.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
@@ -29,23 +27,10 @@ class InspectionChecklistScreen extends StatefulWidget {
 }
 
 class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
-  // BUG FIX #4C — Summary Sync Lock / Form Update Mismatch.
-  // These used to be hardcoded defaults that ignored whatever real state
-  // InspectionProvider already had (loaded via startInspection's local
-  // draft recovery, or hydrateForRework for a reopened job). That's why the
-  // screen always rendered the same "3/5" regardless of what was actually
-  // saved, and why edits made here didn't stick. Now they're seeded from
-  // the provider on first frame.
-  final Map<String, bool> _siteCondition = {
-    'Structure matches declared use': true,
-    'Setback distances compliant': true,
-  };
+  // The provider owns both fresh and restored evidence; no second defaults.
+  final Map<String, bool> _siteCondition = {};
   bool _isSaving = false;
-  final Map<String, bool> _zoningObservations = {
-    'Accessibility & road frontage': true,
-    'Surrounding developments noted': false,
-    'Signage / commercial activity present': false,
-  };
+  final Map<String, bool> _zoningObservations = {};
 
   int get _doneCount =>
       _siteCondition.values.where((v) => v).length +
@@ -64,59 +49,32 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
       ..addAll(provider.zoningObservations);
   }
 
-  // Guards against a burst of rapid taps piling up out-of-order requests —
-  // only the latest call's result matters, so we don't need to await/queue
-  // each one, just make sure an older response can't clobber the DB after
-  // a newer one already landed.
-  int _syncSeq = 0;
-
-  /// Pushes the checklist as it stands right now to `field_jobs`, using the
-  /// same {'item','checked'} shape the final submit writes — so if the app
-  /// dies before Step 6, the ticks the inspector already made aren't lost,
-  /// and reopening this job for rework picks up mid-checklist state too.
-  /// This was `updateJobInspectionProgress()`'s original intended purpose;
-  /// it previously had zero callers.
-  Future<void> _syncChecklistProgress() async {
-    final mySeq = ++_syncSeq;
-    final checklist = [
-      ..._siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
-      ..._zoningObservations.entries.map(
-        (e) => {'item': e.key, 'checked': e.value},
-      ),
-    ];
+  Future<bool> _saveChecklist() async {
+    bool ok;
     try {
-      await SupabaseService.updateJobInspectionProgress(
-        jobId: widget.task.id,
-        updateData: {
-          'checklist_data': checklist,
-          'checklist_completed_count': _doneCount,
-          'checklist_total_count': _totalCount,
-        },
-      );
+      ok = await context.read<InspectionProvider>().saveStepChecklist();
     } catch (_) {
-      // Ignore stale results from superseded calls — a newer toggle
-      // already fired after this one.
-      if (mySeq != _syncSeq) return;
-      // Couldn't reach Supabase (e.g. offline) — queue it instead of just
-      // dropping the update. enqueueChecklistUpdate reuses one row per
-      // job, so repeated offline taps don't pile up duplicate queued
-      // rows — only the latest checklist state is kept. Step 6 submit
-      // still carries the authoritative checklist either way, so a
-      // failure here (queue included) never actually loses data.
-      try {
-        await SyncOutboxService.enqueueChecklistUpdate(
-          jobId: widget.task.id,
-          checklistData: checklist,
-          checklistCompletedCount: _doneCount,
-          checklistTotalCount: _totalCount,
-        );
-      } catch (_) {
-        // Nothing more we can do — safe to ignore, see comment above.
-      }
+      ok = false;
     }
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not save the checklist on this device. Keep this screen open, check available storage and try again.',
+          ),
+        ),
+      );
+    }
+    return ok;
   }
 
-  void _continueToFindings() {
+  Future<void> _continueToFindings() async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+    final ok = await _saveChecklist();
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    if (!ok) return;
     InspectionProgress.instance.markStepComplete(4);
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -136,9 +94,11 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
     return SensitiveScreen(
       child: PopScope(
         canPop:
+            !_isSaving &&
             !context.read<InspectionProvider>().isReworkMode &&
             InspectionProgress.instance.currentStep > 1,
         onPopInvokedWithResult: (didPop, _) {
+          if (_isSaving) return;
           if (didPop) {
             // Already popped natively (smooth swipe/hardware-back animation) —
             // fire the save in the background, nothing to block on here.
@@ -161,12 +121,17 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
               subtitle: widget.task.location,
               stepNumber: 4,
               stepSubtitle: 'VERIFY CRITERIA',
-              onBack: () => handleInspectionExit(
-                context,
-                onSaveProgress: () =>
-                    context.read<InspectionProvider>().saveStepChecklist(),
-                isReworkMode: context.read<InspectionProvider>().isReworkMode,
-              ),
+              onBack: () => _isSaving
+                  ? null
+                  : handleInspectionExit(
+                      context,
+                      onSaveProgress: () => context
+                          .read<InspectionProvider>()
+                          .saveStepChecklist(),
+                      isReworkMode: context
+                          .read<InspectionProvider>()
+                          .isReworkMode,
+                    ),
             ),
             action: Row(
               children: [
@@ -179,9 +144,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           ? null
                           : () async {
                               setState(() => _isSaving = true);
-                              final ok = await context
-                                  .read<InspectionProvider>()
-                                  .saveStepChecklist();
+                              final ok = await _saveChecklist();
                               if (!context.mounted) return;
                               setState(() => _isSaving = false);
                               // Issue 2 fix (Completed Category enhancement):
@@ -191,10 +154,6 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                               // "Continue" tap that doesn't apply here.
                               if (ok) {
                                 Navigator.pop(context);
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Save failed.')),
-                                );
                               }
                             },
                     ),
@@ -203,7 +162,9 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                   Expanded(
                     child: FieldPrimaryButton(
                       label: 'Continue to Findings',
-                      onPressed: _continueToFindings,
+                      busy: _isSaving,
+                      busyLabel: 'Saving on device…',
+                      onPressed: _isSaving ? null : _continueToFindings,
                     ),
                   ),
                 ],
@@ -212,7 +173,8 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
             children: [
               FieldSectionHeading(
                 title: 'Site condition',
-                hint: 'Check the statements that apply to this site.',
+                hint:
+                    'Check only statements you verified on-site. Unchecked means not affirmed, not automatically non-compliant.',
                 trailing: Text(
                   '$_doneCount of $_totalCount checked',
                   style: InsightTheme.inter(
@@ -239,6 +201,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       isChecked: e.value,
                       isLast: entry.key == _siteCondition.length - 1,
                       onTap: () {
+                        if (_isSaving) return;
                         // Persist through the provider FIRST: it refuses a write that is no
                         // longer owned by this session, and the visible
                         // checkbox must never diverge from that.
@@ -251,7 +214,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           return;
                         }
                         setState(() => _siteCondition[e.key] = !e.value);
-                        _syncChecklistProgress();
+                        _saveChecklist();
                       },
                     );
                   }).toList(),
@@ -260,7 +223,8 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
               const SizedBox(height: 24),
               const FieldSectionHeading(
                 title: 'Zoning observations',
-                  hint: 'Leave unchecked if a statement does not apply.',
+                hint:
+                    'Record what you verified. Explain any discrepancy or uncertainty in Findings; no minimum checked count is required here.',
               ),
               Container(
                 decoration: BoxDecoration(
@@ -281,6 +245,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           isChecked: e.value,
                           isLast: entry.key == _zoningObservations.length - 1,
                           onTap: () {
+                            if (_isSaving) return;
                             try {
                               context
                                   .read<InspectionProvider>()
@@ -291,7 +256,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                             setState(
                               () => _zoningObservations[e.key] = !e.value,
                             );
-                            _syncChecklistProgress();
+                            _saveChecklist();
                           },
                         );
                       })

@@ -224,7 +224,10 @@ class SyncOutboxService {
     final last = DateTime.tryParse('${action['updated_at']}');
     if (last == null) return true;
     final wait =
-        kAutomaticBackoff[(attempts - 1).clamp(0, kAutomaticBackoff.length - 1)];
+        kAutomaticBackoff[(attempts - 1).clamp(
+          0,
+          kAutomaticBackoff.length - 1,
+        )];
     return DateTime.now().difference(last) >= wait;
   }
 
@@ -321,6 +324,7 @@ class SyncOutboxService {
     required List<Map<String, dynamic>> checklistData,
     required int checklistCompletedCount,
     required int checklistTotalCount,
+    bool isRework = false,
   }) async {
     final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
@@ -329,6 +333,7 @@ class SyncOutboxService {
         'checklistData': checklistData,
         'checklistCompletedCount': checklistCompletedCount,
         'checklistTotalCount': checklistTotalCount,
+        'isRework': isRework,
       },
     );
     return DBHelper.enqueueAction(
@@ -392,6 +397,7 @@ class SyncOutboxService {
     required String inspectorNotes,
     String? activityId,
     String? activitySubtitle,
+    bool isRework = false,
   }) async {
     final uid = DBHelper.requireInspector();
     final payload = await _withConflictSnapshot(
@@ -403,6 +409,7 @@ class SyncOutboxService {
         'inspectorNotes': inspectorNotes,
         'activityId': activityId,
         'activitySubtitle': activitySubtitle,
+        'isRework': isRework || activityId != null,
       },
     );
     return DBHelper.enqueueAction(
@@ -533,8 +540,9 @@ class SyncOutboxService {
       // The row stays `pending` — "waiting for connection" — and no backoff
       // clock starts, because no remote call was ever made.
       if (!manual && !await hasConnection()) return;
-      final allActions =
-          await DBHelper.getActionableActions(includePaused: manual);
+      final allActions = await DBHelper.getActionableActions(
+        includePaused: manual,
+      );
       final scoped = onlyJobId == null
           ? allActions
           : allActions.where((a) => a['job_id'] == onlyJobId).toList();
@@ -565,12 +573,32 @@ class SyncOutboxService {
       var pausedCount = 0;
 
       for (var i = 0; i < actions.length; i++) {
-        final action = actions[i];
-        if (DBHelper.currentInspectorId != uid || action['inspector_id'] != uid) break;
+        var action = actions[i];
+        if (DBHelper.currentInspectorId != uid ||
+            action['inspector_id'] != uid) {
+          break;
+        }
         final id = action['id'] as String;
         final type = action['type'] as String;
         final jobId = action['job_id'] as String;
-        await DBHelper.markActionSyncing(id);
+        if (!await DBHelper.markActionSyncing(id, expected: action)) {
+          // An accepted Save rebases its still-pending siblings' revision
+          // bookkeeping in place. That is the same logical Save, not a
+          // replacement: re-read and claim it. A different payload (which
+          // carries a different/no activityId) stays untouched.
+          final fresh = await DBHelper.getOwnedAction(id);
+          final activity = _activityIdOf(action);
+          if (fresh == null ||
+              activity == null ||
+              fresh['type'] != type ||
+              fresh['job_id'] != jobId ||
+              fresh['inspector_id'] != uid ||
+              _activityIdOf(fresh) != activity) {
+            continue;
+          }
+          action = fresh;
+          if (!await DBHelper.markActionSyncing(id, expected: action)) continue;
+        }
         // Observers read durable state, so publish only after the claim lands.
         progress.value = SyncProgress(
           actionIndex: i + 1,
@@ -584,8 +612,10 @@ class SyncOutboxService {
           jobId: jobId,
           pendingActionId: id,
         );
+        var executed = false;
         try {
           await _executeAction(action);
+          executed = true;
           DBHelper.requireSameInspector(uid);
           await DBHelper.markActionSynced(id);
           await _recordSuccessfulSync();
@@ -622,30 +652,59 @@ class SyncOutboxService {
           if (e.result == InspectionAuthorityResult.notAssignedOrUnavailable) {
             await DBHelper.markActionConflict(id, e.result.message);
             conflictCount++;
-          } else if (e.result == InspectionAuthorityResult.authRequired) {
+          } else if (e.result == InspectionAuthorityResult.authRequired ||
+              e.result == InspectionAuthorityResult.serverRejected ||
+              e.result == InspectionAuthorityResult.localOwnershipIncomplete) {
             // Permanent: a session that no longer authorises this action will
             // not start authorising it on a retry. Paused, not retried, and
             // never described as a connection problem.
             await DBHelper.markActionPaused(id, e.result.message);
             pausedCount++;
           } else {
-            await DBHelper.markActionFailed(id, e.result.message);
+            final retryCount = (action['retry_count'] as int? ?? 0) + 1;
+            await DBHelper.markActionFailed(
+              id,
+              e.result.message,
+              reconciliationRequired: e is _AmbiguousSubmissionException,
+            );
+            if (retryCount >= kMaxAutomaticRemoteAttempts) {
+              await DBHelper.markActionPaused(
+                id,
+                'Sync paused after $retryCount failed attempts. Your data is '
+                'preserved — use Sync to try once more.',
+              );
+              pausedCount++;
+            }
             failCount++;
           }
+          await DBHelper.logSyncEvent(
+            eventType: 'upload_failed',
+            result: 'warning',
+            message: e.result.message,
+            jobId: jobId,
+            pendingActionId: id,
+            technicalDetails: {'authorityResult': e.result.name},
+          );
         } catch (e) {
           if (DBHelper.currentInspectorId != uid) break;
           debugPrint(
             'SyncOutboxService: action $id (${action['type']}) failed: $e',
           );
           final retryCount = (action['retry_count'] as int? ?? 0) + 1;
-          await DBHelper.markActionFailed(id, e.toString());
+          await DBHelper.markActionFailed(
+            id,
+            e.toString(),
+            reconciliationRequired: type == 'submit_inspection' && executed,
+          );
           if (retryCount >= kMaxAutomaticRemoteAttempts) {
             // Ceiling reached: count the attempt, stop automatic retries, and
             // keep the row with its evidence. Only an explicit user sync may
             // try it again.
-            await DBHelper.markActionPaused(id,
+            await DBHelper.markActionPaused(
+              id,
               'Sync paused after $retryCount failed attempts. Your data is '
-              'preserved — use Sync to try once more.');
+              'preserved — use Sync to try once more.',
+            );
             pausedCount++;
           }
           failCount++;
@@ -675,7 +734,7 @@ class SyncOutboxService {
       if (DBHelper.currentInspectorId != uid) return;
       await DBHelper.logSyncEvent(
         eventType: 'queue_finished',
-        result: failCount > 0
+        result: failCount > 0 || pausedCount > 0
             ? 'warning'
             : (conflictCount > 0 ? 'warning' : 'success'),
         message:
@@ -773,9 +832,13 @@ class SyncOutboxService {
       if (type == 'submit_inspection') {
         DBHelper.requireSameInspector(owner);
         final reconciled = await DBHelper.finalizeAcceptedOnlineInspection(
-          jobId, remoteResult: InspectionAuthorityResult.authorized);
+          jobId,
+          remoteResult: InspectionAuthorityResult.authorized,
+        );
         if (!reconciled) {
-          throw StateError('Accepted submission needs local reconciliation; preserved for recovery');
+          throw StateError(
+            'Accepted submission needs local reconciliation; preserved for recovery',
+          );
         }
       }
       return;
@@ -901,10 +964,19 @@ class SyncOutboxService {
           photoCount: photoPaths.length,
           locationLabel: payload['locationLabel'] as String?,
           submittedAt: action['created_at'] as String?,
+          activityId: action['id'] as String,
         );
+        if (submission == InspectionAuthorityResult.offlineOrUnverifiable) {
+          throw const _AmbiguousSubmissionException();
+        }
         submission.requireAuthorized();
         DBHelper.requireSameInspector(owner);
-        await DBHelper.finalizeAcceptedOnlineInspection(jobId, remoteResult: submission);
+        if (!await DBHelper.finalizeAcceptedOnlineInspection(
+          jobId,
+          remoteResult: submission,
+        )) {
+          throw const _AmbiguousSubmissionException();
+        }
         await _acknowledgeQueuedLocalPhotos(photosData);
         break;
       case 'checklist_update':
@@ -986,30 +1058,28 @@ class SyncOutboxService {
     }
   }
 
-  static bool _sameEvidence(dynamic a, dynamic b) {
-    if (a is Map && b is Map) {
-      return a.length == b.length &&
-          a.keys.every((k) => b.containsKey(k) && _sameEvidence(a[k], b[k]));
-    }
-    if (a is List && b is List) {
-      return a.length == b.length &&
-          List.generate(
-            a.length,
-            (i) => i,
-          ).every((i) => _sameEvidence(a[i], b[i]));
-    }
-    return a == b;
-  }
-
   /// The four evidence fields a findings action writes and reconciles.
-  static Map<String, dynamic> _findingsEvidence(
-    Map<String, dynamic> payload,
-  ) => {
-    'observations': payload['observations'],
-    'discrepancies': payload['discrepancies'],
-    'recommendations': payload['recommendations'],
-    'inspector_notes': payload['inspectorNotes'],
-  };
+  static Map<String, dynamic> _findingsEvidence(Map<String, dynamic> payload) =>
+      {
+        'observations': payload['observations'],
+        'discrepancies': payload['discrepancies'],
+        'recommendations': payload['recommendations'],
+        'inspector_notes': payload['inspectorNotes'],
+      };
+
+  /// The stable identity of one explicit Save action, independent of the
+  /// receipt/revision keys a successful predecessor rebases onto its payload.
+  static String? _activityIdOf(Map<String, dynamic> action) {
+    final raw = action['payload'];
+    if (raw is! String) return null;
+    try {
+      final payload = jsonDecode(raw);
+      final id = payload is Map ? payload['activityId'] : null;
+      return id is String && id.isNotEmpty ? id : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Explicit rework Saves have durable per-action component receipts. An
   /// accepted A can finish its activity even after B changed the evidence;
@@ -1023,42 +1093,72 @@ class SyncOutboxService {
     var remote = await SupabaseService.readOutboxRecoveryJob(jobId);
     DBHelper.requireSameInspector(owner);
     if (remote == null || remote['status'] != 'completed') {
-      throw _OutboxConflictException('Missing, reassigned or non-completed rework job');
+      throw _OutboxConflictException(
+        'Missing, reassigned or non-completed rework job',
+      );
     }
     final desired = _findingsEvidence(payload);
-    bool matches() => desired.entries.every((e) =>
-        remote!.containsKey(e.key) && _sameEvidence(remote[e.key], e.value));
+    bool matches() => desired.entries.every(
+      (e) =>
+          remote!.containsKey(e.key) &&
+          sameInspectionEvidence(remote[e.key], e.value),
+    );
     String revision(Map<String, dynamic> row) {
       final value = row['updated_at'];
       if (value is! String || DateTime.tryParse(value) == null) {
-        throw const InspectionAuthorityException(InspectionAuthorityResult.offlineOrUnverifiable);
+        throw const InspectionAuthorityException(
+          InspectionAuthorityResult.offlineOrUnverifiable,
+        );
       }
       return value;
     }
+
     if (payload['findingsEvidenceAccepted'] != true) {
       final before = revision(remote);
       final alreadySatisfied = matches();
       if (!alreadySatisfied) {
         // Retain conservative interrupted-completed evidence recovery.
         if (payload['r4RecoveryRequired'] == true) {
-          throw _OutboxConflictException('No defensible unchanged durable base for recovery');
+          throw _OutboxConflictException(
+            'No defensible unchanged durable base for recovery',
+          );
         }
-        final base = _knownGoodUpdatedAt[jobId] ?? payload[_conflictSnapshotKey] as String?;
-        if (payload[_forceSyncAnywayKey] != true && base != null &&
-            base.isNotEmpty && !_sameInstant(base, before)) {
-          throw _OutboxConflictException('Conflict detected: job changed on server before findings Save');
+        final base =
+            _knownGoodUpdatedAt[jobId] ??
+            payload[_conflictSnapshotKey] as String?;
+        if (payload[_forceSyncAnywayKey] != true &&
+            base != null &&
+            base.isNotEmpty &&
+            !_sameInstant(base, before)) {
+          throw _OutboxConflictException(
+            'Conflict detected: job changed on server before findings Save',
+          );
         }
-        remote = await SupabaseService.conditionalOutboxUpdate(jobId, before, 'completed', desired);
+        remote = await SupabaseService.conditionalOutboxUpdate(
+          jobId,
+          before,
+          'completed',
+          desired,
+        );
         DBHelper.requireSameInspector(owner);
-        if (remote == null || remote['id'] != jobId ||
-            remote['assigned_inspector_id'] != owner || !matches()) {
-          throw _OutboxConflictException('Conditional findings Save was not accepted');
+        if (remote == null ||
+            remote['id'] != jobId ||
+            remote['assigned_inspector_id'] != owner ||
+            !matches()) {
+          throw _OutboxConflictException(
+            'Conditional findings Save was not accepted',
+          );
         }
       }
-      await _checkpointFindings(action, payload,
+      await _checkpointFindings(
+        action,
+        payload,
         components: {'findingsEvidenceAccepted': true},
-        previousUpdatedAt: alreadySatisfied ? payload[_conflictSnapshotKey] as String? : before,
-        acceptedUpdatedAt: revision(remote));
+        previousUpdatedAt: alreadySatisfied
+            ? payload[_conflictSnapshotKey] as String?
+            : before,
+        acceptedUpdatedAt: revision(remote),
+      );
     }
     // An authoritative read can satisfy a marker whose response/checkpoint
     // was lost. Adopt that revision only while reconciling matching evidence,
@@ -1066,16 +1166,21 @@ class SyncOutboxService {
     String? markerRevision;
     if (remote['rework_started_at'] == null) {
       markerRevision = await SupabaseService.markReworkModified(
-        jobId: jobId, locationLabel: payload['activitySubtitle'] as String?,
-        expectedUpdatedAt: payload['findingsAcceptedUpdatedAt'] as String?);
+        jobId: jobId,
+        locationLabel: payload['activitySubtitle'] as String?,
+        expectedUpdatedAt: payload['findingsAcceptedUpdatedAt'] as String?,
+      );
     } else if (payload['findingsMarkerAccepted'] != true && matches()) {
       markerRevision = revision(remote);
     }
     DBHelper.requireSameInspector(owner);
-    await _checkpointFindings(action, payload,
+    await _checkpointFindings(
+      action,
+      payload,
       components: {'findingsMarkerAccepted': true},
       previousUpdatedAt: payload['findingsAcceptedUpdatedAt'] as String?,
-      acceptedUpdatedAt: markerRevision);
+      acceptedUpdatedAt: markerRevision,
+    );
     await _recordFindingsActivity(jobId, payload, owner);
   }
 
@@ -1088,12 +1193,20 @@ class SyncOutboxService {
   }) async {
     final jobId = action['job_id'] as String;
     // Capture the accepted revision before any marker/activity side effect.
-    if (acceptedUpdatedAt != null) _knownGoodUpdatedAt[jobId] = acceptedUpdatedAt;
+    if (acceptedUpdatedAt != null) {
+      _knownGoodUpdatedAt[jobId] = acceptedUpdatedAt;
+    }
     final updated = await DBHelper.recordFindingsAcceptance(
-      actionId: action['id'] as String, jobId: jobId,
-      inspectorId: action['inspector_id'] as String, components: components,
-      previousUpdatedAt: previousUpdatedAt, acceptedUpdatedAt: acceptedUpdatedAt);
-    payload..clear()..addAll(updated);
+      actionId: action['id'] as String,
+      jobId: jobId,
+      inspectorId: action['inspector_id'] as String,
+      components: components,
+      previousUpdatedAt: previousUpdatedAt,
+      acceptedUpdatedAt: acceptedUpdatedAt,
+    );
+    payload
+      ..clear()
+      ..addAll(updated);
   }
 
   /// Records one Save event after its evidence and marker are satisfied.
@@ -1133,7 +1246,9 @@ class SyncOutboxService {
     }
     if (type == 'submit_inspection' &&
         (remote['id'] != jobId || remote['assigned_inspector_id'] != owner)) {
-      throw _OutboxConflictException('Submission receipt belongs to another owner or round');
+      throw _OutboxConflictException(
+        'Submission receipt belongs to another owner or round',
+      );
     }
     final status = remote['status'] as String?;
     if (!{
@@ -1145,19 +1260,19 @@ class SyncOutboxService {
       throw _OutboxConflictException('Unsupported remote lifecycle');
     }
     final desired = <String, dynamic>{};
-    void fields(Map<String, String> mapping, {bool omitNull = false}) {
+    void fields(Map<String, String> mapping) {
       for (final entry in mapping.entries) {
         if (!payload.containsKey(entry.value)) {
           throw _OutboxConflictException('Missing queued ${entry.value}');
         }
-        if (!omitNull || payload[entry.value] != null) {
-          desired[entry.key] = payload[entry.value];
-        }
+        desired[entry.key] = payload[entry.value];
       }
     }
 
     bool matches() => desired.entries.every(
-      (e) => remote.containsKey(e.key) && _sameEvidence(remote[e.key], e.value),
+      (e) =>
+          remote.containsKey(e.key) &&
+          sameInspectionEvidence(remote[e.key], e.value),
     );
     final now = DateTime.now().toUtc().toIso8601String();
     switch (type) {
@@ -1288,7 +1403,7 @@ class SyncOutboxService {
             'discrepancies': 'discrepancies',
             'recommendations': 'recommendations',
             'inspector_notes': 'inspectorNotes',
-          }, omitNull: true);
+          });
           if (matches() &&
               status == 'completed' &&
               remote['submitted_at'] != null &&
@@ -1360,13 +1475,24 @@ class SyncOutboxService {
     }
     DBHelper.requireSameInspector(owner);
     if (type == 'submit_inspection' &&
-        (result['id'] != jobId || result['assigned_inspector_id'] != owner ||
-         result['status'] != 'completed' || result['current_step'] != 6 ||
-         !desired.entries.every((e) => result.containsKey(e.key) &&
-           (e.key == 'submitted_at'
-             ? result[e.key] is String && _sameInstant(e.value as String, result[e.key] as String)
-             : _sameEvidence(result[e.key], e.value))))) {
-      throw _OutboxConflictException('Conditional submission receipt does not prove accepted evidence');
+        (result['id'] != jobId ||
+            result['assigned_inspector_id'] != owner ||
+            result['status'] != 'completed' ||
+            result['current_step'] != 6 ||
+            !desired.entries.every(
+              (e) =>
+                  result.containsKey(e.key) &&
+                  (e.key == 'submitted_at'
+                      ? result[e.key] is String &&
+                            _sameInstant(
+                              e.value as String,
+                              result[e.key] as String,
+                            )
+                      : sameInspectionEvidence(result[e.key], e.value)),
+            ))) {
+      throw _OutboxConflictException(
+        'Conditional submission receipt does not prove accepted evidence',
+      );
     }
     if (type == 'findings_update') {
       await _recordFindingsActivity(jobId, payload, owner);
@@ -1441,4 +1567,11 @@ class _OutboxConflictException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Only a business submission attempt with an unknown receipt enters R4.
+/// A photo preflight failure is not evidence that the business write ran.
+class _AmbiguousSubmissionException extends InspectionAuthorityException {
+  const _AmbiguousSubmissionException()
+    : super(InspectionAuthorityResult.offlineOrUnverifiable);
 }

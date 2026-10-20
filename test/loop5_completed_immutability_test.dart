@@ -146,40 +146,40 @@ void main() {
         'assigned',
       );
       expect(
-      TaskItem.fromJob({...rows.first, 'is_self_scheduled': false}).category,
-      'Completed',
-    );
+        TaskItem.fromJob({...rows.first, 'is_self_scheduled': false}).category,
+        'Completed',
+      );
     },
   );
 
-  test(
-    'source contract preserves rework lifecycle and evidence-only writes',
-    () {
-      final service = File(
-        'lib/core/services/supabase_service.dart',
-      ).readAsStringSync();
-      final provider = File(
-        'lib/modules/inspection/providers/inspection_provider.dart',
-      ).readAsStringSync();
-      final rework = RegExp(
-        r'static Future<void> reopenForRework\([\s\S]*?(?=\n  // ─)',
-      ).firstMatch(service)!.group(0)!;
-      expect(rework, isNot(contains("'status': 'in_progress'")));
-      expect(rework, isNot(contains("'current_step'")));
-      expect(rework, isNot(contains("'submitted_at'")));
-      for (final evidence in [
-        "'checklist_data'",
-        "'observations'",
-        "'photo_paths'",
-      ]) {
-        expect(provider, contains(evidence));
-      }
-      final submit = RegExp(
-        r'static Future<InspectionAuthorityResult> submitInspection\([\s\S]*?(?=\n  // ─)',
-      ).firstMatch(service)!.group(0)!;
-      expect(submit, contains("'current_step': 6"));
-      expect(submit, contains('existingSubmittedAt ??'));
-      expect(submit, contains("'submitted_at': effectiveSubmittedAt"));
-    },
-  );
+  test('source contract preserves rework lifecycle and evidence-only writes', () {
+    final service = File(
+      'lib/core/services/supabase_service.dart',
+    ).readAsStringSync();
+    final provider = File(
+      'lib/modules/inspection/providers/inspection_provider.dart',
+    ).readAsStringSync();
+    final rework = RegExp(
+      r'static Future<void> reopenForRework\([\s\S]*?(?=\n  // ─)',
+    ).firstMatch(service)!.group(0)!;
+    expect(rework, isNot(contains("'status': 'in_progress'")));
+    expect(rework, isNot(contains("'current_step'")));
+    expect(rework, isNot(contains("'submitted_at'")));
+    final outbox = File(
+      'lib/core/services/sync_outbox_service.dart',
+    ).readAsStringSync();
+    // Per-step saves write the local snapshot first and deliver through the
+    // durable outbox, so the checklist evidence key lives there; the other
+    // evidence keys are still built in the provider.
+    expect(outbox, contains("'checklist_data'"));
+    for (final evidence in ["'observations'", "'photo_paths'"]) {
+      expect(provider, contains(evidence));
+    }
+    final submit = RegExp(
+      r'static Future<InspectionAuthorityResult> submitInspection\([\s\S]*?(?=\n  // ─)',
+    ).firstMatch(service)!.group(0)!;
+    expect(submit, contains("'current_step': 6"));
+    expect(submit, contains('existingSubmittedAt ??'));
+    expect(submit, contains("'submitted_at': effectiveSubmittedAt"));
+  });
 }

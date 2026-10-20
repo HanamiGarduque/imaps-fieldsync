@@ -595,129 +595,224 @@ void main() {
     },
   );
 
-  testWidgets('camera capture gates notes and saving, retakes, and returns saved evidence to the grid', (tester) async {
-    final semantics = tester.ensureSemantics();
-    final root = Platform.isWindows
-        ? Directory('${Platform.environment['LOCALAPPDATA']}/Temp/opencode')
-        : Directory.systemTemp;
-    final directory = root.createTempSync('fieldsync-camera-');
-    addTearDown(() => tester.runAsync(() => directory.delete(recursive: true)));
-    final raw = File('${directory.path}/raw.jpg')
-      ..writeAsBytesSync(image.encodeJpg(image.Image(width: 320, height: 480)));
-    const cameraChannel = MethodChannel('plugins.flutter.io/camera');
-    const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
-    binding.defaultBinaryMessenger.setMockMethodCallHandler(cameraChannel, (call) async {
-      switch (call.method) {
-        case 'availableCameras':
-          return [{'name': 'back', 'lensFacing': 'back', 'sensorOrientation': 90}];
-        case 'create':
-          return {'cameraId': 1};
-        case 'initialize':
-          binding.channelBuffers.push('flutter.io/cameraPlugin/camera1',
-            const StandardMethodCodec().encodeMethodCall(const MethodCall('initialized', {
-              'previewWidth': 320.0, 'previewHeight': 480.0,
-              'exposureMode': 'auto', 'focusMode': 'auto',
-              'exposurePointSupported': false, 'focusPointSupported': false,
-            })), (_) {});
-          return null;
-        case 'takePicture':
-          return raw.path;
-        case 'dispose':
-          return null;
-        default:
-          throw MissingPluginException(call.method);
-      }
-    });
-    binding.defaultBinaryMessenger.setMockMethodCallHandler(pathChannel,
-        (call) async => call.method == 'getApplicationDocumentsDirectory' ? directory.path : null);
-    addTearDown(() {
-      binding.defaultBinaryMessenger.setMockMethodCallHandler(cameraChannel, null);
-      binding.defaultBinaryMessenger.setMockMethodCallHandler(pathChannel, null);
-    });
-    await mount(tester, CapturePhotoScreen(task: task), const Size(360, 800), scale: 1);
-    await tester.tap(find.bySemanticsLabel('Add site photo'));
-    await tester.pumpAndSettle();
-    final shutter = find.bySemanticsLabel('Capture site photo');
-    expect(shutter, findsOneWidget);
-    expect(tester.getSize(shutter).shortestSide, greaterThanOrEqualTo(48));
-    expect(find.text('Photo notes'), findsNothing);
-    expect(find.text('Save Photo'), findsNothing);
-    expect(find.text('Retake'), findsNothing);
-    final preview = find.byType(Texture);
-    expect(tester.getRect(shutter).top, greaterThan(tester.getRect(preview).bottom),
-        reason: 'The shutter must not be obstructed by the preview/geotag overlay.');
-    Future<void> capture() async {
-      await tester.ensureVisible(shutter);
-      await tester.runAsync(() async {
-        await tester.tap(shutter);
-        for (var frame = 0; frame < 250 && find.text('Photo notes').evaluate().isEmpty; frame++) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-          await tester.pump();
+  testWidgets(
+    'camera capture gates notes and saving, retakes, and returns saved evidence to the grid',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final root = Platform.isWindows
+          ? Directory('${Platform.environment['LOCALAPPDATA']}/Temp/opencode')
+          : Directory.systemTemp;
+      final directory = root.createTempSync('fieldsync-camera-');
+      addTearDown(
+        () => tester.runAsync(() => directory.delete(recursive: true)),
+      );
+      final raw = File('${directory.path}/raw.jpg')
+        ..writeAsBytesSync(
+          image.encodeJpg(image.Image(width: 320, height: 480)),
+        );
+      const cameraChannel = MethodChannel('plugins.flutter.io/camera');
+      const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(cameraChannel, (
+        call,
+      ) async {
+        switch (call.method) {
+          case 'availableCameras':
+            return [
+              {'name': 'back', 'lensFacing': 'back', 'sensorOrientation': 90},
+            ];
+          case 'create':
+            return {'cameraId': 1};
+          case 'initialize':
+            binding.channelBuffers.push(
+              'flutter.io/cameraPlugin/camera1',
+              const StandardMethodCodec().encodeMethodCall(
+                const MethodCall('initialized', {
+                  'previewWidth': 320.0,
+                  'previewHeight': 480.0,
+                  'exposureMode': 'auto',
+                  'focusMode': 'auto',
+                  'exposurePointSupported': false,
+                  'focusPointSupported': false,
+                }),
+              ),
+              (_) {},
+            );
+            return null;
+          case 'takePicture':
+            return raw.path;
+          case 'dispose':
+            return null;
+          default:
+            throw MissingPluginException(call.method);
         }
       });
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        pathChannel,
+        (call) async => call.method == 'getApplicationDocumentsDirectory'
+            ? directory.path
+            : null,
+      );
+      addTearDown(() {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          cameraChannel,
+          null,
+        );
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          pathChannel,
+          null,
+        );
+      });
+      await mount(
+        tester,
+        CapturePhotoScreen(task: task),
+        const Size(360, 800),
+        scale: 1,
+      );
+      await tester.tap(find.bySemanticsLabel('Add site photo'));
       await tester.pumpAndSettle();
-      expect(find.text('Photo notes'), findsOneWidget);
-      expect(find.text('Save Photo'), findsOneWidget);
-      expect(shutter, findsNothing);
-    }
-    await capture();
-    await tester.tap(find.text('Retake'));
-    await tester.pumpAndSettle();
-    expect(find.text('Photo notes'), findsNothing);
-    expect(shutter, findsOneWidget);
-    await capture();
-    await tester.ensureVisible(find.byType(TextField));
-    await tester.enterText(find.byType(TextField), 'Local fixture photo notes');
-    await tester.ensureVisible(find.text('Save Photo'));
-    await tester.tap(find.text('Save Photo'));
-    await tester.pumpAndSettle();
-    final provider = tester.element(find.byType(CapturePhotoScreen)).read<InspectionProvider>();
-    expect(provider.capturedPhotos, hasLength(1));
-    expect(provider.capturedPhotos.single['notes'], 'Local fixture photo notes');
-    expect(File(provider.capturedPhotos.single['photoPath'] as String).existsSync(), isTrue);
-    expect(find.text('Capture Site Photo'), findsNothing);
-    expect(find.bySemanticsLabel(RegExp('View photo 1')), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    semantics.dispose();
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpAndSettle();
-  });
-
-  testWidgets('security status distinguishes enrollment from activated login and reports actual opening protection', (tester) async {
-    final storage = <String, String>{};
-    const secure = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
-    const localAuth = MethodChannel('plugins.flutter.io/local_auth');
-    binding.defaultBinaryMessenger.setMockMethodCallHandler(localAuth,
-        (call) async => call.method == 'getAvailableBiometrics' ? ['fingerprint'] : true);
-    addTearDown(() => binding.defaultBinaryMessenger.setMockMethodCallHandler(localAuth,
-        (call) async => call.method == 'getAvailableBiometrics' ? <String>[] : true));
-    binding.defaultBinaryMessenger.setMockMethodCallHandler(secure, (call) async {
-      final args = call.arguments as Map;
-      switch (call.method) {
-        case 'read': return storage[args['key']];
-        case 'write': storage[args['key'] as String] = args['value'] as String; return null;
-        case 'delete': storage.remove(args['key']); return null;
-        default: return null;
+      final shutter = find.bySemanticsLabel('Capture site photo');
+      expect(shutter, findsOneWidget);
+      expect(tester.getSize(shutter).shortestSide, greaterThanOrEqualTo(48));
+      expect(find.text('Photo notes'), findsNothing);
+      expect(find.text('Save Photo'), findsNothing);
+      expect(find.text('Retake'), findsNothing);
+      final preview = find.byType(Texture);
+      expect(
+        tester.getRect(shutter).top,
+        greaterThan(tester.getRect(preview).bottom),
+        reason:
+            'The shutter must not be obstructed by the preview/geotag overlay.',
+      );
+      Future<void> capture() async {
+        await tester.ensureVisible(shutter);
+        await tester.runAsync(() async {
+          await tester.tap(shutter);
+          for (
+            var frame = 0;
+            frame < 250 && find.text('Photo notes').evaluate().isEmpty;
+            frame++
+          ) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+            await tester.pump();
+          }
+        });
+        await tester.pumpAndSettle();
+        expect(find.text('Photo notes'), findsOneWidget);
+        expect(find.text('Save Photo'), findsOneWidget);
+        expect(shutter, findsNothing);
       }
-    });
-    addTearDown(() => binding.defaultBinaryMessenger.setMockMethodCallHandler(secure, (_) async => null));
-    final profile = UserProfile(id: 'ui-layout-inspector', fullName: 'Inspector', role: 'inspector');
-    await mount(tester, SecuritySettingsScreen(profile: profile), const Size(360, 800), scale: 1);
-    await tester.runAsync(() async {
-      await tester.tap(find.byType(Switch).first);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Pending Activation'), findsOneWidget);
-    expect(find.textContaining('Fingerprint Active'), findsNothing);
-    await SecurePrefsService.setBioConfirmed(true);
-    await SecurePrefsService.setBioRequireOnOpen(false);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await mount(tester, SecuritySettingsScreen(profile: profile), const Size(320, 640));
-    expect(find.text('Fingerprint Active'), findsOneWidget);
-    expect(find.textContaining('App opening protection off'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+
+      await capture();
+      await tester.tap(find.text('Retake'));
+      await tester.pumpAndSettle();
+      expect(find.text('Photo notes'), findsNothing);
+      expect(shutter, findsOneWidget);
+      await capture();
+      await tester.ensureVisible(find.byType(TextField));
+      await tester.enterText(
+        find.byType(TextField),
+        'Local fixture photo notes',
+      );
+      await tester.ensureVisible(find.text('Save Photo'));
+      await tester.tap(find.text('Save Photo'));
+      await tester.pumpAndSettle();
+      final provider = tester
+          .element(find.byType(CapturePhotoScreen))
+          .read<InspectionProvider>();
+      expect(provider.capturedPhotos, hasLength(1));
+      expect(
+        provider.capturedPhotos.single['notes'],
+        'Local fixture photo notes',
+      );
+      expect(
+        File(
+          provider.capturedPhotos.single['photoPath'] as String,
+        ).existsSync(),
+        isTrue,
+      );
+      expect(find.text('Capture Site Photo'), findsNothing);
+      expect(find.bySemanticsLabel(RegExp('View photo 1')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'security status distinguishes enrollment from activated login and reports actual opening protection',
+    (tester) async {
+      final storage = <String, String>{};
+      const secure = MethodChannel(
+        'plugins.it_nomads.com/flutter_secure_storage',
+      );
+      const localAuth = MethodChannel('plugins.flutter.io/local_auth');
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        localAuth,
+        (call) async =>
+            call.method == 'getAvailableBiometrics' ? ['fingerprint'] : true,
+      );
+      addTearDown(
+        () => binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          localAuth,
+          (call) async =>
+              call.method == 'getAvailableBiometrics' ? <String>[] : true,
+        ),
+      );
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(secure, (
+        call,
+      ) async {
+        final args = call.arguments as Map;
+        switch (call.method) {
+          case 'read':
+            return storage[args['key']];
+          case 'write':
+            storage[args['key'] as String] = args['value'] as String;
+            return null;
+          case 'delete':
+            storage.remove(args['key']);
+            return null;
+          default:
+            return null;
+        }
+      });
+      addTearDown(
+        () => binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          secure,
+          (_) async => null,
+        ),
+      );
+      final profile = UserProfile(
+        id: 'ui-layout-inspector',
+        fullName: 'Inspector',
+        role: 'inspector',
+      );
+      await mount(
+        tester,
+        SecuritySettingsScreen(profile: profile),
+        const Size(360, 800),
+        scale: 1,
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byType(Switch).first);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Pending Activation'), findsOneWidget);
+      expect(find.textContaining('Fingerprint Active'), findsNothing);
+      await SecurePrefsService.setBioConfirmed(true);
+      await SecurePrefsService.setBioRequireOnOpen(false);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await mount(
+        tester,
+        SecuritySettingsScreen(profile: profile),
+        const Size(320, 640),
+      );
+      expect(find.text('Fingerprint Active'), findsOneWidget);
+      expect(find.textContaining('App opening protection off'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('review groups each section in its own surface', (tester) async {
     await mount(
@@ -774,7 +869,7 @@ void main() {
         .fontSize!;
     for (final hint in [
       'Record the site condition, land use and notable features.',
-      'Optional. Leave these fields blank if no issues were found.',
+      'Optional. Leave these fields blank if no issues were found. Required for any non-Compliant assessment: describe what was observed and why it differs or needs review/reinspection.',
       'Describe any permits, follow-up or other recommended action.',
     ]) {
       final target = find.text(hint);
@@ -814,7 +909,17 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       expect(tester.widget<Text>(notes).maxLines, isNull);
-      expect(find.text(task.discrepancies!), findsOneWidget);
+      // The saved discrepancy is shown once read-only in the evidence recap
+      // and once in Step 6's editable explanation — the SAME stored value, so
+      // the two can never contradict each other.
+      expect(find.text(task.discrepancies!), findsNWidgets(2));
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('assessment-explanation')),
+          matching: find.text(task.discrepancies!),
+        ),
+        findsOneWidget,
+      );
       final submit = find.widgetWithText(ElevatedButton, 'Submit Inspection');
       await tester.scrollUntilVisible(
         submit,
@@ -898,10 +1003,16 @@ void main() {
         // baseline 48x24 text-link box (keyboard-focusable) rather than the
         // 48px-square floor reserved for standalone tap targets; a taller box
         // would push the two notice sentences apart again.
-        expect(tester.getSize(find.widgetWithText(TextButton, label)).width,
-            greaterThanOrEqualTo(48), reason: 'Legal links keep a 48px minimum width.');
-        expect(tester.getSize(find.widgetWithText(TextButton, label)).height,
-            lessThanOrEqualTo(24), reason: 'Inline links retain the documented compact text-link box.');
+        expect(
+          tester.getSize(find.widgetWithText(TextButton, label)).width,
+          greaterThanOrEqualTo(48),
+          reason: 'Legal links keep a 48px minimum width.',
+        );
+        expect(
+          tester.getSize(find.widgetWithText(TextButton, label)).height,
+          lessThanOrEqualTo(24),
+          reason: 'Inline links retain the documented compact text-link box.',
+        );
         // ignore: deprecated_member_use
         final flags = link()!.getSemanticsData().flagsCollection;
         expect(
@@ -945,13 +1056,17 @@ void main() {
       await tester.ensureVisible(find.byTooltip('Show passcode'));
       await tester.pumpAndSettle();
       final notice = tester.getRect(
-        find.ancestor(
-          of: find.text('Authorized MPDO personnel only.'),
-          matching: find.byType(Column),
-        ).first,
+        find
+            .ancestor(
+              of: find.text('Authorized MPDO personnel only.'),
+              matching: find.byType(Column),
+            )
+            .first,
       );
       final sentence = find.byKey(const ValueKey('login-legal-sentence'));
-      final lastLine = tester.getRect(find.text('Authorized MPDO personnel only.'));
+      final lastLine = tester.getRect(
+        find.text('Authorized MPDO personnel only.'),
+      );
       // Two 12px lines at 1.4 line-height need ~17px each; the notice should read
       // as one tight block. Anything past ~24px means a gap crept back in.
       expect(
@@ -969,8 +1084,11 @@ void main() {
       expect(find.text('Use your authorized inspector account.'), findsNothing);
       expect(find.text('Access your workspace'), findsOneWidget);
       final brand = tester.getRect(find.text('FieldSync'));
-      expect(brand.top, lessThan(notice.top),
-          reason: 'The app title must stay above the legal notice.');
+      expect(
+        brand.top,
+        lessThan(notice.top),
+        reason: 'The app title must stay above the legal notice.',
+      );
       expect(tester.takeException(), isNull);
     },
   );

@@ -40,18 +40,26 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   static const _statusOptions = [
     (title: 'Compliant', subtitle: 'Matches declared use, no issues'),
     (title: 'With Discrepancy', subtitle: 'Observed use differs from declared'),
-    (title: 'For Review', subtitle: 'Needs supervisor sign-off'),
-    (title: 'Requires Reinspection', subtitle: 'Site conditions incomplete'),
+    (
+      title: 'For Review',
+      subtitle: 'Needs Planning Officer review; not a non-compliance finding',
+    ),
+    (
+      title: 'Requires Reinspection',
+      subtitle: 'Needs another site visit; not a non-compliance finding',
+    ),
   ];
 
   late String _selectedStatus;
   bool _submitting = false;
   String? _localSaveError;
+  late final TextEditingController _explanationController;
 
   void _localSaveFailure(Object error) {
     if (!mounted) return;
-    final message = error is StateError &&
-        error.message.toString().startsWith('A final submission')
+    final message =
+        error is StateError &&
+            error.message.toString().startsWith('A final submission')
         ? error.message.toString()
         : 'Could not save locally. Your review and photos are still here. Please try again.';
     setState(() {
@@ -64,17 +72,108 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   void initState() {
     super.initState();
     _selectedStatus = context.read<InspectionProvider>().inspectionResult;
+    _explanationController = TextEditingController(
+      text: context.read<InspectionProvider>().discrepancies,
+    );
+  }
+
+  @override
+  void dispose() {
+    _explanationController.dispose();
+    super.dispose();
+  }
+
+  Future<bool> _saveReviewDraft() async {
+    try {
+      return await context.read<InspectionProvider>().saveAllInspectionState(
+        syncOnline: false,
+      );
+    } catch (e) {
+      _localSaveFailure(e);
+      return false;
+    }
+  }
+
+  void _showValidation(String message) {
+    setState(() => _localSaveError = message);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<bool> _confirmSubmission(InspectionProvider provider) async {
+    final answers = {...provider.siteCondition, ...provider.zoningObservations};
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            scrollable: true,
+            title: const Text('Confirm inspection assessment'),
+            content: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(widget.task.inspectionNo),
+                const SizedBox(height: 8),
+                Text(
+                  _selectedStatus,
+                  style: InsightTheme.inter(16, w: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  provider.discrepancies.trim().isEmpty
+                      ? 'No discrepancy / explanation recorded'
+                      : provider.discrepancies,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '${answers.values.where((value) => value).length} of ${answers.length} checked — unchecked is not automatically non-compliant.',
+                ),
+                for (final answer in answers.entries)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '${answer.key}: ${answer.value ? 'Checked' : 'Unchecked'}',
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Text('${provider.capturedPhotos.length} photos attached'),
+                const SizedBox(height: 16),
+                const Text(
+                  'This is the inspector’s assessment, not an approval or rejection. The Planning Officer retains decision-making authority.',
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Keep editing'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Confirm & Submit'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   Future<void> _handleSubmit() async {
     if (_submitting) return;
     final provider = context.read<InspectionProvider>();
+    final validation = provider.assessmentValidationMessage;
+    if (validation != null) {
+      _showValidation(validation);
+      return;
+    }
     // Prove the session BEFORE disabling the button, so a lapsed session
     // leaves the screen usable with an explanation instead of a dead control.
     final String uid;
     try {
       provider.requireOwner();
-      if (!AuthService.isLoggedIn) throw StateError('Authenticated inspector required');
+      if (!AuthService.isLoggedIn) {
+        throw StateError('Authenticated inspector required');
+      }
       uid = DBHelper.requireInspector();
       if (provider.activeTask?.id != widget.task.id) {
         throw StateError('Review must belong to the active inspection round');
@@ -94,6 +193,12 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       _submitting = true;
       _localSaveError = null;
     });
+    final confirmed = await _confirmSubmission(provider);
+    if (!mounted) return;
+    if (!confirmed) {
+      setState(() => _submitting = false);
+      return;
+    }
     try {
       // Local first: even a later enqueue failure cannot discard this review's
       // checklist, findings, photos or previously reached step.
@@ -123,123 +228,83 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
         .where((p) => (p['photoPath'] as String?)?.isNotEmpty == true)
         .toList();
 
-    final observations =
-        'Actual land use: ${provider.actualLandUse}. Boundary status: ${provider.boundaryStatus}.';
-
-    // Mark before the first remote attempt. Even if the upload or queue write
-    // fails, the delete path must not treat this photo as safely local-only.
-    provider.markPhotosSubmitted();
-
-    // Try the real thing first — unchanged happy path when online.
-    bool queuedOffline = false;
-    bool requiresReview = false;
-    var submission = InspectionAuthorityResult.offlineOrUnverifiable;
+    Map<String, dynamic> action;
     try {
-      final preserved = await DBHelper.getSyncCenterQueueActions();
       DBHelper.requireSameInspector(uid);
-      if (preserved.any((a) => a['job_id'] == widget.task.id &&
-          a['type'] == 'submit_inspection')) {
-        // Restart/re-entry must recognize durable intent before any upload or
-        // business write. Enqueue below checks identical evidence atomically.
-        throw const InspectionAuthorityException(
-          InspectionAuthorityResult.offlineOrUnverifiable);
-      }
-      if (!await SyncOutboxService.hasConnection()
-          .timeout(const Duration(seconds: 2))) {
-        throw const InspectionAuthorityException(
-          InspectionAuthorityResult.offlineOrUnverifiable);
-      }
-      final photoPaths = await SupabaseService.uploadInspectionPhotos(
-        jobId: widget.task.id,
-        photosData: photosData,
-      );
-      DBHelper.requireSameInspector(uid);
-
-      submission = await SupabaseService.submitInspection(
+      // Journal one immutable intent BEFORE remote work, online as well as
+      // offline. Lost acknowledgements now share the outbox recovery identity.
+      await SyncOutboxService.enqueueSubmitInspection(
         jobId: widget.task.id,
         findings: provider.notes,
         isCompliant: _selectedStatus == 'Compliant',
         inspectionResult: _selectedStatus,
-        observations: observations,
-        discrepancies: provider.discrepancies.isNotEmpty
-            ? provider.discrepancies
-            : null,
-        recommendations: provider.recommendations.isNotEmpty
-            ? provider.recommendations
-            : null,
+        observations: provider.observations,
+        discrepancies: provider.discrepancies.trim().isEmpty
+            ? null
+            : provider.discrepancies,
+        recommendations: provider.recommendations.trim().isEmpty
+            ? null
+            : provider.recommendations,
         inspectorNotes: provider.notes,
         checklistData: checklist,
         checklistCompletedCount: checklistCompleted,
         checklistTotalCount: checklist.length,
-        photoPaths: photoPaths,
-        photoCount: photoPaths.length,
+        photosData: photosData,
         locationLabel: widget.task.location,
       );
-      submission.requireAuthorized();
+      DBHelper.requireSameInspector(uid);
+      final queued = await DBHelper.getSyncCenterQueueActions();
+      // A concurrently running reconnect drain can already have acknowledged
+      // this intent. Retained owner-scoped receipts are not a missing save.
+      final candidates = [
+        ...queued,
+        ...await DBHelper.getRecentSyncedActions(limit: 50),
+      ];
+      DBHelper.requireSameInspector(uid);
+      action = candidates.firstWhere(
+        (row) =>
+            row['job_id'] == widget.task.id &&
+            row['type'] == 'submit_inspection',
+      );
+      provider.markPhotosSubmitted();
     } catch (e) {
-      // Couldn't reach Supabase (or a photo failed mid-upload) — rather
-      // than lose everything the inspector just entered, queue the whole
-      // submission (including the still-local photo paths) in the
-      // FieldSync outbox and let them finish. It'll upload the photos and
-      // submit for real once connectivity returns.
-      try {
-        DBHelper.requireSameInspector(uid);
-        if (e is InspectionAuthorityException) submission = e.result;
-        await SyncOutboxService.enqueueSubmitInspection(
-          jobId: widget.task.id,
-          findings: provider.notes,
-          isCompliant: _selectedStatus == 'Compliant',
-          inspectionResult: _selectedStatus,
-          observations: observations,
-          discrepancies: provider.discrepancies.isNotEmpty
-              ? provider.discrepancies
-              : null,
-          recommendations: provider.recommendations.isNotEmpty
-              ? provider.recommendations
-              : null,
-          inspectorNotes: provider.notes,
-          checklistData: checklist,
-          checklistCompletedCount: checklistCompleted,
-          checklistTotalCount: checklist.length,
-          photosData: photosData,
-          locationLabel: widget.task.location, // UPDATED: Passing photosData
-          preserveOnly:
-              submission ==
-                  InspectionAuthorityResult.notAssignedOrUnavailable ||
-              submission == InspectionAuthorityResult.authRequired,
-        );
-        queuedOffline = true;
-        final preserved = await DBHelper.getSyncCenterQueueActions();
-        DBHelper.requireSameInspector(uid);
-        requiresReview = preserved.any((a) => a['job_id'] == widget.task.id &&
-          a['type'] == 'submit_inspection' &&
-          const ['conflict', 'paused'].contains(a['status']));
-      } catch (saveError) {
-        _localSaveFailure(saveError);
-        return;
-      }
+      _localSaveFailure(e);
+      return;
     }
 
-    // Remote acceptance has already succeeded. Local cleanup must never enter
-    // the catch above and enqueue/retry that successful business submission.
+    try {
+      // Do not wait for a reconnect or manual tap when delivery can succeed now.
+      await SyncOutboxService.drain(onlyJobId: widget.task.id);
+    } catch (_) {
+      // The exact durable intent above remains recoverable in Sync Center.
+    }
     if (DBHelper.currentInspectorId != uid) {
       if (mounted) setState(() => _submitting = false);
       return;
     }
-    if (!queuedOffline && !provider.isReworkMode) {
-      final cleaned = await DBHelper.finalizeAcceptedOnlineInspection(
-        widget.task.id,
-        remoteResult: submission,
+    final Map<String, dynamic>? receipt;
+    try {
+      receipt = await DBHelper.getOwnedAction(action['id'] as String);
+      DBHelper.requireSameInspector(uid);
+    } catch (e) {
+      _localSaveFailure(e);
+      return;
+    }
+    if (!mounted) return;
+    if (receipt == null) {
+      _localSaveFailure(StateError('Submission receipt could not be read'));
+      return;
+    }
+    final queuedOffline = receipt['status'] != 'synced';
+    final requiresReview = receipt['status'] == 'conflict';
+    if (receipt['status'] == 'paused') {
+      setState(() => _submitting = false);
+      _showValidation(
+        'Saved on this device, but not accepted by the server. '
+        'Delivery is paused. Review your assessment and assignment in Sync Center, '
+        'sign in again if needed, or contact the Planning Office before retrying.',
       );
-      if (!cleaned && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Inspection submitted. Local cache cleanup will retry on refresh.',
-            ),
-          ),
-        );
-      }
+      return;
     }
 
     if (!queuedOffline) InspectionProgress.instance.markStepComplete(6);
@@ -288,7 +353,9 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
           // Findings/checklist/photos are already persisted by their own
           // steps by the time an inspector reaches Review — nothing new to
           // save here, just confirm and keep the task under Ongoing.
-          handleInspectionExit(context, onSaveProgress: () async => true);
+          if (!_submitting) {
+            handleInspectionExit(context, onSaveProgress: _saveReviewDraft);
+          }
         },
         child: Scaffold(
           backgroundColor: InsightTheme.bg,
@@ -299,10 +366,12 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               subtitle: widget.task.location,
               stepNumber: 6,
               stepSubtitle: 'FINALIZE REPORT',
-              onBack: () => handleInspectionExit(
-                context,
-                onSaveProgress: () async => true,
-              ),
+              onBack: () => _submitting
+                  ? null
+                  : handleInspectionExit(
+                      context,
+                      onSaveProgress: _saveReviewDraft,
+                    ),
             ),
             action: FieldPrimaryButton(
               label: 'Submit Inspection',
@@ -316,8 +385,10 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   liveRegion: true,
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(_localSaveError!,
-                      style: InsightTheme.inter(14, c: InsightTheme.redInk)),
+                    child: Text(
+                      _localSaveError!,
+                      style: InsightTheme.inter(14, c: InsightTheme.redInk),
+                    ),
                   ),
                 ),
               FieldSectionHeading(
@@ -344,7 +415,9 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   ),
                   _SummaryRow(
                     label: 'Assessment',
-                    value: _selectedStatus,
+                    value: _selectedStatus.isEmpty
+                        ? 'Not selected'
+                        : _selectedStatus,
                     isLast: true,
                   ),
                 ],
@@ -355,60 +428,101 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   title: 'Attached photos',
                   hint: 'Tap a photo to inspect the full image.',
                   bottomSpacing: 8,
-                  trailing: Text('${provider.capturedPhotos.length} photos',
-                    style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                  trailing: Text(
+                    '${provider.capturedPhotos.length} photos',
+                    style: InsightTheme.inter(
+                      13,
+                      w: FontWeight.w600,
+                      c: InsightTheme.blueInk,
+                    ),
+                  ),
                 ),
                 FieldReadOnlyCard(
                   padding: const EdgeInsets.all(12),
                   children: [
                     SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        for (var i = 0; i < provider.capturedPhotos.length; i++) ...[
-                          if (i > 0) const SizedBox(width: 12),
-                          Builder(builder: (context) {
-                          final paths = inspectionDisplayPaths(
-                            provider.capturedPhotos
-                                .map((p) => p['photoPath'] as String? ?? '')
-                                .toList(),
-                            widget.task.id,
-                            widget.task.photoDetails,
-                            widget.task.photoPaths,
-                          );
-                          return Semantics(
-                            button: true,
-                            label: 'View photo ${i + 1}',
-                            child: SizedBox(width: 128,
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  borderRadius: InsightTheme.roundedSm,
-                                  onTap: () => openFullscreenPhotoViewer(
-                                    context,
-                                    paths,
-                                    i,
-                                  ),
-                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                    ClipRRect(
-                                      borderRadius: InsightTheme.roundedSm,
-                                      child: SizedBox(height: 100, width: 128,
-                                        child: AdaptivePhotoImage(path: paths[i])),
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (
+                            var i = 0;
+                            i < provider.capturedPhotos.length;
+                            i++
+                          ) ...[
+                            if (i > 0) const SizedBox(width: 12),
+                            Builder(
+                              builder: (context) {
+                                final paths = inspectionDisplayPaths(
+                                  provider.capturedPhotos
+                                      .map(
+                                        (p) => p['photoPath'] as String? ?? '',
+                                      )
+                                      .toList(),
+                                  widget.task.id,
+                                  widget.task.photoDetails,
+                                  widget.task.photoPaths,
+                                );
+                                return Semantics(
+                                  button: true,
+                                  label: 'View photo ${i + 1}',
+                                  child: SizedBox(
+                                    width: 128,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: InsightTheme.roundedSm,
+                                        onTap: () => openFullscreenPhotoViewer(
+                                          context,
+                                          paths,
+                                          i,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            ClipRRect(
+                                              borderRadius:
+                                                  InsightTheme.roundedSm,
+                                              child: SizedBox(
+                                                height: 100,
+                                                width: 128,
+                                                child: AdaptivePhotoImage(
+                                                  path: paths[i],
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons.camera_alt_outlined,
+                                                  size: 14,
+                                                  color: InsightTheme.ink2,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Text(
+                                                    'Photo ${i + 1}',
+                                                    style: InsightTheme.inter(
+                                                      12,
+                                                      c: InsightTheme.ink2,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
-                                    const SizedBox(height: 6),
-                                    Row(children: [
-                                      const Icon(Icons.camera_alt_outlined, size: 14, color: InsightTheme.ink2),
-                                      const SizedBox(width: 6),
-                                      Expanded(child: Text('Photo ${i + 1}',
-                                        style: InsightTheme.inter(12, c: InsightTheme.ink2))),
-                                    ]),
-                                  ]),
-                                ),
-                              ),
+                                  ),
+                                );
+                              },
                             ),
-                          );
-                          }),
+                          ],
                         ],
-                      ]),
+                      ),
                     ),
                   ],
                 ),
@@ -445,8 +559,14 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                 FieldSectionHeading(
                   title: 'Checklist answers',
                   bottomSpacing: 8,
-                  trailing: Text('$checklistDone/$checklistTotal checked',
-                    style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                  trailing: Text(
+                    '$checklistDone/$checklistTotal checked',
+                    style: InsightTheme.inter(
+                      13,
+                      w: FontWeight.w600,
+                      c: InsightTheme.blueInk,
+                    ),
+                  ),
                 ),
                 FieldReadOnlyCard(
                   children: [
@@ -476,7 +596,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                     compact: true,
                   ),
                   _SummaryRow(
-                    label: 'Discrepancies',
+                    label: 'Discrepancies / assessment explanation',
                     value: provider.discrepancies.isEmpty
                         ? 'No discrepancies recorded'
                         : provider.discrepancies,
@@ -496,7 +616,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               const FieldSectionHeading(
                 title: 'Final assessment',
                 hint:
-                    'Select the assessment that best reflects your inspection.',
+                    'Choose explicitly. This is an inspector assessment, not the Planning Officer’s approval or rejection.',
               ),
               ..._statusOptions.map(
                 (o) => _ResultOption(
@@ -504,11 +624,41 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   subtitle: o.subtitle,
                   isSelected: _selectedStatus == o.title,
                   onTap: () {
+                    if (_submitting) return;
                     HapticFeedback.selectionClick();
                     setState(() => _selectedStatus = o.title);
                     context.read<InspectionProvider>().updateResult(o.title);
+                    _saveReviewDraft();
                   },
                 ),
+              ),
+              const SizedBox(height: 8),
+              const FieldSectionHeading(
+                title: 'Assessment explanation',
+                hint:
+                    'The same details recorded in Step 5. For any non-Compliant outcome, explain what was observed and why it differs or needs follow-up. Review/reinspection alone does not prove non-compliance.',
+                bottomSpacing: 8,
+              ),
+              TextField(
+                key: const ValueKey('assessment-explanation'),
+                controller: _explanationController,
+                readOnly: _submitting,
+                minLines: 3,
+                maxLines: 6,
+                decoration: InsightTheme.compactFormInput.copyWith(
+                  labelText: 'Shared Step 5 explanation',
+                  alignLabelWithHint: true,
+                ),
+                onChanged: (value) {
+                  provider.updateFindings(
+                    actualLandUse: provider.actualLandUse,
+                    notes: provider.notes,
+                    discrepancies: value,
+                    recommendations: provider.recommendations,
+                    boundaryStatus: provider.boundaryStatus,
+                  );
+                  _saveReviewDraft();
+                },
               ),
             ],
           ),
@@ -536,12 +686,22 @@ class _SummaryRow extends StatelessWidget {
     final text = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: InsightTheme.inter(checked == null ? 13 : 14,
-            c: checked == null ? InsightTheme.ink3 : InsightTheme.ink)),
+        Text(
+          label,
+          style: InsightTheme.inter(
+            checked == null ? 13 : 14,
+            c: checked == null ? InsightTheme.ink3 : InsightTheme.ink,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(value, style: InsightTheme.inter(checked == null ? 15 : 12.5,
+        Text(
+          value,
+          style: InsightTheme.inter(
+            checked == null ? 15 : 12.5,
             w: checked == null ? FontWeight.w500 : FontWeight.w400,
-            c: checked == null ? InsightTheme.ink : InsightTheme.ink2)),
+            c: checked == null ? InsightTheme.ink : InsightTheme.ink2,
+          ),
+        ),
       ],
     );
     return Container(
@@ -552,19 +712,37 @@ class _SummaryRow extends StatelessWidget {
             ? null
             : const Border(bottom: BorderSide(color: InsightTheme.line)),
       ),
-      child: checked == null ? text : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          width: 20, height: 20,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: checked! ? InsightTheme.blueTint : InsightTheme.surface,
-            border: Border.all(color: checked! ? InsightTheme.blue1.withValues(alpha: 0.2) : InsightTheme.lineStrong),
-          ),
-          child: checked! ? const Icon(Icons.check_rounded, size: 14, color: InsightTheme.blue1) : null,
-        ),
-        const SizedBox(width: 10),
-        Expanded(child: text),
-      ]),
+      child: checked == null
+          ? text
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: checked!
+                        ? InsightTheme.blueTint
+                        : InsightTheme.surface,
+                    border: Border.all(
+                      color: checked!
+                          ? InsightTheme.blue1.withValues(alpha: 0.2)
+                          : InsightTheme.lineStrong,
+                    ),
+                  ),
+                  child: checked!
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 14,
+                          color: InsightTheme.blue1,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: text),
+              ],
+            ),
     );
   }
 }
@@ -674,98 +852,105 @@ class SubmissionSuccessScreen extends StatelessWidget {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return SensitiveScreen(
       child: Scaffold(
-      backgroundColor: InsightTheme.bg,
-      body: FieldFormBody(
-        header: const SizedBox(height: 40),
-        action: FieldPrimaryButton(
-          label: 'Back to Home',
-          onPressed: () async {
-            try {
-              final uid = inspectorId ?? DBHelper.requireInspector();
-              DBHelper.requireSameInspector(uid);
-              final profile = await AuthService.getCachedProfileForCurrentInspector();
-              DBHelper.requireSameInspector(uid);
-              if (profile == null || profile.id != uid) {
-                throw StateError('Authorized local profile unavailable');
+        backgroundColor: InsightTheme.bg,
+        body: FieldFormBody(
+          header: const SizedBox(height: 40),
+          action: FieldPrimaryButton(
+            label: 'Back to Home',
+            onPressed: () async {
+              try {
+                final uid = inspectorId ?? DBHelper.requireInspector();
+                DBHelper.requireSameInspector(uid);
+                final profile =
+                    await AuthService.getCachedProfileForCurrentInspector();
+                DBHelper.requireSameInspector(uid);
+                if (profile == null || profile.id != uid) {
+                  throw StateError('Authorized local profile unavailable');
+                }
+                if (!context.mounted) return;
+                InspectionProgress.instance.reset();
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (_) => MainShellScreen(
+                      profile: profile,
+                      offlineSession: queuedOffline,
+                    ),
+                  ),
+                  (route) => false,
+                );
+              } catch (_) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Your saved submission is preserved. Sign in again to return Home.',
+                    ),
+                  ),
+                );
               }
-              if (!context.mounted) return;
-              InspectionProgress.instance.reset();
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (_) => MainShellScreen(
-                    profile: profile,
-                    offlineSession: queuedOffline,
-                  ),
-                ),
-                (route) => false,
-              );
-            } catch (_) {
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(
-                'Your saved submission is preserved. Sign in again to return Home.',
-              )));
-            }
-          },
-        ),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: InsightTheme.surface,
-              borderRadius: InsightTheme.roundedMd,
-              border: Border.all(color: InsightTheme.line),
-            ),
-            child: Column(
-              children: [
-                CircleAvatar(
-                  radius: 32,
-                  backgroundColor: queuedOffline
-                      ? InsightTheme.blueTint
-                      : InsightTheme.greenTint,
-                  child: Icon(
-                    queuedOffline
-                        ? Icons.cloud_off_rounded
-                        : Icons.check_rounded,
-                    color: queuedOffline
-                        ? InsightTheme.blueInk
-                        : InsightTheme.greenInk,
-                    size: 32,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  queuedOffline ? (requiresReview ? 'Saved Locally' : 'Saved Offline')
-                      : 'Inspection Submitted',
-                  textAlign: TextAlign.center,
-                  style: InsightTheme.urbanist(24, w: FontWeight.w800),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  queuedOffline
-                      ? (requiresReview
-                          ? 'Saved on this device. Delivery needs review in Sync Center; remote completion is not confirmed.'
-                          : 'Saved on this device. Pending Sync — remote completion is not confirmed. FieldSync will attempt delivery when connected; check Sync Center for updates.')
-                      : 'Your inspection was accepted by the server.',
-                  textAlign: TextAlign.center,
-                  style: InsightTheme.inter(14, c: InsightTheme.ink2),
-                ),
-                const SizedBox(height: 24),
-                _SummaryRow(label: 'Inspection reference', value: referenceNo),
-                _SummaryRow(
-                  label: 'Final assessment',
-                  value: finalStatus,
-                ),
-                _SummaryRow(
-                  label: 'Synchronization',
-                  value: queuedOffline ? (requiresReview ? 'Review needed' : 'Pending Sync')
-                      : 'Server accepted',
-                  isLast: true,
-                ),
-              ],
-            ),
+            },
           ),
-        ],
-      ),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: InsightTheme.surface,
+                borderRadius: InsightTheme.roundedMd,
+                border: Border.all(color: InsightTheme.line),
+              ),
+              child: Column(
+                children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: queuedOffline
+                        ? InsightTheme.blueTint
+                        : InsightTheme.greenTint,
+                    child: Icon(
+                      queuedOffline
+                          ? Icons.cloud_off_rounded
+                          : Icons.check_rounded,
+                      color: queuedOffline
+                          ? InsightTheme.blueInk
+                          : InsightTheme.greenInk,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    queuedOffline
+                        ? (requiresReview ? 'Saved Locally' : 'Saved Offline')
+                        : 'Inspection Submitted',
+                    textAlign: TextAlign.center,
+                    style: InsightTheme.urbanist(24, w: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    queuedOffline
+                        ? (requiresReview
+                              ? 'Saved on this device. Delivery needs review in Sync Center; remote completion is not confirmed.'
+                              : 'Saved on this device. Pending Sync — remote completion is not confirmed. FieldSync will attempt delivery when connected; check Sync Center for updates.')
+                        : 'Received by FieldSync / Supabase. Planning Officer-side iMAPS import is not yet confirmed.',
+                    textAlign: TextAlign.center,
+                    style: InsightTheme.inter(14, c: InsightTheme.ink2),
+                  ),
+                  const SizedBox(height: 24),
+                  _SummaryRow(
+                    label: 'Inspection reference',
+                    value: referenceNo,
+                  ),
+                  _SummaryRow(label: 'Final assessment', value: finalStatus),
+                  _SummaryRow(
+                    label: 'Synchronization',
+                    value: queuedOffline
+                        ? (requiresReview ? 'Review needed' : 'Pending Sync')
+                        : 'Server accepted',
+                    isLast: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -47,6 +47,54 @@ class SupabaseService {
     }
   }
 
+  /// Classify only known rejections. Unknown/transport outcomes still require
+  /// verification; never expose SQL, response details or exception text to UI.
+  static InspectionAuthorityResult _authorityFailure(Object error) {
+    if (error is InspectionAuthorityException) return error.result;
+    if (error is AuthException) return InspectionAuthorityResult.authRequired;
+    final code = error is PostgrestException
+        ? error.code
+        : error is StorageException
+        ? error.statusCode
+        : null;
+    if (const {
+      '401',
+      'PGRST301',
+      'PGRST302',
+      'PGRST303',
+      '28000',
+      '28P01',
+    }.contains(code)) {
+      return InspectionAuthorityResult.authRequired;
+    }
+    if (code != null &&
+        (code.startsWith('22') ||
+            code.startsWith('23') ||
+            const {
+              '400',
+              '403',
+              '405',
+              '409',
+              '413',
+              '415',
+              '422',
+              '42501',
+              'PGRST100',
+              'PGRST102',
+              'PGRST105',
+              'PGRST106',
+              'PGRST107',
+              'PGRST108',
+              'PGRST200',
+              'PGRST201',
+              'PGRST202',
+              'PGRST204',
+            }.contains(code))) {
+      return InspectionAuthorityResult.serverRejected;
+    }
+    return InspectionAuthorityResult.offlineOrUnverifiable;
+  }
+
   /// One authority-checked write. Zero returned rows are never success: only a
   /// current authoritative read can tell an idempotent no-op from lost or
   /// unverifiable authority.
@@ -59,15 +107,19 @@ class SupabaseService {
     if (uid == null) return InspectionAuthorityResult.authRequired;
     try {
       final rows = await write(uid).timeout(const Duration(seconds: 10));
-      if (client.auth.currentUser?.id != uid) return InspectionAuthorityResult.authRequired;
+      if (client.auth.currentUser?.id != uid) {
+        return InspectionAuthorityResult.authRequired;
+      }
       if (rows.length == 1 &&
           rows.single['id'] == jobId &&
           rows.single['assigned_inspector_id'] == uid) {
         return satisfied == null || satisfied(rows.single)
-          ? InspectionAuthorityResult.authorized
-          : InspectionAuthorityResult.offlineOrUnverifiable;
+            ? InspectionAuthorityResult.authorized
+            : InspectionAuthorityResult.offlineOrUnverifiable;
       }
-      if (rows.isNotEmpty) return InspectionAuthorityResult.offlineOrUnverifiable;
+      if (rows.isNotEmpty) {
+        return InspectionAuthorityResult.offlineOrUnverifiable;
+      }
       final row = await client
           .from('field_jobs')
           .select()
@@ -76,22 +128,23 @@ class SupabaseService {
           .maybeSingle()
           .retry(enabled: false)
           .timeout(const Duration(seconds: 10));
-      if (client.auth.currentUser?.id != uid) return InspectionAuthorityResult.authRequired;
-      if (row == null) return InspectionAuthorityResult.notAssignedOrUnavailable;
+      if (client.auth.currentUser?.id != uid) {
+        return InspectionAuthorityResult.authRequired;
+      }
+      if (row == null) {
+        return InspectionAuthorityResult.notAssignedOrUnavailable;
+      }
       if (row['id'] != jobId || row['assigned_inspector_id'] != uid) {
         return InspectionAuthorityResult.offlineOrUnverifiable;
       }
       return satisfied != null && satisfied(row)
-        ? InspectionAuthorityResult.authorized : InspectionAuthorityResult.offlineOrUnverifiable;
-    } on AuthException {
-      return InspectionAuthorityResult.authRequired;
-    } on PostgrestException catch (e) {
-      return const {'401','PGRST301','PGRST302','PGRST303','28000','28P01'}.contains(e.code)
-        ? InspectionAuthorityResult.authRequired : InspectionAuthorityResult.offlineOrUnverifiable;
-    } catch (_) {
-      return InspectionAuthorityResult.offlineOrUnverifiable;
+          ? InspectionAuthorityResult.authorized
+          : InspectionAuthorityResult.offlineOrUnverifiable;
+    } catch (e) {
+      return _authorityFailure(e);
     }
   }
+
   static Future<void> initialize() async {
     // Release builds fail before any network call when the bundled endpoint is
     // not a public HTTPS host; the message never echoes the configured value.
@@ -245,6 +298,10 @@ class SupabaseService {
           .exists(storagePath);
       return exists ? PhotoObjectState.exists : PhotoObjectState.missing;
     } catch (e) {
+      final result = _authorityFailure(e);
+      if (result != InspectionAuthorityResult.offlineOrUnverifiable) {
+        throw InspectionAuthorityException(result);
+      }
       debugPrint('Photo object existence check unknown for $storagePath: $e');
       return PhotoObjectState.unknown;
     }
@@ -493,11 +550,9 @@ class SupabaseService {
       } else {
         // A durable action's event: repeat delivery is a no-op, any other
         // failure must propagate so the caller can retry it.
-        await client.from('activity_log').upsert(
-          row,
-          onConflict: 'id',
-          ignoreDuplicates: true,
-        );
+        await client
+            .from('activity_log')
+            .upsert(row, onConflict: 'id', ignoreDuplicates: true);
       }
     } catch (e) {
       if (activityId != null) rethrow;
@@ -723,22 +778,25 @@ class SupabaseService {
     // The lifecycle predicate keeps a stale card/action a safe no-op after
     // another client completes the job: `completed` is excluded, so this can
     // never resurrect a finished round.
-    return _writeWithAuthority(jobId, (uid) => client
-        .from('field_jobs')
-        .update({
-          'scheduled_date': dateStr,
-          'is_self_scheduled': true,
-          'status': 'pending',
-        })
-        .eq('id', jobId)
-        .eq('assigned_inspector_id', uid)
-        .inFilter('status', ['assigned', 'in_progress'])
-        .select()
-        .retry(enabled: false),
+    return _writeWithAuthority(
+      jobId,
+      (uid) => client
+          .from('field_jobs')
+          .update({
+            'scheduled_date': dateStr,
+            'is_self_scheduled': true,
+            'status': 'pending',
+          })
+          .eq('id', jobId)
+          .eq('assigned_inspector_id', uid)
+          .inFilter('status', ['assigned', 'in_progress'])
+          .select()
+          .retry(enabled: false),
       satisfied: (row) =>
           row['scheduled_date'] == dateStr &&
           row['is_self_scheduled'] == true &&
-          row['status'] == 'pending');
+          row['status'] == 'pending',
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -767,14 +825,25 @@ class SupabaseService {
   //   and stepped away, without clobbering a status a later step already set.
   // ─────────────────────────────────────────────────────────────────────────
   static Future<InspectionAuthorityResult> markJobOngoing(String jobId) =>
-    _writeWithAuthority(jobId, (uid) => client
-          .from('field_jobs')
-          .update({'status': 'in_progress', 'started_at': DateTime.now().toUtc().toIso8601String()})
-          .eq('id', jobId)
-          .eq('assigned_inspector_id', uid)
-          .inFilter('status', kStartableTaskStatuses).select().retry(enabled: false),
-      satisfied: (row) => (row['status'] == 'in_progress' && row['started_at'] != null)
-        || (row['status'] == 'completed' && row['current_step'] == 6 && row['submitted_at'] != null));
+      _writeWithAuthority(
+        jobId,
+        (uid) => client
+            .from('field_jobs')
+            .update({
+              'status': 'in_progress',
+              'started_at': DateTime.now().toUtc().toIso8601String(),
+            })
+            .eq('id', jobId)
+            .eq('assigned_inspector_id', uid)
+            .inFilter('status', kStartableTaskStatuses)
+            .select()
+            .retry(enabled: false),
+        satisfied: (row) =>
+            (row['status'] == 'in_progress' && row['started_at'] != null) ||
+            (row['status'] == 'completed' &&
+                row['current_step'] == 6 &&
+                row['submitted_at'] != null),
+      );
 
   // ─────────────────────────────────────────────────────────────────────────
   // CONFIRM GPS ON-SITE  (GPS verification screen → marks job in_progress)
@@ -790,15 +859,21 @@ class SupabaseService {
       final confirmedAt = DateTime.now().toUtc().toIso8601String();
       // GPS is evidence. It may be corrected during completed-task rework,
       // but must never carry a lifecycle assignment that reopens the job.
-      final evidence = await _writeWithAuthority(jobId, (uid) => client
-          .from('field_jobs')
-          .update({
-            'confirmed_latitude': latitude,
-            'confirmed_longitude': longitude,
-            'gps_accuracy_m': accuracyMeters,
-            'gps_confirmed_at': confirmedAt,
-          })
-          .eq('id', jobId).eq('assigned_inspector_id', uid).select().retry(enabled: false));
+      final evidence = await _writeWithAuthority(
+        jobId,
+        (uid) => client
+            .from('field_jobs')
+            .update({
+              'confirmed_latitude': latitude,
+              'confirmed_longitude': longitude,
+              'gps_accuracy_m': accuracyMeters,
+              'gps_confirmed_at': confirmedAt,
+            })
+            .eq('id', jobId)
+            .eq('assigned_inspector_id', uid)
+            .select()
+            .retry(enabled: false),
+      );
       evidence.requireAuthorized();
       (await markJobOngoing(jobId)).requireAuthorized();
       await logActivity(
@@ -958,10 +1033,14 @@ class SupabaseService {
           }
         }
       } catch (e) {
+        final result = _authorityFailure(e);
+        if (result != InspectionAuthorityResult.offlineOrUnverifiable) {
+          throw InspectionAuthorityException(result);
+        }
         // An unknown metadata lookup is retryable. Never treat it as an
         // absent row: doing so could rewrite a historical stored value.
         throw PhotoRecoveryUnknownException(
-          'Photo metadata lookup is unknown: $e',
+          'Photo metadata could not be verified. Your local work is preserved.',
         );
       }
     }
@@ -1079,7 +1158,10 @@ class SupabaseService {
         }
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
-        if (e is InspectionAuthorityException) rethrow;
+        final result = _authorityFailure(e);
+        if (result != InspectionAuthorityResult.offlineOrUnverifiable) {
+          throw InspectionAuthorityException(result);
+        }
         failedPaths.add(path);
       }
     }
@@ -1087,7 +1169,7 @@ class SupabaseService {
     if (failedPaths.isNotEmpty) {
       throw Exception(
         '${failedPaths.length} of ${photosData.length} photo(s) failed to upload. '
-        'Check your connection and try submitting again.',
+        'Your local evidence is preserved. Review the photo evidence and retry.',
       );
     }
     _requireSession(uid);
@@ -1113,6 +1195,7 @@ class SupabaseService {
     int photoCount = 0,
     String? locationLabel,
     String? submittedAt,
+    String? activityId,
   }) async {
     final uid = client.auth.currentUser?.id;
     if (uid == null) return InspectionAuthorityResult.authRequired;
@@ -1122,58 +1205,91 @@ class SupabaseService {
       // boundary with a newer timestamp.
       final existing = await client
           .from('field_jobs')
-          .select('status,submitted_at')
+          .select()
           .eq('id', jobId)
           .eq('assigned_inspector_id', uid)
-          .maybeSingle();
-      if (client.auth.currentUser?.id != uid) return InspectionAuthorityResult.authRequired;
-      if (existing == null) return InspectionAuthorityResult.notAssignedOrUnavailable;
+          .maybeSingle()
+          .retry(enabled: false)
+          .timeout(const Duration(seconds: 10));
+      if (client.auth.currentUser?.id != uid) {
+        return InspectionAuthorityResult.authRequired;
+      }
+      if (existing == null) {
+        return InspectionAuthorityResult.notAssignedOrUnavailable;
+      }
+      if (existing['id'] != jobId || existing['assigned_inspector_id'] != uid) {
+        return InspectionAuthorityResult.offlineOrUnverifiable;
+      }
       final existingSubmittedAt = existing['submitted_at']?.toString();
       final effectiveSubmittedAt =
           existingSubmittedAt ??
           submittedAt ??
           DateTime.now().toUtc().toIso8601String();
-      final result = await _writeWithAuthority(jobId, (owner) => client
-          .from('field_jobs')
-          .update({
-            'status': 'completed',
-            'current_step': 6,
-            'findings': findings,
-            'is_compliant': isCompliant,
-            'inspection_result': inspectionResult,
-            'observations': ?observations,
-            'discrepancies': ?discrepancies,
-            'recommendations': ?recommendations,
-            'inspector_notes': ?inspectorNotes,
-            'checklist_data': ?checklistData,
-            'checklist_completed_count': checklistCompletedCount,
-            'checklist_total_count': checklistTotalCount,
-            'photo_paths': ?photoPaths,
-            'photo_count': photoCount,
-            'submitted_at': effectiveSubmittedAt,
-            // Rework redesign: Review & Submit is the one finalize point,
-            // for both a normal submit (already null — harmless) and a
-            // rework resubmit (clears the "Modified" signal). status was
-            // already 'completed' the whole time it was being reworked,
-            // so this update is really "confirm the new revision," not
-            // "close out an in-progress task."
-            'rework_started_at': null,
-          })
-          .eq('id', jobId).eq('assigned_inspector_id', owner).select().retry(enabled: false),
-        satisfied: (row) => row['status'] == 'completed' && row['current_step'] == 6
-          && row['submitted_at'] != null && row['findings'] == findings
-          && row['inspection_result'] == inspectionResult && row['is_compliant'] == isCompliant);
+      final evidence = <String, dynamic>{
+        'findings': findings,
+        'is_compliant': isCompliant,
+        'inspection_result': inspectionResult,
+        'observations': observations,
+        'discrepancies': discrepancies,
+        'recommendations': recommendations,
+        'inspector_notes': inspectorNotes,
+        'checklist_data': checklistData,
+        'checklist_completed_count': checklistCompletedCount,
+        'checklist_total_count': checklistTotalCount,
+        'photo_paths': photoPaths,
+        'photo_count': photoCount,
+      };
+      bool satisfied(Map<String, dynamic> row) =>
+          row['status'] == 'completed' &&
+          row['current_step'] == 6 &&
+          row['submitted_at'] != null &&
+          row['rework_started_at'] == null &&
+          evidence.entries.every(
+            (entry) =>
+                row.containsKey(entry.key) &&
+                sameInspectionEvidence(row[entry.key], entry.value),
+          );
+      // An authoritative receipt of this complete evidence is already enough.
+      // Do not repeat the business mutation or invent another completion event.
+      if (satisfied(existing)) return InspectionAuthorityResult.authorized;
+      final result = await _writeWithAuthority(
+        jobId,
+        (owner) => client
+            .from('field_jobs')
+            .update({
+              'status': 'completed',
+              'current_step': 6,
+              ...evidence,
+              'submitted_at': effectiveSubmittedAt,
+              // Rework redesign: Review & Submit is the one finalize point,
+              // for both a normal submit (already null — harmless) and a
+              // rework resubmit (clears the "Modified" signal). status was
+              // already 'completed' the whole time it was being reworked,
+              // so this update is really "confirm the new revision," not
+              // "close out an in-progress task."
+              'rework_started_at': null,
+            })
+            .eq('id', jobId)
+            .eq('assigned_inspector_id', owner)
+            .select()
+            .retry(enabled: false),
+        satisfied: satisfied,
+      );
       if (result != InspectionAuthorityResult.authorized) return result;
-      try { await logActivity(
-        eventType: 'inspection_completed',
-        title: 'Inspection completed',
-        subtitle: locationLabel,
-        fieldJobId: jobId,
-      ); } catch (_) { debugPrint('Completion accepted; activity delivery unverified.'); }
+      try {
+        await logActivity(
+          eventType: 'inspection_completed',
+          title: 'Inspection completed',
+          subtitle: locationLabel,
+          fieldJobId: jobId,
+          activityId: activityId,
+        );
+      } catch (_) {
+        debugPrint('Completion accepted; activity delivery unverified.');
+      }
       return result;
     } catch (e) {
-      return e is AuthException ? InspectionAuthorityResult.authRequired
-        : InspectionAuthorityResult.offlineOrUnverifiable;
+      return _authorityFailure(e);
     }
   }
 
@@ -1312,7 +1428,9 @@ class SupabaseService {
             .eq('assigned_inspector_id', uid)
             .eq('status', 'completed')
             .isFilter('rework_started_at', null);
-        if (expectedUpdatedAt != null) update = update.eq('updated_at', expectedUpdatedAt);
+        if (expectedUpdatedAt != null) {
+          update = update.eq('updated_at', expectedUpdatedAt);
+        }
         final rows = await update
             .select()
             .retry(enabled: false)
@@ -1321,7 +1439,8 @@ class SupabaseService {
         return rows;
       },
       satisfied: (row) {
-        final satisfied = row['status'] == 'completed' && row['rework_started_at'] != null;
+        final satisfied =
+            row['status'] == 'completed' && row['rework_started_at'] != null;
         if (satisfied) accepted = row;
         return satisfied;
       },
@@ -1331,19 +1450,27 @@ class SupabaseService {
       // prove the marker landed; otherwise preserve the explicit failure.
       final row = await readOutboxRecoveryJob(jobId);
       _requireSession(uid);
-      if (row == null || row['assigned_inspector_id'] != uid ||
-          row['status'] != 'completed' || row['rework_started_at'] == null) {
+      if (row == null ||
+          row['assigned_inspector_id'] != uid ||
+          row['status'] != 'completed' ||
+          row['rework_started_at'] == null) {
         result.requireAuthorized();
       }
       accepted = row;
       final landedMarker = row!['rework_started_at'];
-      transitioned = landedMarker is String &&
-          DateTime.tryParse(landedMarker)?.isAtSameMomentAs(DateTime.parse(marker)) == true;
+      transitioned =
+          landedMarker is String &&
+          DateTime.tryParse(
+                landedMarker,
+              )?.isAtSameMomentAs(DateTime.parse(marker)) ==
+              true;
     }
     if (!transitioned) return null;
     final revision = accepted?['updated_at'];
     if (revision is! String || DateTime.tryParse(revision) == null) {
-      throw const InspectionAuthorityException(InspectionAuthorityResult.offlineOrUnverifiable);
+      throw const InspectionAuthorityException(
+        InspectionAuthorityResult.offlineOrUnverifiable,
+      );
     }
     try {
       await logActivity(
@@ -1384,8 +1511,16 @@ class SupabaseService {
       );
     }
     try {
-      final result = await _writeWithAuthority(jobId, (uid) => client.from('field_jobs')
-        .update(updateData).eq('id', jobId).eq('assigned_inspector_id', uid).select().retry(enabled: false));
+      final result = await _writeWithAuthority(
+        jobId,
+        (uid) => client
+            .from('field_jobs')
+            .update(updateData)
+            .eq('id', jobId)
+            .eq('assigned_inspector_id', uid)
+            .select()
+            .retry(enabled: false),
+      );
       result.requireAuthorized();
     } catch (e) {
       debugPrint('Error updating field job: $e');
@@ -1403,18 +1538,25 @@ class SupabaseService {
     if (currentStep < 0 || currentStep > 6) {
       throw RangeError.range(currentStep, 0, 6, 'currentStep');
     }
-    return _writeWithAuthority(jobId, (uid) => client
-        .from('field_jobs')
-        .update({
-          'current_step': currentStep,
-          'step_timestamps': ?stepTimestamps,
-        })
-        .eq('id', jobId)
-        .eq('assigned_inspector_id', uid)
-        .neq('status', 'completed')
-        .lt('current_step', currentStep).select().retry(enabled: false),
-      satisfied: (row) => row['current_step'] is num && row['current_step'] >= currentStep
-        && (row['status'] != 'completed' || row['current_step'] == 6));
+    return _writeWithAuthority(
+      jobId,
+      (uid) => client
+          .from('field_jobs')
+          .update({
+            'current_step': currentStep,
+            'step_timestamps': ?stepTimestamps,
+          })
+          .eq('id', jobId)
+          .eq('assigned_inspector_id', uid)
+          .neq('status', 'completed')
+          .lt('current_step', currentStep)
+          .select()
+          .retry(enabled: false),
+      satisfied: (row) =>
+          row['current_step'] is num &&
+          row['current_step'] >= currentStep &&
+          (row['status'] != 'completed' || row['current_step'] == 6),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────

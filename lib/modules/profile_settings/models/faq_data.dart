@@ -118,18 +118,15 @@ class FaqData {
         FaqItem(
           questionEn: 'What is the red pin?',
           questionTl: 'Ano ang red pin?',
-          answerEn:
-              'The red pin shows the target parcel or inspection site.',
+          answerEn: 'The red pin shows the target parcel or inspection site.',
           answerTl:
               'Ipinapakita ng red pin ang target parcel o ang lokasyon ng inspection site.',
         ),
         FaqItem(
           questionEn: 'What is the blue "You are here" marker?',
           questionTl: 'Ano ang blue "You are here" marker?',
-          answerEn:
-              'It shows your current GPS location.',
-          answerTl:
-              'Ipinapakita nito ang iyong kasalukuyang GPS location.',
+          answerEn: 'It shows your current GPS location.',
+          answerTl: 'Ipinapakita nito ang iyong kasalukuyang GPS location.',
         ),
         FaqItem(
           questionEn: 'What does the blue line mean?',
@@ -141,7 +138,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'Can I use the blue line like Google Maps navigation?',
-          questionTl: 'Maaari ko bang gamitin ang blue line tulad ng Google Maps navigation?',
+          questionTl:
+              'Maaari ko bang gamitin ang blue line tulad ng Google Maps navigation?',
           answerEn:
               'No. It is only a travel and orientation guide. It does not provide turn-by-turn driving instructions.',
           answerTl:
@@ -167,8 +165,7 @@ class FaqData {
         FaqItem(
           questionEn: 'How close do I need to be?',
           questionTl: 'Gaano ako dapat kalapit sa site?',
-          answerEn:
-              'You need to be within 30 meters of the target site.',
+          answerEn: 'You need to be within 30 meters of the target site.',
           answerTl:
               'Kailangan mong pumuwesto sa loob ng 30 meters mula sa target site.',
         ),
@@ -215,7 +212,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'What happens when I press Save after taking a photo?',
-          questionTl: 'Ano ang mangyayari kapag pinindot ang Save matapos kumuha ng litrato?',
+          questionTl:
+              'Ano ang mangyayari kapag pinindot ang Save matapos kumuha ng litrato?',
           answerEn:
               'The photo is saved as part of your inspection work. You can see it again in the inspection flow and Task Overview.',
           answerTl:
@@ -223,7 +221,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'Why does the photo have location and time information?',
-          questionTl: 'Bakit may nakalagay na impormasyon ng lokasyon at oras sa litrato?',
+          questionTl:
+              'Bakit may nakalagay na impormasyon ng lokasyon at oras sa litrato?',
           answerEn:
               'The app places important inspection information such as date, time, and GPS coordinates directly on the photo to help document where and when the photo was taken.',
           answerTl:
@@ -263,23 +262,24 @@ class FaqData {
               'Ipinapakita nito kung ilang checklist items na ang iyong natapos mula sa kabuuang bilang ng mga aytem na kailangan.',
         ),
         FaqItem(
-          questionEn: 'Do I need a separate Save button for every checklist item?',
-          questionTl: 'Kailangan ko ba ng hiwalay na Save button sa bawat checklist item?',
-          answerEn:
-              'No. Checklist changes are saved as you work.',
+          questionEn:
+              'Do I need a separate Save button for every checklist item?',
+          questionTl:
+              'Kailangan ko ba ng hiwalay na Save button sa bawat checklist item?',
+          answerEn: 'No. Checklist changes are saved as you work.',
           answerTl:
               'Hindi. Awtomatikong nase-save ang mga pagbabago sa checklist habang naglalagay ka ng check.',
         ),
         FaqItem(
           questionEn: 'What is Step 5 for?',
           questionTl: 'Para saan ang Step 5?',
-          answerEn:
-              'Step 5 is where you record what you observed at the site.',
+          answerEn: 'Step 5 is where you record what you observed at the site.',
           answerTl:
               'Ang Step 5 ay kung saan mo itatala ang lahat ng iyong naobserbahan sa mismong site.',
         ),
         FaqItem(
-          questionEn: 'What is the difference between Observations and Discrepancy?',
+          questionEn:
+              'What is the difference between Observations and Discrepancy?',
           questionTl: 'Ano ang pagkakaiba ng Observations at Discrepancy?',
           answerEn:
               'Observations describe what you saw at the site.\n\nA Discrepancy records a specific issue or difference that needs attention.',
@@ -311,16 +311,20 @@ class FaqData {
       icon: Icons.wifi_off_outlined,
       items: [
         FaqItem(
-          questionEn: 'What happens if I lose internet while inspecting a site?',
-          questionTl: 'Ano ang mangyayari kung mawalan ng internet habang nag-iinspeksyon?',
+          questionEn:
+              'What happens if I lose internet while inspecting a site?',
+          questionTl:
+              'Ano ang mangyayari kung mawalan ng internet habang nag-iinspeksyon?',
           answerEn:
               'You can continue the supported inspection work. The app saves your work on the device first and waits for an internet connection before sending it to the cloud.',
           answerTl:
               'Maaari kang magpatuloy sa iyong inspection work. Iniimbak muna ng app ang iyong mga ginawa sa mismong device at maghihintay ng internet connection bago ito ipadala sa cloud.',
         ),
         FaqItem(
-          questionEn: 'Will my work disappear if I close the app while offline?',
-          questionTl: 'Mawawala ba ang aking ginawa kapag isinara ko ang app nang offline?',
+          questionEn:
+              'Will my work disappear if I close the app while offline?',
+          questionTl:
+              'Mawawala ba ang aking ginawa kapag isinara ko ang app nang offline?',
           answerEn:
               'Saved inspection work is designed to remain on the device and can be loaded again when you reopen the app.',
           answerTl:
@@ -347,13 +351,15 @@ class FaqData {
           questionEn: 'What is Sync Center?',
           questionTl: 'Ano ang Sync Center?',
           answerEn:
-              'Sync Center helps you see and manage inspection information that is waiting to synchronize with the MPDO server.',
+              'Sync Center shows what is saved on this device, what is still waiting to send, and what FieldSync-Supabase has already received. The Completed Audit Log keeps the device receipt for each successful send. A Planning Officer-side iMAPS import is not yet confirmed, so a delivered update is never shown as already imported into iMAPS.',
           answerTl:
-              'Ang Sync Center ay tumutulong upang makita at mapamahalaan ang mga inspection data na naghihintay ma-synchronize sa MPDO server.',
+              'Ipinapakita ng Sync Center ang naka-save sa device na ito, ang naghihintay pang ipadala, at ang natanggap na ng FieldSync-Supabase. Ang Completed Audit Log ay may receipt ng bawat matagumpay na pagpapadala. Hindi pa kumpirmado ang pag-import sa iMAPS sa panig ng Planning Officer, kaya hindi ipinapakita na na-import na sa iMAPS ang isang update.',
         ),
         FaqItem(
-          questionEn: 'Do I need to open Sync Center every time I want to upload my work?',
-          questionTl: 'Kailangan ko bang buksan ang Sync Center sa bawat pag-upload ng aking gawa?',
+          questionEn:
+              'Do I need to open Sync Center every time I want to upload my work?',
+          questionTl:
+              'Kailangan ko bang buksan ang Sync Center sa bawat pag-upload ng aking gawa?',
           answerEn:
               'No. Synchronization normally starts automatically when an internet connection becomes available.',
           answerTl:
@@ -369,7 +375,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'What do the pending numbers mean?',
-          questionTl: 'Ano ang ibig sabihin ng mga numerong nakalagay sa pending?',
+          questionTl:
+              'Ano ang ibig sabihin ng mga numerong nakalagay sa pending?',
           answerEn:
               'They show work that is still waiting to synchronize, such as inspection updates, checklist changes, GPS information, or photos.',
           answerTl:
@@ -377,7 +384,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'What happens if synchronization fails?',
-          questionTl: 'Ano ang mangyayari kung hindi magtagumpay ang synchronization?',
+          questionTl:
+              'Ano ang mangyayari kung hindi magtagumpay ang synchronization?',
           answerEn:
               'The app keeps the item in the synchronization process so it can be retried instead of simply deleting your saved work.',
           answerTl:
@@ -395,15 +403,14 @@ class FaqData {
           questionEn: 'Why are there six steps?',
           questionTl: 'Bakit mayroong anim na hakbang (6 Steps)?',
           answerEn:
-              'The six steps organize the inspection from checking the site, collecting evidence, recording findings, and reviewing the final result before submission.',
+              'The six steps organize the inspection from checking the site to reviewing the final result before submission:\n\n1. Site Verification\n2. GPS Verification\n3. Photographic Evidence\n4. Checklist\n5. Field Findings\n6. Review & Submit',
           answerTl:
-              'Inaayos ng anim na steps ang buong inspection—mula sa pagpunta sa site, GPS verification, pagkuha ng ebidensya, checklist, pagtatala ng findings, hanggang sa pinal na pagsusuri bago magsumite.',
+              'Inaayos ng anim na hakbang ang buong inspection mula sa pagpunta sa site hanggang sa pinal na pagsusuri bago magsumite:\n\n1. Site Verification\n2. GPS Verification\n3. Photographic Evidence\n4. Checklist\n5. Field Findings\n6. Review & Submit',
         ),
         FaqItem(
           questionEn: 'Can I leave an inspection before finishing?',
           questionTl: 'Maaari ba akong lumabas sa inspection bago ito matapos?',
-          answerEn:
-              'Yes. Saved inspection work can be resumed later.',
+          answerEn: 'Yes. Saved inspection work can be resumed later.',
           answerTl:
               'Oo. Maaari kang lumabas pansamantala; mase-save ang iyong ginawa at maaari mo itong ipagpatuloy muli.',
         ),
@@ -441,8 +448,10 @@ class FaqData {
               'Ang Rework ay nagbibigay-daan upang muling buksan ang isang completed na inspection upang ituwid o i-update ang isang partikular na bahagi nang hindi na kailangang simulan muli mula sa simula.',
         ),
         FaqItem(
-          questionEn: 'If I open Rework but change nothing, will it become Modified?',
-          questionTl: 'Kung bubuksan ko ang Rework ngunit wala akong babaguhin, magiging Modified ba ito?',
+          questionEn:
+              'If I open Rework but change nothing, will it become Modified?',
+          questionTl:
+              'Kung bubuksan ko ang Rework ngunit wala akong babaguhin, magiging Modified ba ito?',
           answerEn:
               'No. Simply opening a step for Rework does not mean that the inspection was changed.',
           answerTl:
@@ -458,7 +467,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'Does changing one step erase the other steps?',
-          questionTl: 'Mabubura ba ang ibang steps kapag binago ko ang isang step?',
+          questionTl:
+              'Mabubura ba ang ibang steps kapag binago ko ang isang step?',
           answerEn:
               'No. Reworking one step does not intentionally erase the information from the other inspection steps.',
           answerTl:
@@ -516,7 +526,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'Why can’t I select my task for Application Support?',
-          questionTl: 'Bakit hindi ko mapili ang task ko sa Application Support?',
+          questionTl:
+              'Bakit hindi ko mapili ang task ko sa Application Support?',
           answerEn:
               'A task saved by an older version of FieldSync may be missing information needed to link your report correctly. '
               'Open or refresh My Tasks while online, then refresh the tasks in Application Support. '
@@ -558,7 +569,8 @@ class FaqData {
         ),
         FaqItem(
           questionEn: 'What should I do if submission status is uncertain?',
-          questionTl: 'Ano ang gagawin ko kung uncertain ang submission status?',
+          questionTl:
+              'Ano ang gagawin ko kung uncertain ang submission status?',
           answerEn:
               'FieldSync cannot tell whether the report reached the server, so it will not silently resend it. '
               'Check My Reports first. If you decide to try sending again, read the confirmation carefully: '

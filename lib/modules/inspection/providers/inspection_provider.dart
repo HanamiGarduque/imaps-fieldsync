@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -13,18 +14,21 @@ class InspectionProvider extends ChangeNotifier {
   TaskItem? _activeTask;
   String? _inspectorId;
   void _requireOwner() {
-    if (_inspectorId == null) throw StateError('Inspection has no recorded session owner');
+    if (_inspectorId == null) {
+      throw StateError('Inspection has no recorded session owner');
+    }
     DBHelper.requireSameInspector(_inspectorId!);
   }
+
   int _currentStep = 1;
 
   // Checklist State
   final Map<String, bool> _siteCondition = {
-    'Structure matches declared use': true,
-    'Setback distances compliant': true,
+    'Structure matches declared use': false,
+    'Setback distances compliant': false,
   };
   final Map<String, bool> _zoningObservations = {
-    'Accessibility & road frontage': true,
+    'Accessibility & road frontage': false,
     'Surrounding developments noted': false,
     'Signage / commercial activity present': false,
   };
@@ -41,8 +45,8 @@ class InspectionProvider extends ChangeNotifier {
   String _notes = '';
   String _discrepancies = '';
   String _recommendations = '';
-  String _boundaryStatus = 'Compliant';
-  String _inspectionResult = 'Compliant'; // Selected assessment result
+  String _boundaryStatus = 'Not recorded';
+  String _inspectionResult = ''; // No assessment until the inspector chooses.
 
   bool _isSyncing = false;
   bool _isReworkMode = false;
@@ -71,28 +75,55 @@ class InspectionProvider extends ChangeNotifier {
   ]);
 
   // Getters
-  bool get _visible => _inspectorId != null && _inspectorId == DBHelper.currentInspectorId;
+  bool get _visible =>
+      _inspectorId != null && _inspectorId == DBHelper.currentInspectorId;
   TaskItem? get activeTask => _visible ? _activeTask : null;
   int get currentStep => _visible ? _currentStep : 1;
   Map<String, bool> get siteCondition => _visible ? _siteCondition : {};
-  Map<String, bool> get zoningObservations => _visible ? _zoningObservations : {};
-  List<Map<String, dynamic>> get capturedPhotos => _visible ? _capturedPhotos : [];
+  Map<String, bool> get zoningObservations =>
+      _visible ? _zoningObservations : {};
+  List<Map<String, dynamic>> get capturedPhotos =>
+      _visible ? _capturedPhotos : [];
   String get actualLandUse => _visible ? _actualLandUse : '';
   String get notes => _visible ? _notes : '';
   String get discrepancies => _visible ? _discrepancies : '';
   String get recommendations => _visible ? _recommendations : '';
   String get boundaryStatus => _visible ? _boundaryStatus : '';
-  String get inspectionResult => _visible ? _inspectionResult : 'Compliant';
+  String get inspectionResult => _visible ? _inspectionResult : '';
+  static const assessmentOptions = [
+    'Compliant',
+    'With Discrepancy',
+    'For Review',
+    'Requires Reinspection',
+  ];
+
+  String? get assessmentValidationMessage {
+    if (!assessmentOptions.contains(inspectionResult)) {
+      return 'Choose an assessment before submitting the inspection.';
+    }
+    if (inspectionResult != 'Compliant' && discrepancies.trim().isEmpty) {
+      return 'Explain what you observed and why it differs or needs review/reinspection before submitting.';
+    }
+    // Unchecked criteria are not negative findings. Only explicitly recorded
+    // discrepancy evidence contradicts an unqualified Compliant assessment.
+    if (inspectionResult == 'Compliant' && discrepancies.trim().isNotEmpty) {
+      return 'Compliant does not match the recorded discrepancy / explanation. Review the evidence and choose the assessment yourself; nothing has been changed automatically.';
+    }
+    return null;
+  }
+
   /// The `observations` text actually on file for this rework session, so a
   /// summary can show the same value instead of re-composing it. Land use and
   /// boundary status are folded into one freeform column and cannot be parsed
   /// back apart, so the stored sentence wins until its inputs change.
   String get observations => _visible
       ? _findingsObservations ??
-          'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.'
+            'Actual land use: $_actualLandUse. Boundary status: $_boundaryStatus.'
       : '';
+
   /// Draft or saved-pending findings must overlay a stale remote summary.
-  bool get hasReworkFindings => _visible &&
+  bool get hasReworkFindings =>
+      _visible &&
       _isReworkMode &&
       (_pendingFindingsSignature != null ||
           _findingsSignature != _persistedFindingsSignature);
@@ -104,23 +135,15 @@ class InspectionProvider extends ChangeNotifier {
   /// Clears every field observation. Used by both entry paths so no session's
   /// answers can reach another session's report.
   void _resetFieldState() {
-    _siteCondition.updateAll(
-      (key, value) =>
-          key == 'Surrounding developments noted' ||
-              key == 'Signage / commercial activity present'
-          ? false
-          : true,
-    );
-    _zoningObservations.updateAll(
-      (key, value) => key == 'Accessibility & road frontage' ? true : false,
-    );
+    _siteCondition.updateAll((key, value) => false);
+    _zoningObservations.updateAll((key, value) => false);
     _capturedPhotos.clear();
     _actualLandUse = 'Single-detached residential';
     _notes = '';
     _discrepancies = '';
     _recommendations = '';
-    _boundaryStatus = 'Compliant';
-    _inspectionResult = 'Compliant';
+    _boundaryStatus = 'Not recorded';
+    _inspectionResult = '';
     _persistedFindingsSignature = null;
     _pendingFindingsSignature = null;
     _findingsObservations = null;
@@ -129,25 +152,29 @@ class InspectionProvider extends ChangeNotifier {
   // --- INITIALIZATION & NAVIGATION ---
 
   Future<void> startInspection(TaskItem task) async {
-  _inspectorId = DBHelper.requireInspector();
-  await DBHelper.requireOwnedJob(await DBHelper.database, task.id, _inspectorId!);
-  _activeTask = task;
-  _isReworkMode = false;
+    _inspectorId = DBHelper.requireInspector();
+    await DBHelper.requireOwnedJob(
+      await DBHelper.database,
+      task.id,
+      _inspectorId!,
+    );
+    _activeTask = task;
+    _isReworkMode = false;
 
-  // Reset defaults first
-  _photosWithRemoteWork.clear();
-  _resetFieldState();
+    // Reset defaults first
+    _photosWithRemoteWork.clear();
+    _resetFieldState();
 
-  // Load persisted draft AFTER reset — this restores checklist, findings,
-  // photos, AND current_step from the task's own SQLite row.
-  // Each task has its own row so step can never bleed across tasks.
-  final draft = await DBHelper.getLocalInspection(task.id);
-  _currentStep = (draft?['current_step'] as int?) ?? 1;
-  if (_currentStep < 1) _currentStep = 1;
+    // Load persisted draft AFTER reset — this restores checklist, findings,
+    // photos, AND current_step from the task's own SQLite row.
+    // Each task has its own row so step can never bleed across tasks.
+    final draft = await DBHelper.getLocalInspection(task.id);
+    _currentStep = (draft?['current_step'] as int?) ?? 1;
+    if (_currentStep < 1) _currentStep = 1;
 
-  await _loadLocalDraftIfExists(task.id);
-  notifyListeners();
-}
+    await _loadLocalDraftIfExists(task.id);
+    notifyListeners();
+  }
 
   // NOTE (removed 2026-07-24): this class used to have an updateStep(int)
   // method that duplicated current_step persistence (SQLite + Supabase +
@@ -279,7 +306,7 @@ class InspectionProvider extends ChangeNotifier {
     }
     if (PhotoSourceResolver.classify(photoPath) != PhotoSourceKind.localFile) {
       return false;
-      }
+    }
 
     if (_isReworkMode ||
         _activeTask?.lifecycleCategory == TaskLifecycleCategory.completed) {
@@ -288,14 +315,15 @@ class InspectionProvider extends ChangeNotifier {
 
     final localRow = await DBHelper.getLocalPhoto(photoId);
     final locallyAcknowledged = localRow?['is_synced'] == 1;
-    final knownRemote = photo['isRemoteUrl'] == true || _photoHasRemoteWork(photo);
+    final knownRemote =
+        photo['isRemoteUrl'] == true || _photoHasRemoteWork(photo);
     if (locallyAcknowledged || knownRemote) {
       return false;
     }
 
-      try {
+    try {
       await DBHelper.deleteLocalPhoto(photoId, photoPath: photoPath);
-      } catch (e) {
+    } catch (e) {
       debugPrint('removePhoto: local file/row delete failed — $e');
       return false;
     }
@@ -362,7 +390,9 @@ class InspectionProvider extends ChangeNotifier {
     // Keep this owner's same-job draft across a revisit: entering rework
     // again after leaving without Save must not wipe unsaved text. Anything
     // else hydrates normally; another job or session starts fresh.
-    final keepFindings = _visible &&
+    final keepFindings =
+        _visible &&
+        _isReworkMode &&
         _activeTask?.id == task.id &&
         (_pendingFindingsSignature != null ||
             _findingsSignature != _persistedFindingsSignature);
@@ -430,24 +460,24 @@ class InspectionProvider extends ChangeNotifier {
         PhotoSourceResolver.evidence(task.photoDetails, task.photoPaths).map((
           photo,
         ) {
-            final path = photo['photoPath'] as String;
-            // Existing upload API uses this flag to preserve remote evidence;
-            // never mark an arbitrary local/invalid value as remote.
-            bool remote = PhotoSourceResolver.isObjectPath(path);
+          final path = photo['photoPath'] as String;
+          // Existing upload API uses this flag to preserve remote evidence;
+          // never mark an arbitrary local/invalid value as remote.
+          bool remote = PhotoSourceResolver.isObjectPath(path);
           if (PhotoSourceResolver.classify(path) ==
               PhotoSourceKind.remoteHttp) {
-              try {
-                remote = inspectionPhotoResolver().objectPath(path) != null;
-              } catch (_) {
-                remote = false;
-              }
+            try {
+              remote = inspectionPhotoResolver().objectPath(path) != null;
+            } catch (_) {
+              remote = false;
             }
-            return {
-              ...photo,
-              'notes': photo['notes'] ?? '',
-              'capturedAt': photo['captured_at'] ?? task.submittedAt,
-              'isRemoteUrl': remote,
-            };
+          }
+          return {
+            ...photo,
+            'notes': photo['notes'] ?? '',
+            'capturedAt': photo['captured_at'] ?? task.submittedAt,
+            'isRemoteUrl': remote,
+          };
         }),
       );
 
@@ -466,10 +496,10 @@ class InspectionProvider extends ChangeNotifier {
       _findingsObservations = findings.observations;
       _pendingFindingsSignature = findings.pending;
     }
-    _inspectionResult =
-        task.inspectionResult ??
-        (task.isCompliant == true ? 'Compliant' : 'With Discrepancy');
-    _boundaryStatus = task.isCompliant == false ? 'Non-compliant' : 'Compliant';
+    _inspectionResult = task.inspectionResult ?? '';
+    // The legacy boolean cannot distinguish a procedural review/reinspection
+    // from a boundary failure, so `false` never invents "Non-compliant".
+    _boundaryStatus = task.isCompliant == true ? 'Compliant' : 'Not recorded';
     // NOTE: `observations` was historically written as one freeform
     // sentence (e.g. "Actual land use: X. Boundary status: Y.") rather than
     // matching `_actualLandUse` 1:1 — I'm not auto-parsing that back apart
@@ -488,10 +518,15 @@ class InspectionProvider extends ChangeNotifier {
     final jobId = _activeTask?.id;
     if (!_isReworkMode || jobId == null) return;
     final signature = _findingsSignature;
-    final draft = signature != (_pendingFindingsSignature ?? _persistedFindingsSignature);
+    final draft =
+        signature != (_pendingFindingsSignature ?? _persistedFindingsSignature);
     final pending = await DBHelper.getPendingFindingsSave(jobId);
     _requireOwner();
-    if (_activeTask?.id != jobId || !_isReworkMode || _findingsSignature != signature) return;
+    if (_activeTask?.id != jobId ||
+        !_isReworkMode ||
+        _findingsSignature != signature) {
+      return;
+    }
     if (pending == null) {
       if (_pendingFindingsSignature != null) {
         if (afterSave) {
@@ -512,7 +547,9 @@ class InspectionProvider extends ChangeNotifier {
       final discrepancies = pending['discrepancies'] as String? ?? '';
       final recommendations = pending['recommendations'] as String? ?? '';
       _pendingFindingsSignature = jsonEncode([
-        notes.trim(), discrepancies.trim(), recommendations.trim(),
+        notes.trim(),
+        discrepancies.trim(),
+        recommendations.trim(),
       ]);
       if (!draft) {
         _notes = notes;
@@ -535,9 +572,7 @@ class InspectionProvider extends ChangeNotifier {
       _actualLandUse = draft['actual_land_use'] ?? _actualLandUse;
       _notes = draft['notes'] ?? _notes;
       _boundaryStatus = draft['boundary_status'] ?? _boundaryStatus;
-      _inspectionResult =
-          draft['inspection_result'] as String? ??
-          (draft['is_compliant'] == 1 ? 'Compliant' : 'With Discrepancy');
+      _inspectionResult = draft['inspection_result'] as String? ?? '';
 
       if (draft['checklist_json'] != null) {
         try {
@@ -567,15 +602,21 @@ class InspectionProvider extends ChangeNotifier {
 
     final pending = await DBHelper.getLocalFindingsIntent(jobId);
     _requireOwner();
-    final queuedAt = DateTime.tryParse(pending?['localCreatedAt'] as String? ?? '');
+    final queuedAt = DateTime.tryParse(
+      pending?['localCreatedAt'] as String? ?? '',
+    );
     final draftAt = DateTime.tryParse(draft?['updated_at'] as String? ?? '');
-    if (pending != null && (!hasFindingsSnapshot ||
-        (queuedAt != null && draftAt != null && queuedAt.isAfter(draftAt)))) {
+    if (pending != null &&
+        (!hasFindingsSnapshot ||
+            (queuedAt != null &&
+                draftAt != null &&
+                queuedAt.isAfter(draftAt)))) {
       _notes = pending['inspectorNotes'] as String? ?? _notes;
       _discrepancies = pending['discrepancies'] as String? ?? '';
       _recommendations = pending['recommendations'] as String? ?? '';
       _findingsObservations = pending['observations'] as String?;
-      _inspectionResult = pending['inspectionResult'] as String? ?? _inspectionResult;
+      _inspectionResult =
+          pending['inspectionResult'] as String? ?? _inspectionResult;
     }
 
     final localPhotos = await DBHelper.getLocalPhotos(jobId);
@@ -599,29 +640,42 @@ class InspectionProvider extends ChangeNotifier {
 
   // --- LOCAL SAVE & ONLINE SYNC ---
 
-  Future<bool> saveInspectionProgress() async {
+  Future<void> _saveLocalInspection() {
     _requireOwner();
-    if (_activeTask == null) return false;
-
-    // Save Checklist observations
-    final Map<String, bool> combinedChecklist = {
-      ..._siteCondition,
-      ..._zoningObservations,
-    };
-
-    // 1. Save main inspection details to local sqlite
-    await DBHelper.saveInspectionLocally(
+    return DBHelper.saveInspectionLocally(
       jobId: _activeTask!.id,
+      expectedInspectorId: _inspectorId,
       actualLandUse: _actualLandUse,
       notes: _notes,
       isCompliant: _inspectionResult == 'Compliant',
       inspectionResult: _inspectionResult,
-      checklist: combinedChecklist,
+      checklist: {..._siteCondition, ..._zoningObservations},
       boundaryStatus: _boundaryStatus,
       currentStep: _currentStep,
-      findings: {'discrepancies': _discrepancies,
-        'recommendations': _recommendations, 'observations': observations},
+      findings: {
+        'discrepancies': _discrepancies,
+        'recommendations': _recommendations,
+        'observations': observations,
+      },
     );
+  }
+
+  void _syncSavedStep(String jobId) {
+    // Delivery runs separately: a successful local save must not wait on radio
+    // availability. Startup/reconnect and manual sync retain the same outbox.
+    unawaited(
+      SyncOutboxService.drain(onlyJobId: jobId).catchError((Object e) {
+        debugPrint('Step saved locally; delivery remains queued — $e');
+      }),
+    );
+  }
+
+  Future<bool> saveInspectionProgress() async {
+    _requireOwner();
+    if (_activeTask == null) return false;
+
+    // 1. Save main inspection details to local sqlite
+    await _saveLocalInspection();
 
     // 2. Save photos to local sqlite
     for (final photo in _capturedPhotos) {
@@ -711,42 +765,22 @@ class InspectionProvider extends ChangeNotifier {
       ),
     ];
     final done = checklist.where((c) => c['checked'] == true).length;
+    final jobId = _activeTask!.id;
     try {
-      await SupabaseService.updateJobInspectionProgress(
-        jobId: _activeTask!.id,
-        updateData: {
-          'checklist_data': checklist,
-          'checklist_completed_count': done,
-          'checklist_total_count': checklist.length,
-        },
+      await _saveLocalInspection();
+      _requireOwner();
+      await SyncOutboxService.enqueueChecklistUpdate(
+        jobId: jobId,
+        checklistData: checklist,
+        checklistCompletedCount: done,
+        checklistTotalCount: checklist.length,
+        isRework: _isReworkMode,
       );
+      _syncSavedStep(jobId);
       return true;
     } catch (e) {
-      // Consistency fix (offline/sync validation pass): this used to have
-      // no fallback at all — a failed direct push (e.g. offline) just
-      // returned false and the rework-mode "Save" button on the Checklist
-      // screen showed "Save failed.", even though the per-toggle autosave
-      // in inspection_checklist_screen.dart (_syncChecklistProgress) had
-      // already queued the same state via SyncOutboxService moments
-      // earlier — so no data was actually lost, but the message was
-      // misleading. Now matches the same queue-on-failure pattern already
-      // used by saveStepPhotos and saveStepFindings above.
-      debugPrint(
-        'saveStepChecklist: direct push failed, queuing for retry — $e',
-      );
-      try {
-        _requireOwner();
-        await SyncOutboxService.enqueueChecklistUpdate(
-          jobId: _activeTask!.id,
-          checklistData: checklist,
-          checklistCompletedCount: done,
-          checklistTotalCount: checklist.length,
-        );
-        return true; // queued — not lost, will apply once synced
-      } catch (e2) {
-        debugPrint('saveStepChecklist: failed to queue checklist update — $e2');
-        return false;
-      }
+      debugPrint('saveStepChecklist: local save failed — $e');
+      return false;
     }
   }
 
@@ -759,8 +793,8 @@ class InspectionProvider extends ChangeNotifier {
   /// claim a remote success before it happened, and a retry cannot add a
   /// second row — no new schema or table is involved.
   ///
-  /// Returns true when the evidence is durable: written remotely, queued for
-  /// guaranteed delivery, or a genuine no-op.
+  /// Returns true only after the complete local snapshot and delivery intent
+  /// are durable, or when an explicit Save is a genuine no-op.
   Future<bool> saveStepFindings({bool isExplicitSave = false}) async {
     _requireOwner();
     if (_activeTask == null) return false;
@@ -776,11 +810,16 @@ class InspectionProvider extends ChangeNotifier {
     if (isExplicitSave) {
       // A Save of byte-identical text changes nothing: it must not be queued
       // and must not produce an activity row.
-      if (signature == (_pendingFindingsSignature ?? _persistedFindingsSignature)) return true;
+      if (signature ==
+          (_pendingFindingsSignature ?? _persistedFindingsSignature)) {
+        return true;
+      }
       try {
         // Durable first, remote second: the action (and its event id) exists
         // before any write, so a lost response is recoverable rather than
         // unrecoverable work.
+        await _saveLocalInspection();
+        _requireOwner();
         await SyncOutboxService.enqueueFindingsUpdate(
           jobId: jobId,
           observations: observations,
@@ -789,6 +828,7 @@ class InspectionProvider extends ChangeNotifier {
           inspectorNotes: notes,
           activityId: const Uuid().v4(),
           activitySubtitle: _activeTask!.location,
+          isRework: _isReworkMode,
         );
         _requireOwner();
         _pendingFindingsSignature = signature;
@@ -802,45 +842,30 @@ class InspectionProvider extends ChangeNotifier {
         await SyncOutboxService.drain(onlyJobId: jobId);
         await restorePendingFindings(afterSave: true);
       } catch (e) {
-        debugPrint('saveStepFindings: saved locally; sync remains pending — $e');
+        debugPrint(
+          'saveStepFindings: saved locally; sync remains pending — $e',
+        );
       }
       return true;
     }
 
     try {
-      await SupabaseService.updateJobInspectionProgress(
+      await _saveLocalInspection();
+      _requireOwner();
+      await SyncOutboxService.enqueueFindingsUpdate(
         jobId: jobId,
-        updateData: {
-          'observations': observations,
-          'discrepancies': discrepancies,
-          'recommendations': recommendations,
-          'inspector_notes': notes,
-        },
+        observations: observations,
+        discrepancies: discrepancies,
+        recommendations: recommendations,
+        inspectorNotes: notes,
+        isRework: _isReworkMode,
       );
       _persistedFindingsSignature = signature;
+      _syncSavedStep(jobId);
       return true;
     } catch (e) {
-      // Issue 4 fix — same rationale as saveStepPhotos above: no offline
-      // fallback existed here before, so a failed push while offline was
-      // silently lost instead of queued.
-      debugPrint(
-        'saveStepFindings: direct push failed, queuing for retry — $e',
-      );
-      try {
-        _requireOwner();
-        await SyncOutboxService.enqueueFindingsUpdate(
-          jobId: jobId,
-          observations: observations,
-          discrepancies: discrepancies,
-          recommendations: recommendations,
-          inspectorNotes: notes,
-        );
-        _persistedFindingsSignature = signature;
-        return true;
-      } catch (e2) {
-        debugPrint('saveStepFindings: failed to queue findings update — $e2');
-        return false;
-      }
+      debugPrint('saveStepFindings: local save failed — $e');
+      return false;
     }
   }
 
@@ -867,23 +892,7 @@ class InspectionProvider extends ChangeNotifier {
     _requireOwner();
     if (_activeTask == null) return false;
 
-    final Map<String, bool> combinedChecklist = {
-      ..._siteCondition,
-      ..._zoningObservations,
-    };
-
-    await DBHelper.saveInspectionLocally(
-      jobId: _activeTask!.id,
-      actualLandUse: _actualLandUse,
-      notes: _notes,
-      isCompliant: _inspectionResult == 'Compliant',
-      inspectionResult: _inspectionResult,
-      checklist: combinedChecklist,
-      boundaryStatus: _boundaryStatus,
-      currentStep: _currentStep,
-      findings: {'discrepancies': _discrepancies,
-        'recommendations': _recommendations, 'observations': observations},
-    );
+    await _saveLocalInspection();
 
     for (final photo in _capturedPhotos) {
       // ROOT-CAUSE FIX (2026-07-23) — see addPhoto() for the full
@@ -947,7 +956,11 @@ class InspectionProvider extends ChangeNotifier {
         for (final a in await DBHelper.getSyncCenterQueueActions())
           if (a['type'] == 'submit_inspection') a['job_id'] as String,
         for (final job in await DBHelper.getCachedJobs())
-          if (const ['completed', 'Completed', 'submitted'].contains(job['status']))
+          if (const [
+            'completed',
+            'Completed',
+            'submitted',
+          ].contains(job['status']))
             job['id'] as String,
       };
       DBHelper.requireSameInspector(uid);
@@ -956,7 +969,8 @@ class InspectionProvider extends ChangeNotifier {
       // Legacy local_photos rows are adapted here; all NEW remote identities
       // now use job ID + stable local path + UUIDv5 through the service path.
       final pendingPhotos = (await DBHelper.getPendingPhotos())
-          .where((p) => !protectedJobs.contains(p['job_id'])).toList();
+          .where((p) => !protectedJobs.contains(p['job_id']))
+          .toList();
       final pendingPhotosByJob = <String, List<Map<String, dynamic>>>{};
       for (final photo in pendingPhotos) {
         final jobId = photo['job_id'] as String?;
@@ -1003,11 +1017,16 @@ class InspectionProvider extends ChangeNotifier {
               .toList();
           final merged = {...existingPaths, ...entry.value}.toList();
           DBHelper.requireSameInspector(uid);
-          await SupabaseService.updateJobInspectionProgress(jobId: entry.key,
-            updateData: {'photo_paths': merged, 'photo_count': merged.length});
+          await SupabaseService.updateJobInspectionProgress(
+            jobId: entry.key,
+            updateData: {'photo_paths': merged, 'photo_count': merged.length},
+          );
           DBHelper.requireSameInspector(uid);
-          await DBHelper.markPhotosSynced(pendingPhotosByJob[entry.key]!
-            .map((p) => p['localPhotoId'] as String?));
+          await DBHelper.markPhotosSynced(
+            pendingPhotosByJob[entry.key]!.map(
+              (p) => p['localPhotoId'] as String?,
+            ),
+          );
         } catch (e) {
           debugPrint(
             'Could not patch field_jobs.photo_paths for ${entry.key}: $e',
@@ -1025,7 +1044,8 @@ class InspectionProvider extends ChangeNotifier {
 
       // 2. Sync Pending Inspections
       final pendingInspections = (await DBHelper.getPendingInspections())
-          .where((d) => !protectedJobs.contains(d['id'])).toList();
+          .where((d) => !protectedJobs.contains(d['id']))
+          .toList();
       for (final insp in pendingInspections) {
         DBHelper.requireSameInspector(uid);
         final Map<String, dynamic> checklist = jsonDecode(
@@ -1036,18 +1056,26 @@ class InspectionProvider extends ChangeNotifier {
             .map((e) => '${e.key}: ${e.value == true ? "Yes" : "No"}')
             .join('; ');
 
+        // A fresh Step 6 has no recorded assessment: never send '' (the
+        // server CHECK accepts only the four explicit outcomes) and never
+        // invent "With Discrepancy" from a missing value. A legacy binary row
+        // that is explicitly compliant may still carry its Compliant boundary.
+        final savedResult = insp['inspection_result'] as String?;
+        final legacyCompliant = insp['is_compliant'] == 1;
+        final resultToSend = savedResult != null && savedResult.isNotEmpty
+            ? savedResult
+            : (legacyCompliant ? 'Compliant' : null);
+
         // A saved draft is evidence, not final-submit intent. Only the explicit
         // submission path may prove completion and release retention.
-        await SupabaseService.updateJobInspectionProgress(jobId: insp['id'] as String,
-            updateData: {
-              'findings': '${insp['notes']}\n\nChecklist: $checklistSummary',
-              'is_compliant': insp['is_compliant'] == 1,
-              'inspection_result':
-                  insp['inspection_result'] as String? ??
-                  (insp['is_compliant'] == 1
-                      ? 'Compliant'
-                      : 'With Discrepancy'),
-            });
+        await SupabaseService.updateJobInspectionProgress(
+          jobId: insp['id'] as String,
+          updateData: {
+            'findings': '${insp['notes']}\n\nChecklist: $checklistSummary',
+            'is_compliant': legacyCompliant,
+            'inspection_result': ?resultToSend,
+          },
+        );
         DBHelper.requireSameInspector(uid);
         await DBHelper.markInspectionSynced(insp['id']);
       }
