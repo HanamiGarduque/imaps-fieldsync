@@ -333,6 +333,51 @@ void main() {
       expect(gate.count, 0);
     });
 
+    test('system image-picker pause/resume locks when opening protection is on', () {
+      start(minutes: 1, requireOnOpen: true);
+      controller.handleLifecycle(AppLifecycleState.paused);
+      clock.advance(const Duration(seconds: 2));
+      controller.handleLifecycle(AppLifecycleState.resumed);
+
+      expect(gate.count, 1);
+    });
+
+    test('system image-picker pause/resume does not idle-lock on a quick return', () {
+      start(minutes: 1);
+      controller.handleLifecycle(AppLifecycleState.paused);
+      clock.advance(const Duration(seconds: 2));
+      controller.handleLifecycle(AppLifecycleState.resumed);
+
+      expect(gate.count, 0);
+    });
+
+    test('secure fallback keeps opening and idle locks enabled', () async {
+      const fallback = AutoLockPolicy.secureFallback();
+      expect(fallback.requireOnOpen, isTrue);
+      expect(fallback.minutes, 1);
+      expect(fallback.biometricReady, isTrue);
+      expect(fallback.canLock, isTrue);
+      expect(fallback.locksOnResume, isTrue);
+
+      controller.start(policy: fallback, onLockRequested: gate.request);
+      clock.advance(const Duration(seconds: 59));
+      expect(gate.count, 0);
+      clock.advance(const Duration(seconds: 1));
+      expect(gate.count, 1);
+      await gate.release();
+    });
+
+    test('policy load read failure uses the secure fallback', () async {
+      final policy = await AutoLockPolicy.loadWith(
+        () async => throw StateError('secure storage unavailable'),
+      );
+
+      expect(policy.requireOnOpen, isTrue);
+      expect(policy.minutes, 1);
+      expect(policy.biometricReady, isTrue);
+      expect(policy.canLock, isTrue);
+    });
+
     test('does not lock when no biometric unlock is available', () {
       start(minutes: 1, biometricReady: false);
 

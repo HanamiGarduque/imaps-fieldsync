@@ -22,6 +22,17 @@ class AutoLockPolicy {
       minutes = 0,
       biometricReady = false;
 
+  /// Fail-closed policy used when secure storage cannot be read.
+  ///
+  /// A read failure must not silently remove a required lock. One minute is the
+  /// shortest selectable idle period; the lock screen always exposes "Log Out"
+  /// to the normal password login, so a biometric failure cannot strand the
+  /// user permanently.
+  const AutoLockPolicy.secureFallback()
+    : requireOnOpen = true,
+      minutes = 1,
+      biometricReady = true;
+
   final bool requireOnOpen;
   final int minutes;
 
@@ -41,22 +52,34 @@ class AutoLockPolicy {
 
   /// Reads the persisted policy once per start/settings change. Never called
   /// from the pointer/timer hot path.
-  static Future<AutoLockPolicy> load() async {
+  static Future<AutoLockPolicy> load() => loadWith(_readPersistedPolicy);
+
+  /// Test seam for the fail-closed path. A read failure must never silently
+  /// disable a required lock.
+  @visibleForTesting
+  static Future<AutoLockPolicy> loadWith(
+    Future<AutoLockPolicy> Function() reader,
+  ) async {
     try {
-      final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
-      final minutes = await SecurePrefsService.getBioAutoLockMins();
-      final enrolled = await BiometricService.isEnrolled();
-      final confirmed = await BiometricService.isConfirmed();
-      return AutoLockPolicy(
-        requireOnOpen: requireOnOpen,
-        minutes: minutes,
-        biometricReady: enrolled && confirmed,
-      );
+      return await reader();
     } catch (_) {
-      // A secure-storage or device-check failure must not take down the shell
-      // or leave a half-configured lock active.
-      return const AutoLockPolicy.disabled();
+      // Never fail open: if the persisted policy cannot be read, keep opening
+      // protection and the shortest idle period. The lock screen's Log Out
+      // path is the recovery route if biometrics are unavailable.
+      return const AutoLockPolicy.secureFallback();
     }
+  }
+
+  static Future<AutoLockPolicy> _readPersistedPolicy() async {
+    final requireOnOpen = await SecurePrefsService.getBioRequireOnOpen();
+    final minutes = await SecurePrefsService.getBioAutoLockMins();
+    final enrolled = await BiometricService.isEnrolled();
+    final confirmed = await BiometricService.isConfirmed();
+    return AutoLockPolicy(
+      requireOnOpen: requireOnOpen,
+      minutes: minutes,
+      biometricReady: enrolled && confirmed,
+    );
   }
 }
 
