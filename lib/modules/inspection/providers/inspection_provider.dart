@@ -9,6 +9,7 @@ import '../../../core/services/db_helper.dart';
 import '../services/photo_source_resolver.dart';
 import '../services/geotag_service.dart';
 import '../services/site_location_reference_service.dart';
+import '../structured_checklist.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../../tasks/screens/tasks_screen.dart'; // To access TaskItem class
 
@@ -34,6 +35,10 @@ class InspectionProvider extends ChangeNotifier {
     'Surrounding developments noted': false,
     'Signage / commercial activity present': false,
   };
+
+  // CE-05 structured answers. Kept local-only until CE-06 updates the iMAPS
+  // reader; a missing key means "not recorded", never an implicit No.
+  final Map<String, String?> _structuredAnswers = {};
 
   // Photo Evidence State
   final List<Map<String, dynamic>> _capturedPhotos = [];
@@ -86,6 +91,8 @@ class InspectionProvider extends ChangeNotifier {
   Map<String, bool> get siteCondition => _visible ? _siteCondition : {};
   Map<String, bool> get zoningObservations =>
       _visible ? _zoningObservations : {};
+  Map<String, String?> get structuredAnswers =>
+      _visible ? Map.unmodifiable(_structuredAnswers) : {};
   List<Map<String, dynamic>> get capturedPhotos =>
       _visible ? _capturedPhotos : [];
   GpsVerificationSnapshot? get gpsVerification =>
@@ -146,6 +153,7 @@ class InspectionProvider extends ChangeNotifier {
   void _resetFieldState() {
     _siteCondition.updateAll((key, value) => false);
     _zoningObservations.updateAll((key, value) => false);
+    _structuredAnswers.clear();
     _capturedPhotos.clear();
     _actualLandUse = 'Single-detached residential';
     _notes = '';
@@ -239,6 +247,27 @@ class InspectionProvider extends ChangeNotifier {
   void setZoningObservation(String key, bool value) {
     _requireOwner();
     _zoningObservations[key] = value;
+    _markReworkModifiedIfNeeded();
+    notifyListeners();
+  }
+
+  /// Records one CE-05 answer. Unknown keys are ignored so a stale UI cannot
+  /// grow the JSON contract; an empty value clears back to "not recorded".
+  void setStructuredAnswer(String key, String? value) {
+    _requireOwner();
+    if (!StructuredChecklist.questionLabels.containsKey(key)) return;
+    final normalised = value?.trim();
+    if (normalised != null &&
+        normalised.isNotEmpty &&
+        key != StructuredChecklist.existingUse &&
+        !StructuredChecklist.optionsFor(key).containsKey(normalised)) {
+      return;
+    }
+    if (normalised == null || normalised.isEmpty) {
+      _structuredAnswers.remove(key);
+    } else {
+      _structuredAnswers[key] = normalised;
+    }
     _markReworkModifiedIfNeeded();
     notifyListeners();
   }
@@ -746,6 +775,12 @@ class InspectionProvider extends ChangeNotifier {
               _zoningObservations[key] = value == true;
             }
           });
+          final structured = checklist[StructuredChecklist.jsonKey];
+          if (structured != null) {
+            _structuredAnswers
+              ..clear()
+              ..addAll(StructuredChecklist.decode(structured));
+          }
         } catch (e) {
           debugPrint('Error decoding local checklist: $e');
         }
@@ -792,8 +827,35 @@ class InspectionProvider extends ChangeNotifier {
 
   // --- LOCAL SAVE & ONLINE SYNC ---
 
+  /// Restores CE-05 answers from this job's owned local draft after rework
+  /// hydration. The remote checklist stays legacy-only until CE-06 teaches
+  /// the iMAPS reader to render structured answers truthfully.
+  Future<void> restoreStructuredChecklist() async {
+    _requireOwner();
+    if (_activeTask == null) return;
+    final draft = await DBHelper.getLocalInspection(_activeTask!.id);
+    _requireOwner();
+    _structuredAnswers.clear();
+    if (draft == null || draft['checklist_json'] == null) {
+      notifyListeners();
+      return;
+    }
+    try {
+      final checklist = jsonDecode(draft['checklist_json'] as String);
+      if (checklist is Map) {
+        _structuredAnswers.addAll(
+          StructuredChecklist.decode(checklist[StructuredChecklist.jsonKey]),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error restoring structured checklist: $e');
+    }
+    notifyListeners();
+  }
+
   Future<void> _saveLocalInspection() {
     _requireOwner();
+    final structured = StructuredChecklist.activeAnswers(_structuredAnswers);
     return DBHelper.saveInspectionLocally(
       jobId: _activeTask!.id,
       expectedInspectorId: _inspectorId,
@@ -801,7 +863,11 @@ class InspectionProvider extends ChangeNotifier {
       notes: _notes,
       isCompliant: _inspectionResult == 'Compliant',
       inspectionResult: _inspectionResult,
-      checklist: {..._siteCondition, ..._zoningObservations},
+      checklist: {
+        ..._siteCondition,
+        ..._zoningObservations,
+        if (structured.isNotEmpty) StructuredChecklist.jsonKey: structured,
+      },
       boundaryStatus: _boundaryStatus,
       currentStep: _currentStep,
       findings: {

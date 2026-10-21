@@ -317,8 +317,10 @@ class _CompletedInspectionDetailScreenState
       // FIXED: Moved mounted check above the context usage across the async gap
       if (!mounted) return;
 
-      context.read<InspectionProvider>().hydrateForRework(task);
-      await context.read<InspectionProvider>().restorePendingFindings();
+      final inspectionProvider = context.read<InspectionProvider>();
+      inspectionProvider.hydrateForRework(task);
+      await inspectionProvider.restoreStructuredChecklist();
+      await inspectionProvider.restorePendingFindings();
       if (!mounted) return;
       InspectionProgress.instance.unlockAllForReview(
         task.id,

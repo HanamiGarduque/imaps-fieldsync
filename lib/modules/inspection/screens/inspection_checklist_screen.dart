@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 
 import 'field_findings_screen.dart';
 import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
+import '../structured_checklist.dart';
 import '../widgets/exit_confirm_dialog.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 
@@ -31,6 +33,8 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   final Map<String, bool> _siteCondition = {};
   bool _isSaving = false;
   final Map<String, bool> _zoningObservations = {};
+  Timer? _structuredSaveTimer;
+  late final TextEditingController _existingUseController;
 
   int get _doneCount =>
       _siteCondition.values.where((v) => v).length +
@@ -47,6 +51,122 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
     _zoningObservations
       ..clear()
       ..addAll(provider.zoningObservations);
+    _existingUseController = TextEditingController(
+      text: provider.structuredAnswers[StructuredChecklist.existingUse] ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _structuredSaveTimer?.cancel();
+    _existingUseController.dispose();
+    super.dispose();
+  }
+
+  /// Persists one CE-05 answer. Dropdown choices save at once like the legacy
+  /// checklist; typed use text is debounced so each keystroke cannot queue a
+  /// database write.
+  void _setStructured(String key, String? value, {bool saveNow = true}) {
+    try {
+      context.read<InspectionProvider>().setStructuredAnswer(key, value);
+    } catch (_) {
+      return;
+    }
+    if (!saveNow) return;
+    _structuredSaveTimer?.cancel();
+    _saveChecklist();
+  }
+
+  BoxDecoration get _cardDecoration => BoxDecoration(
+    color: InsightTheme.surface,
+    borderRadius: BorderRadius.circular(20),
+    border: Border.all(color: InsightTheme.line),
+    boxShadow: InsightTheme.inspectionCardShadow,
+  );
+
+  Widget _structuredQuestion(
+    String key,
+    Map<String, String?> answers,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          StructuredChecklist.questionLabels[key]!,
+          style: InsightTheme.inter(
+            14,
+            w: FontWeight.w500,
+            c: InsightTheme.ink,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          StructuredChecklist.questionHints[key]!,
+          style: InsightTheme.inter(12, c: InsightTheme.ink3),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          key: ValueKey('structured_$key'),
+          initialValue: answers[key] ?? '',
+          isExpanded: true,
+          decoration: InsightTheme.compactFormInput,
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Not recorded')),
+            for (final option in StructuredChecklist.optionsFor(key).entries)
+              DropdownMenuItem(value: option.key, child: Text(option.value)),
+          ],
+          onChanged: _isSaving
+              ? null
+              : (selected) =>
+                    _setStructured(key, selected == '' ? null : selected),
+        ),
+      ],
+    );
+  }
+
+  Widget _existingUseField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          StructuredChecklist.questionLabels[StructuredChecklist.existingUse]!,
+          style: InsightTheme.inter(
+            14,
+            w: FontWeight.w500,
+            c: InsightTheme.ink,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          StructuredChecklist.questionHints[StructuredChecklist.existingUse]!,
+          style: InsightTheme.inter(12, c: InsightTheme.ink3),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          key: const ValueKey('structured_existing_use_input'),
+          controller: _existingUseController,
+          enabled: !_isSaving,
+          maxLength: 120,
+          style: InsightTheme.inter(16, c: InsightTheme.ink),
+          decoration: InsightTheme.compactFormInput.copyWith(
+            hintText: 'e.g. residential, commercial, agricultural',
+            counterText: '',
+          ),
+          onChanged: (value) {
+            _setStructured(
+              StructuredChecklist.existingUse,
+              value,
+              saveNow: false,
+            );
+            _structuredSaveTimer?.cancel();
+            _structuredSaveTimer = Timer(
+              const Duration(milliseconds: 400),
+              _saveChecklist,
+            );
+          },
+        ),
+      ],
+    );
   }
 
   Future<bool> _saveChecklist() async {
@@ -91,6 +211,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    final structured = context.watch<InspectionProvider>().structuredAnswers;
     return SensitiveScreen(
       child: PopScope(
         canPop:
@@ -261,6 +382,63 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                         );
                       })
                       .toList(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                decoration: _cardDecoration,
+                padding: const EdgeInsets.all(16),
+                child: _structuredQuestion(
+                  StructuredChecklist.mojonObserved,
+                  structured,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const FieldSectionHeading(
+                title: 'Project status',
+                hint:
+                    'Record only what you verified. An unanswered question stays Not recorded and is never treated as No.',
+              ),
+              Container(
+                decoration: _cardDecoration,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _structuredQuestion(
+                      StructuredChecklist.existingDevelopment,
+                      structured,
+                    ),
+                    if (structured[StructuredChecklist
+                            .existingDevelopment] ==
+                        StructuredChecklist.yes) ...[
+                      const SizedBox(height: 18),
+                      _existingUseField(),
+                    ],
+                    const SizedBox(height: 18),
+                    _structuredQuestion(
+                      StructuredChecklist.extensionOfExisting,
+                      structured,
+                    ),
+                    const SizedBox(height: 18),
+                    _structuredQuestion(
+                      StructuredChecklist.proposalStage,
+                      structured,
+                    ),
+                    if (structured[StructuredChecklist.proposalStage] ==
+                        StructuredChecklist.yes) ...[
+                      const SizedBox(height: 18),
+                      _structuredQuestion(
+                        StructuredChecklist.treesPresent,
+                        structured,
+                      ),
+                      const SizedBox(height: 18),
+                      _structuredQuestion(
+                        StructuredChecklist.canalWaterway,
+                        structured,
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
