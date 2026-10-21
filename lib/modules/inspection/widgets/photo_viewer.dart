@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../services/photo_source_resolver.dart';
+import '../services/photo_export_service.dart';
+import '../../../core/services/db_helper.dart';
 
 /// Renders a photo whether `path` is a local device file path or a remote
 /// (Supabase Storage) URL — used anywhere a photo might be either,
@@ -120,6 +122,7 @@ void openFullscreenPhotoViewer(
   List<String> photoPaths,
   int startIndex, {
   List<Map<String, dynamic>>? photoDetails,
+  String? jobId,
 }) {
   Navigator.push(
     context,
@@ -128,6 +131,7 @@ void openFullscreenPhotoViewer(
         photoPaths: photoPaths,
         startIndex: startIndex,
         photoDetails: photoDetails,
+        jobId: jobId,
       ),
       fullscreenDialog: true,
     ),
@@ -147,11 +151,13 @@ class FullscreenPhotoViewer extends StatefulWidget {
 
   /// Same-order per-photo metadata (local_photos / field_job_photos shape).
   final List<Map<String, dynamic>>? photoDetails;
+  final String? jobId;
   const FullscreenPhotoViewer({
     super.key,
     required this.photoPaths,
     required this.startIndex,
     this.photoDetails,
+    this.jobId,
   });
 
   @override
@@ -161,10 +167,13 @@ class FullscreenPhotoViewer extends StatefulWidget {
 class _FullscreenPhotoViewerState extends State<FullscreenPhotoViewer> {
   late PageController _pageController;
   late int _currentIndex;
+  late final String? _inspectorId;
+  bool _savingCopy = false;
 
   @override
   void initState() {
     super.initState();
+    _inspectorId = DBHelper.currentInspectorId;
     _currentIndex = widget.startIndex;
     _pageController = PageController(initialPage: widget.startIndex);
   }
@@ -217,6 +226,27 @@ class _FullscreenPhotoViewerState extends State<FullscreenPhotoViewer> {
     );
   }
 
+  Future<void> _saveCopy() async {
+    if (_savingCopy) return;
+    setState(() => _savingCopy = true);
+    final outcome = await PhotoExportService.saveCopy(
+      path: widget.photoPaths[_currentIndex],
+      jobId: widget.jobId ?? _metadata?['job_id'] as String?,
+      inspectorId: _inspectorId,
+    );
+    if (!mounted) return;
+    setState(() => _savingCopy = false);
+    final message = switch (outcome) {
+      PhotoCopyOutcome.saved => 'Copy saved. Original inspection evidence is unchanged.',
+      PhotoCopyOutcome.cancelled => null,
+      PhotoCopyOutcome.unavailable => 'This photo is not available on this device. Save Copy needs a locally saved photo.',
+      PhotoCopyOutcome.failed => 'Could not save the copy. Check free space and destination access, then try again. Your original is unchanged; a partial destination may need removing.',
+      PhotoCopyOutcome.unauthorized => 'The inspection session or evidence changed. Reopen this inspection before saving a copy.',
+      PhotoCopyOutcome.unsupported => 'Save Copy is available in the Android app.',
+    };
+    if (message != null) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final metadata = _metadata;
@@ -232,6 +262,7 @@ class _FullscreenPhotoViewerState extends State<FullscreenPhotoViewer> {
           iconTheme: const IconThemeData(color: Colors.white),
         ),
         body: PageView.builder(
+          physics: _savingCopy ? const NeverScrollableScrollPhysics() : null,
           controller: _pageController,
           itemCount: widget.photoPaths.length,
           onPageChanged: (i) => setState(() => _currentIndex = i),
@@ -284,6 +315,13 @@ class _FullscreenPhotoViewerState extends State<FullscreenPhotoViewer> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _savingCopy ? null : _saveCopy,
+                  icon: const Icon(Icons.save_alt_rounded, size: 18),
+                  label: Text(_savingCopy ? 'Saving copy…' : 'Save Copy'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white,
+                    minimumSize: const Size(48, 48)),
+                ),
                 TextButton.icon(
                   onPressed: hasLocation ? _copyGoogleMapsLocation : null,
                   icon: const Icon(Icons.copy_rounded, size: 18),

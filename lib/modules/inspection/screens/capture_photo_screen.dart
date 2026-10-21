@@ -25,6 +25,7 @@ import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../widgets/photo_viewer.dart';
 import '../services/photo_source_resolver.dart';
+import '../services/pending_capture_store.dart';
 import '../widgets/inspection_step_header.dart';
 
 class CapturePhotoScreen extends StatefulWidget {
@@ -46,6 +47,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       _provider.activeTask?.id == widget.task.id &&
       _provider.activeTask?.inspectionRoundNumber ==
           widget.task.inspectionRoundNumber;
+  int get _round => widget.task.inspectionRoundNumber ?? 0;
   List<Map<String, dynamic>> get _capturedPhotos =>
       _sameInspection ? _provider.capturedPhotos : [];
   bool _isCameraMode = false;
@@ -74,9 +76,26 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     _inspectorId = DBHelper.currentInspectorId;
     _initCamera();
     _fetchLocation();
+    unawaited(_cleanAbandonedCaptures());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _referenceFuture = _ensureLocationReference();
     });
+  }
+
+  /// Bounded to this owner/job/round; never touches accepted, queued, other
+  /// round, other owner or unprovable files.
+  Future<void> _cleanAbandonedCaptures() async {
+    if (_inspectorId == null || !_sameInspection) return;
+    try {
+      await PendingCaptureStore.cleanupAbandoned(
+        owner: _inspectorId,
+        jobId: widget.task.id,
+        round: _round,
+        protectedPaths: {?_capturedPhotoPath},
+      );
+    } catch (e) {
+      debugPrint('Pending capture cleanup skipped: $e');
+    }
   }
 
   Future<void> _initCamera() async {
@@ -230,20 +249,23 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       );
 
       if (!_sameInspection) return;
-      final directory = await _evidenceDirectory();
-      final savedFile = File(
-        '${directory.path}/inspection_${capturedAt.millisecondsSinceEpoch}.jpg',
+      final photoId = _pendingPhotoId ?? const Uuid().v4();
+      final stagedPath = await PendingCaptureStore.stage(
+        owner: _inspectorId!,
+        jobId: widget.task.id,
+        round: _round,
+        id: photoId,
+        bytes: geotaggedBytes,
       );
-      await savedFile.writeAsBytes(geotaggedBytes, flush: true);
       if (_sameInspection) {
         setState(() {
-          _capturedPhotoPath = savedFile.path;
+          _capturedPhotoPath = stagedPath;
           _capturedPosition = position;
           _capturedAt = capturedAt;
-          _pendingPhotoId = const Uuid().v4();
+          _pendingPhotoId = photoId;
         });
       } else {
-        await _deleteQuietly(savedFile.path);
+        await PendingCaptureStore.discard(stagedPath);
       }
     } catch (e) {
       if (mounted) {
@@ -267,12 +289,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _deleteQuietly(String path) async {
-    try {
-      final file = File(path);
-      if (await file.exists()) await file.delete();
-    } catch (e) {
-      debugPrint('Pending capture cleanup skipped: $e');
-    }
+    await PendingCaptureStore.discard(path);
   }
 
   void _retakePhoto() {
@@ -353,15 +370,28 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
     setState(() => _isSavingPhoto = true);
     final capturedAt = _capturedAt ?? DateTime.now();
-    final photo = <String, dynamic>{
-      'id': _pendingPhotoId ??= const Uuid().v4(),
-      'photoPath': capturedPath,
-      'notes': _notesController.text,
-      'latitude': _capturedPosition?.latitude,
-      'longitude': _capturedPosition?.longitude,
-      'capturedAt': GeotagService.storageTimestamp(capturedAt),
-    };
+    final photoId = _pendingPhotoId ??= const Uuid().v4();
+    String? acceptedPath;
     try {
+      // Durable "acceptance started" first: a crash after this point must
+      // leave the staged bytes for a human, never for automatic deletion.
+      await PendingCaptureStore.markAccepting(capturedPath);
+      if (!_sameInspection) throw StateError('The active inspection changed');
+      final directory = await _evidenceDirectory();
+      acceptedPath =
+          '${directory.path}/inspection_${capturedAt.millisecondsSinceEpoch}.jpg';
+      final accepted = File(acceptedPath);
+      if (!accepted.existsSync()) {
+        File(capturedPath).copySync(acceptedPath);
+      }
+      final photo = <String, dynamic>{
+        'id': photoId,
+        'photoPath': acceptedPath,
+        'notes': _notesController.text,
+        'latitude': _capturedPosition?.latitude,
+        'longitude': _capturedPosition?.longitude,
+        'capturedAt': GeotagService.storageTimestamp(capturedAt),
+      };
       if (!await _provider.persistPhoto(
         photo,
         task: widget.task,
@@ -374,12 +404,16 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       _capturedPosition = null;
       _capturedAt = null;
       _pendingPhotoId = null;
+      unawaited(_deleteQuietly(capturedPath));
       if (!_sameInspection) return;
       setState(() {
         _isCameraMode = false;
         _notesController.clear();
       });
     } catch (e) {
+      if (acceptedPath != null) {
+        await _discardUnacceptedCopy(acceptedPath, photoId);
+      }
       if (!mounted || !_sameInspection) {
         // A write may have completed for the initiating task before context
         // changed. Never delete that task's durable image on screen disposal.
@@ -396,6 +430,20 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       );
     } finally {
       if (mounted) setState(() => _isSavingPhoto = false);
+    }
+  }
+
+  /// Removes a just-copied canonical file only when no local row references
+  /// its id, so a failed save can be retried without duplicate evidence.
+  Future<void> _discardUnacceptedCopy(String path, String photoId) async {
+    try {
+      if (DBHelper.currentInspectorId != _inspectorId) return;
+      final rows = await DBHelper.getLocalPhotos(widget.task.id);
+      if (rows.any((row) => row['id'] == photoId)) return;
+      final file = File(path);
+      if (file.existsSync()) file.deleteSync();
+    } catch (e) {
+      debugPrint('Unaccepted copy retained: $e');
     }
   }
 
@@ -1137,6 +1185,7 @@ class _PhotoCell extends StatelessWidget {
             allPhotoPaths,
             index,
             photoDetails: photoDetails,
+            jobId: context.read<InspectionProvider>().activeTask?.id,
           ),
           child: Container(
             decoration: BoxDecoration(

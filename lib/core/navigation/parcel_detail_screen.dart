@@ -139,6 +139,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       photoPaths,
       startIndex,
       photoDetails: details,
+      jobId: task.id,
     );
   }
 

@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:path/path.dart' as p;
 import 'package:imaps_fieldsync/core/navigation/parcel_detail_screen.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
@@ -161,6 +163,76 @@ void main() {
       accuracyMeters: 8,
       fixAt: DateTime.now(),
     );
+  }
+
+  fixture.widgetTest('unaccepted camera JPEG stays outside canonical evidence until Save', (tester) async {
+    await fixture.mount(tester, CapturePhotoScreen(task: offlineTask));
+    await tester.pumpAndSettle();
+    await capture(tester);
+    final files = fixture.directory.listSync(recursive: true).whereType<File>()
+        .where((file) => file.path.endsWith('.jpg') && p.basename(file.path) != 'raw.jpg').toList();
+    expect(files, hasLength(1));
+    expect(files.single.path, contains('pending_captures_v1'));
+    expect(await DBHelper.getLocalPhotos(offlineJob), isEmpty);
+    await tester.tap(find.text('Save Photo'));
+    await fixture.flush(tester);
+    final row = (await DBHelper.getLocalPhotos(offlineJob)).single;
+    expect(row['photo_path'], isNot(contains('pending_captures_v1')));
+    expect(File(row['photo_path'] as String).existsSync(), isTrue);
+  });
+
+  Future<File> abandoned({String owner = offlineInspector, String job = offlineJob,
+      String state = 'pending', bool malformed = false, bool extraFile = false}) async {
+    String key(String value) => base64Url.encode(utf8.encode(value)).replaceAll('=', '');
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';
+    final dir = Directory(p.join(fixture.directory.path, 'pending_captures_v1',
+      key(owner), key(job), 'round_${offlineTask.inspectionRoundNumber ?? 0}', id));
+    dir.createSync(recursive: true);
+    File(p.join(dir.path, 'capture.json')).writeAsStringSync(malformed ? '{' : jsonEncode({
+      'version': 1, 'owner': owner, 'job': job,
+      'round': offlineTask.inspectionRoundNumber ?? 0, 'id': id, 'state': state,
+    }));
+    final photo = raw.copySync(p.join(dir.path, 'photo.jpg'));
+    if (extraFile) File(p.join(dir.path, 'unknown.txt')).writeAsStringSync('retain');
+    return photo;
+  }
+
+  fixture.widgetTest('reopening cleans only proved abandoned temporary capture, not legacy evidence', (tester) async {
+    final pending = await abandoned();
+    final legacy = raw.copySync(p.join(fixture.directory.path, 'legacy.jpg'));
+    await fixture.mount(tester, CapturePhotoScreen(task: offlineTask));
+    await flushUntil(tester, () => !pending.existsSync());
+    expect(legacy.existsSync(), isTrue);
+    expect(raw.existsSync(), isTrue);
+    expect(await DBHelper.getLocalPhotos(offlineJob), isEmpty);
+  });
+
+  for (final protection in ['local row', 'queued upload', 'final submission', 'malformed receipt',
+      'unknown file', 'accepting state', 'foreign owner', 'other round', 'malformed queue']) {
+    fixture.widgetTest('temporary cleanup retains $protection evidence', (tester) async {
+      final pending = await abandoned(
+        owner: protection == 'foreign owner' ? 'foreign-owner' : offlineInspector,
+        job: protection == 'other round' ? offlineRound2 : offlineJob,
+        state: protection == 'accepting state' ? 'accepting' : 'pending',
+        malformed: protection == 'malformed receipt', extraFile: protection == 'unknown file');
+      if (protection == 'local row') {
+        await DBHelper.savePhotoLocally(photoId: 'protected-photo', jobId: offlineJob,
+          photoPath: pending.path, notes: 'accepted', latitude: null, longitude: null);
+      }
+      if (['queued upload', 'final submission', 'malformed queue'].contains(protection)) {
+        await fixture.db.insert('pending_actions', {
+          'id': 'protected-action', 'job_id': offlineJob, 'inspector_id': offlineInspector,
+          'type': protection == 'final submission' ? 'submit_inspection' : 'photos_update',
+          'payload': protection == 'malformed queue' ? '{' : jsonEncode({'photos': [{'photoPath': pending.path}]}),
+          'created_at': '2026-10-22T00:00:00Z', 'updated_at': '2026-10-22T00:00:00Z',
+        });
+      }
+      await fixture.mount(tester, CapturePhotoScreen(task: offlineTask));
+      await fixture.flush(tester);
+      await tester.pumpAndSettle();
+      expect(pending.existsSync(), isTrue);
+      expect(pending.readAsBytesSync(), raw.readAsBytesSync());
+    });
   }
 
   for (final scenario in ['unavailable', 'inaccurate', 'stale']) {
@@ -463,9 +535,14 @@ void main() {
         fixture.provider.capturedPhotos.single['id'],
         'remote-reference-row',
       );
+      final regenerated = File(
+        p.join(fixture.directory.path, 'inspection_evidence',
+            Uri.encodeComponent(offlineInspector), offlineJob,
+            SiteLocationReferenceService.fileName(offlineJob, null)),
+      );
       expect(
-        documentRequests,
-        0,
+        regenerated.existsSync(),
+        isFalse,
         reason: 'accepted remote evidence is not regenerated',
       );
     },

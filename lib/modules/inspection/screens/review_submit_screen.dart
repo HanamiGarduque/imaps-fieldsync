@@ -483,6 +483,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                           paths,
                                           i,
                                           photoDetails: provider.capturedPhotos,
+                                          jobId: widget.task.id,
                                         ),
                                         child: Column(
                                           crossAxisAlignment:

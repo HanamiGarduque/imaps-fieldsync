@@ -1092,6 +1092,7 @@ class _CompletedInspectionDetailScreenState
                     urls,
                     i,
                     photoDetails: hasDetails ? task.photoDetails : null,
+                    jobId: task.id,
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
