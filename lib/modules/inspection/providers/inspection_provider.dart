@@ -12,6 +12,7 @@ import '../services/site_location_reference_service.dart';
 import '../structured_checklist.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../../tasks/screens/tasks_screen.dart'; // To access TaskItem class
+import '../screens/inspection_progress.dart';
 
 class InspectionProvider extends ChangeNotifier {
   TaskItem? _activeTask;
@@ -24,6 +25,9 @@ class InspectionProvider extends ChangeNotifier {
   }
 
   int _currentStep = 1;
+
+  // The per-step completion times stored for this inspection's own draft.
+  final Map<int, String> _persistedStepTimestamps = {};
 
   // Checklist State
   final Map<String, bool> _siteCondition = {
@@ -100,6 +104,22 @@ class InspectionProvider extends ChangeNotifier {
       _visible ? _gpsVerification : null;
   int get realPhotoCount =>
       capturedPhotos.where((photo) => !isLocationReferencePhoto(photo)).length;
+
+  /// The per-step completion times stored for this inspection's own draft.
+  /// They are the durable record of which of the independent steps 3, 4 and
+  /// 5 are really done.
+  Map<int, String> get persistedStepTimestamps =>
+      Map.unmodifiable(_persistedStepTimestamps);
+
+  /// The independent steps (3, 4, 5) that this inspection has really
+  /// completed, derived from the stored per-step times. A draft saved before
+  /// the steps became independent has no per-step times for them, and its
+  /// highest reached step then stands for all of them.
+  Set<int> get completedFlexibleSteps => InspectionProgress.deriveCompletedSteps(
+    _currentStep,
+    _persistedStepTimestamps,
+  );
+
   bool get hasLocationReference => capturedPhotos.any(isLocationReferencePhoto);
   String get actualLandUse => _visible ? _actualLandUse : '';
   String get notes => _visible ? _notes : '';
@@ -188,8 +208,25 @@ class InspectionProvider extends ChangeNotifier {
     // photos, AND current_step from the task's own SQLite row.
     // Each task has its own row so step can never bleed across tasks.
     final draft = await DBHelper.getLocalInspection(task.id);
-    _currentStep = (draft?['current_step'] as int?) ?? 1;
-    if (_currentStep < 1) _currentStep = 1;
+    final storedStep = (draft?['current_step'] as int?) ?? 0;
+    _currentStep = storedStep < 1 ? 1 : storedStep;
+    _persistedStepTimestamps
+      ..clear()
+      ..addAll(InspectionProgress.decodeStepTimestamps(draft?['step_timestamps']));
+    // Bind the shared progress to this inspection. The Task Overview does the
+    // same with the task's own (possibly fresher) data when it opens; this
+    // keeps a step screen that was opened directly from recording its
+    // completion instead of silently dropping it.
+    if (InspectionProgress.instance.activeTaskId != task.id) {
+      InspectionProgress.instance.ensureActiveInspection(
+        task.id,
+        label: task.location,
+        initialStep: storedStep,
+        stepTimestamps: _persistedStepTimestamps.map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+      );
+    }
 
     await _loadLocalDraftIfExists(task.id);
     _gpsVerification = _snapshotFromRow(

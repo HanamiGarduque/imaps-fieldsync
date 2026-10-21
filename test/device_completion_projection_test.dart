@@ -10,6 +10,7 @@ import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/core/widgets/offline_banner.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
+import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/completed_inspection_detail_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/widgets/photo_viewer.dart';
@@ -89,6 +90,14 @@ void main() {
     await DBHelper.saveInspectionStep(offlineJob, 5, {
       '5': '2026-10-16T00:00:00Z',
     }, offlineInspector);
+    // The Task Overview binds the shared progress to the stored inspection
+    // when it opens it, so the completed steps are live.
+    InspectionProgress.instance.ensureActiveInspection(
+      offlineJob,
+      label: 'Fixture',
+      initialStep: 5,
+      stepTimestamps: {'5': '2026-10-16T00:00:00Z'},
+    );
     return photo;
   }
 

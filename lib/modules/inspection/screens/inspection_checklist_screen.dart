@@ -3,7 +3,7 @@ import '../../../core/widgets/field_form_widgets.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 
-import 'field_findings_screen.dart';
+import 'inspection_step_router.dart';
 import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'package:provider/provider.dart';
@@ -198,11 +198,10 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
     InspectionProgress.instance.markStepComplete(4);
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => FieldFindingsScreen(
+        builder: (_) => buildNextInspectionStep(
+          currentStep: 4,
           task: widget.task,
-          capturedPhotos: widget.capturedPhotos,
-          checklistDone: _doneCount,
-          checklistTotal: _totalCount,
+          provider: context.read<InspectionProvider>(),
         ),
       ),
     );
@@ -282,7 +281,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                 ] else ...[
                   Expanded(
                     child: FieldPrimaryButton(
-                      label: 'Continue to Findings',
+                      label: nextStepLabel(4),
                       busy: _isSaving,
                       busyLabel: 'Saving on device…',
                       onPressed: _isSaving ? null : _continueToFindings,

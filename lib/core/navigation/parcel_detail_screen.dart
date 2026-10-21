@@ -56,6 +56,11 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       task.id,
       label: task.location,
       initialStep: task.currentStep > 0 ? task.currentStep : task.derivedHighestStep,
+      // The persisted per-step times are what prove which of the
+      // independent steps 3, 4 and 5 are really done.
+      stepTimestamps: task.stepTimestamps.map(
+        (key, value) => MapEntry(key.toString(), value),
+      ),
     );
     progress.addListener(_onProgressChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -292,7 +297,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                                       ),
                                       child: FractionallySizedBox(
                                         alignment: Alignment.centerLeft,
-                                        widthFactor: progress.isComplete ? 1.0 : (currentStep - 1) / InspectionProgress.totalSteps,
+                                        widthFactor: progress.isComplete ? 1.0 : progress.completedStepCount / InspectionProgress.totalSteps,
                                         child: Container(
                                           decoration: BoxDecoration(
                                             color: InsightTheme.blue1,
@@ -304,16 +309,32 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                                   ),
                                   const SizedBox(width: 10),
                                   Text(
-                                    progress.isComplete ? '100%' : '${((currentStep - 1) / InspectionProgress.totalSteps * 100).toInt()}%',
+                                    progress.isComplete ? '100%' : '${(progress.completedStepCount / InspectionProgress.totalSteps * 100).toInt()}%',
                                     style: InsightTheme.jetBrains(11, w: FontWeight.w700, c: InsightTheme.ink),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              
+
+                              if (progress.completedStepCount >= 2) ...[
+                                Text(
+                                  'Steps 3–5 are independent: open them in any '
+                                  'order and come back to the rest. Each step '
+                                  'keeps its own saved status.',
+                                  style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+
                               _StepsTimelineCard(
                                 currentStep: currentStep,
                                 isComplete: progress.isComplete,
+                                // Each step shows its own real status: the
+                                // independent steps 3-5 are never shown as
+                                // done just because a later step was reached.
+                                isStepDone: progress.isDone,
+                                isStepCurrent: progress.isCurrent,
+                                isStepLocked: progress.isLocked,
                                 // F1 fix: live times recorded this session for
                                 // the active task, merged over the persisted
                                 // step_timestamps fetched with the task.
@@ -535,6 +556,12 @@ class _StepsTimelineCard extends StatelessWidget {
   final List<_StepInfo> steps;
   final int currentStep;
   final bool isComplete;
+  // Per-step truth from InspectionProgress: the independent steps 3-5 each
+  // have their own completion, so a later step never marks an earlier one
+  // as done.
+  final bool Function(int step) isStepDone;
+  final bool Function(int step) isStepCurrent;
+  final bool Function(int step) isStepLocked;
   // F1 fix: real per-step saved times (step number -> ISO8601). Resolved
   // by the parent: live InspectionProgress entries for the active task,
   // falling back to the task's persisted step_timestamps.
@@ -542,6 +569,7 @@ class _StepsTimelineCard extends StatelessWidget {
 
   const _StepsTimelineCard({
     required this.steps, required this.currentStep, this.isComplete = false,
+    required this.isStepDone, required this.isStepCurrent, required this.isStepLocked,
     this.savedTimes = const <int, String>{},
   });
 
@@ -551,8 +579,8 @@ class _StepsTimelineCard extends StatelessWidget {
       children: List.generate(steps.length, (i) {
         final step = steps[i];
         final isLast = i == steps.length - 1;
-        final isCurrent = step.index == currentStep && !isComplete;
-        final isDone = step.index < currentStep || isComplete;
+        final isCurrent = isStepCurrent(step.index) && !isComplete;
+        final isDone = isStepDone(step.index) || isComplete;
         final isLocked = !isDone && !isCurrent;
         return _StepRow(
           step: step,

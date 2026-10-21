@@ -71,6 +71,14 @@ void main() {
     await DBHelper.saveInspectionStep(offlineJob, 5, {
       '5': '2026-01-01T00:00:00Z',
     }, offlineInspector);
+    // The Task Overview binds the shared progress to the stored inspection
+    // when it opens it; do the same so the step completion is live.
+    InspectionProgress.instance.ensureActiveInspection(
+      offlineJob,
+      label: 'Fixture',
+      initialStep: 5,
+      stepTimestamps: {'5': '2026-01-01T00:00:00Z'},
+    );
     return photo;
   }
 
@@ -257,6 +265,15 @@ void main() {
     'reopened Review keeps one intent while immediately verifying remote authority',
     (tester) async {
       fixture.provider.updateResult('Compliant');
+      // A submission needs the independent steps 3-5 to be really complete;
+      // the Task Overview binds the shared progress to the stored inspection
+      // when it opens it.
+      InspectionProgress.instance.ensureActiveInspection(
+        offlineJob,
+        label: 'Fixture',
+        initialStep: 5,
+        stepTimestamps: {'5': '2026-01-01T00:00:00Z'},
+      );
       await fixture.mount(tester, ReviewSubmitScreen(task: offlineTask));
       await submit(tester);
       final first = (await tester.runAsync(

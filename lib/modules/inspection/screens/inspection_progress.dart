@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
@@ -30,7 +32,18 @@ class InspectionProgress extends ChangeNotifier {
     'Review & submit',
   ];
 
+  /// Steps 3, 4 and 5 are independent: once Step 2 is verified the
+  /// inspector may complete them in any order. Steps 1 and 2 stay strictly
+  /// sequential because Step 2 is the verified anchor of the whole protocol.
+  static const List<int> flexibleSteps = [3, 4, 5];
+
   int _highestCompleted = 0; // 0 = nothing done yet
+
+  /// The real, per-step completion of the independent steps 3, 4 and 5.
+  /// This is never inferred from "a later step was reached": the persisted
+  /// step_timestamps map is the record, so finishing Step 5 first does not
+  /// pretend that Steps 3 and 4 are done.
+  final Set<int> _completedSteps = {};
 
   // F1 fix (per-step saved times): records the real moment each step's
   // save/proceed button fired, for the ACTIVE task only. Keyed by step
@@ -65,11 +78,59 @@ class InspectionProgress extends ChangeNotifier {
   Future<void> _persistQueue = Future.value();
 
   int get highestCompleted => _inspectorId == DBHelper.currentInspectorId ? _highestCompleted : 0;
-  int get currentStep => (highestCompleted + 1).clamp(1, totalSteps);
+
+  /// How many of the six steps are genuinely complete. For a sequential
+  /// inspection this equals the highest reached step; for the independent
+  /// steps 3-5 it counts the ones that really have a saved completion.
+  int get completedStepCount {
+    var count = 0;
+    for (var step = 1; step <= totalSteps; step++) {
+      if (isDone(step)) count++;
+    }
+    return count;
+  }
+
+  /// The next step the inspector should work on: the first one that is not
+  /// complete yet. With independent steps 3-5 this is the lowest unfinished
+  /// one, not simply "the step after the highest reached".
+  int get currentStep {
+    for (var step = 1; step < totalSteps; step++) {
+      if (!isDone(step)) return step;
+    }
+    return totalSteps;
+  }
+
   bool get isComplete => highestCompleted >= totalSteps;
-  bool isDone(int step) => step <= highestCompleted;
+
+  /// True only when this step really has a saved completion of its own.
+  bool isDone(int step) {
+    if (step <= 2) return step <= _highestCompleted;
+    if (step <= 5) return _completedSteps.contains(step);
+    return _highestCompleted >= totalSteps;
+  }
+
   bool isCurrent(int step) => step == currentStep;
-  bool isLocked(int step) => step > currentStep;
+
+  /// Steps 3-5 unlock together once Step 2 is verified. Step 6 stays locked
+  /// until every one of them is genuinely complete.
+  bool isLocked(int step) {
+    if (step <= 2) return step > _highestCompleted + 1;
+    if (step <= 5) return _highestCompleted < 2;
+    return !_allFlexibleStepsComplete;
+  }
+
+  bool get _allFlexibleStepsComplete =>
+      flexibleSteps.every(_completedSteps.contains);
+
+  /// The first of the independent steps that still needs work, or null when
+  /// Steps 3, 4 and 5 are all complete (the review is next).
+  int? get nextIncompleteFlexibleStep {
+    for (final step in flexibleSteps) {
+      if (!_completedSteps.contains(step)) return step;
+    }
+    return null;
+  }
+
   String get currentStepTitle => stepTitles[currentStep - 1];
 
   /// Real saved time for a step of the ACTIVE task, if recorded this
@@ -80,36 +141,61 @@ class InspectionProgress extends ChangeNotifier {
   Map<int, String> get stepCompletedAt => Map.unmodifiable(_stepCompletedAt);
 
   /// Call when a step's "Continue" action fires, right before navigating
-  /// forward. Steps can only be completed in order.
+  /// forward. Steps 1 and 2 must be completed in order; steps 3, 4 and 5 may
+  /// be completed in any order once Step 2 is verified.
   void markStepComplete(int step) {
-    if (_inspectorId == null || _inspectorId != DBHelper.currentInspectorId) return;
-    if (step == _highestCompleted + 1) {
-      _highestCompleted = step;
-      // F1 fix: stamp the real moment this save/proceed happened. Every
-      // task gets its own times because this map is cleared whenever the
-      // active task changes and each entry is persisted per job id.
-      _stepCompletedAt[step] = DateTime.now().toUtc().toIso8601String();
-      notifyListeners();
+    if (_inspectorId == null || _inspectorId != DBHelper.currentInspectorId) {
+      return;
+    }
+    if (step < 1 || step > totalSteps) return;
+    if (step == 1) {
+      if (_highestCompleted >= 1) return;
+    } else if (step == 2) {
+      // Step 2 is the verified anchor; it needs a completed Step 1.
+      if (_highestCompleted < 1) return;
+    } else if (step <= 5) {
+      // The independent steps need a verified Step 2, and each one counts
+      // only once.
+      if (_highestCompleted < 2) return;
+      if (_completedSteps.contains(step)) return;
+    } else {
+      // Step 6 needs every earlier step, whatever order they were done in.
+      if (!_allFlexibleStepsComplete) return;
+      if (_highestCompleted >= totalSteps) return;
+    }
+    _completeStep(step);
+  }
 
-      if (_activeTaskId != null) {
-        // Capture taskId now, not inside the deferred closure below — by
-        // the time this queued write actually runs, the inspector could
-        // have already switched to a different task, and _activeTaskId
-        // would no longer be the one this particular step belongs to.
-        final taskId = _activeTaskId!;
-        final uid = _inspectorId!;
-        final timestamps = _stepCompletedAt.map((k,v) => MapEntry(k.toString(),v));
-        _persistQueue = _persistQueue.then((_) => _persistCurrentStep(taskId, step, uid, timestamps));
-      }
+  void _completeStep(int step) {
+    // F1 fix: stamp the real moment this save/proceed happened. Every
+    // task gets its own times because this map is cleared whenever the
+    // active task changes and each entry is persisted per job id.
+    _stepCompletedAt[step] = DateTime.now().toUtc().toIso8601String();
+    if (step >= 3 && step <= 5) _completedSteps.add(step);
+    if (step > _highestCompleted) _highestCompleted = step;
+    notifyListeners();
 
-      if (step < totalSteps && _activeTaskId != null) {
-        SupabaseService.logActivity(
-          eventType: 'step_completed',
-          title: 'Completed Step $step: ${stepTitles[step - 1]}',
-          subtitle: _activeTaskLabel,
-          fieldJobId: _activeTaskId,
-        );
-      }
+    if (_activeTaskId != null) {
+      // Capture taskId now, not inside the deferred closure below — by
+      // the time this queued write actually runs, the inspector could
+      // have already switched to a different task, and _activeTaskId
+      // would no longer be the one this particular step belongs to.
+      final taskId = _activeTaskId!;
+      final uid = _inspectorId!;
+      final timestamps = _stepCompletedAt.map((k,v) => MapEntry(k.toString(),v));
+      // current_step is the highest step reached and never regresses; the
+      // independent completion of steps 3-5 travels in step_timestamps.
+      final reached = _highestCompleted;
+      _persistQueue = _persistQueue.then((_) => _persistCurrentStep(taskId, reached, uid, timestamps));
+    }
+
+    if (step < totalSteps && _activeTaskId != null) {
+      SupabaseService.logActivity(
+        eventType: 'step_completed',
+        title: 'Completed Step $step: ${stepTitles[step - 1]}',
+        subtitle: _activeTaskLabel,
+        fieldJobId: _activeTaskId,
+      );
     }
   }
 
@@ -198,7 +284,12 @@ class InspectionProgress extends ChangeNotifier {
   /// from `task.currentStep`/`derivedHighestStep`, which are already kept
   /// current by the Bug 1 fix, so trusting it here is exactly "always read
   /// from the database, not from what the UI happened to have in memory."
-  void ensureActiveInspection(String taskId, {String? label, int? initialStep}) {
+  void ensureActiveInspection(
+    String taskId, {
+    String? label,
+    int? initialStep,
+    Map<String, String>? stepTimestamps,
+  }) {
     final uid = DBHelper.currentInspectorId;
     final isDifferentTask = _activeTaskId != taskId || _inspectorId != uid;
     _inspectorId = uid;
@@ -208,6 +299,7 @@ class InspectionProgress extends ChangeNotifier {
     // task must never inherit another task's timestamps.
     if (isDifferentTask) {
       _stepCompletedAt.clear();
+      _completedSteps.clear();
     }
     if (initialStep != null) {
       _highestCompleted = initialStep;
@@ -216,7 +308,82 @@ class InspectionProgress extends ChangeNotifier {
       // fresh" rather than carrying over the previous task's progress.
       _highestCompleted = 0;
     }
+    _hydrateCompletedSteps(initialStep ?? _highestCompleted, stepTimestamps);
   }
+
+  /// Restores the independent completion of steps 3-5 from the persisted
+  /// per-step times. A draft saved before the steps became independent has
+  /// no per-step times for them, and its highest reached step therefore
+  /// stands for all of them — that is the historical meaning of a sequential
+  /// inspection, and it is honoured only for those drafts.
+  void _hydrateCompletedSteps(int highestReached, Map<String, String>? times) {
+    _completedSteps.removeWhere((step) => step > 5);
+    times?.forEach((key, value) {
+      final step = int.tryParse(key);
+      if (step == null || value.isEmpty) return;
+      if (step >= 1 && step <= totalSteps) {
+        _stepCompletedAt.putIfAbsent(step, () => value);
+      }
+    });
+    _completedSteps.addAll(
+      deriveCompletedSteps(
+        highestReached,
+        times?.map(
+              (key, value) => MapEntry(int.tryParse(key) ?? 0, value),
+            ) ??
+            const <int, String>{},
+      ),
+    );
+  }
+
+  /// Decodes a stored step_timestamps value (JSON object of step -> time).
+  static Map<int, String> decodeStepTimestamps(Object? raw) {
+    final times = <int, String>{};
+    if (raw is! String || raw.isEmpty) return times;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return times;
+      decoded.forEach((key, value) {
+        final step = int.tryParse(key.toString());
+        if (step != null && value is String && value.isNotEmpty) {
+          times[step] = value;
+        }
+      });
+    } catch (_) {
+      // An unreadable record simply proves nothing.
+    }
+    return times;
+  }
+
+  /// The independent steps that are genuinely complete for a stored draft.
+  ///
+  /// A record that carries the sequential prefix (steps 1 and 2) was written
+  /// by the app that knows the independent steps, so its per-step times for
+  /// steps 3-5 are authoritative. A record without that prefix predates
+  /// them, and its highest reached step then stands for all of them - the
+  /// historical meaning of a sequential inspection.
+  static Set<int> deriveCompletedSteps(
+    int highestReached,
+    Map<int, String>? stepTimes,
+  ) {
+    final completed = <int>{};
+    stepTimes?.forEach((step, value) {
+      if (step >= 3 && step <= 5 && value.isNotEmpty) completed.add(step);
+    });
+    final hasSequentialPrefix = (stepTimes?[1]?.isNotEmpty ?? false) &&
+        (stepTimes?[2]?.isNotEmpty ?? false);
+    if (hasSequentialPrefix) return completed;
+    for (var step = 3; step <= 5; step++) {
+      if (step <= highestReached) completed.add(step);
+    }
+    return completed;
+  }
+
+  /// The inspection this progress belongs to.
+  String? get activeTaskId => _activeTaskId;
+
+  /// The independent steps completed in this session.
+  Set<int> get completedSteps => Set.unmodifiable(_completedSteps);
 
   void reset() {
     _highestCompleted = 0;
@@ -224,6 +391,7 @@ class InspectionProgress extends ChangeNotifier {
     _activeTaskLabel = null;
     _inspectorId = null;
     _stepCompletedAt.clear();
+    _completedSteps.clear();
     notifyListeners();
   }
 
@@ -236,6 +404,7 @@ class InspectionProgress extends ChangeNotifier {
     _activeTaskId = taskId;
     _activeTaskLabel = label ?? _activeTaskLabel;
     _highestCompleted = totalSteps;
+    _completedSteps.addAll(flexibleSteps);
     // F1 fix: same per-task isolation as ensureActiveInspection.
     if (isDifferentTask) _stepCompletedAt.clear();
     notifyListeners();

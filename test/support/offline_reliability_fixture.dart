@@ -361,8 +361,11 @@ class OfflineReliabilityFixture {
     ]);
     await DBHelper.retainInspectionJob(offlineJob);
     provider = InspectionProvider();
-    await provider.startInspection(offlineTask);
+    // Reset the shared progress BEFORE the inspection starts, so the
+    // inspection can bind itself to it (the binding is what records a step
+    // completion when a step screen is opened directly).
     InspectionProgress.instance.reset();
+    await provider.startInspection(offlineTask);
     SyncOutboxService.hasConnectionOverride = () async => false;
   }
 

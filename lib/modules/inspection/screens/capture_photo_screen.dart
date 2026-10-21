@@ -16,7 +16,7 @@ import '../services/site_location_reference_service.dart';
 
 import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
-import 'inspection_checklist_screen.dart';
+import 'inspection_step_router.dart';
 import 'package:provider/provider.dart';
 import '../providers/inspection_provider.dart';
 import '../widgets/exit_confirm_dialog.dart';
@@ -590,9 +590,10 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => InspectionChecklistScreen(
+          builder: (_) => buildNextInspectionStep(
+            currentStep: 3,
             task: widget.task,
-            capturedPhotos: _capturedPhotos,
+            provider: _provider,
           ),
         ),
       );
@@ -704,7 +705,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
               ] else ...[
                 Expanded(
                   child: FieldPrimaryButton(
-                    label: 'Continue to Checklist',
+                    label: nextStepLabel(3),
                     busy: _isSaving,
                     onPressed: _isSaving ? null : _finishAndContinue,
                   ),

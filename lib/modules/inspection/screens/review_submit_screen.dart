@@ -163,11 +163,31 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   Future<void> _handleSubmit() async {
     if (_submitting) return;
     final provider = context.read<InspectionProvider>();
-    // Resume can enter Review without revisiting Step 3. A generated location
-    // reference must never stand in for the required camera evidence.
+    // A generated location reference must never stand in for the required
+    // camera evidence.
     if (provider.hasLocationReference && provider.realPhotoCount == 0) {
       _showValidation('Capture at least one camera photo before submitting.');
       return;
+    }
+    // Resume can enter Review without revisiting every step. Steps 3, 4 and
+    // 5 are independent, but all three must be genuinely complete before an
+    // inspection can be submitted, whatever order they were done in. The
+    // live progress of this inspection is the record; an inspection that is
+    // not loaded in this session is decided by the server.
+    final progress = InspectionProgress.instance;
+    if (progress.activeTaskId == widget.task.id) {
+      final completed = progress.completedSteps;
+      final missing = InspectionProgress.flexibleSteps
+          .where((step) => !completed.contains(step))
+          .toList();
+      if (missing.isNotEmpty) {
+        _showValidation(
+          'Complete the remaining inspection step'
+          '${missing.length == 1 ? '' : 's'} before submitting: '
+          '${missing.map((step) => 'Step $step').join(', ')}.',
+        );
+        return;
+      }
     }
     final validation = provider.assessmentValidationMessage;
     if (validation != null) {

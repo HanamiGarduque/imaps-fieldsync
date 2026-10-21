@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import 'package:flutter/services.dart';
 
-import 'review_submit_screen.dart';
+import 'inspection_step_router.dart';
 import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
 import 'package:provider/provider.dart';
@@ -145,7 +145,13 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
     InspectionProgress.instance.markStepComplete(5);
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => ReviewSubmitScreen(task: widget.task)),
+      MaterialPageRoute(
+        builder: (_) => buildNextInspectionStep(
+          currentStep: 5,
+          task: widget.task,
+          provider: _provider,
+        ),
+      ),
     );
   }
 
@@ -279,7 +285,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
                 ] else ...[
                   Expanded(
                     child: FieldPrimaryButton(
-                      label: 'Continue to Review',
+                      label: nextStepLabel(5),
                       busy: _isSaving,
                       busyLabel: 'Saving on device…',
                       onPressed: _isSaving ? null : _handleContinue,
