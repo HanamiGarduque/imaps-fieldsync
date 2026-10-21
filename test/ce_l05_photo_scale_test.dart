@@ -89,7 +89,7 @@ void main() {
   tearDownAll(fixture.dispose);
 
   /// Scrolls the page until the Add cell is built and visible.
-  Future<void> _revealAddCell(WidgetTester tester) async {
+  Future<void> revealAddCell(WidgetTester tester) async {
     await tester.scrollUntilVisible(
       find.bySemanticsLabel('Add site photo'),
       200,
@@ -105,7 +105,7 @@ void main() {
       await fixture.mount(tester, CapturePhotoScreen(task: offlineTask));
       await fixture.flush(tester);
       expect(find.text('0 site photos'), findsOneWidget);
-      await _revealAddCell(tester);
+      await revealAddCell(tester);
       expect(find.bySemanticsLabel('Add site photo'), findsOneWidget);
 
       for (final target in [1, 10, 11, 20, 50, 100]) {
@@ -122,7 +122,7 @@ void main() {
           find.text(target == 1 ? '1 site photo' : '$target site photos'),
           findsOneWidget,
         );
-        await _revealAddCell(tester);
+        await revealAddCell(tester);
         expect(find.bySemanticsLabel('Add site photo'), findsOneWidget);
       }
 
