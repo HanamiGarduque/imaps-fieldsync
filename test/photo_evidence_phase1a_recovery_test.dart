@@ -301,7 +301,7 @@ void main() {
   );
 
   fixture.widgetTest(
-    'ten real photos plus one reference hide Add without raising the camera limit',
+    'more than ten real photos keep Add available and count only site photos',
     (tester) async {
       for (var i = 0; i < 10; i++) {
         fixture.provider.addPhoto(
@@ -320,9 +320,23 @@ void main() {
       );
       await fixture.mount(tester, CapturePhotoScreen(task: offlineTask));
       await tester.pumpAndSettle();
-      expect(find.text('10 / 10 photos'), findsOneWidget);
-      expect(find.bySemanticsLabel('Add site photo'), findsNothing);
+      // The generated reference is separate evidence, not a site photo.
+      expect(find.text('10 site photos'), findsOneWidget);
+      expect(find.bySemanticsLabel('Add site photo'), findsOneWidget);
       expect(fixture.provider.capturedPhotos, hasLength(11));
+
+      for (var i = 10; i < 20; i++) {
+        fixture.provider.addPhoto(
+          photoPath: raw.path,
+          photoNotes: 'camera $i',
+          latitude: null,
+          longitude: null,
+        );
+      }
+      await tester.pumpAndSettle();
+      expect(find.text('20 site photos'), findsOneWidget);
+      expect(find.bySemanticsLabel('Add site photo'), findsOneWidget);
+      expect(fixture.provider.capturedPhotos, hasLength(21));
     },
   );
 

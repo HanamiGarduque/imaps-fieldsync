@@ -32,12 +32,16 @@ class CapturePhotoScreen extends StatefulWidget {
   final TaskItem task;
   const CapturePhotoScreen({super.key, required this.task});
 
+  /// Thumbnail decode ceiling. The grid can hold every accepted photo, so
+  /// decoding each one at full resolution would exhaust memory on a large
+  /// set. Full resolution stays available in the fullscreen viewer.
+  static const int thumbnailCacheWidth = 384;
+
   @override
   State<CapturePhotoScreen> createState() => _CapturePhotoScreenState();
 }
 
 class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
-  static const int maxPhotos = 10;
   late final InspectionProvider _provider;
   late final String? _inspectorId;
   bool get _sameInspection =>
@@ -346,25 +350,9 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Future<void> _savePhotoAndReturnToGrid() async {
     if (_isSavingPhoto || !_sameInspection) return;
-    final realCount = _capturedPhotos
-        .where((photo) => !isLocationReferencePhoto(photo))
-        .length;
-    if (realCount >= maxPhotos) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Max $maxPhotos site photos reached.',
-            style: InsightTheme.inter(13, c: Colors.white),
-          ),
-          backgroundColor: InsightTheme.ink,
-        ),
-      );
-      setState(() {
-        _isCameraMode = false;
-        _discardPendingCapture();
-      });
-      return;
-    }
+    // No fixed application photo cap: capacity is whatever the device can
+    // store. Storage failures below are reported per capture and never
+    // discard already accepted evidence.
     final capturedPath = _capturedPhotoPath;
     if (capturedPath == null) return;
 
@@ -631,6 +619,9 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Widget _buildGridMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    final realPhotoCount = _capturedPhotos
+        .where((p) => !isLocationReferencePhoto(p))
+        .length;
     return PopScope(
       canPop:
           !context.read<InspectionProvider>().isReworkMode &&
@@ -713,11 +704,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
             FieldSectionHeading(
               title: 'Site photos',
               hint:
-                  'Attach at least one photo to continue. Up to '
-                  '$maxPhotos site photos; the generated location reference is '
-                  'not counted against that limit.',
+                  'Attach at least one photo to continue. Add as many site '
+                  'photos as this device can store; the generated location '
+                  'reference is not counted as a site photo.',
               trailing: Text(
-                '${_capturedPhotos.where((p) => !isLocationReferencePhoto(p)).length} / $maxPhotos photos',
+                '$realPhotoCount ${realPhotoCount == 1 ? 'site photo' : 'site photos'}',
                 style: InsightTheme.inter(
                   13,
                   w: FontWeight.w600,
@@ -745,14 +736,8 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                 mainAxisSpacing: 12,
                 childAspectRatio: 1,
               ),
-              itemCount:
-                  _capturedPhotos.length +
-                  (_capturedPhotos
-                              .where((p) => !isLocationReferencePhoto(p))
-                              .length <
-                          maxPhotos
-                      ? 1
-                      : 0),
+              // Always one trailing Add cell: there is no fixed photo cap.
+              itemCount: _capturedPhotos.length + 1,
               itemBuilder: (context, index) {
                 if (index < _capturedPhotos.length) {
                   final paths = inspectionDisplayPaths(
@@ -1210,7 +1195,21 @@ class _PhotoCell extends StatelessWidget {
                 Positioned.fill(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(16),
-                    child: AdaptivePhotoImage(path: photoPath),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // ~cell resolution is enough for a thumbnail; the
+                        // fullscreen viewer still decodes full resolution.
+                        final width =
+                            (constraints.maxWidth *
+                                    MediaQuery.devicePixelRatioOf(context))
+                                .round()
+                                .clamp(200, CapturePhotoScreen.thumbnailCacheWidth);
+                        return AdaptivePhotoImage(
+                          path: photoPath,
+                          cacheWidth: width,
+                        );
+                      },
+                    ),
                   ),
                 ),
                 Positioned(

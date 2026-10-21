@@ -1185,17 +1185,26 @@ class SupabaseService {
     final Map<String, String> existingPhotoValues = {};
     if (pathToRowId.isNotEmpty) {
       try {
-        final existing = await client
-            .from('field_job_photos')
-            .select('id,photo_url')
-            .eq('field_job_id', jobId)
-            .inFilter('id', pathToRowId.values.toList());
-        for (final row in existing as List) {
-          final map = row as Map;
-          final id = map['id'];
-          final value = map['photo_url'];
-          if (id is String && value is String && value.isNotEmpty) {
-            existingPhotoValues[id] = value;
+        // PostgREST encodes an `in.(...)` list into the request URL, so one
+        // filter with every photo id overflows URL limits at large sets.
+        // Chunk it; an unknown chunk still fails the whole pre-check and
+        // remains retryable rather than being treated as absent.
+        const metadataChunkSize = 50;
+        final rowIds = pathToRowId.values.toList();
+        for (var start = 0; start < rowIds.length; start += metadataChunkSize) {
+          final chunk = rowIds.skip(start).take(metadataChunkSize).toList();
+          final existing = await client
+              .from('field_job_photos')
+              .select('id,photo_url')
+              .eq('field_job_id', jobId)
+              .inFilter('id', chunk);
+          for (final row in existing as List) {
+            final map = row as Map;
+            final id = map['id'];
+            final value = map['photo_url'];
+            if (id is String && value is String && value.isNotEmpty) {
+              existingPhotoValues[id] = value;
+            }
           }
         }
       } catch (e) {

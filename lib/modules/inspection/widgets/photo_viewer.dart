@@ -20,6 +20,12 @@ class AdaptivePhotoImage extends StatefulWidget {
   final PhotoSourceResolver? resolver;
   final Widget Function(BuildContext context)? errorBuilder;
 
+  /// Bounds the decoded bitmap to this pixel width. Use it for grid
+  /// thumbnails so a large photo set decodes small bitmaps instead of one
+  /// full-resolution frame per cell. Leave null (full resolution) for the
+  /// fullscreen viewer.
+  final int? cacheWidth;
+
   const AdaptivePhotoImage({
     super.key,
     required this.path,
@@ -27,6 +33,7 @@ class AdaptivePhotoImage extends StatefulWidget {
     this.fallbackPath,
     this.resolver,
     this.errorBuilder,
+    this.cacheWidth,
   });
 
   @override
@@ -91,11 +98,13 @@ class _AdaptivePhotoImageState extends State<AdaptivePhotoImage> {
           ? Image.file(
               File(photo.localPath!),
               fit: widget.fit,
+              cacheWidth: widget.cacheWidth,
               errorBuilder: (_, _, _) => _error(),
             )
           : Image.memory(
               photo.bytes!,
               fit: widget.fit,
+              cacheWidth: widget.cacheWidth,
               errorBuilder: (_, _, _) => _error(),
             );
     },

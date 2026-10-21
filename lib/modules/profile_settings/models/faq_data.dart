@@ -218,9 +218,9 @@ class FaqData {
           questionTl:
               'Ilang litrato ang maaari kong kunin sa bawat inspection?',
           answerEn:
-              'You can capture and attach up to 10 photos for each inspection.',
+              'You can attach as many site photos as the device has storage for. The generated Site Location Reference is separate evidence and does not count as a site photo.',
           answerTl:
-              'Maaari kang kumuha at maglakip ng hanggang 10 litrato para sa bawat inspection.',
+              'Maaari kang maglakip ng kahit ilang site photo hangga\'t may espasyo ang device. Ang generated na Site Location Reference ay hiwalay na ebidensya at hindi binibilang bilang site photo.',
         ),
         FaqItem(
           questionEn: 'What happens when I press Save after taking a photo?',
