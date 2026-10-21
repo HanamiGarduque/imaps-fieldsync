@@ -289,7 +289,19 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     _capturedPosition = null;
     _capturedAt = null;
     _pendingPhotoId = null;
-    if (path != null) unawaited(_deleteQuietly(path));
+    if (path != null) _retireStagedCapture(path);
+  }
+
+  /// Removes a staged capture only after the frame that stopped showing it.
+  /// The preview can still be decoding that file when the capture is
+  /// retaken, cancelled or accepted, and deleting it first would fail the
+  /// in-flight decode. This never touches accepted or queued evidence:
+  /// `PendingCaptureStore.discard` refuses any path a local row or a queue
+  /// entry references.
+  void _retireStagedCapture(String path) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_deleteQuietly(path));
+    });
   }
 
   Future<void> _deleteQuietly(String path) async {
@@ -1091,7 +1103,20 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       return Stack(
         fit: StackFit.expand,
         children: [
-          Image.file(File(_capturedPhotoPath!), fit: BoxFit.contain),
+          Image.file(
+            File(_capturedPhotoPath!),
+            fit: BoxFit.contain,
+            // A staged capture can disappear (retaken, cancelled, or
+            // accepted and retired) while the preview is still decoding it.
+            // That is an expected outcome, not a failure to report.
+            errorBuilder: (_, _, _) => const Center(
+              child: Icon(
+                Icons.image_not_supported_outlined,
+                color: Colors.white70,
+                size: 40,
+              ),
+            ),
+          ),
           Positioned(
             top: 16,
             right: 16,

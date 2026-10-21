@@ -202,6 +202,28 @@ void main() {
     await profileDb.close();
   });
 
+  /// Step 3 now awaits a real durable write, a platform-channel directory
+  /// lookup and real thumbnail file reads, so the widget fake clock alone
+  /// cannot finish them. Give the real event loop short windows until no
+  /// action is busy, then settle - the same approach the offline reliability
+  /// fixture uses.
+  Future<void> settleWithRealAsync(WidgetTester tester) async {
+    for (var attempt = 0; attempt < 40; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+      final busy = tester
+          .widgetList<FieldPrimaryButton>(find.byType(FieldPrimaryButton))
+          .any((button) => button.busy);
+      if (!busy &&
+          find.byType(CircularProgressIndicator).evaluate().isEmpty) {
+        break;
+      }
+    }
+    await tester.pumpAndSettle();
+  }
+
   Future<void> mount(
     WidgetTester tester,
     Widget screen,
@@ -719,7 +741,7 @@ void main() {
       );
       await tester.ensureVisible(find.text('Save Photo'));
       await tester.tap(find.text('Save Photo'));
-      await tester.pumpAndSettle();
+      await settleWithRealAsync(tester);
       final provider = tester
           .element(find.byType(CapturePhotoScreen))
           .read<InspectionProvider>();
