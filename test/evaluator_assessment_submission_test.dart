@@ -7,6 +7,7 @@ import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
+import 'package:imaps_fieldsync/modules/inspection/structured_checklist.dart';
 
 import 'support/offline_reliability_fixture.dart';
 
@@ -179,6 +180,46 @@ void main() {
       },
     );
   }
+
+  fixture.widgetTest(
+    'enabled structured answers reach the final submission once',
+    (tester) async {
+      StructuredChecklist.remoteTransmissionEnabledForTesting = true;
+      addTearDown(() {
+        StructuredChecklist.remoteTransmissionEnabledForTesting = null;
+      });
+      fixture.provider
+        ..setSiteCondition('Structure matches declared use', true)
+        ..setStructuredAnswer(
+          StructuredChecklist.existingDevelopment,
+          StructuredChecklist.yes,
+        )
+        ..setStructuredAnswer(
+          StructuredChecklist.existingUse,
+          'Fictional clinic',
+        )
+        ..updateResult('Compliant');
+      await fixture.mount(tester, ReviewSubmitScreen(task: offlineTask));
+      await pressSubmit(tester);
+      await confirm(tester);
+
+      final queued = (await tester.runAsync(
+        DBHelper.getActionableActions,
+      ))!.single;
+      final payload = jsonDecode(queued['payload'] as String) as Map;
+      expect(payload['checklistCompletedCount'], 1);
+      expect(payload['checklistTotalCount'], 5);
+      final data = payload['checklistData'] as List;
+      expect(data, hasLength(7));
+      final items = data.map((entry) => (entry as Map)['item']).toList();
+      expect(items.toSet(), hasLength(items.length));
+      expect(data.last, {
+        'item':
+            StructuredChecklist.questionLabels[StructuredChecklist.existingUse],
+        'answer': 'Fictional clinic',
+      });
+    },
+  );
 
   fixture.widgetTest('cancel confirmation sends no business submission', (
     tester,

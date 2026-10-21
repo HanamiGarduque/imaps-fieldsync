@@ -15,11 +15,9 @@ import 'support/offline_reliability_fixture.dart';
 
 /// CE-05 — Step 4 Project Status / Zoning Observations.
 ///
-/// Structured answers stay local-only in this slice: the current iMAPS reader
-/// (`resources/js/Pages/Site Inspections/Show.jsx`, `readChecklist`) maps any
-/// entry without a boolean `checked` to "Not recorded", so transmitting them
-/// now would publish misleading PO reports. CE-06 owns that transport/reader
-/// change; the payload test below pins the reason.
+/// This file keeps the local persistence, rework, ownership and R1/R2 proof.
+/// CE-05T owns the serialized remote contract and its default-off transmission
+/// gate in `ce05t_structured_transmission_test.dart`.
 void main() {
   final fixture = OfflineReliabilityFixture();
   setUpAll(fixture.initialize);
@@ -42,15 +40,6 @@ void main() {
       whereArgs: [offlineJob, 'checklist_update'],
     );
     return jsonDecode(rows.single['payload'] as String) as Map<String, dynamic>;
-  }
-
-  /// Transliteration of the current iMAPS reader, used only to pin the
-  /// documented incompatibility. Cited source (read-only):
-  /// `resources/js/Pages/Site Inspections/Show.jsx:216-227`.
-  String readChecklistAnswer(Object? checked) {
-    if (checked == true || checked == 1) return 'Checked';
-    if (checked == false || checked == 0) return 'Not checked';
-    return 'Not recorded';
   }
 
   group('structured model', () {
@@ -495,19 +484,19 @@ void main() {
     },
   );
 
-  test('the current iMAPS reader would misstate structured answers', () {
-    // Legacy payload still reads truthfully.
-    expect(readChecklistAnswer(false), 'Not checked');
-    expect(readChecklistAnswer(true), 'Checked');
+  test('structured remote transmission stays disabled after CE-06', () {
+    expect(StructuredChecklist.remoteTransmissionEnabled, isFalse);
+    expect(StructuredChecklist.isRemoteTransmissionEnabled, isFalse);
 
-    // Candidate CE-06 structured entries carry an answer token, no boolean.
-    // Today they would render as "Not recorded" — which is why CE-05 sends
-    // none of them until the reader is updated.
-    final candidate = <String, Object?>{
-      'item': 'Existing project or development on site',
-      'answer': StructuredChecklist.unable,
-    };
-    expect(readChecklistAnswer(candidate['checked']), 'Not recorded');
+    final payload = StructuredChecklist.remoteChecklist(
+      legacy: const {'Legacy question': true},
+      answers: const {
+        StructuredChecklist.existingDevelopment: StructuredChecklist.yes,
+      },
+    );
+    expect(payload, [
+      {'item': 'Legacy question', 'checked': true},
+    ]);
   });
 
   Future<void> chooseOption(
@@ -537,9 +526,7 @@ void main() {
       await fixture.mount(tester, InspectionChecklistScreen(task: offlineTask));
 
       expect(
-        find.byKey(
-          const ValueKey('structured_existing_use_input'),
-        ),
+        find.byKey(const ValueKey('structured_existing_use_input')),
         findsNothing,
       );
       expect(
@@ -553,21 +540,17 @@ void main() {
         'Yes',
       );
       expect(
-        fixture.provider
-            .structuredAnswers[StructuredChecklist.existingDevelopment],
+        fixture.provider.structuredAnswers[StructuredChecklist
+            .existingDevelopment],
         StructuredChecklist.yes,
         reason: 'current answers: ${fixture.provider.structuredAnswers}',
       );
       expect(
-        find.byKey(
-          const ValueKey('structured_existing_use_input'),
-        ),
+        find.byKey(const ValueKey('structured_existing_use_input')),
         findsOneWidget,
       );
       await tester.enterText(
-        find.byKey(
-          const ValueKey('structured_existing_use_input'),
-        ),
+        find.byKey(const ValueKey('structured_existing_use_input')),
         'Fictional residential',
       );
       await tester.pump();
@@ -623,10 +606,7 @@ void main() {
         of: find.byType(ReviewSubmitScreen),
         matching: find.text(text),
       );
-      expect(
-        inReview('Project status & zoning observations'),
-        findsOneWidget,
-      );
+      expect(inReview('Project status & zoning observations'), findsOneWidget);
       expect(inReview('Not Applicable'), findsOneWidget);
       expect(inReview('Unable to Verify'), findsOneWidget);
       expect(inReview("Existing project's declared use"), findsOneWidget);

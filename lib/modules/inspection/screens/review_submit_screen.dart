@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/inspection_provider.dart';
+import '../structured_checklist.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../../../core/services/db_helper.dart';
@@ -218,17 +219,15 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       return;
     }
 
-    final checklist = <Map<String, dynamic>>[
-      ...provider.siteCondition.entries.map(
-        (e) => {'item': e.key, 'checked': e.value},
-      ),
-      ...provider.zoningObservations.entries.map(
-        (e) => {'item': e.key, 'checked': e.value},
-      ),
-    ];
-    final checklistCompleted = checklist
-        .where((c) => c['checked'] == true)
-        .length;
+    final legacy = <String, bool>{
+      ...provider.siteCondition,
+      ...provider.zoningObservations,
+    };
+    final checklist = StructuredChecklist.remoteChecklist(
+      legacy: legacy,
+      answers: provider.structuredAnswers,
+    );
+    final checklistCompleted = legacy.values.where((value) => value).length;
 
     // UPDATED: Pass the full Map so SupabaseService has access to coordinates & timestamps
     final photosData = provider.capturedPhotos
@@ -255,7 +254,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
         inspectorNotes: provider.notes,
         checklistData: checklist,
         checklistCompletedCount: checklistCompleted,
-        checklistTotalCount: checklist.length,
+        checklistTotalCount: legacy.length,
         photosData: photosData,
         locationLabel: widget.task.location,
       );

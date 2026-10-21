@@ -36,8 +36,9 @@ class InspectionProvider extends ChangeNotifier {
     'Signage / commercial activity present': false,
   };
 
-  // CE-05 structured answers. Kept local-only until CE-06 updates the iMAPS
-  // reader; a missing key means "not recorded", never an implicit No.
+  // CE-05 structured answers. Transmission stays hard-disabled until the
+  // corrected iMAPS reader is released; a missing key means "not recorded",
+  // never an implicit No.
   final Map<String, String?> _structuredAnswers = {};
 
   // Photo Evidence State
@@ -828,8 +829,8 @@ class InspectionProvider extends ChangeNotifier {
   // --- LOCAL SAVE & ONLINE SYNC ---
 
   /// Restores CE-05 answers from this job's owned local draft after rework
-  /// hydration. The remote checklist stays legacy-only until CE-06 teaches
-  /// the iMAPS reader to render structured answers truthfully.
+  /// hydration. Remote transmission remains gated by
+  /// [StructuredChecklist.isRemoteTransmissionEnabled].
   Future<void> restoreStructuredChecklist() async {
     _requireOwner();
     if (_activeTask == null) return;
@@ -989,13 +990,12 @@ class InspectionProvider extends ChangeNotifier {
   Future<bool> saveStepChecklist() async {
     _requireOwner();
     if (_activeTask == null) return false;
-    final checklist = <Map<String, dynamic>>[
-      ..._siteCondition.entries.map((e) => {'item': e.key, 'checked': e.value}),
-      ..._zoningObservations.entries.map(
-        (e) => {'item': e.key, 'checked': e.value},
-      ),
-    ];
-    final done = checklist.where((c) => c['checked'] == true).length;
+    final legacy = <String, bool>{..._siteCondition, ..._zoningObservations};
+    final checklist = StructuredChecklist.remoteChecklist(
+      legacy: legacy,
+      answers: _structuredAnswers,
+    );
+    final done = legacy.values.where((value) => value).length;
     final jobId = _activeTask!.id;
     try {
       await _saveLocalInspection();
@@ -1004,7 +1004,7 @@ class InspectionProvider extends ChangeNotifier {
         jobId: jobId,
         checklistData: checklist,
         checklistCompletedCount: done,
-        checklistTotalCount: checklist.length,
+        checklistTotalCount: legacy.length,
         isRework: _isReworkMode,
       );
       _syncSavedStep(jobId);

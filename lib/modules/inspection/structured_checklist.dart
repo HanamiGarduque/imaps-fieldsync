@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// CE-05 structured site-condition answers.
 ///
 /// Answers are additive to the existing local `checklist_json` contract
@@ -87,6 +89,45 @@ class StructuredChecklist {
       for (final entry in present.entries)
         if (isVisible(entry.key, present)) entry.key: entry.value,
     };
+  }
+
+  /// Production default stays off until the corrected iMAPS reader is
+  /// released and verified. This is a reviewed code constant, not a runtime
+  /// or build toggle, so a deployment cannot switch it on accidentally.
+  static const bool remoteTransmissionEnabled = false;
+
+  /// Local tests may exercise the enabled path; app code must never set this.
+  @visibleForTesting
+  static bool? remoteTransmissionEnabledForTesting;
+
+  static bool get isRemoteTransmissionEnabled =>
+      remoteTransmissionEnabledForTesting ?? remoteTransmissionEnabled;
+
+  /// The remote checklist contract: the five legacy boolean rows first, in
+  /// their existing order, then one row per active structured answer when
+  /// transmission is enabled. Missing answers and hidden conditional children
+  /// are omitted; they are never serialized as "No". Legacy counts remain the
+  /// five boolean rows, so structured answers never change historical totals.
+  static List<Map<String, dynamic>> remoteChecklist({
+    required Map<String, bool> legacy,
+    required Map<String, String?> answers,
+  }) {
+    final entries = <Map<String, dynamic>>[
+      for (final entry in legacy.entries)
+        {'item': entry.key, 'checked': entry.value},
+    ];
+    if (!isRemoteTransmissionEnabled) return entries;
+
+    final emitted = entries.map((entry) => entry['item'] as String).toSet();
+    final active = activeAnswers(answers);
+    for (final key in questionLabels.keys) {
+      final answer = active[key];
+      if (answer == null) continue;
+      final item = questionLabels[key]!;
+      if (!emitted.add(item)) continue;
+      entries.add({'item': item, 'answer': answer});
+    }
+    return entries;
   }
 
   /// Tolerant decode: ignores unknown keys, unknown option tokens and
