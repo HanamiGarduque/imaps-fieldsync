@@ -90,17 +90,10 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     final provider = context.watch<InspectionProvider>();
     final bool sessionActive =
         provider.activeTask?.id == task.id && provider.capturedPhotos.isNotEmpty;
-    final List<String> paths = sessionActive
-        ? provider.capturedPhotos
-            .map((p) => p['photoPath'] as String? ?? '')
-            .where((p) => p.isNotEmpty)
-            .toList()
-        : (task.photoDetails.isNotEmpty
-            ? task.photoDetails
-                .map((p) => p['photo_url'] as String? ?? '')
-                .where((p) => p.isNotEmpty)
-                .toList()
-            : task.photoPaths);
+    final details = sessionActive
+        ? provider.capturedPhotos.where((p) => (p['photoPath'] as String?)?.isNotEmpty == true).toList()
+        : PhotoSourceResolver.evidence(task.photoDetails, task.photoPaths);
+    final paths = details.map((p) => p['photoPath'] as String).toList();
     final displayPaths = inspectionDisplayPaths(
         paths, task.id, task.photoDetails, task.photoPaths);
     return _sectionShell(
@@ -115,7 +108,11 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                   itemCount: paths.length,
                   separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => _openFullscreenPhoto(displayPaths, i),
+                    onTap: () => _openFullscreenPhoto(
+                      displayPaths,
+                      i,
+                      details,
+                    ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       // AdaptivePhotoImage renders BOTH freshly-captured
@@ -132,8 +129,17 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
       );
   }
 
-  void _openFullscreenPhoto(List<String> photoPaths, int startIndex) {
-    openFullscreenPhotoViewer(context, photoPaths, startIndex);
+  void _openFullscreenPhoto(
+    List<String> photoPaths,
+    int startIndex,
+    List<Map<String, dynamic>>? details,
+  ) {
+    openFullscreenPhotoViewer(
+      context,
+      photoPaths,
+      startIndex,
+      photoDetails: details,
+    );
   }
 
   Future<void> _goToStep(BuildContext context, int step, WidgetBuilder builder) async {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -5,9 +6,13 @@ import '../../../core/widgets/field_form_widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../../core/services/db_helper.dart';
 import '../services/location_service.dart';
 import '../services/geotag_service.dart';
+import '../services/site_route_guidance.dart';
+import '../services/site_location_reference_service.dart';
 
 import '../../tasks/screens/tasks_screen.dart';
 import 'inspection_progress.dart';
@@ -32,7 +37,17 @@ class CapturePhotoScreen extends StatefulWidget {
 
 class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   static const int maxPhotos = 10;
-  final List<Map<String, dynamic>> _capturedPhotos = [];
+  late final InspectionProvider _provider;
+  late final String? _inspectorId;
+  bool get _sameInspection =>
+      mounted &&
+      _inspectorId != null &&
+      DBHelper.currentInspectorId == _inspectorId &&
+      _provider.activeTask?.id == widget.task.id &&
+      _provider.activeTask?.inspectionRoundNumber ==
+          widget.task.inspectionRoundNumber;
+  List<Map<String, dynamic>> get _capturedPhotos =>
+      _sameInspection ? _provider.capturedPhotos : [];
   bool _isCameraMode = false;
 
   final TextEditingController _notesController = TextEditingController();
@@ -41,16 +56,27 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   String? _cameraError;
   Position? _currentPosition;
   String? _capturedPhotoPath;
+  Position? _capturedPosition;
+  DateTime? _capturedAt;
+  String? _pendingPhotoId;
+  Map<String, dynamic>? _pendingReference;
+  Future<void>? _referenceFuture;
   bool _isCapturing = false;
   bool _isSaving = false;
+  bool _isSavingPhoto = false;
+  bool _referenceEnsuring = false;
+  String? _referenceError;
 
   @override
   void initState() {
     super.initState();
+    _provider = context.read<InspectionProvider>();
+    _inspectorId = DBHelper.currentInspectorId;
     _initCamera();
     _fetchLocation();
-    final existingPhotos = context.read<InspectionProvider>().capturedPhotos;
-    if (existingPhotos.isNotEmpty) _capturedPhotos.addAll(existingPhotos);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _referenceFuture = _ensureLocationReference();
+    });
   }
 
   Future<void> _initCamera() async {
@@ -115,61 +141,110 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Future<void> _fetchLocation() async {
     try {
-      final position = await LocationService.getCurrentLocation();
+      final position = await LocationService.getCurrentLocation(
+        timeout: const Duration(seconds: 10),
+      );
       if (mounted) setState(() => _currentPosition = position);
     } catch (e) {
       debugPrint('Location error: $e');
     }
   }
 
-  String _monthName(int month) => const [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ][month - 1];
+  bool _isReliableCaptureFix(Position position, {DateTime? capturedAt}) {
+    if (!position.latitude.isFinite ||
+        !position.longitude.isFinite ||
+        position.latitude.abs() > 90 ||
+        position.longitude.abs() > 180) {
+      return false;
+    }
+    return reliableSiteFix(
+      accuracyMeters: position.accuracy,
+      timestamp: position.timestamp,
+      now: capturedAt ?? DateTime.now(),
+    );
+  }
 
-  String get _geotagText {
-    final now = DateTime.now();
-    final dateStr =
-        '${_monthName(now.month)} ${now.day.toString().padLeft(2, '0')}, ${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final coords = _currentPosition != null
-        ? '${_currentPosition!.latitude.toStringAsFixed(6)}, ${_currentPosition!.longitude.toStringAsFixed(6)}'
-        : 'Locating...';
-    return '$dateStr\n$coords';
+  /// Shutter-time fix. A fresh bounded request is preferred; the screen's
+  /// earlier fix is reused only while it still passes the same ≤25 m / ≤15 s
+  /// gate. There is deliberately no fallback to Step 2 or the parcel point.
+  Future<Position?> _acquireShutterFix(DateTime capturedAt) async {
+    try {
+      final fresh = await LocationService.getCurrentLocation(
+        timeout: const Duration(seconds: 8),
+      );
+      if (_isReliableCaptureFix(fresh, capturedAt: capturedAt)) return fresh;
+    } catch (e) {
+      debugPrint('Shutter GPS error: $e');
+    }
+    final cached = _currentPosition;
+    if (cached != null && _isReliableCaptureFix(cached, capturedAt: capturedAt)) {
+      return cached;
+    }
+    return null;
+  }
+
+  List<String> get _previewFooterLines {
+    final position =
+        _currentPosition != null && _isReliableCaptureFix(_currentPosition!)
+        ? _currentPosition
+        : null;
+    return GeotagService.captureFooterLines(
+      applicant: widget.task.name,
+      address: widget.task.locationAddress,
+      capturedAt: DateTime.now(),
+      latitude: position?.latitude,
+      longitude: position?.longitude,
+      accuracyMeters: position?.accuracy,
+    );
   }
 
   Future<void> _capturePhoto() async {
-    if (_cameraController == null ||
+    if (!_sameInspection ||
+        _isSavingPhoto ||
+        _cameraController == null ||
         !_cameraController!.value.isInitialized ||
         _isCapturing) {
       return;
     }
     setState(() => _isCapturing = true);
+    final capturedAt = DateTime.now();
     try {
+      // Start the shutter-time fix alongside the capture so a weak GPS lock
+      // cannot freeze the camera UI. The result is gated; a parcel point or
+      // Step 2 verification is never substituted here.
+      final fixFuture = _acquireShutterFix(capturedAt);
       final xFile = await _cameraController!.takePicture();
       final rawBytes = await xFile.readAsBytes();
+      final position = await fixFuture;
 
-      // PRESERVED BUSINESS LOGIC: Embed EXIF/Geotag metadata into the image bytes
-      final geotaggedBytes = GeotagService.embedGeotag(
+      final geotaggedBytes = await GeotagService.appendFooter(
         photoBytes: rawBytes,
-        lines: _geotagText.split('\n'),
+        lines: GeotagService.captureFooterLines(
+          applicant: widget.task.name,
+          address: widget.task.locationAddress,
+          capturedAt: capturedAt,
+          latitude: position?.latitude,
+          longitude: position?.longitude,
+          accuracyMeters: position?.accuracy,
+        ),
       );
 
-      final directory = await getApplicationDocumentsDirectory();
+      if (!_sameInspection) return;
+      final directory = await _evidenceDirectory();
       final savedFile = File(
-        '${directory.path}/inspection_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        '${directory.path}/inspection_${capturedAt.millisecondsSinceEpoch}.jpg',
       );
-      await savedFile.writeAsBytes(geotaggedBytes);
-      if (mounted) setState(() => _capturedPhotoPath = savedFile.path);
+      await savedFile.writeAsBytes(geotaggedBytes, flush: true);
+      if (_sameInspection) {
+        setState(() {
+          _capturedPhotoPath = savedFile.path;
+          _capturedPosition = position;
+          _capturedAt = capturedAt;
+          _pendingPhotoId = const Uuid().v4();
+        });
+      } else {
+        await _deleteQuietly(savedFile.path);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -181,7 +256,30 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     }
   }
 
-  void _retakePhoto() => setState(() => _capturedPhotoPath = null);
+  void _discardPendingCapture() {
+    if (_isSavingPhoto || _isCapturing) return;
+    final path = _capturedPhotoPath;
+    _capturedPhotoPath = null;
+    _capturedPosition = null;
+    _capturedAt = null;
+    _pendingPhotoId = null;
+    if (path != null) unawaited(_deleteQuietly(path));
+  }
+
+  Future<void> _deleteQuietly(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      debugPrint('Pending capture cleanup skipped: $e');
+    }
+  }
+
+  void _retakePhoto() {
+    if (_isSavingPhoto || _isCapturing) return;
+    _discardPendingCapture();
+    setState(() {});
+  }
 
   void _confirmRemovePhoto(int index) {
     showDialog(
@@ -225,20 +323,20 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       );
       return;
     }
-    // Screen-local `_capturedPhotos` and InspectionProvider's own list have
-    // been kept in lockstep — appended together in _savePhotoAndReturnToGrid
-    // and seeded together in initState — so the same index is safe to
-    // remove from both. The provider confirms the file and row cleanup
-    // before this grid changes.
-    setState(() => _capturedPhotos.removeAt(index));
+    // The provider is the only evidence list; it removes the row/file first.
+    setState(() {});
   }
 
-  void _savePhotoAndReturnToGrid() {
-    if (_capturedPhotos.length >= maxPhotos) {
+  Future<void> _savePhotoAndReturnToGrid() async {
+    if (_isSavingPhoto || !_sameInspection) return;
+    final realCount = _capturedPhotos
+        .where((photo) => !isLocationReferencePhoto(photo))
+        .length;
+    if (realCount >= maxPhotos) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Max $maxPhotos photos reached.',
+            'Max $maxPhotos site photos reached.',
             style: InsightTheme.inter(13, c: Colors.white),
           ),
           backgroundColor: InsightTheme.ink,
@@ -246,37 +344,186 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       );
       setState(() {
         _isCameraMode = false;
-        _capturedPhotoPath = null;
+        _discardPendingCapture();
       });
       return;
     }
-    if (_capturedPhotoPath == null) return;
-    context.read<InspectionProvider>().addPhoto(
-      photoPath: _capturedPhotoPath!,
-      photoNotes: _notesController.text,
-      latitude: _currentPosition?.latitude,
-      longitude: _currentPosition?.longitude,
-    );
-    setState(() {
-      _capturedPhotos.add({
-        'photoPath': _capturedPhotoPath,
-        'notes': _notesController.text,
-        'latitude': _currentPosition?.latitude,
-        'longitude': _currentPosition?.longitude,
-        'capturedAt': DateTime.now().toIso8601String(),
-      });
-      _isCameraMode = false;
+    final capturedPath = _capturedPhotoPath;
+    if (capturedPath == null) return;
+
+    setState(() => _isSavingPhoto = true);
+    final capturedAt = _capturedAt ?? DateTime.now();
+    final photo = <String, dynamic>{
+      'id': _pendingPhotoId ??= const Uuid().v4(),
+      'photoPath': capturedPath,
+      'notes': _notesController.text,
+      'latitude': _capturedPosition?.latitude,
+      'longitude': _capturedPosition?.longitude,
+      'capturedAt': GeotagService.storageTimestamp(capturedAt),
+    };
+    try {
+      if (!await _provider.persistPhoto(
+        photo,
+        task: widget.task,
+        inspectorId: _inspectorId!,
+      )) {
+        throw StateError('Photo could not be saved');
+      }
+      // SQLite, not this preview, now owns the image's lifetime.
       _capturedPhotoPath = null;
-      _notesController.clear();
-    });
+      _capturedPosition = null;
+      _capturedAt = null;
+      _pendingPhotoId = null;
+      if (!_sameInspection) return;
+      setState(() {
+        _isCameraMode = false;
+        _notesController.clear();
+      });
+    } catch (e) {
+      if (!mounted || !_sameInspection) {
+        // A write may have completed for the initiating task before context
+        // changed. Never delete that task's durable image on screen disposal.
+        _capturedPhotoPath = null;
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Photo was not saved on this device. The preview is retained; '
+            'tap Save Photo to retry before leaving.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingPhoto = false);
+    }
   }
 
-  void _finishAndContinue() {
-    if (_capturedPhotos.isEmpty) {
+  Future<Directory> _evidenceDirectory() async {
+    final documents = await getApplicationDocumentsDirectory();
+    if (!_sameInspection) throw StateError('The active inspection changed');
+    return Directory(
+      '${documents.path}/inspection_evidence/'
+      '${Uri.encodeComponent(_inspectorId!)}/${Uri.encodeComponent(widget.task.id)}',
+    ).create(recursive: true);
+  }
+
+  Future<void> _ensureLocationReference() async {
+    if (_referenceEnsuring || !_sameInspection) return;
+    Map<String, dynamic>? existing;
+    for (final photo in _capturedPhotos) {
+      if (isLocationReferencePhoto(photo)) {
+        existing = photo;
+        break;
+      }
+    }
+    if (existing != null) {
+      final existingPath = existing['photoPath'] as String?;
+      if (existingPath == null ||
+          PhotoSourceResolver.classify(existingPath) !=
+              PhotoSourceKind.localFile ||
+          _provider.isReworkMode ||
+          File(existingPath).existsSync()) {
+        return;
+      }
+      // The row survived but the image did not: regenerate the same stable
+      // file and re-save the same deterministic identity below.
+    }
+
+    setState(() {
+      _referenceEnsuring = true;
+      _referenceError = null;
+    });
+    try {
+      if (_pendingReference == null) {
+        final snapshot = _provider.gpsVerification;
+        if (snapshot == null) {
+          throw StateError(
+            'Step 2 GPS verification is unavailable on this device.',
+          );
+        }
+        final cached = await DBHelper.getCachedJob(widget.task.id);
+        if (!_sameInspection) return;
+        final parcelLat = (cached?['parcel_lat'] as num?)?.toDouble();
+        final parcelLng = (cached?['parcel_lng'] as num?)?.toDouble();
+        if (parcelLat == null || parcelLng == null) {
+          throw StateError(
+            'The recorded parcel reference point is unavailable on this device.',
+          );
+        }
+        final generatedAt =
+            DateTime.tryParse(existing?['capturedAt'] as String? ?? '') ??
+            DateTime.now();
+        final bytes = await SiteLocationReferenceService.render(
+          jobId: widget.task.id,
+          round: widget.task.inspectionRoundNumber,
+          applicant: widget.task.name,
+          address: widget.task.locationAddress,
+          verifiedLatitude: snapshot.latitude,
+          verifiedLongitude: snapshot.longitude,
+          verifiedAt: snapshot.verifiedAt,
+          verifiedAccuracyMeters: snapshot.accuracyMeters,
+          parcelLatitude: parcelLat,
+          parcelLongitude: parcelLng,
+          generatedAt: generatedAt,
+        );
+        if (!_sameInspection) return;
+        final directory = await _evidenceDirectory();
+        if (!_sameInspection) return;
+        final file = File(
+          existing?['photoPath'] as String? ??
+              '${directory.path}/${SiteLocationReferenceService.fileName(widget.task.id, widget.task.inspectionRoundNumber)}',
+        );
+        await file.writeAsBytes(bytes, flush: true);
+        if (!_sameInspection) return;
+        _pendingReference =
+            existing ??
+            {
+              'id': SiteLocationReferenceService.photoId(
+                widget.task.id,
+                widget.task.inspectionRoundNumber,
+              ),
+              'photoPath': file.path,
+              'notes': kSiteLocationReferenceNotes,
+              'latitude': snapshot.latitude,
+              'longitude': snapshot.longitude,
+              'capturedAt': GeotagService.storageTimestamp(generatedAt),
+              'isLocationReference': true,
+            };
+      }
+      if (!_sameInspection) return;
+      if (!await _provider.persistPhoto(
+        _pendingReference!,
+        task: widget.task,
+        inspectorId: _inspectorId!,
+      )) {
+        throw StateError(
+          'The location reference could not be saved on this device.',
+        );
+      }
+      _pendingReference = null;
+    } catch (e) {
+      if (!_sameInspection) return;
+      setState(() {
+        _referenceError =
+            '${e is StateError ? e.message : 'The location reference could not be prepared on this device.'} '
+            'Real site photos are still accepted.';
+      });
+    } finally {
+      if (mounted) setState(() => _referenceEnsuring = false);
+    }
+  }
+
+  Future<void> _finishAndContinue() async {
+    if (_isSaving || _isSavingPhoto || !_sameInspection) return;
+    final realCount = _capturedPhotos
+        .where((photo) => !isLocationReferencePhoto(photo))
+        .length;
+    if (realCount == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Capture at least one photo.',
+            'Capture at least one camera photo.',
             style: InsightTheme.inter(13, c: Colors.white),
           ),
           backgroundColor: InsightTheme.ink,
@@ -284,38 +531,55 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       );
       return;
     }
-    InspectionProgress.instance.markStepComplete(3);
-    // Issue 4 fix (device-test finding — Task Overview showed "no photos
-    // on file" after this step was already finished): saveStepPhotos()
-    // used to only run on early exit, the rework-only Save button, or
-    // final submit — never on normal forward progress, unlike checklist
-    // (which auto-saves per toggle). Fire-and-forget so a slow/offline
-    // save can't delay navigation; it now has its own outbox fallback
-    // too (see SyncOutboxService.enqueuePhotosUpdate), so nothing is
-    // lost either way.
-    context.read<InspectionProvider>().saveStepPhotos();
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => InspectionChecklistScreen(
-          task: widget.task,
-          capturedPhotos: _capturedPhotos,
+    setState(() => _isSaving = true);
+    try {
+      await _referenceFuture;
+      if (!_sameInspection) return;
+      await _provider.persistCapturedPhotos();
+      if (!mounted || !_sameInspection) return;
+      InspectionProgress.instance.markStepComplete(3);
+      unawaited(_provider.saveStepPhotos());
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InspectionChecklistScreen(
+            task: widget.task,
+            capturedPhotos: _capturedPhotos,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (_) {
+      if (!mounted || !_sameInspection) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Photos could not be saved on this device. Stay on Step 3 and retry.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
   void dispose() {
+    if (!_isSavingPhoto) _discardPendingCapture();
     _notesController.dispose();
     _cameraController?.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => SensitiveScreen(
-    child: _isCameraMode ? _buildCameraMode() : _buildGridMode(),
-  );
+  Widget build(BuildContext context) {
+    context.watch<InspectionProvider>();
+    return SensitiveScreen(
+      child: PopScope(
+        canPop: !_isSavingPhoto && !_isCapturing && !_isSaving,
+        child: _isCameraMode ? _buildCameraMode() : _buildGridMode(),
+      ),
+    );
+  }
 
   Widget _buildGridMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
@@ -324,6 +588,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
           !context.read<InspectionProvider>().isReworkMode &&
           InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
+        if (_isSaving) return;
         if (didPop) {
           context.read<InspectionProvider>().saveStepPhotos();
           return;
@@ -389,7 +654,8 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                 Expanded(
                   child: FieldPrimaryButton(
                     label: 'Continue to Checklist',
-                    onPressed: _finishAndContinue,
+                    busy: _isSaving,
+                    onPressed: _isSaving ? null : _finishAndContinue,
                   ),
                 ),
               ],
@@ -399,9 +665,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
             FieldSectionHeading(
               title: 'Site photos',
               hint:
-                  'Attach at least one photo to continue. You can add up to $maxPhotos.',
+                  'Attach at least one photo to continue. Up to '
+                  '$maxPhotos site photos; the generated location reference is '
+                  'not counted against that limit.',
               trailing: Text(
-                '${_capturedPhotos.length} / $maxPhotos photos',
+                '${_capturedPhotos.where((p) => !isLocationReferencePhoto(p)).length} / $maxPhotos photos',
                 style: InsightTheme.inter(
                   13,
                   w: FontWeight.w600,
@@ -409,6 +677,16 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                 ),
               ),
             ),
+            if (_referenceEnsuring)
+              const _ReferenceNotice(
+                text: 'Preparing the Site Location Reference…',
+                busy: true,
+              )
+            else if (_referenceError != null)
+              _ReferenceNotice(
+                text: _referenceError!,
+                onRetry: () => _referenceFuture = _ensureLocationReference(),
+              ),
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -421,7 +699,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
               ),
               itemCount:
                   _capturedPhotos.length +
-                  (_capturedPhotos.length < maxPhotos ? 1 : 0),
+                  (_capturedPhotos
+                              .where((p) => !isLocationReferencePhoto(p))
+                              .length <
+                          maxPhotos
+                      ? 1
+                      : 0),
               itemBuilder: (context, index) {
                 if (index < _capturedPhotos.length) {
                   final paths = inspectionDisplayPaths(
@@ -432,11 +715,26 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                     widget.task.photoDetails,
                     widget.task.photoPaths,
                   );
+                  final photo = _capturedPhotos[index];
+                  final isReference = isLocationReferencePhoto(photo);
+                  final realIndex =
+                      _capturedPhotos
+                          .take(index)
+                          .where((p) => !isLocationReferencePhoto(p))
+                          .length +
+                      1;
                   return _PhotoCell(
                     photoPath: paths[index],
                     allPhotoPaths: paths,
+                    photoDetails: _capturedPhotos,
                     index: index,
-                    onRemove: () => _confirmRemovePhoto(index),
+                    isLocationReference: isReference,
+                    label: isReference
+                        ? 'Location reference'
+                        : 'Photo $realIndex',
+                    onRemove: isReference
+                        ? null
+                        : () => _confirmRemovePhoto(index),
                   );
                 }
                 return _AddPhotoCell(
@@ -505,10 +803,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                                   color: Colors.white,
                                   size: 24,
                                 ),
-                                onPressed: () => setState(() {
-                                  _isCameraMode = false;
-                                  _capturedPhotoPath = null;
-                                }),
+                                onPressed: _isSavingPhoto || _isCapturing
+                                    ? null
+                                    : () => setState(() {
+                                        _isCameraMode = false;
+                                        _discardPendingCapture();
+                                      }),
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -564,9 +864,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                                       ),
                                     ),
                                     child: Text(
-                                      _geotagText,
+                                      _previewFooterLines.join('\n'),
+                                      maxLines: 5,
+                                      overflow: TextOverflow.ellipsis,
                                       style: InsightTheme.mono(
-                                        12,
+                                        11,
                                         c: Colors.white,
                                         ls: 0.08,
                                       ),
@@ -705,6 +1007,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                                 ),
                                 child: TextField(
                                   controller: _notesController,
+                                  enabled: !_isSavingPhoto,
                                   keyboardType: TextInputType.multiline,
                                   textInputAction: TextInputAction.newline,
                                   minLines: 3,
@@ -729,7 +1032,10 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                                 width: double.infinity,
                                 child: FieldPrimaryButton(
                                   label: 'Save Photo',
-                                  onPressed: _savePhotoAndReturnToGrid,
+                                  busy: _isSavingPhoto,
+                                  onPressed: _isSavingPhoto
+                                      ? null
+                                      : _savePhotoAndReturnToGrid,
                                 ),
                               ),
                             ],
@@ -752,12 +1058,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       return Stack(
         fit: StackFit.expand,
         children: [
-          Image.file(File(_capturedPhotoPath!), fit: BoxFit.cover),
+          Image.file(File(_capturedPhotoPath!), fit: BoxFit.contain),
           Positioned(
             top: 16,
             right: 16,
             child: TextButton.icon(
-              onPressed: _retakePhoto,
+              onPressed: _isSavingPhoto ? null : _retakePhoto,
               style: TextButton.styleFrom(
                 backgroundColor: Colors.black.withValues(alpha: 0.65),
                 foregroundColor: Colors.white,
@@ -800,12 +1106,18 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 class _PhotoCell extends StatelessWidget {
   final String photoPath;
   final List<String> allPhotoPaths;
+  final List<Map<String, dynamic>> photoDetails;
   final int index;
-  final VoidCallback onRemove;
+  final bool isLocationReference;
+  final String label;
+  final VoidCallback? onRemove;
   const _PhotoCell({
     required this.photoPath,
     required this.allPhotoPaths,
+    required this.photoDetails,
     required this.index,
+    required this.isLocationReference,
+    required this.label,
     required this.onRemove,
   });
   @override
@@ -813,16 +1125,28 @@ class _PhotoCell extends StatelessWidget {
     // Use the same private-storage read contract as the fullscreen viewer.
     return Semantics(
       button: true,
-      label: 'View photo ${index + 1}',
+      label: isLocationReference
+          ? 'View generated site location reference'
+          : 'View ${label.toLowerCase()}',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           borderRadius: InsightTheme.roundedMd,
-          onTap: () => openFullscreenPhotoViewer(context, allPhotoPaths, index),
+          onTap: () => openFullscreenPhotoViewer(
+            context,
+            allPhotoPaths,
+            index,
+            photoDetails: photoDetails,
+          ),
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: InsightTheme.line),
+              border: Border.all(
+                color: isLocationReference
+                    ? InsightTheme.blueInk
+                    : InsightTheme.line,
+                width: isLocationReference ? 2 : 1,
+              ),
 
               boxShadow: const [
                 BoxShadow(
@@ -858,37 +1182,108 @@ class _PhotoCell extends StatelessWidget {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          'Photo ${index + 1}',
+                          label,
                           style: InsightTheme.inter(12, c: Colors.white),
                         ),
                       ),
                     ),
                   ),
                 ),
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: IconButton(
-                    tooltip: 'Remove photo ${index + 1}',
-                    onPressed: () {
-                      HapticFeedback.mediumImpact();
-                      onRemove();
-                    },
-                    constraints: const BoxConstraints(
-                      minWidth: 48,
-                      minHeight: 48,
+                if (isLocationReference)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: InsightTheme.blueInk,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'SYSTEM',
+                        style: InsightTheme.inter(
+                          10,
+                          w: FontWeight.w700,
+                          c: Colors.white,
+                          ls: 0.6,
+                        ),
+                      ),
                     ),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.black.withValues(alpha: 0.65),
-                      foregroundColor: Colors.white,
-                    ),
-                    icon: const Icon(Icons.close_rounded, size: 20),
                   ),
-                ),
+                if (onRemove != null)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: IconButton(
+                      tooltip: 'Remove $label',
+                      onPressed: () {
+                        HapticFeedback.mediumImpact();
+                        onRemove!();
+                      },
+                      constraints: const BoxConstraints(
+                        minWidth: 48,
+                        minHeight: 48,
+                      ),
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black.withValues(alpha: 0.65),
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                    ),
+                  ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ReferenceNotice extends StatelessWidget {
+  final String text;
+  final bool busy;
+  final VoidCallback? onRetry;
+  const _ReferenceNotice({required this.text, this.busy = false, this.onRetry});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: InsightTheme.surface,
+        borderRadius: InsightTheme.roundedMd,
+        border: Border.all(color: InsightTheme.line),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (busy)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            const Icon(
+              Icons.info_outline_rounded,
+              size: 18,
+              color: InsightTheme.blueInk,
+            ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: InsightTheme.inter(13, c: InsightTheme.ink2, h: 1.35),
+            ),
+          ),
+          if (onRetry != null)
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
       ),
     );
   }

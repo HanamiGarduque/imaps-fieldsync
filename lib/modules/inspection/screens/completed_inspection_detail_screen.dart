@@ -1085,7 +1085,12 @@ class _CompletedInspectionDetailScreenState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 GestureDetector(
-                  onTap: () => openFullscreenPhotoViewer(context, urls, i),
+                  onTap: () => openFullscreenPhotoViewer(
+                    context,
+                    urls,
+                    i,
+                    photoDetails: hasDetails ? task.photoDetails : null,
+                  ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: SizedBox(

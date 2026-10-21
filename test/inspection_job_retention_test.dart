@@ -657,7 +657,7 @@ void main() {
           ]),
         );
 
-        expect(source, contains('version: 18,'));
+        expect(source, contains('version: 19,'));
         expect(source, contains('if (oldVersion < 10)'));
         expect(source, contains('if (oldVersion < 11)'));
         expect(source, contains('if (oldVersion < 12)'));
@@ -667,6 +667,7 @@ void main() {
         expect(source, contains('if (oldVersion < 16)'));
         expect(source, contains('if (oldVersion < 17)'));
         expect(source, contains('if (oldVersion < 18)'));
+        expect(source, contains('if (oldVersion < 19)'));
         expect(
           RegExp(
             r'ALTER TABLE local_jobs ADD COLUMN assignment_instructions TEXT',

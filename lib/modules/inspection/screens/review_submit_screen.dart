@@ -161,6 +161,12 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   Future<void> _handleSubmit() async {
     if (_submitting) return;
     final provider = context.read<InspectionProvider>();
+    // Resume can enter Review without revisiting Step 3. A generated location
+    // reference must never stand in for the required camera evidence.
+    if (provider.hasLocationReference && provider.realPhotoCount == 0) {
+      _showValidation('Capture at least one camera photo before submitting.');
+      return;
+    }
     final validation = provider.assessmentValidationMessage;
     if (validation != null) {
       _showValidation(validation);
@@ -476,6 +482,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                           context,
                                           paths,
                                           i,
+                                          photoDetails: provider.capturedPhotos,
                                         ),
                                         child: Column(
                                           crossAxisAlignment:

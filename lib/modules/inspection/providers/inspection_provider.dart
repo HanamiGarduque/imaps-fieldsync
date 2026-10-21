@@ -7,6 +7,8 @@ import 'package:uuid/uuid.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
 import '../services/photo_source_resolver.dart';
+import '../services/geotag_service.dart';
+import '../services/site_location_reference_service.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../../tasks/screens/tasks_screen.dart'; // To access TaskItem class
 
@@ -35,6 +37,8 @@ class InspectionProvider extends ChangeNotifier {
 
   // Photo Evidence State
   final List<Map<String, dynamic>> _capturedPhotos = [];
+  // Immutable Step 2 verification snapshot for the generated location card.
+  GpsVerificationSnapshot? _gpsVerification;
   // Photos that have entered save/upload/queue work in this durable session.
   // A local row alone cannot prove a photo was never uploaded: the live
   // capture path can upload before a local_photos row is acknowledged.
@@ -84,6 +88,11 @@ class InspectionProvider extends ChangeNotifier {
       _visible ? _zoningObservations : {};
   List<Map<String, dynamic>> get capturedPhotos =>
       _visible ? _capturedPhotos : [];
+  GpsVerificationSnapshot? get gpsVerification =>
+      _visible ? _gpsVerification : null;
+  int get realPhotoCount =>
+      capturedPhotos.where((photo) => !isLocationReferencePhoto(photo)).length;
+  bool get hasLocationReference => capturedPhotos.any(isLocationReferencePhoto);
   String get actualLandUse => _visible ? _actualLandUse : '';
   String get notes => _visible ? _notes : '';
   String get discrepancies => _visible ? _discrepancies : '';
@@ -147,6 +156,7 @@ class InspectionProvider extends ChangeNotifier {
     _persistedFindingsSignature = null;
     _pendingFindingsSignature = null;
     _findingsObservations = null;
+    _gpsVerification = null;
   }
 
   // --- INITIALIZATION & NAVIGATION ---
@@ -173,6 +183,10 @@ class InspectionProvider extends ChangeNotifier {
     if (_currentStep < 1) _currentStep = 1;
 
     await _loadLocalDraftIfExists(task.id);
+    _gpsVerification = _snapshotFromRow(
+      await DBHelper.getGpsVerification(task.id),
+    );
+    _gpsVerification ??= _snapshotFromTask(task);
     notifyListeners();
   }
 
@@ -260,6 +274,9 @@ class InspectionProvider extends ChangeNotifier {
     required String photoNotes,
     required double? latitude,
     required double? longitude,
+    DateTime? capturedAt,
+    String? photoId,
+    bool isLocationReference = false,
   }) {
     _requireOwner();
     _markReworkModifiedIfNeeded();
@@ -280,14 +297,75 @@ class InspectionProvider extends ChangeNotifier {
       // in `field_job_photos` after two saves).
       // Fix: generate the id ONCE, here, at capture time, and have every
       // save path below reuse this same id instead of minting a new one.
-      'id': const Uuid().v4(),
+      'id': photoId ?? const Uuid().v4(),
       'photoPath': photoPath,
       'notes': photoNotes,
       'latitude': latitude,
       'longitude': longitude,
-      'capturedAt': DateTime.now().toIso8601String(),
+      'capturedAt': GeotagService.storageTimestamp(
+        capturedAt ?? DateTime.now(),
+      ),
+      if (isLocationReference) 'isLocationReference': true,
     });
     notifyListeners();
+  }
+
+  void _requirePhotoContext(TaskItem task, String inspectorId) {
+    _requireOwner();
+    DBHelper.requireSameInspector(inspectorId);
+    if (_inspectorId != inspectorId ||
+        _activeTask?.id != task.id ||
+        _activeTask?.inspectionRoundNumber != task.inspectionRoundNumber) {
+      throw StateError(
+        'The active inspection changed. Evidence was not attached to another task.',
+      );
+    }
+  }
+
+  /// Accepts new evidence only AFTER its local row is durable. The initiating
+  /// task/owner are explicit so an asynchronous capture cannot attach to a
+  /// different task which happens to be active when SQLite finishes.
+  Future<bool> persistPhoto(
+    Map<String, dynamic> photo, {
+    required TaskItem task,
+    required String inspectorId,
+  }) async {
+    _requirePhotoContext(task, inspectorId);
+    final photoId = photo['id'] as String?;
+    final photoPath = photo['photoPath'] as String?;
+    if (photoId == null || photoPath == null || photoPath.isEmpty) {
+      return false;
+    }
+    await DBHelper.savePhotoLocally(
+      photoId: photoId,
+      jobId: task.id,
+      photoPath: photoPath,
+      notes: photo['notes'] as String? ?? '',
+      latitude: (photo['latitude'] as num?)?.toDouble(),
+      longitude: (photo['longitude'] as num?)?.toDouble(),
+      capturedAt: photo['capturedAt'] as String?,
+    );
+    _requirePhotoContext(task, inspectorId);
+    if (!_capturedPhotos.any((saved) => saved['id'] == photoId)) {
+      _capturedPhotos.add(Map<String, dynamic>.from(photo));
+      _markReworkModifiedIfNeeded();
+      notifyListeners();
+    }
+    return true;
+  }
+
+  /// Local acceptance is a navigation gate; slow/offline remote delivery is not.
+  Future<void> persistCapturedPhotos() async {
+    _requireOwner();
+    final task = _activeTask;
+    final inspectorId = _inspectorId!;
+    if (task == null) throw StateError('No active inspection');
+    for (final photo in List<Map<String, dynamic>>.of(_capturedPhotos)) {
+      if (!await persistPhoto(photo, task: task, inspectorId: inspectorId)) {
+        throw StateError('Photo evidence could not be saved on this device');
+      }
+    }
+    _requirePhotoContext(task, inspectorId);
   }
 
   /// Removes one captured photo only when it is still local, unacknowledged
@@ -299,6 +377,10 @@ class InspectionProvider extends ChangeNotifier {
     if (index < 0 || index >= _capturedPhotos.length) return false;
 
     final photo = _capturedPhotos[index];
+    if (isLocationReferencePhoto(photo)) {
+      // Generated location evidence is regenerated, never user-deleted.
+      return false;
+    }
     final photoId = photo['id'] as String?;
     final photoPath = photo['photoPath'] as String?;
     if (photoId == null || photoPath == null || photoPath.isEmpty) {
@@ -368,12 +450,81 @@ class InspectionProvider extends ChangeNotifier {
 
   // Called by GpsVerificationScreen right after a successful on-site
   // confirmation, so Step 5 (Findings) reflects the real GPS result
-  // instead of a hardcoded placeholder string.
-  void recordGpsVerification({required double distanceMeters}) {
+  // instead of a hardcoded placeholder string. The same accepted fix is
+  // stored locally as the immutable Step 3 Site Location Reference source.
+  Future<void> recordGpsVerification({
+    required double distanceMeters,
+    required double latitude,
+    required double longitude,
+    required double accuracyMeters,
+    required DateTime fixAt,
+  }) async {
     _requireOwner();
+    final verifiedAt = DateTime.now();
+    _gpsVerification = GpsVerificationSnapshot(
+      latitude: latitude,
+      longitude: longitude,
+      accuracyMeters: accuracyMeters,
+      fixAt: fixAt,
+      verifiedAt: verifiedAt,
+    );
     _boundaryStatus =
         'Verified on-site — ${distanceMeters.round()}m from declared location';
+    final jobId = _activeTask?.id;
+    if (jobId != null) {
+      try {
+        await DBHelper.saveGpsVerification(
+          jobId: jobId,
+          latitude: latitude,
+          longitude: longitude,
+          accuracyMeters: accuracyMeters,
+          fixAt: fixAt,
+          verifiedAt: verifiedAt,
+        );
+      } catch (e) {
+        // The confirmation itself already happened; failing to persist this
+        // local copy must not block the inspector, but it is never invented.
+        debugPrint('recordGpsVerification: local snapshot not saved — $e');
+      }
+    }
     notifyListeners();
+  }
+
+  GpsVerificationSnapshot? _snapshotFromRow(Map<String, dynamic>? row) {
+    if (row == null) return null;
+    final latitude = (row['latitude'] as num?)?.toDouble();
+    final longitude = (row['longitude'] as num?)?.toDouble();
+    final fixAt = DateTime.tryParse(row['fix_at'] as String? ?? '');
+    final verifiedAt = DateTime.tryParse(row['verified_at'] as String? ?? '');
+    if (latitude == null ||
+        longitude == null ||
+        fixAt == null ||
+        verifiedAt == null) {
+      return null;
+    }
+    return GpsVerificationSnapshot(
+      latitude: latitude,
+      longitude: longitude,
+      accuracyMeters: (row['accuracy_meters'] as num?)?.toDouble(),
+      fixAt: fixAt,
+      verifiedAt: verifiedAt,
+    );
+  }
+
+  GpsVerificationSnapshot? _snapshotFromTask(TaskItem task) {
+    final latitude = task.confirmedLatitude;
+    final longitude = task.confirmedLongitude;
+    final verifiedAt = DateTime.tryParse(task.gpsConfirmedAt ?? '');
+    if (latitude == null || longitude == null || verifiedAt == null) {
+      return null;
+    }
+    return GpsVerificationSnapshot(
+      latitude: latitude,
+      longitude: longitude,
+      accuracyMeters: task.gpsAccuracyM,
+      fixAt: verifiedAt,
+      verifiedAt: verifiedAt,
+    );
   }
 
   void updateResult(String result) {
@@ -416,6 +567,7 @@ class InspectionProvider extends ChangeNotifier {
     // carries; anything it does not carry starts from the same defaults
     // startInspection() uses rather than leaking a prior inspector's answer.
     _resetFieldState();
+    _gpsVerification = _snapshotFromTask(task);
 
     // Match stored checklist entries back onto the two known maps.
     // FIX (Completed/Rework audit, Finding 2): this used to read
@@ -710,6 +862,17 @@ class InspectionProvider extends ChangeNotifier {
   Future<bool> saveStepPhotos() async {
     _requireOwner();
     if (_activeTask == null) return false;
+    final task = _activeTask!;
+    final inspectorId = _inspectorId!;
+    // Durable first: every accepted photo gets its local_photos row before any
+    // upload/queue attempt, so a crash or offline exit cannot lose the list.
+    try {
+      await persistCapturedPhotos();
+      _requirePhotoContext(task, inspectorId);
+    } catch (e) {
+      debugPrint('saveStepPhotos: local photo persistence failed — $e');
+      return false;
+    }
     // Filter out any entries without a valid photo path, but keep the full Map structure
     final photosToUpload = _capturedPhotos
         .where((p) => (p['photoPath'] as String?)?.isNotEmpty == true)
@@ -720,14 +883,15 @@ class InspectionProvider extends ChangeNotifier {
     try {
       // Pass the full list of maps as photosData
       final uploadedUrls = await SupabaseService.uploadInspectionPhotos(
-        jobId: _activeTask!.id,
+        jobId: task.id,
         photosData: photosToUpload,
       );
 
       // Update the main field_jobs table to maintain the array of URLs for quick access
       _requireOwner();
+      DBHelper.requireSameInspector(inspectorId);
       await SupabaseService.updateJobInspectionProgress(
-        jobId: _activeTask!.id,
+        jobId: task.id,
         updateData: {
           'photo_paths': uploadedUrls,
           'photo_count': uploadedUrls.length,
@@ -743,8 +907,9 @@ class InspectionProvider extends ChangeNotifier {
       debugPrint('saveStepPhotos: direct push failed, queuing for retry — $e');
       try {
         _requireOwner();
+        DBHelper.requireSameInspector(inspectorId);
         await SyncOutboxService.enqueuePhotosUpdate(
-          jobId: _activeTask!.id,
+          jobId: task.id,
           photosData: photosToUpload,
         );
         return true; // queued — not lost, will apply once synced
@@ -1094,4 +1259,23 @@ class InspectionProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+}
+
+/// Accepted Step 2 on-site fix for this job/round. Read-only evidence: the
+/// Site Location Reference uses it, and it never substitutes a photo's own
+/// shutter GPS.
+class GpsVerificationSnapshot {
+  final double latitude;
+  final double longitude;
+  final double? accuracyMeters;
+  final DateTime fixAt;
+  final DateTime verifiedAt;
+
+  const GpsVerificationSnapshot({
+    required this.latitude,
+    required this.longitude,
+    required this.accuracyMeters,
+    required this.fixAt,
+    required this.verifiedAt,
+  });
 }

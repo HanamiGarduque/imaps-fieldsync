@@ -84,6 +84,10 @@ class TaskItem {
   final String? parcelId;
   final String name;
   final String location;
+  /// Exact parcel address on file in iMAPS (`supabase_parcels.location_address`).
+  /// Null/empty is meaningful: the UI must say "Address not on file", never
+  /// substitute the barangay or invent a street address.
+  final String? locationAddress;
   final String parcels; 
   final String? status;
   final String inspectionNo;
@@ -160,6 +164,7 @@ class TaskItem {
     this.localInspectionId, this.inspectionRoundNumber,
     this.previousSiteInspectionId, this.reinspectionReason, this.reinspectionReviewedAt,
     required this.id, this.parcelId, required this.name, required this.location,
+    this.locationAddress,
     required this.parcels, required this.status, required this.inspectionNo, 
     this.scheduledDate = '', this.deadlineDate, this.landUseClass = 'Not yet on file', this.lotAreaSqm,
     this.propertyIndexNumber, this.applicationType, this.findings, this.observations,
@@ -195,6 +200,10 @@ class TaskItem {
       parcelId: job['supabase_parcel_id'] as String?,
       name: application?['applicant_name'] as String? ?? 'Unknown Applicant',
       location: application?['barangay'] as String? ?? 'No barangay listed',
+      locationAddress:
+          (parcel?['location_address'] as String?)?.trim().isNotEmpty == true
+          ? (parcel?['location_address'] as String).trim()
+          : null,
       applicantPhone: (application?['contact_number'] as String?)?.trim().isNotEmpty == true
           ? (application?['contact_number'] as String).trim()
           : null,
@@ -263,6 +272,7 @@ class TaskItem {
     },
     'supabase_parcels': {
       'land_use_class': row['declared_land_use'], 'lot_area_sqm': row['lot_area_sqm'],
+      'location_address': row['parcel_address'],
     },
   });
 

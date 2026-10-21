@@ -482,6 +482,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
     final longitude = _longitude!;
     final accuracy = _accuracy!;
     final distance = _distance!;
+    final fixAt = _fixAt!;
     setState(() => _submitting = true);
 
     bool queuedOffline = false;
@@ -514,7 +515,14 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
         icon: Icons.cloud_off_rounded,
       );
     }
-    context.read<InspectionProvider>().recordGpsVerification(distanceMeters: distance);
+    await context.read<InspectionProvider>().recordGpsVerification(
+      distanceMeters: distance,
+      latitude: latitude,
+      longitude: longitude,
+      accuracyMeters: accuracy,
+      fixAt: fixAt,
+    );
+    if (!mounted) return;
     HapticFeedback.selectionClick();
     setState(() => _submitting = false);
     // Issue 2 fix (Completed Category enhancement): this screen never

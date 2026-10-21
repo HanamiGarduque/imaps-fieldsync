@@ -256,7 +256,7 @@ void main() {
 
   test('DBHelper declares version 16 with an applied v16 upgrade branch', () {
     final source = File('lib/core/services/db_helper.dart').readAsStringSync();
-    expect(source, contains('version: 18,'));
+    expect(source, contains('version: 19,'));
     expect(source, contains('if (oldVersion < 16)'));
     expect(source, contains('ReportQueueSchema.applyV16(db)'));
     // The v15 branch must still be present for devices coming from older builds.

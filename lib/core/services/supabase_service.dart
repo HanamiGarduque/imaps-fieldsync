@@ -682,13 +682,36 @@ class SupabaseService {
   // FETCH JOBS  (Tasks screen)
   //   FK hint: field_jobs.supabase_application_id → supabase_zoning_applications
   // ─────────────────────────────────────────────────────────────────────────
+  // The address is optional presentation data, not a prerequisite for jobs.
+  // Retry only a confirmed missing parcel-address column, never auth/network
+  // failures or another field's schema error. Both reads retain owner filters.
+  static Future<T> _withOptionalParcelAddress<T>(
+    Future<T> Function(bool includeAddress) read,
+  ) async {
+    try {
+      return await read(true);
+    } on PostgrestException catch (error) {
+      final message = error.message.toLowerCase();
+      if (!const ['42703', 'PGRST204'].contains(error.code) ||
+          !message.contains('supabase_parcels') ||
+          !message.contains('location_address')) {
+        rethrow;
+      }
+      debugPrint(
+        'Parcel address column unavailable; retrying without address.',
+      );
+      return read(false);
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> fetchMyJobs() async {
     final userId = client.auth.currentUser?.id;
     if (userId == null) return [];
 
-    final response = await client
-        .from('field_jobs')
-        .select('''
+    final response = await _withOptionalParcelAddress(
+      (includeAddress) => client
+          .from('field_jobs')
+          .select('''
       id,
       local_inspection_id,
       inspection_round_number,
@@ -726,7 +749,7 @@ class SupabaseService {
         land_use_class,
         property_index_number,
         latitude,
-        longitude
+        longitude${includeAddress ? ',location_address' : ''}
       ),
       field_job_reviews (
         id,
@@ -739,8 +762,9 @@ class SupabaseService {
         reviewed_at
       )
     ''')
-        .eq('assigned_inspector_id', userId)
-        .order('scheduled_date', ascending: true);
+          .eq('assigned_inspector_id', userId)
+          .order('scheduled_date', ascending: true),
+    );
 
     // Effective local presentation only: the remote row is not rewritten.
     // Both Tasks and Home Dashboard consume this same protected result.
@@ -872,7 +896,7 @@ class SupabaseService {
   ) async {
     final row = await client
         .from('field_jobs')
-        .select(
+          .select(
             'id,status,deadline_date,scheduled_date,is_self_scheduled,assigned_inspector_id')
         .eq('id', jobId)
         .eq('assigned_inspector_id', uid)
@@ -1096,6 +1120,24 @@ class SupabaseService {
     }
   }
 
+  /// Exact metadata contract consumed by the unchanged iMAPS PO reader
+  /// (`field_job_photos`: photo_url + latitude/longitude/captured_at/notes).
+  @visibleForTesting
+  static Map<String, dynamic> inspectionPhotoMetadataRow({
+    required String rowId,
+    required String jobId,
+    required String photoUrl,
+    required Map<String, dynamic> photo,
+  }) => {
+    'id': rowId,
+    'field_job_id': jobId,
+    'photo_url': photoUrl,
+    'latitude': photo['latitude'],
+    'longitude': photo['longitude'],
+    'captured_at': photo['capturedAt'],
+    'notes': photo['notes'],
+  };
+
   static Future<List<String>> uploadInspectionPhotos({
     required String jobId,
     required List<Map<String, dynamic>>
@@ -1205,15 +1247,15 @@ class SupabaseService {
               .maybeSingle();
           if (existing == null || existing['photo_url'] is! String) {
             _requireSession(uid);
-            await client.from('field_job_photos').upsert({
-              'id': rowId,
-              'field_job_id': jobId,
-              'photo_url': objectPath,
-              'latitude': photo['latitude'],
-              'longitude': photo['longitude'],
-              'captured_at': photo['capturedAt'],
-              'notes': photo['notes'],
-            }, onConflict: 'id');
+            await client.from('field_job_photos').upsert(
+              inspectionPhotoMetadataRow(
+                rowId: rowId,
+                jobId: jobId,
+                photoUrl: objectPath,
+                photo: photo,
+              ),
+              onConflict: 'id',
+            );
             uploadedUrls.add(objectPath);
           } else {
             uploadedUrls.add(existing['photo_url'] as String);
@@ -1265,20 +1307,15 @@ class SupabaseService {
           //    the same deterministic id derived from the photo's storage
           //    path. A retry updates this one row in place — it never adds
           //    a second row for a photo that already synced.
-          await client.from('field_job_photos').upsert({
-            'id': rowId,
-            'field_job_id': jobId,
-            'photo_url': storagePath,
-            'latitude': photo['latitude'],
-            'longitude': photo['longitude'],
-            'captured_at': photo['capturedAt'],
-            // Fix (Summary/Step-3 audit): this was missing entirely, so the
-            // note the inspector typed for this specific photo — already
-            // captured on-device via InspectionProvider.addPhoto and already
-            // persisted locally (local_photos.notes) — was silently dropped
-            // on every upload and never reached Supabase at all.
-            'notes': photo['notes'],
-          }, onConflict: 'id');
+          await client.from('field_job_photos').upsert(
+            inspectionPhotoMetadataRow(
+              rowId: rowId,
+              jobId: jobId,
+              photoUrl: storagePath,
+              photo: photo,
+            ),
+            onConflict: 'id',
+          );
         }
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
@@ -1444,9 +1481,10 @@ class SupabaseService {
       // used in fetchMyJobs() and fetchCompletedJobs() above.
       final userId = client.auth.currentUser?.id;
       if (userId == null) return null;
-      final response = await client
-          .from('field_jobs')
-          .select('''
+      final response = await _withOptionalParcelAddress(
+        (includeAddress) => client
+            .from('field_jobs')
+            .select('''
             *,
             supabase_zoning_applications!field_jobs_supabase_application_id_fkey (
               reference_number,
@@ -1458,7 +1496,9 @@ class SupabaseService {
             supabase_parcels!field_jobs_supabase_parcel_id_fkey (
               lot_area_sqm,
               land_use_class,
-              property_index_number
+              property_index_number,
+              latitude,
+              longitude${includeAddress ? ',location_address' : ''}
             ),
             field_job_photos (
               id,
@@ -1479,9 +1519,10 @@ class SupabaseService {
               reviewed_at
             )
           ''') // Added field_job_photos to the select query
-          .eq('id', jobId)
-          .eq('assigned_inspector_id', userId)
-          .single();
+            .eq('id', jobId)
+            .eq('assigned_inspector_id', userId)
+            .single(),
+      );
       return response;
     } catch (e) {
       debugPrint('Error fetching job detail: $e');

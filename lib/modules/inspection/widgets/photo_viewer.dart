@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../services/photo_source_resolver.dart';
 
@@ -36,12 +37,15 @@ class _AdaptivePhotoImageState extends State<AdaptivePhotoImage> {
   Future<ResolvedPhoto?> _resolve() async {
     try {
       // Local capture remains usable before/offline from Supabase setup.
-      if (PhotoSourceResolver.classify(widget.path) == PhotoSourceKind.localFile &&
+      if (PhotoSourceResolver.classify(widget.path) ==
+              PhotoSourceKind.localFile &&
           File(widget.path).existsSync()) {
         return ResolvedPhoto.local(widget.path);
       }
-      return await (widget.resolver ?? inspectionPhotoResolver())
-          .resolve(widget.path, fallback: widget.fallbackPath);
+      return await (widget.resolver ?? inspectionPhotoResolver()).resolve(
+        widget.path,
+        fallback: widget.fallbackPath,
+      );
     } catch (_) {
       return null;
     }
@@ -63,23 +67,35 @@ class _AdaptivePhotoImageState extends State<AdaptivePhotoImage> {
     }
   }
 
-  Widget _error() => widget.errorBuilder?.call(context) ?? const _BrokenImageFallback();
+  Widget _error() =>
+      widget.errorBuilder?.call(context) ?? const _BrokenImageFallback();
 
   @override
   Widget build(BuildContext context) => FutureBuilder<ResolvedPhoto?>(
     future: _photo,
     builder: (context, snapshot) {
       if (snapshot.connectionState != ConnectionState.done) {
-        return const Center(child: SizedBox(width: 20, height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2)));
+        return const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
       }
       final photo = snapshot.data;
       if (photo == null) return _error();
       return photo.localPath != null
-          ? Image.file(File(photo.localPath!), fit: widget.fit,
-              errorBuilder: (_, _, _) => _error())
-          : Image.memory(photo.bytes!, fit: widget.fit,
-              errorBuilder: (_, _, _) => _error());
+          ? Image.file(
+              File(photo.localPath!),
+              fit: widget.fit,
+              errorBuilder: (_, _, _) => _error(),
+            )
+          : Image.memory(
+              photo.bytes!,
+              fit: widget.fit,
+              errorBuilder: (_, _, _) => _error(),
+            );
     },
   );
 }
@@ -102,12 +118,17 @@ class _BrokenImageFallback extends StatelessWidget {
 void openFullscreenPhotoViewer(
   BuildContext context,
   List<String> photoPaths,
-  int startIndex,
-) {
+  int startIndex, {
+  List<Map<String, dynamic>>? photoDetails,
+}) {
   Navigator.push(
     context,
     MaterialPageRoute(
-      builder: (_) => FullscreenPhotoViewer(photoPaths: photoPaths, startIndex: startIndex),
+      builder: (_) => FullscreenPhotoViewer(
+        photoPaths: photoPaths,
+        startIndex: startIndex,
+        photoDetails: photoDetails,
+      ),
       fullscreenDialog: true,
     ),
   );
@@ -123,7 +144,15 @@ void openFullscreenPhotoViewer(
 class FullscreenPhotoViewer extends StatefulWidget {
   final List<String> photoPaths;
   final int startIndex;
-  const FullscreenPhotoViewer({super.key, required this.photoPaths, required this.startIndex});
+
+  /// Same-order per-photo metadata (local_photos / field_job_photos shape).
+  final List<Map<String, dynamic>>? photoDetails;
+  const FullscreenPhotoViewer({
+    super.key,
+    required this.photoPaths,
+    required this.startIndex,
+    this.photoDetails,
+  });
 
   @override
   State<FullscreenPhotoViewer> createState() => _FullscreenPhotoViewerState();
@@ -146,35 +175,128 @@ class _FullscreenPhotoViewerState extends State<FullscreenPhotoViewer> {
     super.dispose();
   }
 
+  Map<String, dynamic>? get _metadata {
+    final details = widget.photoDetails;
+    if (details == null ||
+        _currentIndex < 0 ||
+        _currentIndex >= details.length) {
+      return null;
+    }
+    return details[_currentIndex];
+  }
+
+  double? get _latitude {
+    final value = _metadata?['latitude'] ?? _metadata?['capture_latitude'];
+    final latitude = (value as num?)?.toDouble();
+    if (latitude == null || !latitude.isFinite || latitude.abs() > 90) {
+      return null;
+    }
+    return latitude;
+  }
+
+  double? get _longitude {
+    final value = _metadata?['longitude'] ?? _metadata?['capture_longitude'];
+    final longitude = (value as num?)?.toDouble();
+    if (longitude == null || !longitude.isFinite || longitude.abs() > 180) {
+      return null;
+    }
+    return longitude;
+  }
+
+  Future<void> _copyGoogleMapsLocation() async {
+    final latitude = _latitude;
+    final longitude = _longitude;
+    if (latitude == null || longitude == null) return;
+    final url =
+        'https://maps.google.com/?q=${latitude.toStringAsFixed(6)},'
+        '${longitude.toStringAsFixed(6)}';
+    await Clipboard.setData(ClipboardData(text: url));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Google Maps location copied.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final metadata = _metadata;
+    final notes = (metadata?['notes'] as String?)?.trim() ?? '';
+    final hasLocation = _latitude != null && _longitude != null;
     return SensitiveScreen(
       child: Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text('${_currentIndex + 1} / ${widget.photoPaths.length}'),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: PageView.builder(
-        controller: _pageController,
-        itemCount: widget.photoPaths.length,
-        onPageChanged: (i) => setState(() => _currentIndex = i),
-        itemBuilder: (context, i) => InteractiveViewer(
-          child: Center(
-            child: AdaptivePhotoImage(
-              path: widget.photoPaths[i],
-              fit: BoxFit.contain,
-              errorBuilder: (_) => const Icon(
-                Icons.broken_image_outlined,
-                color: Colors.white38,
-                size: 48,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: Text('${_currentIndex + 1} / ${widget.photoPaths.length}'),
+          iconTheme: const IconThemeData(color: Colors.white),
+        ),
+        body: PageView.builder(
+          controller: _pageController,
+          itemCount: widget.photoPaths.length,
+          onPageChanged: (i) => setState(() => _currentIndex = i),
+          itemBuilder: (context, i) => InteractiveViewer(
+            child: Center(
+              child: AdaptivePhotoImage(
+                path: widget.photoPaths[i],
+                fit: BoxFit.contain,
+                errorBuilder: (_) => const Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white38,
+                  size: 48,
+                ),
               ),
             ),
           ),
         ),
-      ),
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Container(
+            color: const Color(0xFF0B1220),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (notes.isNotEmpty) ...[
+                  Text(
+                    notes,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Text(
+                  hasLocation
+                      ? 'Camera/verified GPS: '
+                            '${_latitude!.toStringAsFixed(6)}, '
+                            '${_longitude!.toStringAsFixed(6)}'
+                      : 'No reliable GPS location is recorded for this photo.',
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: hasLocation ? _copyGoogleMapsLocation : null,
+                  icon: const Icon(Icons.copy_rounded, size: 18),
+                  label: const Text('Copy Google Maps Location'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    disabledForegroundColor: Colors.white30,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

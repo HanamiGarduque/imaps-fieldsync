@@ -99,6 +99,7 @@ class DBHelper {
       'local_jobs': 'id',
       'local_inspections': 'id',
       'local_photos': 'job_id',
+      'local_gps_verifications': 'job_id',
       'inspection_job_retention': 'job_id',
       'pending_actions': 'job_id',
     }.entries) {
@@ -279,7 +280,7 @@ class DBHelper {
     return await openDatabase(
       path,
       password: password,
-      version: 18,
+      version: 19,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           // Existing installs won't have this column yet — add it so
@@ -426,6 +427,7 @@ class DBHelper {
         }
         if (oldVersion < 17) await InspectionOwnershipSchema.applyV17(db);
         if (oldVersion < 18) await applyV18(db);
+        if (oldVersion < 19) await _applyV19(db);
       },
       onCreate: (db, version) async {
         await createInspectionRetentionTable(db);
@@ -498,6 +500,11 @@ class DBHelper {
           )
         ''');
 
+        // Immutable Step 2 verification snapshot for the Step 3 Site Location
+        // Reference. Local-only provenance: never uploaded as its own record
+        // and never a substitute for a photo's own shutter GPS.
+        await db.execute(_gpsVerificationSchema);
+
         // Generic offline-action outbox (FieldSync). Every offline-capable
         // write — GPS confirm, checklist update, photo upload, submit,
         // status change — becomes one row here instead of each screen
@@ -517,6 +524,20 @@ class DBHelper {
       },
     );
   }
+
+  /// Immutable Step 2 on-site verification snapshot. Additive, local-only,
+  /// owner-scoped, and never synced as its own record.
+  static const String _gpsVerificationSchema = '''
+    CREATE TABLE IF NOT EXISTS local_gps_verifications(
+      job_id TEXT PRIMARY KEY NOT NULL,
+      inspector_id TEXT NOT NULL,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      accuracy_meters REAL,
+      fix_at TEXT NOT NULL,
+      verified_at TEXT NOT NULL
+    )
+  ''';
 
   /// Per-job cache of a real OSRM road route.
   ///
@@ -779,6 +800,12 @@ class DBHelper {
     }
   }
 
+  /// V19: one isolated local table for the immutable Step 2 verification
+  /// snapshot. Additive and idempotent; no existing row is rewritten.
+  static Future<void> _applyV19(DatabaseExecutor db) async {
+    await db.execute(_gpsVerificationSchema);
+  }
+
   /// Shared single-job cache mapping. Used by full-list cacheJobs() and
   /// normal inspection entry so both persist identical metadata.
   static Map<String, dynamic> _cachedJobRow(Map<String, dynamic> job) {
@@ -825,7 +852,7 @@ class DBHelper {
       'lot_area_sqm': parcel['lot_area_sqm'],
       'declared_land_use':
           parcel['declared_land_use'] ?? 'Single-detached residential',
-      'parcel_address': parcel['address'] ?? '',
+      'parcel_address': parcel['location_address'] ?? parcel['address'] ?? '',
       // Offline/online list parity: the Tasks screen sorts Completed by
       // submitted_at, so the cached row must carry it or the offline order
       // silently diverges from the online order.
@@ -997,6 +1024,20 @@ class DBHelper {
     return rows;
   }
 
+  static Future<Map<String, dynamic>?> getCachedJob(String jobId) async {
+    final uid = currentInspectorId;
+    if (uid == null || uid.isEmpty) return null;
+    final db = await database;
+    final rows = await db.query(
+      'local_jobs',
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [jobId, uid],
+      limit: 1,
+    );
+    requireSameInspector(uid);
+    return rows.isEmpty ? null : rows.first;
+  }
+
   /// Read-only My Tasks projection input. Jobs and final intent must be from
   /// one SQLite snapshot, so a concurrent acknowledgement cannot briefly move
   /// a submitted round back to Ongoing. No lifecycle/evidence row is written.
@@ -1013,13 +1054,16 @@ class DBHelper {
       requireSameInspector(uid);
       // Read-only progress projection: v18 already stores saved steps in the
       // exact-owner draft, not local_jobs. Do not rewrite either stored row.
-      final jobs = await txn.rawQuery('''
+      final jobs = await txn.rawQuery(
+        '''
         SELECT jobs.*, draft.current_step AS current_step
         FROM local_jobs AS jobs
         LEFT JOIN local_inspections AS draft
           ON draft.id = jobs.id AND draft.inspector_id = jobs.inspector_id
         WHERE jobs.inspector_id = ?
-      ''', [uid]);
+      ''',
+        [uid],
+      );
       final submissions = await txn.query(
         'pending_actions',
         where: "type = 'submit_inspection' AND inspector_id = ?",
@@ -1233,6 +1277,56 @@ class DBHelper {
     );
   }
 
+  // --- STEP 2 GPS VERIFICATION SNAPSHOT ---
+
+  /// Persists the single accepted Step 2 fix for this job/round. Owner-scoped
+  /// and idempotent: a re-confirmation replaces the prior snapshot.
+  static Future<void> saveGpsVerification({
+    required String jobId,
+    required double latitude,
+    required double longitude,
+    required double? accuracyMeters,
+    required DateTime fixAt,
+    required DateTime verifiedAt,
+  }) async {
+    final uid = requireInspector();
+    final db = await database;
+    await db.transaction((txn) async {
+      await requireOwnedJob(txn, jobId, uid);
+      await _requireOwnedRow(
+        txn,
+        'local_gps_verifications',
+        'job_id',
+        jobId,
+        uid,
+      );
+      await txn.insert('local_gps_verifications', {
+        'job_id': jobId,
+        'inspector_id': uid,
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy_meters': accuracyMeters,
+        'fix_at': fixAt.toUtc().toIso8601String(),
+        'verified_at': verifiedAt.toUtc().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      requireSameInspector(uid);
+    });
+  }
+
+  static Future<Map<String, dynamic>?> getGpsVerification(String jobId) async {
+    final uid = currentInspectorId;
+    if (uid == null || uid.isEmpty) return null;
+    final db = await database;
+    final rows = await db.query(
+      'local_gps_verifications',
+      where: 'job_id = ? AND inspector_id = ?',
+      whereArgs: [jobId, uid],
+      limit: 1,
+    );
+    requireSameInspector(uid);
+    return rows.isEmpty ? null : rows.first;
+  }
+
   // --- LOCAL PHOTOS ---
 
   static Future<void> savePhotoLocally({
@@ -1259,6 +1353,9 @@ class DBHelper {
           'A captured photo cannot move between inspection rounds',
         );
       }
+      final photoCapturedAt = previous.isNotEmpty
+          ? previous.single['captured_at']
+          : capturedAt ?? DateTime.now().toIso8601String();
       await txn.insert('local_photos', {
         'id': photoId,
         'inspector_id': uid,
@@ -1267,9 +1364,7 @@ class DBHelper {
         'notes': notes,
         'latitude': latitude,
         'longitude': longitude,
-        'captured_at': previous.isNotEmpty
-            ? previous.single['captured_at']
-            : capturedAt ?? DateTime.now().toIso8601String(),
+        'captured_at': photoCapturedAt,
         'is_synced':
             previous.isNotEmpty &&
                 previous.single['photo_path'] == photoPath &&
@@ -1279,6 +1374,19 @@ class DBHelper {
             ? previous.single['is_synced']
             : 0,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+      final saved = await txn.query(
+        'local_photos',
+        where: 'id = ? AND job_id = ? AND inspector_id = ?',
+        whereArgs: [photoId, jobId, uid],
+      );
+      if (saved.length != 1 ||
+          saved.single['photo_path'] != photoPath ||
+          saved.single['notes'] != notes ||
+          saved.single['latitude'] != latitude ||
+          saved.single['longitude'] != longitude ||
+          saved.single['captured_at'] != photoCapturedAt) {
+        throw StateError('Photo evidence was not saved on this device');
+      }
       requireSameInspector(uid);
     });
   }

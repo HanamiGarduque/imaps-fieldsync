@@ -56,13 +56,17 @@ void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
     sqfliteFfiInit();
-    profileDb = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
-    await profileDb.execute(
-      'CREATE TABLE local_jobs (id TEXT, status TEXT, inspector_id TEXT)',
+    // Step 3 now awaits a real durable write. Use the complete schema and
+    // no-isolate SQLite so its IO can complete inside the widget fake clock.
+    profileDb = await databaseFactoryFfiNoIsolate.openDatabase(
+      inMemoryDatabasePath,
     );
-    await profileDb.execute(
-      'CREATE TABLE pending_actions (job_id TEXT, type TEXT, status TEXT)',
-    );
+    final source = File('lib/core/services/db_helper.dart').readAsStringSync();
+    for (final match in RegExp(
+      r'CREATE TABLE(?: IF NOT EXISTS)? (\w+)\([\s\S]*?\)',
+    ).allMatches(source)) {
+      await profileDb.execute(match.group(0)!);
+    }
     DBHelper.useDatabaseForTesting(profileDb);
     GoogleFonts.config.allowRuntimeFetching = false;
     final fonts = Directory(
