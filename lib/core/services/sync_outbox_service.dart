@@ -761,6 +761,26 @@ class SyncOutboxService {
     }
   }
 
+  /// Writes the per-step completion times of a queued progress action without
+  /// touching `current_step`, the status or the submitted evidence. A failed
+  /// write throws, so the action stays retryable and is never acknowledged
+  /// with a false receipt.
+  static Future<void> _recordQueuedStepTimestamps(
+    String jobId,
+    Map<String, dynamic> payload,
+    String owner,
+  ) async {
+    final stepTs = payload['stepTimestamps'];
+    if (stepTs is! Map || stepTs.isEmpty) return;
+    DBHelper.requireSameInspector(owner);
+    await SupabaseService.recordStepTimestamps(
+      jobId: jobId,
+      stepTimestamps: stepTs.map(
+        (k, v) => MapEntry(k.toString(), v.toString()),
+      ),
+    );
+  }
+
   /// User-facing label for an action type, used in sync log messages.
   /// Deliberately separate from [SyncProgress.actionLabel] (which is
   /// tuned for a short live-progress line) — this one reads naturally in
@@ -858,6 +878,14 @@ class SyncOutboxService {
           throw _OutboxConflictException(
             'Completed job has invalid current_step; refusing stale replay',
           );
+        }
+        if (type == 'current_step_update') {
+          // The completion already superseded the progress write, but the
+          // per-step completion times are the inspector's own record and
+          // are not part of the immutable evidence. The timestamp-only
+          // write cannot move current_step, change the status or touch the
+          // assessment, so the timeline survives the submission.
+          await _recordQueuedStepTimestamps(jobId, payload, owner);
         }
         return;
       }
@@ -996,14 +1024,23 @@ class SyncOutboxService {
         // F1 fix: carry the per-step saved times through the offline queue
         // so field_jobs.step_timestamps is updated by the same drain pass.
         final stepTs = payload['stepTimestamps'];
+        final stepTimestamps = stepTs is Map
+            ? stepTs.map((k, v) => MapEntry(k.toString(), v.toString()))
+            : null;
         final result = await SupabaseService.advanceJobInspectionProgress(
           jobId: jobId,
           currentStep: payload['currentStep'] as int,
-          stepTimestamps: stepTs is Map
-              ? stepTs.map((k, v) => MapEntry(k.toString(), v.toString()))
-              : null,
+          stepTimestamps: stepTimestamps,
         );
         result.requireAuthorized();
+        // The monotonic write can only land while the remote step is still
+        // below this one. When the remote already sits at this step, a step
+        // completed after a later one could not carry its own time, so the
+        // timestamp-only write delivers exactly the missing keys without
+        // moving current_step.
+        if (stepTimestamps != null && stepTimestamps.isNotEmpty) {
+          await _recordQueuedStepTimestamps(jobId, payload, owner);
+        }
         break;
       case 'photos_update':
         final photosData = (payload['photos'] as List)

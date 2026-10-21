@@ -186,7 +186,9 @@ class InspectionProgress extends ChangeNotifier {
       // current_step is the highest step reached and never regresses; the
       // independent completion of steps 3-5 travels in step_timestamps.
       final reached = _highestCompleted;
-      _persistQueue = _persistQueue.then((_) => _persistCurrentStep(taskId, reached, uid, timestamps));
+      _persistQueue = _persistQueue.then(
+        (_) => _persistCurrentStep(taskId, reached, uid, timestamps),
+      );
     }
 
     if (step < totalSteps && _activeTaskId != null) {
@@ -202,6 +204,10 @@ class InspectionProgress extends ChangeNotifier {
   /// Saves the exact step number to SQLite (always) and Supabase (best-
   /// effort, if online). This gives us a real stored value alongside the
   /// derivedHighestStep heuristic — belt-and-suspenders, doesn't replace it.
+  ///
+  /// [step] is the highest step reached, which is what `current_step` may
+  /// ever hold. The per-step times travel with it, so an independent step
+  /// completed out of order still keeps its own completion time.
   Future<void> _persistCurrentStep(String taskId, int step, String uid,
       Map<String,String> timestamps) async {
     try {
@@ -225,6 +231,15 @@ class InspectionProgress extends ChangeNotifier {
                timestamps,
         );
         result.requireAuthorized();
+        // The monotonic write can only land while the remote step is still
+        // below this one. When the remote already sits at this step - a step
+        // completed after a later one, or a remote that is ahead of this
+        // device - the newest time was not carried. The timestamp-only write
+        // delivers exactly the missing keys and cannot move current_step.
+        await SupabaseService.recordStepTimestamps(
+          jobId: taskId,
+          stepTimestamps: timestamps,
+        );
       } else {
         await SyncOutboxService.enqueueCurrentStepUpdate(
           jobId: taskId,

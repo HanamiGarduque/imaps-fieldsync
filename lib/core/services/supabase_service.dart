@@ -43,6 +43,14 @@ class PhotoRecoveryUnknownException implements Exception {
   String toString() => message;
 }
 
+/// Result of a timestamp-only write.
+enum StepTimestampWriteOutcome {
+  /// The remote record now holds the requested times.
+  written,
+
+  /// The remote record already held every requested time; nothing to write.
+  alreadyPresent,
+}
 class SupabaseService {
   /// Live session identity, or null when no client session exists. Reading it
   /// never throws, so a caller can demand a session only at the point it
@@ -1700,6 +1708,70 @@ class SupabaseService {
       debugPrint('Error updating field job: $e');
       rethrow;
     }
+  }
+
+  /// Result of a timestamp-only write.
+  /// Records the real completion time of an inspection step without touching
+  /// `current_step`, the task status or any submitted evidence.
+  ///
+  /// [advanceJobInspectionProgress] can only update a row whose
+  /// `current_step` is still below the requested step, so a step that is
+  /// completed after a later one (the independent steps 3, 4 and 5) can
+  /// never carry its own time to the server: the write matches no row and
+  /// the "already at this step" condition is accepted as success. This
+  /// writes that one column through the existing authority-checked partial
+  /// update, which explicitly forbids the lifecycle fields, so
+  /// `current_step` can never move backward.
+  ///
+  /// The stored map is merged, never replaced: times another writer already
+  /// stored are kept, and only the steps this device recorded are added. A
+  /// failed write throws, so the caller never reports a false receipt.
+  static Future<StepTimestampWriteOutcome> recordStepTimestamps({
+    required String jobId,
+    required Map<String, String> stepTimestamps,
+  }) async {
+    if (stepTimestamps.isEmpty) {
+      return StepTimestampWriteOutcome.alreadyPresent;
+    }
+    final uid = client.auth.currentUser?.id;
+    if (uid == null) {
+      throw StateError('Authenticated inspector required');
+    }
+    final row = await client
+        .from('field_jobs')
+        .select('id,assigned_inspector_id,status,current_step,step_timestamps')
+        .eq('id', jobId)
+        .eq('assigned_inspector_id', uid)
+        .maybeSingle()
+        .retry(enabled: false)
+        .timeout(const Duration(seconds: 10));
+    if (client.auth.currentUser?.id != uid) {
+      throw StateError('Session changed while recording step times');
+    }
+    if (row == null ||
+        row['id'] != jobId ||
+        row['assigned_inspector_id'] != uid) {
+      throw StateError('Inspection is not available to this inspector');
+    }
+    final stored = <String, String>{};
+    final raw = row['step_timestamps'];
+    if (raw is Map) {
+      raw.forEach((key, value) {
+        if (value is String && value.isNotEmpty) {
+          stored[key.toString()] = value;
+        }
+      });
+    }
+    final merged = <String, String>{...stored, ...stepTimestamps};
+    if (merged.length == stored.length &&
+        stored.keys.every((key) => merged[key] == stored[key])) {
+      return StepTimestampWriteOutcome.alreadyPresent;
+    }
+    await updateJobInspectionProgress(
+      jobId: jobId,
+      updateData: {'step_timestamps': merged},
+    );
+    return StepTimestampWriteOutcome.written;
   }
 
   /// Advances ordinary inspection progress without ever lowering it or
