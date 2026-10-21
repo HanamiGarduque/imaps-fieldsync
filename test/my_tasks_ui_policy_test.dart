@@ -65,14 +65,23 @@ void main() {
   }
 
   Future<void> mount(WidgetTester tester, {bool home = false, double scale = 1,
+      Size size = const Size(360, 1000),
       int tab = TasksScreen.tabPending}) async {
     await fixture.mount(tester, home ? HomeDashboardScreen(profile: profile) :
         TasksScreen(profile: profile, initialTabIndex: tab),
-        size: const Size(360, 1000), textScale: scale);
+        size: size, textScale: scale);
     await settle(tester);
   }
 
   Finder card() => find.byKey(const ValueKey(offlineJob));
+  Finder info() => find.descendant(of: card(), matching: find.byType(FieldInfoButton));
+  Finder dialogText(String text) => find.descendant(of: find.byType(AlertDialog), matching: find.text(text));
+  Future<void> openInfo(WidgetTester tester) async {
+    await tester.ensureVisible(info());
+    await tester.tap(info());
+    await settle(tester);
+    expect(find.text('Task details'), findsOneWidget);
+  }
   Future<void> expand(WidgetTester tester) async {
     await tester.tap(find.descendant(of: card(), matching: find.text('Fictional $offlineJob')));
     await settle(tester);
@@ -123,8 +132,11 @@ void main() {
     await mount(tester);
     expect(find.text('PO Deadline Today'), findsOneWidget);
     expect(find.text('For Reschedule'), findsNothing);
-    expect(find.textContaining('PO Deadline today. Rescheduling is unavailable'), findsOneWidget);
+    expect(find.textContaining('PO Deadline today. Rescheduling is unavailable'), findsNothing);
     expect(decoration(tester).color, InsightTheme.surface);
+    await openInfo(tester);
+    expect(dialogText('Scheduled visit tomorrow.'), findsOneWidget);
+    expect(dialogText('PO Deadline today. Rescheduling is unavailable; complete your inspection.'), findsOneWidget);
     await fixture.capture(tester, 'my-tasks-visit-tomorrow-deadline-today');
   });
 
@@ -140,11 +152,87 @@ void main() {
     jobs = [job(visit: 2, deadline: 3)];
     await mount(tester);
     for (var i = 0; i < 3; i++) {
-      expect(find.text('Scheduled visit in 2 days — prepare your site inspection.'), findsOneWidget);
-      expect(find.text('PO Deadline in 3 days.'), findsOneWidget);
+      expect(find.byType(AlertDialog), findsNothing, reason: 'no automatic popup on rebuild');
+      expect(find.text('Scheduled visit in 2 days — prepare your site inspection.'), findsNothing);
+      expect(find.text('PO Deadline in 3 days.'), findsNothing);
+      expect(info(), findsOneWidget);
+      await openInfo(tester);
+      expect(dialogText('Scheduled visit in 2 days — prepare your site inspection.'), findsOneWidget);
+      expect(dialogText('PO Deadline in 3 days.'), findsOneWidget);
+      expect(dialogText('Visit date'), findsOneWidget);
+      expect(dialogText(date(2)), findsOneWidget);
+      expect(dialogText('PO Deadline'), findsOneWidget);
+      expect(dialogText(date(3)), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await settle(tester);
       await expand(tester);
     }
     expect(patches, 0);
+  });
+
+  for (final (visit, deadline, scheduled, message, color) in [
+    (3, 8, true, 'Scheduled visit in 3 days — prepare your site inspection.', InsightTheme.orangeInk),
+    (2, 8, true, 'Scheduled visit in 2 days — prepare your site inspection.', InsightTheme.orangeInk),
+    (1, 8, true, 'Scheduled visit tomorrow.', InsightTheme.redInk),
+    (0, 8, true, 'Scheduled visit today — proceed with the inspection.', InsightTheme.redInk),
+    (-1, 8, true, 'You missed your Visit date. Reschedule before the PO Deadline or continue the inspection.', InsightTheme.redInk),
+    (0, 3, false, 'PO Deadline in 3 days.', InsightTheme.orangeInk),
+    (0, 2, false, 'PO Deadline in 2 days.', InsightTheme.orangeInk),
+    (0, 1, false, 'PO Deadline in 1 day.', InsightTheme.redInk),
+    (0, 0, false, 'PO Deadline today. Rescheduling is unavailable; complete your inspection.', InsightTheme.redInk),
+    (0, -1, false, 'Overdue — the PO deadline has passed.', InsightTheme.redInk),
+    (4, 3, true, 'Your Visit date is after the PO Deadline. Coordinate with the Planning Officer; choose a valid Visit only while scheduling is available.', InsightTheme.redInk),
+  ]) {
+    fixture.widgetTest('contextual notice $message uses highest severity without inline clutter', (tester) async {
+      jobs = [job(visit: visit, deadline: deadline, scheduled: scheduled, status: 'assigned', step: 0)];
+      await mount(tester);
+      expect(info(), findsOneWidget);
+      expect(find.text(message), findsNothing);
+      final icon = tester.widget<Icon>(find.descendant(of: info(), matching: find.byType(Icon)));
+      expect(icon.color, color);
+      await openInfo(tester);
+      expect(dialogText(message), findsOneWidget);
+      expect(dialogText('Next action'), findsOneWidget);
+      expect(dialogText('PO Deadline'), findsOneWidget);
+      expect(dialogText(date(deadline)), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await settle(tester);
+      await tester.pump(const Duration(minutes: 2));
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text(message), findsNothing);
+      expect(patches, 0);
+    });
+  }
+
+  fixture.widgetTest('ordinary and Completed cards do not inherit historical warning icons', (tester) async {
+    jobs = [job(visit: 4, deadline: 8, status: 'assigned', step: 0)];
+    await mount(tester);
+    expect(tester.widget<Icon>(find.descendant(of: info(), matching: find.byType(Icon))).color, InsightTheme.blueInk);
+    jobs = [job(visit: -4, deadline: -1, status: 'completed', step: 6)];
+    await fixture.unmount(tester);
+    await mount(tester, tab: TasksScreen.tabCompleted);
+    expect((decoration(tester).border! as Border).top.color, InsightTheme.green);
+    expect(tester.widget<Icon>(find.descendant(of: info(), matching: find.byType(Icon))).color, InsightTheme.blueInk);
+    await openInfo(tester);
+    expect(find.textContaining('Overdue'), findsNothing);
+    expect(find.textContaining('Scheduled visit'), findsNothing);
+  });
+
+  fixture.widgetTest('notice dialog stays scrollable and dismissible at 320px and 200% text', (tester) async {
+    jobs = [job(visit: 2, deadline: 3)];
+    await mount(tester, scale: 2, size: const Size(320, 568));
+    expect(tester.getSize(info()), const Size(48, 48));
+    await openInfo(tester);
+    expect(dialogText('Scheduled visit in 2 days — prepare your site inspection.'), findsOneWidget);
+    expect(dialogText('PO Deadline in 3 days.'), findsOneWidget);
+    final close = find.text('Close');
+    expect(close.hitTestable(), findsOneWidget);
+    await tester.drag(find.descendant(of: find.byType(AlertDialog), matching: find.byType(SingleChildScrollView)), const Offset(0, -600));
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    await tester.tap(close);
+    await settle(tester);
+    expect(find.byType(AlertDialog), findsNothing);
   });
 
   fixture.widgetTest('fresh PO placeholder uses Schedule and a tomorrow-only picker', (tester) async {

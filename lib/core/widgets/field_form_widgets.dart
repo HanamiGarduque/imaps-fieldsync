@@ -30,9 +30,12 @@ class FieldBackButton extends StatelessWidget {
 
 /// Secondary explanatory control; the screen owns its message and action.
 class FieldInfoButton extends StatelessWidget {
-  const FieldInfoButton({super.key, required this.label, required this.onPressed});
+  const FieldInfoButton({super.key, required this.label, required this.onPressed,
+    this.color = InsightTheme.blueInk, this.backgroundColor = InsightTheme.blueTint});
   final String label;
   final VoidCallback onPressed;
+  final Color color;
+  final Color backgroundColor;
 
   @override
   Widget build(BuildContext context) => SizedBox.square(
@@ -43,10 +46,10 @@ class FieldInfoButton extends StatelessWidget {
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 48, height: 48),
       icon: DecoratedBox(
-        decoration: BoxDecoration(color: InsightTheme.blueTint,
+        decoration: BoxDecoration(color: backgroundColor,
           borderRadius: BorderRadius.circular(10)),
-        child: const SizedBox.square(dimension: 28,
-          child: Icon(Icons.info_outline_rounded, size: 18, color: InsightTheme.blueInk)),
+        child: SizedBox.square(dimension: 28,
+          child: Icon(Icons.info_outline_rounded, size: 18, color: color)),
       ),
     ),
   );

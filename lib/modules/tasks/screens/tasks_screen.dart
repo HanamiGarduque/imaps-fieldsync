@@ -1998,12 +1998,23 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     final isCompleted = _displayCategory == 'Completed';
     final isScheduled =
         task.pendingSection == PendingTaskSection.scheduled;
-    final visitRowVisible = isScheduled && task.scheduledDate.isNotEmpty;
-    final deadlineRowVisible = !isCompleted && task.deadlineDate?.isNotEmpty == true;
-
-    final isOverdue = !isCompleted && p.isOverdue;
-    final scheduledVisitRed = isScheduled && p.border == MyTaskBorder.red;
-    final scheduledVisitOrange = isScheduled && p.border == MyTaskBorder.orange;
+    if (!isCompleted) {
+      if (isScheduled) {
+        indicators.add(MapEntry('Visit date', p.visitDay?.toIso8601String().split('T').first ?? 'Not verified'));
+      }
+      indicators.add(MapEntry('PO Deadline', p.deadlineDay?.toIso8601String().split('T').first ?? 'Not verified'));
+      for (final notice in p.notices) {
+        final title = switch (notice) {
+          MyTaskNotice.visitInDays || MyTaskNotice.visitTomorrow ||
+          MyTaskNotice.visitToday || MyTaskNotice.visitMissed => 'Visit notice',
+          MyTaskNotice.scheduleConflict => 'Visit / PO Deadline conflict',
+          _ => 'PO Deadline notice',
+        };
+        indicators.add(MapEntry(title, p.noticeText(notice)));
+      }
+      indicators.add(MapEntry('Next action', p.scheduleBlockReason ??
+          'Continue your inspection before the PO Deadline. To ${isScheduled ? 'reschedule' : 'schedule'} a Visit, choose a date from tomorrow through the verified PO Deadline.'));
+    }
 
     if (isCompleted) {
       indicators.add(_awaitingAcceptance
@@ -2020,47 +2031,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       indicators.add(const MapEntry('Available Anytime', 'This task does not have a fixed visit date yet. You can inspect it anytime before the admin-set deadline. If you want a specific visit date, you can schedule one.'));
     }
 
-    if (!isCompleted) {
-      if (visitRowVisible) {
-        indicators.add(const MapEntry('Visit', 'This task has a deliberate visit date selected for the inspection.'));
-      }
-      if (deadlineRowVisible) {
-        indicators.add(const MapEntry('Deadline', 'This is the admin-set deadline for completing the inspection.'));
-      }
-      if (isOverdue) {
-        indicators.add(const MapEntry('Full red container', 'The admin-set deadline has passed, so the active task is fully highlighted red to show that it needs immediate attention.'));
-      } else if (scheduledVisitRed) {
-        indicators.add(const MapEntry('Red border', 'The scheduled visit date is today, tomorrow, or has already passed. Check the task and take action before the admin-set deadline.'));
-      } else if (scheduledVisitOrange) {
-        indicators.add(const MapEntry('Orange border', 'Your visit date is coming up in 2–3 days. Make sure you are prepared to complete the inspection on time.'));
-      } else {
-        indicators.add(const MapEntry('Blue border', 'The visit date is not close yet, or this task has no deliberate visit date, so no urgent action is needed.'));
-      }
-      if (task.scheduleUrgency == 'Due today') {
-        final dueTodayFromVisit = visitRowVisible && p.visitDaysUntil == 0;
-        indicators.add(MapEntry(
-          'Due Today',
-          dueTodayFromVisit
-              ? 'The scheduled visit date is today. This inspection should be handled today.'
-              : 'The admin-set deadline is today. This inspection should be completed today.',
-        ));
-      }
-      if (isScheduled && task.forReschedule != null) {
-        indicators.add(const MapEntry('For Reschedule', 'The scheduled visit date has already passed, but the admin-set deadline has not. Choose a new valid visit date as soon as possible.'));
-      }
-      if (isOverdue) {
-        indicators.add(const MapEntry('Overdue', 'The admin-set deadline has already passed. This task needs immediate attention.'));
-      }
-      if (p.deadlineState == MyTaskDeadlineState.today) {
-        indicators.add(MapEntry('PO Deadline Today', p.noticeText(MyTaskNotice.deadlineToday)));
-      }
-      if (p.notices.contains(MyTaskNotice.scheduleConflict)) {
-        indicators.add(MapEntry('Visit / Deadline conflict', p.noticeText(MyTaskNotice.scheduleConflict)));
-      }
-      if (!p.canSchedule) {
-        indicators.add(MapEntry('Scheduling unavailable', p.scheduleBlockReason!));
-      }
-    }
     if (!isCompleted && p.showInProgress) {
       indicators.add(const MapEntry('In Progress', 'You have already started this scheduled inspection. Continue working through the remaining steps until it is completed.'));
     }
@@ -2363,6 +2333,14 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   Widget build(BuildContext context) {
     final String taskCategory = _displayCategory;
     final p = widget.task.presentation;
+    final notices = taskCategory == 'Completed' ? const <MyTaskNotice>[] : p.notices;
+    final criticalNotice = notices.any((notice) => switch (notice) {
+      MyTaskNotice.visitTomorrow || MyTaskNotice.visitToday ||
+      MyTaskNotice.visitMissed || MyTaskNotice.deadlineToday ||
+      MyTaskNotice.deadlinePassed || MyTaskNotice.scheduleConflict => true,
+      MyTaskNotice.deadlineInDays => p.deadlineDaysUntil == 1,
+      _ => false,
+    });
     final bool isOverdue = taskCategory != 'Completed' && p.isOverdue;
     final statusColor = _getStatusColor(p);
     final bool showInProgress = taskCategory != 'Completed' && p.showInProgress;
@@ -2464,6 +2442,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               FieldInfoButton(
                                 label: 'About task details for ${widget.task.name}',
                                 onPressed: _showContextualInfo,
+                                color: criticalNotice ? InsightTheme.redInk : notices.isNotEmpty ? InsightTheme.orangeInk : InsightTheme.blueInk,
+                                backgroundColor: criticalNotice ? InsightTheme.redTint : notices.isNotEmpty ? InsightTheme.orangeTint : InsightTheme.blueTint,
                               ),
                               const SizedBox(width: 6),
                               AnimatedRotation(
@@ -2704,13 +2684,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               // category correctly.
                             ],
                           ),
-                          if (taskCategory != 'Completed')
-                            for (final notice in p.notices)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Text(p.noticeText(notice),
-                                    style: InsightTheme.inter(12, c: isOverdue ? InsightTheme.redInk : InsightTheme.ink2)),
-                              ),
                           const SizedBox(height: 10),
                           Row(
                             children: [
