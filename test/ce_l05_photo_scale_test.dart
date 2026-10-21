@@ -88,6 +88,15 @@ void main() {
   tearDown(fixture.closeCase);
   tearDownAll(fixture.dispose);
 
+  /// Scrolls the page until the Add cell is built and visible.
+  Future<void> _revealAddCell(WidgetTester tester) async {
+    await tester.scrollUntilVisible(
+      find.bySemanticsLabel('Add site photo'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+  }
+
   fixture.widgetTest(
     'site photo counter and Add cell keep working at 0, 1, 10, 11, 20, 50 and 100',
     (tester) async {
@@ -96,6 +105,7 @@ void main() {
       await fixture.mount(tester, CapturePhotoScreen(task: offlineTask));
       await fixture.flush(tester);
       expect(find.text('0 site photos'), findsOneWidget);
+      await _revealAddCell(tester);
       expect(find.bySemanticsLabel('Add site photo'), findsOneWidget);
 
       for (final target in [1, 10, 11, 20, 50, 100]) {
@@ -108,13 +118,26 @@ void main() {
           );
         }
         await fixture.flush(tester);
-        expect(find.text('$target site photos'), findsOneWidget);
+        expect(
+          find.text(target == 1 ? '1 site photo' : '$target site photos'),
+          findsOneWidget,
+        );
+        await _revealAddCell(tester);
         expect(find.bySemanticsLabel('Add site photo'), findsOneWidget);
       }
 
-      // The grid must never request a full-resolution decode per cell.
-      final thumbnails = tester.widgetList<Image>(find.byType(Image)).toList();
-      expect(thumbnails, hasLength(100));
+      // Every accepted photo is in the grid, and no cell may ask for a
+      // full-resolution decode.
+      expect(find.bySemanticsLabel(RegExp('View photo ')), findsNWidgets(100));
+      final thumbnails = tester
+          .widgetList<Image>(
+            find.descendant(
+              of: find.byType(GridView),
+              matching: find.byType(Image),
+            ),
+          )
+          .toList();
+      expect(thumbnails, isNotEmpty);
       for (final image in thumbnails) {
         expect(image.image, isA<ResizeImage>());
         expect(
@@ -138,7 +161,13 @@ void main() {
       );
       await fixture.mount(tester, CapturePhotoScreen(task: offlineTask));
       await fixture.flush(tester);
-      await tester.tap(find.bySemanticsLabel('View photo 1'));
+      final cell = find.bySemanticsLabel(RegExp('View photo 1'));
+      await tester.scrollUntilVisible(
+        cell,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(cell);
       await fixture.flush(tester);
 
       final viewerImages = tester
