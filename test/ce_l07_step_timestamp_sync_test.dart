@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
+import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
 
 import 'support/offline_reliability_fixture.dart';
 
@@ -34,6 +35,25 @@ class FakeFieldJobs {
     },
   };
   final List<Map<String, dynamic>> patches = [];
+  int revisions = 0;
+
+  /// Simulates another legitimate writer that changes the row between the
+  /// read and the write.
+  void concurrentWrite(String jobId, Map<String, dynamic> values) {
+    final target = rows[jobId]!;
+    if (values['step_timestamps'] is Map) {
+      // A real writer merges the map; it never drops another writer's keys.
+      target['step_timestamps'] = {
+        ...(target['step_timestamps'] as Map? ?? const <String, dynamic>{}),
+        ...(values['step_timestamps'] as Map),
+      };
+      values = {...values}..remove('step_timestamps');
+    }
+    target.addAll(values);
+    revisions++;
+    target['updated_at'] =
+        '2026-01-02T00:00:${revisions.toString().padLeft(2, '0')}Z';
+  }
 
   Map<String, dynamic> row(String id) => rows[id]!;
 
@@ -56,6 +76,22 @@ class FakeFieldJobs {
           'application/vnd.pgrst.object+json',
         ) ??
         false;
+    // PostgREST answers a single-object request that matches no row with
+    // PGRST116, which the client turns into null for maybeSingle().
+    http.Response noRow() => single
+        ? http.Response(
+            jsonEncode({
+              'code': 'PGRST116',
+              'message':
+                  'JSON object requested, multiple (or no) rows returned',
+              'details': 'Results contain 0 rows',
+              'hint': null,
+            }),
+            406,
+            request: request,
+            headers: {'content-type': 'application/json'},
+          )
+        : http.Response('[]', 200, request: request);
     // The row filters PostgREST applies before the response is built.
     final idFilter = request.url.queryParameters['id'];
     final id = idFilter != null && idFilter.startsWith('eq.')
@@ -74,7 +110,12 @@ class FakeFieldJobs {
     }
     if (request.method == 'GET') {
       if (match == null) {
-        return http.Response('[]', 200, request: request);
+        return http.Response(
+          single ? 'null' : '[]',
+          200,
+          request: request,
+          headers: {'content-type': 'application/json'},
+        );
       }
       return http.Response(
         jsonEncode(single ? match : [match]),
@@ -90,25 +131,29 @@ class FakeFieldJobs {
         'filter_current_step': request.url.queryParameters['current_step'],
       });
       if (match == null) {
-        return http.Response('[]', 200, request: request);
+        return noRow();
       }
       // PostgREST applies the row filters before the update.
-      final limit = request.url.queryParameters['current_step'];
-      if (limit != null && limit.startsWith('lt.')) {
-        final bound = int.parse(limit.substring(3));
-        if ((match['current_step'] as int) >= bound) {
-          return http.Response('[]', 200, request: request);
-        }
-      }
-      final statusFilter = request.url.queryParameters['status'];
-      if (statusFilter != null && statusFilter.startsWith('neq.')) {
-        final excluded = statusFilter.substring(4);
-        if (match['status'] == excluded) {
-          return http.Response('[]', 200, request: request);
+      for (final entry in request.url.queryParameters.entries) {
+        final value = entry.value;
+        if (value.startsWith('eq.')) {
+          if (match[entry.key] != value.substring(3)) {
+            return noRow();
+          }
+        } else if (value.startsWith('neq.')) {
+          if (match[entry.key] == value.substring(4)) {
+            return noRow();
+          }
+        } else if (value.startsWith('lt.')) {
+          final bound = int.parse(value.substring(3));
+          if ((match[entry.key] as int) >= bound) {
+            return noRow();
+          }
         }
       }
       match.addAll(body);
-      match['updated_at'] = '2026-01-02T00:00:00Z';
+      revisions++;
+      match['updated_at'] = '2026-01-02T00:00:${revisions.toString().padLeft(2, '0')}Z';
       return http.Response(
         jsonEncode(single ? match : [match]),
         200,
@@ -271,12 +316,13 @@ void main() {
         initialStep: 0,
       );
 
-      // Everything happens offline: step 5 first, then step 3.
+      // Everything happens offline: step 5 first, then 3, then 4.
       SyncOutboxService.hasConnectionOverride = () async => false;
       await complete(1);
       await complete(2);
       await complete(5);
       await complete(3);
+      await complete(4);
       expect(fake.timestamps, isEmpty, reason: 'nothing reaches the server yet');
 
       // The inspection state is saved and the final submission is queued,
@@ -305,7 +351,7 @@ void main() {
 
       expect(
         fake.timestamps.keys.toSet(),
-        containsAll(<String>{'1', '2', '3', '5'}),
+        containsAll(<String>{'1', '2', '3', '4', '5'}),
         reason:
             'the final submission must not swallow the completion times of the '
             'independent steps',
@@ -470,6 +516,138 @@ void main() {
         containsAll(<String>{'1', '2', '5', '6'}),
         reason: 'the completion times of a submitted inspection are preserved',
       );
+    },
+  );
+
+  test(
+    'a concurrent writer is never overwritten by the timestamp merge',
+    () async {
+      final fake = FakeFieldJobs();
+      bind(fake);
+      fixture.online = true;
+      fixture.mode = 'success';
+      InspectionProgress.instance.ensureActiveInspection(
+        offlineJob,
+        label: 'Fixture',
+        initialStep: 0,
+      );
+      await complete(1);
+      await complete(2);
+      await complete(5);
+      await complete(3);
+
+      // Another writer stores a step of its own after this device read the
+      // row and before this device writes.
+      var raced = false;
+      fixture.requestOverride = (request) async {
+        if (!raced &&
+            request.method == 'PATCH' &&
+            request.url.path == '/rest/v1/field_jobs' &&
+            request.url.queryParameters.containsKey('updated_at')) {
+          raced = true;
+          fake.concurrentWrite(offlineJob, {
+            'step_timestamps': {'6': '2026-01-01T00:00:00Z'},
+          });
+        }
+        return fake.handle(request);
+      };
+
+      await complete(4);
+      expect(
+        fake.timestamps.keys.toSet(),
+        containsAll(<String>{'1', '2', '3', '4', '5', '6'}),
+        reason:
+            'the other writer\'s key must survive; the merge is redone on the '
+            'new revision instead of overwriting it',
+      );
+      expect(
+        fake.timestamps['6'],
+        '2026-01-01T00:00:00Z',
+        reason: 'the concurrent writer keeps its own value',
+      );
+    },
+  );
+
+  fixture.widgetTest(
+    'the real Step 6 screen refuses a submission while a step is unfinished',
+    (tester) async {
+      final fake = FakeFieldJobs();
+      bind(fake);
+      fixture.online = false;
+      InspectionProgress.instance.ensureActiveInspection(
+        offlineJob,
+        label: 'Fixture',
+        initialStep: 0,
+      );
+      // Steps 1, 2 and then 5 and 3: Step 4 is still missing.
+      for (final step in [1, 2, 5, 3]) {
+        InspectionProgress.instance.markStepComplete(step);
+        await fixture.flush(tester);
+      }
+      fixture.provider.updateResult('Compliant');
+      await fixture.mount(tester, ReviewSubmitScreen(task: offlineTask));
+      await fixture.flush(tester);
+
+      await tester.tap(find.text('Submit Inspection'));
+      await fixture.flush(tester);
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(
+        find.textContaining('Complete the remaining inspection step'),
+        findsWidgets,
+      );
+      expect(find.textContaining('Step 4'), findsWidgets);
+      expect(
+        await fixture.db.query(
+          'pending_actions',
+          where: 'type = ?',
+          whereArgs: ['submit_inspection'],
+        ),
+        isEmpty,
+        reason: 'a refused submission is never journaled',
+      );
+      expect(fake.timestamps, isEmpty);
+    },
+  );
+
+  fixture.widgetTest(
+    'a genuinely completed inspection submits and delivers every step time',
+    (tester) async {
+      final fake = FakeFieldJobs();
+      bind(fake);
+      // Everything happens offline first: the steps and the submission are
+      // queued, exactly as a field inspector with no signal experiences it.
+      fixture.online = false;
+      InspectionProgress.instance.ensureActiveInspection(
+        offlineJob,
+        label: 'Fixture',
+        initialStep: 0,
+      );
+      for (final step in [1, 2, 5, 3, 4]) {
+        InspectionProgress.instance.markStepComplete(step);
+        await fixture.flush(tester);
+      }
+      fixture.provider.updateResult('Compliant');
+      await fixture.mount(tester, ReviewSubmitScreen(task: offlineTask));
+      await fixture.flush(tester);
+
+      await tester.tap(find.text('Submit Inspection'));
+      await fixture.flush(tester);
+      await tester.tap(find.text('Confirm & Submit'));
+      await fixture.flush(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        await fixture.db.query(
+          'pending_actions',
+          where: 'type = ?',
+          whereArgs: ['submit_inspection'],
+        ),
+        hasLength(1),
+        reason: 'the finished inspection is journaled exactly once',
+      );
+
+      // Delivery of that journal (restart, reconnect, drain) is proven by
+      // 'an offline final submission still delivers every completion time';
+      // draining real HTTP inside the widget test's fake clock would hang.
     },
   );
 }

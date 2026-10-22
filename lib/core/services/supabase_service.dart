@@ -1719,13 +1719,18 @@ class SupabaseService {
   /// completed after a later one (the independent steps 3, 4 and 5) can
   /// never carry its own time to the server: the write matches no row and
   /// the "already at this step" condition is accepted as success. This
-  /// writes that one column through the existing authority-checked partial
-  /// update, which explicitly forbids the lifecycle fields, so
+  /// writes that one column through the existing authority-checked compare-
+  /// and-set update, which explicitly forbids the lifecycle fields, so
   /// `current_step` can never move backward.
   ///
   /// The stored map is merged, never replaced: times another writer already
   /// stored are kept, and only the steps this device recorded are added. A
-  /// failed write throws, so the caller never reports a false receipt.
+  /// step this device completed is authoritative for its own time, so a
+  /// value read for the same step is replaced rather than kept. The
+  /// merge is written with the revision guard the row was read at, so a
+  /// writer that changed the row in between is never overwritten - the read
+  /// is repeated and the merge redone instead. A failed write throws, so the
+  /// caller never reports a false receipt.
   static Future<StepTimestampWriteOutcome> recordStepTimestamps({
     required String jobId,
     required Map<String, String> stepTimestamps,
@@ -1737,41 +1742,76 @@ class SupabaseService {
     if (uid == null) {
       throw StateError('Authenticated inspector required');
     }
-    final row = await client
-        .from('field_jobs')
-        .select('id,assigned_inspector_id,status,current_step,step_timestamps')
-        .eq('id', jobId)
-        .eq('assigned_inspector_id', uid)
-        .maybeSingle()
-        .retry(enabled: false)
-        .timeout(const Duration(seconds: 10));
-    if (client.auth.currentUser?.id != uid) {
-      throw StateError('Session changed while recording step times');
-    }
-    if (row == null ||
-        row['id'] != jobId ||
-        row['assigned_inspector_id'] != uid) {
-      throw StateError('Inspection is not available to this inspector');
-    }
-    final stored = <String, String>{};
-    final raw = row['step_timestamps'];
-    if (raw is Map) {
-      raw.forEach((key, value) {
-        if (value is String && value.isNotEmpty) {
-          stored[key.toString()] = value;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final row = await client
+          .from('field_jobs')
+          .select(
+            'id,assigned_inspector_id,status,current_step,step_timestamps,updated_at',
+          )
+          .eq('id', jobId)
+          .eq('assigned_inspector_id', uid)
+          .maybeSingle()
+          .retry(enabled: false)
+          .timeout(const Duration(seconds: 10));
+      if (client.auth.currentUser?.id != uid) {
+        throw StateError('Session changed while recording step times');
+      }
+      if (row == null ||
+          row['id'] != jobId ||
+          row['assigned_inspector_id'] != uid) {
+        throw StateError('Inspection is not available to this inspector');
+      }
+      final version = row['updated_at'];
+      final status = row['status'];
+      if (version is! String ||
+          version.isEmpty ||
+          status is! String ||
+          status.isEmpty) {
+        throw StateError('Inspection revision is not readable');
+      }
+      final stored = <String, String>{};
+      final raw = row['step_timestamps'];
+      if (raw is Map) {
+        raw.forEach((key, value) {
+          if (value is String && value.isNotEmpty) {
+            stored[key.toString()] = value;
+          }
+        });
+      }
+      final merged = <String, String>{...stored, ...stepTimestamps};
+      if (merged.length == stored.length &&
+          stored.keys.every((key) => merged[key] == stored[key])) {
+        return StepTimestampWriteOutcome.alreadyPresent;
+      }
+      // Compare-and-set on the revision the map was read at: a writer that
+      // changed the row in between makes this update affect zero rows, and
+      // the loop re-reads and re-merges instead of overwriting that change.
+      Map<String, dynamic>? updated;
+      try {
+        updated = await conditionalOutboxUpdate(
+          jobId,
+          version,
+          status,
+          {'step_timestamps': merged},
+        );
+      } on PostgrestException catch (error) {
+        // Some PostgREST versions answer an object request that matched no
+        // row with PGRST116/406 instead of a null body. Both mean the same
+        // thing here: the row changed after it was read, so merge again.
+        if (error.code == 'PGRST116' || error.code == '406') {
+          continue;
         }
-      });
+        rethrow;
+      }
+      if (updated == null) {
+        continue;
+      }
+      return StepTimestampWriteOutcome.written;
     }
-    final merged = <String, String>{...stored, ...stepTimestamps};
-    if (merged.length == stored.length &&
-        stored.keys.every((key) => merged[key] == stored[key])) {
-      return StepTimestampWriteOutcome.alreadyPresent;
-    }
-    await updateJobInspectionProgress(
-      jobId: jobId,
-      updateData: {'step_timestamps': merged},
+    throw StateError(
+      'Step completion times could not be stored without losing a concurrent '
+      'change; your local work is preserved.',
     );
-    return StepTimestampWriteOutcome.written;
   }
 
   /// Advances ordinary inspection progress without ever lowering it or
