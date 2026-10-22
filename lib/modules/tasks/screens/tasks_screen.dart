@@ -545,13 +545,23 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     for (final row in snapshot.submissions) {
       final job = jobs[row['job_id']];
       if (job == null || result.containsKey(row['job_id'])) continue;
-      // Accepted lifecycle survives capped/obsolete delivery history. Only an
-      // outstanding submission (including rework) needs a separate projection.
-      if (row['status'] == 'synced' &&
-          mapTaskStatusToLifecycle(job['status'] as String?) == TaskLifecycleCategory.completed) {
-        continue;
+      // A readable synced receipt is proof of acceptance even after the job is
+      // completed; the ordering above already lets a newer outstanding action
+      // win. Unreadable delivery history is never proof, so it is skipped
+      // instead of failing the whole projection.
+      final TaskSubmission submission;
+      try {
+        submission = TaskSubmission.fromRow(row);
+      } on FormatException {
+        // Unreadable delivery history is not proof of acceptance; an
+        // unreadable *outstanding* final intent still surfaces the recoverable
+        // local-read failure instead of disappearing silently.
+        if (row['status'] == 'synced') continue;
+        rethrow;
+      } on TypeError {
+        if (row['status'] == 'synced') continue;
+        rethrow;
       }
-      final submission = TaskSubmission.fromRow(row);
       result[submission.jobId] = submission;
     }
     return result;
@@ -2017,9 +2027,20 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     }
 
     if (isCompleted) {
-      indicators.add(_awaitingAcceptance
-          ? const MapEntry('Completed on Device', 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.')
-          : const MapEntry('Completed — Synced', 'The server has confirmed this inspection.'));
+      // Completion and delivery are different facts. Only a readable synced
+      // receipt proves server acceptance; a completed task with no receipt is
+      // honestly unverified.
+      final submission = widget.submission;
+      if (submission == null) {
+        indicators.add(const MapEntry(TaskSubmission.syncUnverifiedBadge,
+            'This task is completed, but this device has no saved final-submission receipt. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'));
+      } else if (_awaitingAcceptance) {
+        indicators.add(const MapEntry('Completed on Device',
+            'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'));
+      } else {
+        indicators.add(const MapEntry('Completed — Synced',
+            'The server has confirmed this inspection.'));
+      }
       if (task.reworkStartedAt != null) {
         indicators.add(const MapEntry('Modified', 'This completed inspection was changed after it was submitted. The Modified label lets you know that the original submitted information was edited.'));
       }
@@ -2546,7 +2567,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                                   decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                                  child: Text(widget.submission?.badge(canonicalCompleted: widget.task.category == 'Completed') ?? 'Completed — Synced',
+                                  child: Text(TaskSubmission.badgeOrUnverified(widget.submission, canonicalCompleted: widget.task.category == 'Completed'),
                                     style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor)),
                                 ),
                               // NOTE: no standalone "Scheduled" pill — it was

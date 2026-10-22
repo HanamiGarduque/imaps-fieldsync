@@ -44,6 +44,19 @@ class TaskSubmission {
     return 'Completed on Device — $label';
   }
 
+  /// The honest fallback when a completed task has no readable final-submit
+  /// receipt. Completion is still true; server acceptance is not proven.
+  static const String syncUnverifiedBadge = 'Completed — Sync Unverified';
+
+  /// Card/summary presentation for a completed task. A missing or unreadable
+  /// receipt must never borrow the acceptance wording of a verified one.
+  static String badgeOrUnverified(
+    TaskSubmission? submission, {
+    required bool canonicalCompleted,
+  }) =>
+      submission?.badge(canonicalCompleted: canonicalCompleted) ??
+      syncUnverifiedBadge;
+
   /// Only saved evidence is overlaid. Status, round identity and server
   /// submitted_at remain the cached job's values, never invented here.
   Map<String, dynamic> get evidenceFields {

@@ -61,6 +61,9 @@ class _CompletedInspectionDetailScreenState
   int _detailRequestId = 0;
   bool _retired = false;
   bool get _savedSubmissionMode => widget.submission != null;
+  /// A completed task opened from a saved receipt that could not be read is
+  /// neither synced nor "saved on device": its delivery state is unverified.
+  bool get _receiptUnverified => _savedSubmissionMode && _submission == null;
   bool get _awaitingAcceptance =>
       _submission?.isSynced == false || _fullTask?.category != 'Completed';
   bool get _readOnly =>
@@ -439,23 +442,25 @@ class _CompletedInspectionDetailScreenState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _submission?.badge(
-                        canonicalCompleted: task.category == 'Completed',
-                      ) ??
-                      'Completed — Synced',
+                  TaskSubmission.badgeOrUnverified(
+                    _submission,
+                    canonicalCompleted: task.category == 'Completed',
+                  ),
                   style: InsightTheme.inter(
                     13,
                     w: FontWeight.w700,
-                    c: _awaitingAcceptance
+                    c: _receiptUnverified || _awaitingAcceptance
                         ? InsightTheme.orangeInk
                         : InsightTheme.green,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _awaitingAcceptance
-                      ? 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
-                      : 'The server has confirmed this inspection.',
+                  _receiptUnverified
+                      ? 'This task is completed, but this device has no saved final-submission receipt. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
+                      : _awaitingAcceptance
+                          ? 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
+                          : 'The server has confirmed this inspection.',
                   style: InsightTheme.inter(12, c: InsightTheme.ink2),
                 ),
               ],

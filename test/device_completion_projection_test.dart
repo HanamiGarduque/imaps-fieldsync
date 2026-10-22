@@ -21,6 +21,7 @@ import 'support/offline_reliability_fixture.dart';
 
 const pendingBadge = 'Completed on Device — Pending Sync';
 const syncedBadge = 'Completed — Synced';
+const unverifiedBadge = 'Completed — Sync Unverified';
 final profile = UserProfile(
   id: offlineInspector,
   fullName: 'Fixture Inspector',
@@ -343,7 +344,10 @@ void main() {
       });
       fixture.online = false;
       await showCompleted(tester);
-      expect(find.text(syncedBadge), findsOneWidget);
+      // Capped delivery history leaves no receipt: the card must not claim a
+      // server acceptance the device can no longer prove.
+      expect(find.text(unverifiedBadge), findsOneWidget);
+      expect(find.text(syncedBadge), findsNothing);
       expect(find.byKey(const ValueKey(offlineJob)), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
@@ -551,6 +555,33 @@ void main() {
     },
   );
 
+  fixture.widgetTest(
+    'rework keeps the Modified label while the badge stays delivery-honest',
+    (tester) async {
+      await tester.runAsync(() async {
+        await queue();
+        await fixture.db.update(
+          'local_jobs',
+          {'rework_started_at': '2026-10-22T08:00:00Z'},
+          where: 'id = ?',
+          whereArgs: [offlineJob],
+        );
+      });
+      await showCompleted(tester);
+      expect(find.text(pendingBadge), findsOneWidget);
+      expect(find.text(syncedBadge), findsNothing);
+      await tester.tap(
+        find.byTooltip('About task details for Fictional Round 1'),
+      );
+      await settle(tester);
+      expect(find.text('Modified'), findsOneWidget);
+      expect(
+        find.textContaining('Server acceptance is not confirmed.'),
+        findsOneWidget,
+      );
+    },
+  );
+
   for (final state in {
     'pending': pendingBadge,
     'syncing': 'Completed on Device — Syncing',
@@ -686,7 +717,7 @@ void main() {
   );
 
   fixture.widgetTest(
-    'canonical accepted completion does not depend on parsing old synced receipts',
+    'canonical completion without a readable receipt is never presented as synced',
     (tester) async {
       await tester.runAsync(() async {
         await queue();
@@ -702,7 +733,8 @@ void main() {
         });
       });
       await showCompleted(tester);
-      expect(find.text(syncedBadge), findsOneWidget);
+      expect(find.text(unverifiedBadge), findsOneWidget);
+      expect(find.text(syncedBadge), findsNothing);
       expect(find.byKey(const ValueKey(offlineJob)), findsOneWidget);
     },
   );
