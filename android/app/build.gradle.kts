@@ -16,7 +16,17 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.imaps_fieldsync"
+        // The QA preview is a separate application: same code base, its own
+        // package id, its own private data sandbox and its own launcher label.
+        // Only a build started with FIELDSYNC_QA_BUILD=1 is affected; every
+        // other build keeps the production identity below.
+        val qaBuild = System.getenv("FIELDSYNC_QA_BUILD") == "1"
+        applicationId = if (qaBuild) {
+            "com.example.imaps_fieldsync.qa"
+        } else {
+            "com.example.imaps_fieldsync"
+        }
+        manifestPlaceholders["appLabel"] = if (qaBuild) "FieldSync QA" else "imaps_fieldsync"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

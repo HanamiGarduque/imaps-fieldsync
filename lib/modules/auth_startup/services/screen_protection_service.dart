@@ -20,6 +20,11 @@ class ScreenProtectionService extends ChangeNotifier
   static final instance = ScreenProtectionService();
   static const nativeTimeout = Duration(seconds: 2);
 
+  /// Set only by the isolated QA preview (`lib/main_qa.dart`) so synthetic
+  /// screens can be captured on-device. No production entry point sets it, so
+  /// a normal build always applies native protection.
+  static bool allowQaScreenshots = false;
+
   final Future<void> Function(bool) _apply;
   final bool _documentationEnabled;
   final _scopes = <Object, ({ModalRoute<dynamic>? route, bool visible})>{};
@@ -39,6 +44,10 @@ class ScreenProtectionService extends ChangeNotifier
   int _biometricPrompts = 0;
 
   static Future<void> _applyNative(bool secure) async {
+    // QA preview: capture-only opt-out for synthetic screens, and only in a
+    // debug build. A release build ignores the flag, and no production entry
+    // point ever sets it.
+    if (kDebugMode && allowQaScreenshots) return;
     // screen_protector only ships an Android/iOS implementation. On other
     // platforms (desktop dev runs, widget tests) there is no channel to call,
     // so report instant success instead of leaving a hanging plugin future
