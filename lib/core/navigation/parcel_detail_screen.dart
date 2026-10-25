@@ -14,6 +14,7 @@ import '../../modules/inspection/providers/inspection_provider.dart';
 import '../../core/widgets/sensitive_screen.dart';
 import '../../modules/inspection/widgets/photo_viewer.dart';
 import '../../modules/inspection/services/photo_source_resolver.dart';
+import '../../modules/inspection/services/photo_evidence_presentation.dart';
 import '../../modules/inspection/screens/completed_inspection_detail_screen.dart';
 import '../../modules/inspection/widgets/inspection_round_widgets.dart';
 
@@ -101,35 +102,75 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     final paths = details.map((p) => p['photoPath'] as String).toList();
     final displayPaths = inspectionDisplayPaths(
         paths, task.id, task.photoDetails, task.photoPaths);
-    return _sectionShell(
-        step: 3,
-        title: 'Photos',
-        child: paths.isEmpty
-            ? Text('No photos on file.', style: InsightTheme.inter(13))
-            : SizedBox(
-                height: 90,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: paths.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (_, i) => GestureDetector(
-                    onTap: () => _openFullscreenPhoto(
-                      displayPaths,
-                      i,
-                      details,
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      // AdaptivePhotoImage renders BOTH freshly-captured
-                      // local files and already-uploaded Storage URLs.
-                      child: SizedBox(
-                        width: 90,
-                        height: 90,
-                        child: AdaptivePhotoImage(path: displayPaths[i]),
-                      ),
+    final evidence = PhotoEvidencePresentation(
+      details,
+      requireMetadata: !sessionActive || provider.isReworkMode,
+    );
+    Widget group(String heading, List<int> indices) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(heading, style: InsightTheme.inter(13, w: FontWeight.w600)),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 90,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: indices.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (_, position) {
+              final i = indices[position];
+              return Semantics(
+                button: true,
+                label: evidence.semanticsAt(i),
+                child: InkWell(
+                  onTap: () => _openFullscreenPhoto(displayPaths, i, details),
+                  borderRadius: BorderRadius.circular(12),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 90,
+                      height: 90,
+                      child: AdaptivePhotoImage(path: displayPaths[i]),
                     ),
                   ),
                 ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+    return _sectionShell(
+        step: 3,
+        title: 'Evidence attachments',
+        child: paths.isEmpty
+            ? Text('No evidence attachments on file.', style: InsightTheme.inter(13))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (evidence.sitePhotoCount > 0)
+                    group('Site photos', [
+                      for (var i = 0; i < paths.length; i++)
+                        if (evidence.isSitePhotoAt(i)) i,
+                    ]),
+                  if (evidence.referenceCount > 0) ...[
+                    if (evidence.sitePhotoCount > 0) const SizedBox(height: 16),
+                    const Icon(Icons.map_outlined, color: InsightTheme.ink2, size: 20),
+                    const SizedBox(height: 8),
+                    group('Site Location Reference', [
+                      for (var i = 0; i < paths.length; i++)
+                        if (evidence.isReferenceAt(i)) i,
+                    ]),
+                  ],
+                  if (evidence.unclassifiedCount > 0) ...[
+                    if (evidence.sitePhotoCount + evidence.referenceCount > 0)
+                      const SizedBox(height: 16),
+                    group('Evidence attachments (type unavailable)', [
+                      for (var i = 0; i < paths.length; i++)
+                        if (!evidence.isSitePhotoAt(i) && !evidence.isReferenceAt(i)) i,
+                    ]),
+                  ],
+                ],
               ),
       );
   }

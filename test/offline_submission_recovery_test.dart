@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:imaps_fieldsync/core/navigation/main_shell_screen.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
+import 'package:imaps_fieldsync/core/services/supabase_service.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
@@ -264,6 +265,16 @@ void main() {
   fixture.widgetTest(
     'reopened Review keeps one intent while immediately verifying remote authority',
     (tester) async {
+      final photo = fixture.seedCameraPhoto();
+      final key = base64Url.encode(utf8.encode(photo.path)).replaceAll('=', '');
+      final storagePath = 'inspections/$offlineJob/photo_$key.jpg';
+      // The Step 3 image is already backed up; this retry must not rewrite it.
+      fixture.requestOverride = (request) async {
+        if (request.method != 'GET' || !request.url.path.endsWith('/field_job_photos')) return null;
+        return http.Response(jsonEncode([
+          {'id': SupabaseService.photoRowId(storagePath), 'photo_url': storagePath},
+        ]), 200, headers: {'content-type': 'application/json'});
+      };
       fixture.provider.updateResult('Compliant');
       // A submission needs the independent steps 3-5 to be really complete;
       // the Task Overview binds the shared progress to the stored inspection

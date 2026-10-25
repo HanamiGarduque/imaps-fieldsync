@@ -20,6 +20,7 @@ import '../widgets/inspection_step_header.dart';
 import '../widgets/structured_checklist_summary.dart';
 import '../widgets/photo_viewer.dart';
 import '../services/photo_source_resolver.dart';
+import '../services/photo_evidence_presentation.dart';
 
 class ReviewSubmitScreen extends StatefulWidget {
   final TaskItem task;
@@ -105,6 +106,10 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
 
   Future<bool> _confirmSubmission(InspectionProvider provider) async {
     final answers = {...provider.siteCondition, ...provider.zoningObservations};
+    final evidence = PhotoEvidencePresentation(
+      provider.capturedPhotos,
+      requireMetadata: provider.isReworkMode,
+    );
     return await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -138,7 +143,10 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                     ),
                   ),
                 const SizedBox(height: 16),
-                Text('${provider.capturedPhotos.length} photos attached'),
+                Text('Site photos: ${evidence.sitePhotoCount}'),
+                if (evidence.referenceCount > 0)
+                  Text('Site Location Reference: ${evidence.referenceCount}'),
+                Text('Total evidence attachments: ${evidence.totalCount}'),
                 const SizedBox(height: 16),
                 const Text(
                   'This is the inspector’s assessment, not an approval or rejection. The Planning Officer retains decision-making authority.',
@@ -165,7 +173,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
     final provider = context.read<InspectionProvider>();
     // A generated location reference must never stand in for the required
     // camera evidence.
-    if (provider.hasLocationReference && provider.realPhotoCount == 0) {
+    if (provider.realPhotoCount == 0) {
       _showValidation('Capture at least one camera photo before submitting.');
       return;
     }
@@ -352,9 +360,13 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final provider = context.watch<InspectionProvider>();
-    final photoCount = provider.capturedPhotos.isNotEmpty
-        ? provider.capturedPhotos.length
-        : widget.capturedPhotos.length;
+    final photos = provider.capturedPhotos.isNotEmpty
+        ? provider.capturedPhotos
+        : widget.capturedPhotos;
+    final evidence = PhotoEvidencePresentation(
+      photos,
+      requireMetadata: provider.isReworkMode,
+    );
     final checklistTotal =
         provider.siteCondition.length + provider.zoningObservations.length;
     final checklistDone =
@@ -436,8 +448,17 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                         : 'None',
                   ),
                   _SummaryRow(
-                    label: 'Photos',
-                    value: photoCount > 0 ? '$photoCount attached' : 'None',
+                    label: 'Site photos',
+                    value: '${evidence.sitePhotoCount}',
+                  ),
+                  if (evidence.referenceCount > 0)
+                    _SummaryRow(
+                      label: 'Site Location Reference',
+                      value: '${evidence.referenceCount}',
+                    ),
+                  _SummaryRow(
+                    label: 'Total evidence attachments',
+                    value: '${evidence.totalCount}',
                   ),
                   _SummaryRow(
                     label: 'Assessment',
@@ -451,11 +472,11 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               if (provider.capturedPhotos.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 FieldSectionHeading(
-                  title: 'Attached photos',
-                  hint: 'Tap a photo to inspect the full image.',
+                  title: 'Evidence attachments',
+                  hint: 'Tap an attachment to inspect the full image.',
                   bottomSpacing: 8,
                   trailing: Text(
-                    '${provider.capturedPhotos.length} photos',
+                    '${evidence.totalCount} total attachments',
                     style: InsightTheme.inter(
                       13,
                       w: FontWeight.w600,
@@ -489,11 +510,14 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                   widget.task.photoDetails,
                                   widget.task.photoPaths,
                                 );
+                                final tileWidth = evidence.isReferenceAt(i)
+                                    ? 160.0
+                                    : 128.0;
                                 return Semantics(
                                   button: true,
-                                  label: 'View photo ${i + 1}',
+                                  label: evidence.semanticsAt(i),
                                   child: SizedBox(
-                                    width: 128,
+                                    width: tileWidth,
                                     child: Material(
                                       color: Colors.transparent,
                                       child: InkWell(
@@ -514,7 +538,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                                   InsightTheme.roundedSm,
                                               child: SizedBox(
                                                 height: 100,
-                                                width: 128,
+                                                width: tileWidth,
                                                 child: AdaptivePhotoImage(
                                                   path: paths[i],
                                                 ),
@@ -523,15 +547,22 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                             const SizedBox(height: 6),
                                             Row(
                                               children: [
-                                                const Icon(
-                                                  Icons.camera_alt_outlined,
+                                                Icon(
+                                                  evidence.isReferenceAt(i)
+                                                      ? Icons.map_outlined
+                                                      : evidence.isSitePhotoAt(
+                                                          i,
+                                                        )
+                                                      ? Icons
+                                                            .camera_alt_outlined
+                                                      : Icons.attach_file,
                                                   size: 14,
                                                   color: InsightTheme.ink2,
                                                 ),
                                                 const SizedBox(width: 6),
                                                 Expanded(
                                                   child: Text(
-                                                    'Photo ${i + 1}',
+                                                    evidence.labelAt(i),
                                                     style: InsightTheme.inter(
                                                       12,
                                                       c: InsightTheme.ink2,

@@ -571,6 +571,7 @@ void main() {
   fixture.widgetTest(
     'the real Step 6 screen refuses a submission while a step is unfinished',
     (tester) async {
+      fixture.seedCameraPhoto();
       final fake = FakeFieldJobs();
       bind(fake);
       fixture.online = false;
@@ -612,6 +613,7 @@ void main() {
   fixture.widgetTest(
     'a genuinely completed inspection submits and delivers every step time',
     (tester) async {
+      fixture.seedCameraPhoto();
       final fake = FakeFieldJobs();
       bind(fake);
       // Everything happens offline first: the steps and the submission are

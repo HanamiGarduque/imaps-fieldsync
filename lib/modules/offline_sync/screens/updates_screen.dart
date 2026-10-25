@@ -273,7 +273,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Clear cached photo files?',
+                  'Clear cached evidence files?',
                   style: InsightTheme.urbanist(
                     16,
                     w: FontWeight.w700,
@@ -282,9 +282,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'This will remove $_syncedPhotoFileCount photo file(s) already backed up to the '
+                  'This will remove $_syncedPhotoFileCount evidence file(s) already backed up to the '
                   'server (${_formatBytes(_clearableBytes.toDouble())}) from this device. '
-                  'Unsynced photos are never touched.',
+                  'Unsynced evidence files are never touched.',
                   style: InsightTheme.openSans(
                     13,
                     c: InsightTheme.ink2,
@@ -302,7 +302,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                       ),
                       onPressed: () => Navigator.pop(ctx, false),
                       child: Text(
-                        'Keep Photo Cache',
+                        'Keep Evidence Cache',
                         style: InsightTheme.openSans(
                           13,
                           w: FontWeight.w600,
@@ -352,7 +352,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         subtitle: 'Freed $cleared photo file(s)',
       ),
     );
-    _showToast('Freed $cleared photo file(s).', color: InsightTheme.greenInk);
+    _showToast('Freed $cleared evidence file(s).', color: InsightTheme.greenInk);
   }
 
   Future<void> _handleSyncNow() async {
@@ -813,7 +813,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         return 'Progress Update (Step ${payload['currentStep'] ?? '—'})';
       case 'submit_inspection':
         final n = (payload['photosData'] as List?)?.length ?? 0;
-        return 'Full Submission — $n photo(s) + Findings';
+        return 'Full Submission — $n ${n == 1 ? 'evidence attachment' : 'evidence attachments'} + Findings';
       default:
         return type;
     }
@@ -1101,7 +1101,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     final queued = _pendingRows.length;
     final detail = <String>[
       if (_pendingBytes > 0) _formatBytes(_pendingBytes),
-      if (_photosWaiting > 0) '$_photosWaiting photos',
+      if (_photosWaiting > 0)
+        '$_photosWaiting ${_photosWaiting == 1 ? 'evidence attachment' : 'evidence attachments'}',
       if (_checklistWaiting > 0) '$_checklistWaiting checklists',
       if (_gpsWaiting > 0) '$_gpsWaiting GPS',
     ];
@@ -1218,7 +1219,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
               children: [
                 _SyncLegendItem(
                   color: InsightTheme.blue1,
-                  label: 'Photos',
+                  label: 'Evidence files',
                   value: _photosWaiting,
                 ),
                 _SyncLegendItem(
@@ -1744,8 +1745,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                               Flexible(
                                                 child: Tooltip(
                                                   message: _clearableBytes > 0
-                                                      ? 'Clear ${_formatBytes(_clearableBytes.toDouble())} of synced photo cache'
-                                                      : 'Photo cache is already clear',
+                                                      ? 'Clear ${_formatBytes(_clearableBytes.toDouble())} of synced evidence cache'
+                                                      : 'Evidence cache is already clear',
                                                   child: TextButton(
                                                     onPressed:
                                                         (_clearingCache ||
@@ -1780,7 +1781,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                                                 ),
                                                           )
                                                         : Text(
-                                                            'Clear photo cache',
+                                                            'Clear evidence cache',
                                                             textAlign:
                                                                 TextAlign.right,
                                                             style:

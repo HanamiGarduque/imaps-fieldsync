@@ -404,6 +404,23 @@ class OfflineReliabilityFixture {
     }
   }
 
+  /// Valid camera evidence prerequisite for tests of later submission gates.
+  File seedCameraPhoto() {
+    final photo = File('${directory.path}/submission-camera.png')
+      ..writeAsBytesSync(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+        ),
+      );
+    provider.addPhoto(
+      photoPath: photo.path,
+      photoNotes: 'Fictional camera observation',
+      latitude: null,
+      longitude: null,
+    );
+    return photo;
+  }
+
   Future<void> mount(
     WidgetTester tester,
     Widget screen, {

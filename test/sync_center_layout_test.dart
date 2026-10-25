@@ -535,7 +535,7 @@ void main() {
         matching: find.byType(Scrollable),
       );
       await tester.scrollUntilVisible(
-        find.text('Full Submission — 1 photo(s) + Findings'),
+        find.text('Full Submission — 1 evidence attachment + Findings'),
         250,
         scrollable: bodyScroll,
         maxScrolls: 30,
@@ -590,7 +590,7 @@ void main() {
       expect(find.text('Retry waiting — saved on device'), findsOneWidget);
       expect(find.byIcon(Icons.error_rounded), findsWidgets);
       expect(
-        find.text('Full Submission — 0 photo(s) + Findings'),
+        find.text('Full Submission — 0 evidence attachments + Findings'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);

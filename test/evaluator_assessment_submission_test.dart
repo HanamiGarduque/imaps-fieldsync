@@ -7,6 +7,7 @@ import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
+import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
 import 'package:imaps_fieldsync/modules/inspection/structured_checklist.dart';
 
 import 'support/offline_reliability_fixture.dart';
@@ -14,7 +15,11 @@ import 'support/offline_reliability_fixture.dart';
 void main() {
   final fixture = OfflineReliabilityFixture();
   setUpAll(fixture.initialize);
-  setUp(fixture.reset);
+  setUp(() async {
+    await fixture.reset();
+    fixture.seedCameraPhoto();
+    InspectionProgress.instance.ensureActiveInspection(offlineJob, initialStep: 5);
+  });
   tearDown(fixture.closeCase);
   tearDownAll(fixture.dispose);
 
@@ -138,10 +143,7 @@ void main() {
           reason: 'unchecked alone is never a failed-compliance judgment',
         );
         expect(
-          find.descendant(
-            of: dialog,
-            matching: find.textContaining('0 photos'),
-          ),
+          find.descendant(of: dialog, matching: find.text('Site photos: 1')),
           findsOneWidget,
         );
         expect(
@@ -242,6 +244,7 @@ void main() {
         fixture.provider.updateResult('Compliant');
         SyncOutboxService.hasConnectionOverride = () async => true;
         fixture.online = true;
+        fixture.mode = 'success';
         fixture.requestOverride = (request) async {
           if (!request.url.path.contains('field_jobs')) return null;
           final data = request.method == 'GET'

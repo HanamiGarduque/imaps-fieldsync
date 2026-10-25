@@ -15,6 +15,7 @@ import '../../../core/theme/insight_theme.dart';
 import '../widgets/inspection_step_header.dart';
 import '../structured_checklist.dart';
 import '../widgets/structured_checklist_summary.dart';
+import '../services/photo_evidence_presentation.dart';
 
 class FieldFindingsScreen extends StatefulWidget {
   final TaskItem task;
@@ -210,9 +211,17 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    final structured = context.watch<InspectionProvider>().structuredAnswers;
-    final hasStructured =
-        StructuredChecklist.activeAnswers(structured).isNotEmpty;
+    final provider = context.watch<InspectionProvider>();
+    final structured = provider.structuredAnswers;
+    final evidence = PhotoEvidencePresentation(
+      provider.activeTask?.id == widget.task.id
+          ? provider.capturedPhotos
+          : widget.capturedPhotos,
+      requireMetadata: provider.isReworkMode,
+    );
+    final hasStructured = StructuredChecklist.activeAnswers(
+      structured,
+    ).isNotEmpty;
     return SensitiveScreen(
       child: PopScope(
         canPop:
@@ -315,7 +324,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
                   hintText: 'Describe what you observed on-site…',
                 ),
               ),
-              if (widget.capturedPhotos.isNotEmpty ||
+              if (evidence.totalCount > 0 ||
                   widget.checklistTotal > 0 ||
                   hasStructured) ...[
                 const SizedBox(height: 16),
@@ -325,16 +334,25 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
                     answers: structured,
                   ),
                 if (hasStructured &&
-                    (widget.capturedPhotos.isNotEmpty ||
-                        widget.checklistTotal > 0))
+                    (evidence.totalCount > 0 || widget.checklistTotal > 0))
                   const SizedBox(height: 16),
                 Wrap(
                   spacing: 16,
                   runSpacing: 8,
                   children: [
-                    if (widget.capturedPhotos.isNotEmpty)
+                    if (evidence.totalCount > 0)
                       Text(
-                        '${widget.capturedPhotos.length} ${widget.capturedPhotos.length == 1 ? 'photo' : 'photos'} attached',
+                        '${evidence.sitePhotoCount} ${evidence.sitePhotoCount == 1 ? 'site photo' : 'site photos'} attached',
+                        style: InsightTheme.inter(13, c: InsightTheme.ink3),
+                      ),
+                    if (evidence.referenceCount > 0)
+                      Text(
+                        'Site Location Reference attached',
+                        style: InsightTheme.inter(13, c: InsightTheme.ink3),
+                      ),
+                    if (evidence.unclassifiedCount > 0)
+                      Text(
+                        '${evidence.unclassifiedCount} evidence attachments (type unavailable)',
                         style: InsightTheme.inter(13, c: InsightTheme.ink3),
                       ),
                     if (widget.checklistTotal > 0)

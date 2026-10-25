@@ -25,6 +25,8 @@ import 'review_submit_screen.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import '../widgets/photo_viewer.dart';
+import '../services/photo_evidence_presentation.dart';
+import '../services/photo_source_resolver.dart';
 
 /// Test-only seam for the Completed summary's remote detail fetch.
 ///
@@ -61,6 +63,7 @@ class _CompletedInspectionDetailScreenState
   int _detailRequestId = 0;
   bool _retired = false;
   bool get _savedSubmissionMode => widget.submission != null;
+
   /// A completed task opened from a saved receipt that could not be read is
   /// neither synced nor "saved on device": its delivery state is unverified.
   bool get _receiptUnverified => _savedSubmissionMode && _submission == null;
@@ -459,8 +462,8 @@ class _CompletedInspectionDetailScreenState
                   _receiptUnverified
                       ? 'This task is completed, but this device has no saved final-submission receipt. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
                       : _awaitingAcceptance
-                          ? 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
-                          : 'The server has confirmed this inspection.',
+                      ? 'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'
+                      : 'The server has confirmed this inspection.',
                   style: InsightTheme.inter(12, c: InsightTheme.ink2),
                 ),
               ],
@@ -1066,11 +1069,42 @@ class _CompletedInspectionDetailScreenState
               .map((p) => (p['photo_url'] as String?) ?? '')
               .toList()
         : task.photoPaths;
+    final savedPhotos = _submission?.payload['photosData'] as List?;
+    bool isSavedCapture(int index) {
+      if (savedPhotos == null || index >= savedPhotos.length) return false;
+      final photo = savedPhotos[index];
+      if (photo is! Map) return false;
+      final id = photo['id'];
+      final path = photo['photoPath'];
+      final capturedAt = photo['capturedAt'];
+      // The owned immutable receipt retains the original capture identity.
+      // A rehydrated remote row or legacy path alone cannot establish it.
+      return id is String &&
+          id.isNotEmpty &&
+          path is String &&
+          path == urls[index] &&
+          PhotoSourceResolver.classify(path) == PhotoSourceKind.localFile &&
+          capturedAt is String &&
+          DateTime.tryParse(capturedAt) != null &&
+          photo['isRemoteUrl'] != true &&
+          !photo.containsKey('photo_url');
+    }
 
-    // Redesign (photo-notes clarity pass, 2026-07): each photo + its note
-    // is its own bordered card with an explicit "Photo N of Count" label,
-    // so which note belongs to which picture is unambiguous even with
-    // several photos, rather than a plain unbounded row/strip.
+    final evidence = PhotoEvidencePresentation(
+      hasDetails
+          ? task.photoDetails
+          : [
+              for (final path in task.photoPaths) {'photo_url': path},
+            ],
+      requireMetadata: true,
+      capturedIndices: {
+        for (var i = 0; i < count; i++)
+          if (isSavedCapture(i)) i,
+      },
+    );
+
+    // Only identified site photos are numbered. References keep their own
+    // identity, and legacy paths/rows without notes stay unclassified.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: List.generate(count, (i) {
@@ -1079,88 +1113,102 @@ class _CompletedInspectionDetailScreenState
             ? (task.photoDetails[i]['notes'] as String?)
             : null;
         final hasNote = note != null && note.trim().isNotEmpty;
+        void openEvidence() => openFullscreenPhotoViewer(
+          context,
+          urls,
+          i,
+          photoDetails: hasDetails ? task.photoDetails : null,
+          jobId: task.id,
+        );
         return Padding(
           padding: EdgeInsets.only(bottom: i == count - 1 ? 0 : 10),
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: InsightTheme.surface2,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: InsightTheme.line),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () => openFullscreenPhotoViewer(
-                    context,
-                    urls,
-                    i,
-                    photoDetails: hasDetails ? task.photoDetails : null,
-                    jobId: task.id,
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 80,
-                      height: 80,
-                      child: AdaptivePhotoImage(
-                        path: url,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context) => Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            color: InsightTheme.surface,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: InsightTheme.line),
-                          ),
-                          child: const Icon(
-                            Icons.broken_image_outlined,
-                            size: 22,
-                            color: InsightTheme.ink3,
+          child: Semantics(
+            button: true,
+            label: evidence.semanticsAt(i),
+            onTap: openEvidence,
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: InsightTheme.surface2,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: InsightTheme.line),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  GestureDetector(
+                    onTap: openEvidence,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        width: 80,
+                        height: 80,
+                        child: AdaptivePhotoImage(
+                          path: url,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context) => Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              color: InsightTheme.surface,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: InsightTheme.line),
+                            ),
+                            child: const Icon(
+                              Icons.broken_image_outlined,
+                              size: 22,
+                              color: InsightTheme.ink3,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.photo_camera_outlined,
-                            size: 12,
-                            color: InsightTheme.ink3,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Photo ${i + 1} of $count',
-                            style: InsightTheme.inter(
-                              9.5,
-                              w: FontWeight.w700,
-                              c: InsightTheme.ink3,
-                              ls: 0.4,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              evidence.isReferenceAt(i)
+                                  ? Icons.map_outlined
+                                  : evidence.isSitePhotoAt(i)
+                                  ? Icons.photo_camera_outlined
+                                  : Icons.attach_file,
+                              size: 12,
+                              color: InsightTheme.ink3,
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        hasNote ? note : 'No inspection note for this photo.',
-                        style: InsightTheme.inter(
-                          12.5,
-                          c: hasNote ? InsightTheme.ink2 : InsightTheme.ink3,
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                evidence.labelAt(i, includeTotal: true),
+                                style: InsightTheme.inter(
+                                  9.5,
+                                  w: FontWeight.w700,
+                                  c: InsightTheme.ink3,
+                                  ls: 0.4,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        Text(
+                          hasNote
+                              ? note
+                              : 'No inspection note for this attachment.',
+                          style: InsightTheme.inter(
+                            12.5,
+                            c: hasNote ? InsightTheme.ink2 : InsightTheme.ink3,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );

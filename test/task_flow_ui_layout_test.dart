@@ -216,8 +216,7 @@ void main() {
       final busy = tester
           .widgetList<FieldPrimaryButton>(find.byType(FieldPrimaryButton))
           .any((button) => button.busy);
-      if (!busy &&
-          find.byType(CircularProgressIndicator).evaluate().isEmpty) {
+      if (!busy && find.byType(CircularProgressIndicator).evaluate().isEmpty) {
         break;
       }
     }
@@ -867,7 +866,13 @@ void main() {
       );
     }
     // The always-present record card keeps its own labels grouped.
-    for (final row in ['Site Location', 'Checklist', 'Photos', 'Assessment']) {
+    for (final row in [
+      'Site Location',
+      'Checklist',
+      'Site photos',
+      'Total evidence attachments',
+      'Assessment',
+    ]) {
       expect(
         find.ancestor(
           of: find.text(row),
