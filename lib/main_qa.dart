@@ -335,6 +335,25 @@ Future<void> _seedSyntheticData() async {
     initialStep: 0,
   );
 
+  // QA-only fixture: a timeline tick for Step 2 is not the immutable on-site
+  // fix snapshot the Site Location Reference renders. Seed one fictional fix
+  // per in-progress job — inside the production 30 m distance / 25 m accuracy
+  // gate of the seeded parcel point — and only when the app has no snapshot
+  // yet. Production logic and its checks are untouched.
+  for (final jobId in [qaJobAvailable, qaJobInProgress]) {
+    if (await DBHelper.getGpsVerification(jobId) == null) {
+      final now = DateTime.now().toUtc();
+      await DBHelper.saveGpsVerification(
+        jobId: jobId,
+        latitude: 14.59962,
+        longitude: 120.98431,
+        accuracyMeters: 8,
+        fixAt: now,
+        verifiedAt: now,
+      );
+    }
+  }
+
   await _seedPhotos();
   // Let the progress write queue reach the local store before the UI reads.
   await Future<void>.delayed(const Duration(milliseconds: 400));
