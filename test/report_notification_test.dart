@@ -23,6 +23,7 @@ void main() {
   late Database db;
   var rows = <Map<String, dynamic>>[];
   final patches = <Uri>[];
+  final deletes = <Uri>[];
 
   Map<String, dynamic> activity(
     String id,
@@ -85,7 +86,7 @@ void main() {
     );
     sqfliteFfiInit();
     db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
-    await db.execute('CREATE TABLE pending_actions (id TEXT, updated_at TEXT)');
+    await db.execute('CREATE TABLE pending_actions (id TEXT, updated_at TEXT, inspector_id TEXT)');
     DBHelper.useDatabaseForTesting(db);
     await Supabase.initialize(
       url: 'https://notification.test',
@@ -106,6 +107,13 @@ void main() {
             headers: {'content-type': 'application/json; charset=utf-8'},
             request: request,
           );
+        }
+        if (request.method == 'DELETE') {
+          expect(query['inspector_id'], 'eq.$inspector');
+          deletes.add(request.url);
+          rows.removeWhere((row) => row['inspector_id'] == inspector &&
+              (query['id'] == null || query['id'] == 'eq.${row['id']}'));
+          return http.Response('', 204, request: request);
         }
         expect(request.method, 'PATCH');
         expect(jsonDecode(request.body), {'is_read': true});
@@ -146,6 +154,7 @@ void main() {
 
   setUp(() {
     patches.clear();
+    deletes.clear();
     rows = [
       activity('event-resolved', 'report_resolved', 'Report resolved'),
       activity(
@@ -251,4 +260,60 @@ void main() {
       },
     );
   }
+
+  testWidgets('long old-date notification retains details read swipe and scoped Clear All at enlarged text', (tester) async {
+    const title = 'Fictional inspection report received an official response';
+    const subtitle = 'The planning officer reviewed the fictional inspection report. Open My Reports to read the response and the next action.';
+    rows[0] = {...rows[0], 'title': title, 'subtitle': subtitle};
+    tester.view.physicalSize = const Size(320, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(
+          textScaler: const TextScaler.linear(2)), child: child!),
+      home: const NotificationsScreen(),
+    ));
+    await tester.runAsync(() async => DBHelper.getSyncLogEntries());
+    await tester.pumpAndSettle();
+    expect(find.text('Other inspector'), findsNothing);
+    await tester.ensureVisible(find.text(title));
+    await tester.tap(find.text(title));
+    await tester.pumpAndSettle();
+    final sheet = find.byType(BottomSheet);
+    expect(find.descendant(of: sheet, matching: find.text(subtitle)), findsOneWidget);
+    expect(find.descendant(of: sheet, matching: find.text('Received: 2026-10-04')), findsOneWidget);
+    final close = find.descendant(of: sheet, matching: find.text('Close'));
+    await tester.ensureVisible(close);
+    await tester.pumpAndSettle();
+    expect(close.hitTestable(), findsOneWidget);
+    await tester.tap(close);
+    await tester.pumpAndSettle();
+    expect(patches, hasLength(1));
+    expect(patches.single.queryParameters['id'], 'eq.event-resolved');
+    await tester.ensureVisible(find.text(title));
+    await tester.pumpAndSettle();
+    await tester.dragFrom(tester.getCenter(find.text(title)), const Offset(-300, 0));
+    await tester.pumpAndSettle();
+    expect(find.text(title), findsNothing);
+    expect(deletes, hasLength(1));
+    expect(deletes.single.queryParameters['id'], 'eq.event-resolved');
+    expect(rows.any((row) => row['id'] == 'foreign-event'), isTrue);
+    await tester.tap(find.text('Clear All'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clear all notifications?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(deletes, hasLength(1));
+    await tester.tap(find.text('Clear All'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Clear All')));
+    await tester.pumpAndSettle();
+    expect(deletes, hasLength(2));
+    expect(deletes.last.queryParameters['inspector_id'], 'eq.$inspector');
+    expect(deletes.last.queryParameters.containsKey('id'), isFalse);
+    expect(rows.single['id'], 'foreign-event');
+    expect(find.text('No notifications yet.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

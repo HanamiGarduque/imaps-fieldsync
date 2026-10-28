@@ -11,10 +11,30 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/supabase_service.dart';
+import 'package:imaps_fieldsync/core/theme/insight_theme.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/notifications_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+class _Android200TextScaler extends TextScaler {
+  const _Android200TextScaler();
+  @override
+  double get textScaleFactor => 2;
+  @override
+  double scale(double fontSize) {
+    const from = [8.0, 10.0, 12.0, 14.0, 18.0, 20.0, 24.0, 30.0, 100.0];
+    const to = [16.0, 20.0, 24.0, 26.0, 30.0, 34.0, 36.0, 38.0, 100.0];
+    if (fontSize <= from.first) return fontSize * 2;
+    for (var i = 1; i < from.length; i++) {
+      if (fontSize <= from[i]) {
+        return to[i - 1] + (to[i] - to[i - 1]) *
+            (fontSize - from[i - 1]) / (from[i] - from[i - 1]);
+      }
+    }
+    return fontSize;
+  }
+}
 
 // Widget-level checks for the Notifications page grouping: time sections
 // (Today / Yesterday / This week / Earlier) render only for non-empty
@@ -72,6 +92,7 @@ void main() {
     int mode = 0,
     Size size = const Size(430, 1400),
     double textScale = 1,
+    TextScaler? scaler,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -82,7 +103,7 @@ void main() {
         child: MaterialApp(
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(context).copyWith(
-              textScaler: TextScaler.linear(textScale),
+              textScaler: scaler ?? TextScaler.linear(textScale),
             ),
             child: child!,
           ),
@@ -380,12 +401,130 @@ void main() {
     await capture(tester, 'sync-sections');
   });
 
+  void expectWholeText(WidgetTester tester, Finder text, Rect bounds) {
+    final paragraph = tester.renderObject<RenderParagraph>(text);
+    expect(paragraph.didExceedMaxLines, isFalse);
+    final value = tester.widget<Text>(text).data!;
+    final boxes = paragraph.getBoxesForSelection(TextSelection(baseOffset: 0, extentOffset: value.length));
+    expect(boxes, isNotEmpty);
+    for (final box in boxes) {
+      expect(bounds.contains(paragraph.localToGlobal(Offset(box.left, box.top))) &&
+          bounds.contains(paragraph.localToGlobal(Offset(box.right, box.bottom))), isTrue,
+          reason: 'Complete text must remain inset inside its row.');
+    }
+    expect(tester.getSize(text).height, closeTo(paragraph.size.height, 0.01),
+        reason: 'Notification text must wrap, not be force-shrunk.');
+  }
+
+  testWidgets('Activity hierarchy keeps long messages dates and unread markers inside grouped rows', (tester) async {
+    const title = 'Fictional riverside inspection evidence is ready for review';
+    const subtitle = 'Photos and field observations are saved with this inspection record for the planning officer to review.';
+    final oldDate = DateTime(2026, 1, 2, 9);
+    for (final width in [320.0, 360.0, 390.0, 412.0, 430.0]) {
+      for (final scaler in [TextScaler.noScaling, const TextScaler.linear(1.3), const TextScaler.linear(2), const _Android200TextScaler()]) {
+        activityRows = [
+          {...activity('long-unread', title, oldDate), 'subtitle': subtitle},
+          {...activity('long-read', 'Read inspection record', oldDate, read: true), 'subtitle': 'Previously reviewed fictional activity.'},
+        ];
+        await pumpScreen(tester, size: Size(width, 844), scaler: scaler);
+        final row = find.byKey(const ValueKey<dynamic>('long-unread'));
+        final rowRect = tester.getRect(row);
+        final message = find.descendant(of: row, matching: find.text(subtitle));
+        final heading = find.descendant(of: row, matching: find.text(title));
+        final timestamp = find.descendant(of: row, matching: find.text('2026-01-02'));
+        expect(tester.getRect(timestamp).top, greaterThanOrEqualTo(tester.getRect(message).bottom + 7.9));
+        expect(tester.getRect(timestamp).left, closeTo(tester.getRect(heading).left, 0.1));
+        for (final text in [heading, message, timestamp]) {
+          expectWholeText(tester, text, rowRect.deflate(15.5));
+        }
+        expect(tester.widget<Text>(heading).style!.fontWeight, FontWeight.w800);
+        final readRow = find.byKey(const ValueKey<dynamic>('long-read'));
+        expect(tester.widget<Text>(find.descendant(of: readRow,
+            matching: find.text('Read inspection record'))).style!.fontWeight, FontWeight.w600);
+        Finder dot(Finder parent) => find.descendant(of: parent, matching: find.byWidgetPredicate(
+            (widget) => widget is Container && widget.constraints?.maxWidth == 8 &&
+                widget.decoration is BoxDecoration && (widget.decoration! as BoxDecoration).color == InsightTheme.blue1));
+        expect(dot(row), findsOneWidget);
+        expect(dot(readRow), findsNothing);
+        expect(rowRect.right - tester.getRect(dot(row)).right, closeTo(16, 0.1));
+        final divider = tester.widget<Divider>(find.descendant(of: row, matching: find.byType(Divider)));
+        expect(divider.indent, 72);
+        expect(divider.endIndent, 16);
+        await capture(tester, 'long-activity-${width.toInt()}-${scaler.runtimeType}-${scaler.scale(12).round()}');
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    }
+  });
+
+  testWidgets('Sync messages dates result icons and technical details retain aligned grouping', (tester) async {
+    final oldDate = DateTime(2026, 1, 2, 9);
+    for (final width in [320.0, 360.0, 390.0, 412.0, 430.0]) {
+      for (final scaler in [TextScaler.noScaling, const TextScaler.linear(1.3), const TextScaler.linear(2), const _Android200TextScaler()]) {
+        await tester.runAsync(() async {
+          await db.delete('sync_log_entries');
+          for (final result in ['success', 'error', 'warning', 'info']) {
+            await db.insert('sync_log_entries', {
+              ...syncEntry('result-$result', 'Fictional inspection evidence synchronization result: $result', oldDate),
+              'result': result, 'technical_details': jsonEncode({'fixture_code': 'SAFE-7', 'attempt': 2}),
+            });
+          }
+        });
+        await pumpScreen(tester, mode: 1, size: Size(width, 844), scaler: scaler);
+        for (final (result, icon) in [('success', Icons.check_circle_rounded), ('error', Icons.error_rounded),
+            ('warning', Icons.warning_rounded), ('info', Icons.sync_rounded)]) {
+          final message = find.text('Fictional inspection evidence synchronization result: $result');
+          final entry = find.ancestor(of: message, matching: find.byType(ExpansionTile));
+          final tile = tester.widget<ExpansionTile>(entry);
+          expect(tile.tilePadding, const EdgeInsets.all(16));
+          expect(tile.childrenPadding, const EdgeInsets.fromLTRB(72, 0, 16, 16));
+          final timestamp = find.descendant(of: entry, matching: find.text('2026-01-02'));
+          expect(tester.getRect(timestamp).top, greaterThanOrEqualTo(tester.getRect(message).bottom + 7.9));
+          expect(tester.getRect(timestamp).left, closeTo(tester.getRect(message).left, 0.1));
+          expect(find.descendant(of: entry, matching: find.byIcon(icon)), findsOneWidget);
+          expectWholeText(tester, message, tester.getRect(entry).deflate(15.5));
+          expectWholeText(tester, timestamp, tester.getRect(entry).deflate(15.5));
+        }
+        final dividers = tester.widgetList<Divider>(find.byType(Divider));
+        expect(dividers, hasLength(3));
+        for (final divider in dividers) {
+          expect(divider.indent, 72);
+          expect(divider.endIndent, 16);
+        }
+        final message = find.text('Fictional inspection evidence synchronization result: success');
+        await tester.ensureVisible(message);
+        await tester.pumpAndSettle();
+        await tester.tap(message);
+        await tester.pumpAndSettle();
+        expect(find.text('fixture_code: SAFE-7\nattempt: 2'), findsOneWidget);
+        expect(find.descendant(of: find.byKey(const ValueKey('unread-filter')), matching: find.text('3')), findsOneWidget);
+        await capture(tester, 'sync-details-${width.toInt()}-${scaler.runtimeType}-${scaler.scale(12).round()}');
+        await tester.tap(find.byKey(const ValueKey('unread-filter')));
+        await tester.pumpAndSettle();
+        expect(message, findsNothing);
+        await tester.tap(find.byKey(const ValueKey('unread-filter')));
+        await tester.pumpAndSettle();
+        expect(message, findsOneWidget);
+        final stored = await tester.runAsync(() => db.query('sync_log_entries'));
+        expect(stored, hasLength(4));
+        expect(stored!.every((row) => !row.containsKey('is_read')), isTrue,
+            reason: 'Expansion retains the existing local-only read state; it must not invent persisted acknowledgements.');
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    }
+  });
+
   for (final size in [
+    const Size(320, 568),
     const Size(320, 640),
+    const Size(360, 800),
     const Size(390, 844),
+    const Size(412, 915),
+    const Size(430, 932),
     const Size(640, 360),
   ]) {
-    for (final scale in [1.0, 2.0]) {
+    for (final scale in [1.0, 1.3, 2.0]) {
       testWidgets('Modes stay readable and tappable at $size / $scale', (
         tester,
       ) async {
@@ -401,12 +540,15 @@ void main() {
         for (final label in ['Notifications', 'Sync history']) {
           final text = find.text(label).last;
           final paragraph = tester.renderObject<RenderParagraph>(text);
+          final target = find.ancestor(of: text, matching: find.byType(InkWell)).first;
+          expect(tester.getSize(target).height, greaterThanOrEqualTo(48));
           expect(
             paragraph.didExceedMaxLines,
             isFalse,
             reason: '$label must remain readable at the chosen text size',
           );
         }
+        expect(tester.getSize(find.byKey(const ValueKey('unread-filter'))).height, greaterThanOrEqualTo(48));
         await tester.tap(find.text('Sync history'));
         await tester.pumpAndSettle();
         expect(find.text('Synchronization History'), findsOneWidget);

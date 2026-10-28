@@ -669,11 +669,18 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
         final isEntryUnread = entry['is_read'] != true;
         rowWidgets.add(Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          data: Theme.of(context).copyWith(
+            dividerColor: Colors.transparent,
+            listTileTheme: Theme.of(context).listTileTheme.copyWith(
+              titleAlignment: ListTileTitleAlignment.top,
+              horizontalTitleGap: 16,
+              minLeadingWidth: 40,
+            ),
+          ),
           child: ExpansionTile(
             enabled: hasDetails,
-            tilePadding: const EdgeInsets.symmetric(horizontal: 13, vertical: 4),
-            childrenPadding: const EdgeInsets.fromLTRB(13, 0, 13, 12),
+            tilePadding: const EdgeInsets.all(16),
+            childrenPadding: const EdgeInsets.fromLTRB(72, 0, 16, 16),
             shape: const Border(),
             collapsedShape: const Border(),
             onExpansionChanged: (expanded) {
@@ -683,18 +690,18 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             },
             leading: Container(
               width: 40, height: 40,
-              decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(13)),
+              decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(12)),
               child: Icon(theme['icon'] as IconData, size: 18, color: theme['fg'] as Color),
             ),
             title: Text(
               entry['message'] as String? ?? '',
               style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
             ),
-            subtitle: Align(
-              alignment: Alignment.centerLeft,
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 8),
               child: Text(
                 _timeAgo(entry['created_at'] as String?),
-                style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                style: InsightTheme.inter(12, c: InsightTheme.ink3),
               ),
             ),
             trailing: Row(
@@ -730,7 +737,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           rowWidgets.add(const Divider(
             height: 1,
             color: InsightTheme.line,
-            indent: 65,
+            indent: 72,
+            endIndent: 16,
           ));
         }
       }
@@ -746,7 +754,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           child: OutlinedButton(
             onPressed: () => _loadSyncLogs(),
             style: OutlinedButton.styleFrom(
-              minimumSize: const Size(48, 44),
+              minimumSize: const Size(48, 48),
               side: const BorderSide(color: InsightTheme.lineStrong),
               shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
             ),
@@ -805,55 +813,58 @@ class _NotificationRow extends StatelessWidget {
         onTap();
       },
       borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 13),
-        decoration: BoxDecoration(
-          border: isLast ? null : const Border(bottom: BorderSide(color: InsightTheme.line)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(color: iconBgColor, borderRadius: BorderRadius.circular(13)),
-              child: Icon(icon, size: 18, color: iconColor),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: InsightTheme.inter(
-                      13.5,
-                      w: isUnread ? FontWeight.w800 : FontWeight.w600,
-                      c: InsightTheme.ink,
-                    ),
-                  ),
-                  if (subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(time, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
-                if (isUnread) ...[
-                  const SizedBox(height: 6),
-                  Container(
-                    width: 8, height: 8,
-                    decoration: const BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle),
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(color: iconBgColor, borderRadius: BorderRadius.circular(12)),
+                  child: Icon(icon, size: 18, color: iconColor),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: InsightTheme.inter(
+                          13.5,
+                          w: isUnread ? FontWeight.w800 : FontWeight.w600,
+                          c: InsightTheme.ink,
+                        ),
+                      ),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(subtitle, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
+                      ],
+                      if (time.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(time, style: InsightTheme.inter(12, c: InsightTheme.ink3)),
+                      ],
+                    ],
                   ),
-                ]
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 12, top: 8),
+                  child: isUnread
+                      ? Container(
+                          width: 8, height: 8,
+                          decoration: const BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle),
+                        )
+                      : const SizedBox.square(dimension: 8),
+                ),
               ],
             ),
-          ],
-        ),
+          ),
+          if (!isLast)
+            const Divider(height: 1, thickness: 1, indent: 72, endIndent: 16, color: InsightTheme.line),
+        ],
       ),
     );
   }
@@ -868,7 +879,7 @@ class _ModeSegment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: InsightTheme.surface2,
         borderRadius: BorderRadius.circular(12),
@@ -920,7 +931,7 @@ class _ModeTab extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          constraints: const BoxConstraints(minHeight: 44),
+          constraints: const BoxConstraints(minHeight: 48),
           alignment: Alignment.center,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           decoration: BoxDecoration(
@@ -978,7 +989,7 @@ class _UnreadFilterChip extends StatelessWidget {
             onTap();
           },
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 44),
+            constraints: const BoxConstraints(minHeight: 48),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
@@ -1057,7 +1068,7 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(4, isFirst ? 4 : 18, 4, 7),
+      padding: EdgeInsets.fromLTRB(4, isFirst ? 4 : 16, 4, 8),
       child: Row(
         children: [
           Expanded(
