@@ -2491,6 +2491,8 @@ void main() {
     final dates = find.byKey(const ValueKey('calendar_preview_days'));
     expect(dates, findsOneWidget);
     final scroll = tester.state<ScrollableState>(find.descendant(of: dates, matching: find.byType(Scrollable)));
+    scroll.position.jumpTo(scroll.position.minScrollExtent);
+    await tester.pump();
     final before = scroll.position.pixels;
     await tester.drag(dates, const Offset(-100, 0));
     await tester.pumpAndSettle();
