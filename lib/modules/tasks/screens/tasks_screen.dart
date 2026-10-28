@@ -1967,9 +1967,56 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     };
   }
 
+  /// Explains the border using the same conditions as [_getStatusColor], so
+  /// the dialog describes the color that is actually displayed.
+  String _borderExplanation(MyTaskPresentation p) {
+    if (_awaitingAcceptance) {
+      return 'Orange — your final submission is saved on this device, but the '
+          'server has not confirmed it yet. This color reflects sync status, '
+          'not a date.';
+    }
+    if (_displayCategory == 'Completed') {
+      return widget.submission == null
+          ? 'Green — this inspection is completed. This device has no final-'
+              'submission receipt, so server acceptance is unverified.'
+          : 'Green — this inspection is completed and the server has '
+              'confirmed it.';
+    }
+    if (p.border == MyTaskBorder.fullRed) {
+      return 'Red — the PO Deadline has passed. This task is overdue.';
+    }
+    if (p.border == MyTaskBorder.red) {
+      final days = p.visitDaysUntil;
+      if (days != null && days < 0) {
+        return 'Red — your scheduled Visit date has passed, but the PO Deadline '
+            'has not. Reschedule the Visit or continue the inspection.';
+      }
+      if (days == 1) {
+        return 'Red — your scheduled Visit is tomorrow. This is Visit timing, '
+            'not a passed PO Deadline.';
+      }
+      if (days == 0) {
+        return 'Red — your scheduled Visit is today. This is Visit timing, '
+            'not a passed PO Deadline.';
+      }
+      return 'Red — this Visit needs attention now. This is Visit timing, '
+          'not a passed PO Deadline.';
+    }
+    if (p.border == MyTaskBorder.orange) {
+      final days = p.visitDaysUntil;
+      return 'Orange — your scheduled Visit is in ${days ?? 'a few'} days, '
+          'within the three-day reminder window. This is Visit timing, not a '
+          'passed PO Deadline.';
+    }
+    return 'Blue — no Visit urgency and no passed PO Deadline are affecting '
+        'this card. This is the normal state.';
+  }
+
   Future<void> _showContextualInfo() async {
     final task = widget.task;
     final p = task.presentation;
+    final statusColor = _getStatusColor(p);
+    final borderExplanation = _borderExplanation(p);
     final indicators = <MapEntry<String, String>>[];
     final isCompleted = _displayCategory == 'Completed';
     final isScheduled =
@@ -2034,6 +2081,29 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 3),
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Border color', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
+                        const SizedBox(height: 2),
+                        Text(borderExplanation, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               for (final indicator in indicators) ...[
                 Text(indicator.key, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
                 const SizedBox(height: 2),
