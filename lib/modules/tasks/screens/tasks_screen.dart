@@ -36,12 +36,11 @@ import '../models/task_lifecycle.dart';
 /// ==================================================================
 
 /// Independent track gutters and tab padding; content never borrows either.
-const double _segmentGap = 8;
-const double _segmentCountGap = 6;
+const double _segmentCountGap = 4;
 const double _segmentInset = 4;
-const double _segmentPadH = 12;
-const double _segmentBadgePad = 4;
-const double _segmentHeight = 54;
+const double _segmentPadH = 8;
+const double _segmentBadgePad = 8;
+const double _segmentHeight = 72;
 
 const List<String> rosarioBarangays = [
   'All Barangays', 'Alupay', 'Antipolo', 'Bagong Tubig', 'Bayawang', 'Bulihan', 
@@ -1500,8 +1499,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
 
   /// The Pending / Ongoing / Completed segmented switcher.
   ///
-  /// Flutter lays out the real label/count widths. Overflow scrolls rather
-  /// than consuming the track gutters or reducing a tab's internal padding.
+  /// Equal stationary cells grow vertically for full labels and exact counts.
   Widget _buildCategoryBar(
       int pendingCount, int ongoingCount, int completedCount) {
     return Container(
@@ -1510,52 +1508,33 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
         borderRadius: BorderRadius.circular(12),
       ),
       clipBehavior: Clip.antiAlias,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final pending = _SegmentTab(
-            text: "Pending",
-            count: pendingCount,
-            isActive: _currentTabIndex == 0,
-            onTap: () => setState(() => _currentTabIndex = 0),
-          );
-          final ongoing = _SegmentTab(
-            text: "Ongoing",
-            count: ongoingCount,
-            isActive: _currentTabIndex == 1,
-            onTap: () => setState(() => _currentTabIndex = 1),
-          );
-          final completed = _SegmentTab(
-            text: "Completed",
-            count: completedCount,
-            isActive: _currentTabIndex == 2,
-            onTap: () => setState(() => _currentTabIndex = 2),
-          );
-
-          return ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              // Keep the end gutters INSIDE the viewport, including at either
-              // scroll limit. Vertical paint space belongs to each touch target.
-              padding: const EdgeInsets.symmetric(horizontal: _segmentInset),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                    minWidth: constraints.maxWidth - _segmentInset * 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    pending,
-                    const SizedBox(width: _segmentGap),
-                    ongoing,
-                    const SizedBox(width: _segmentGap),
-                    completed,
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: _segmentInset),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: _SegmentTab(
+                text: "Pending",
+                count: pendingCount,
+                isActive: _currentTabIndex == 0,
+                onTap: () => setState(() => _currentTabIndex = 0),
+              )),
+              Expanded(child: _SegmentTab(
+                text: "Ongoing",
+                count: ongoingCount,
+                isActive: _currentTabIndex == 1,
+                onTap: () => setState(() => _currentTabIndex = 1),
+              )),
+              Expanded(child: _SegmentTab(
+                text: "Completed",
+                count: completedCount,
+                isActive: _currentTabIndex == 2,
+                onTap: () => setState(() => _currentTabIndex = 2),
+              )),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1885,16 +1864,6 @@ class _SegmentTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textScaler = MediaQuery.textScalerOf(context);
-    if (isActive) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted || context.widget != this) return;
-        // Reveal only this horizontal viewport, never the surrounding page.
-        Scrollable.of(context).position.ensureVisible(
-          context.findRenderObject()!,
-          alignment: 0.5,
-        );
-      });
-    }
     return Semantics(
       selected: isActive,
       button: true,
@@ -1904,12 +1873,11 @@ class _SegmentTab extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
-          // The hit target includes the paint gutter: the track stays 54dp high
-          // while the white surface has a real 4dp inset above and below it.
+          // Keep the selected surface inset; enlarged labels grow the row.
           margin: const EdgeInsets.symmetric(vertical: _segmentInset),
           constraints: const BoxConstraints(
               minHeight: _segmentHeight - _segmentInset * 2),
-          padding: const EdgeInsets.symmetric(horizontal: _segmentPadH),
+          padding: const EdgeInsets.symmetric(horizontal: _segmentPadH, vertical: 8),
           decoration: BoxDecoration(
             color: isActive ? InsightTheme.surface : Colors.transparent,
             borderRadius: BorderRadius.circular(9),
@@ -1922,23 +1890,21 @@ class _SegmentTab extends StatelessWidget {
                   ]
                 : null,
           ),
-          child: Row(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
                 text,
                 textScaler: textScaler,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
                 style: InsightTheme.inter(
                   12,
                   w: isActive ? FontWeight.w700 : FontWeight.w600,
                   c: isActive ? InsightTheme.ink : InsightTheme.ink3,
                 ),
               ),
-              const SizedBox(width: _segmentCountGap),
+              const SizedBox(height: _segmentCountGap),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(

@@ -157,9 +157,9 @@ void main() {
   }
 
   Future<void> mount(WidgetTester tester, {int tab = TasksScreen.tabPending,
-      double width = 375, double scale = 1, Widget? screen}) async {
+      double width = 375, double height = 1000, double scale = 1, Widget? screen}) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = Size(width, 1000);
+    tester.view.physicalSize = Size(width, height);
     addTearDown(tester.view.reset);
     await tester.pumpWidget(ChangeNotifierProvider(create: (_) => InspectionProvider(),
       child: MaterialApp(debugShowCheckedModeBanner: false, builder: (context, child) => MediaQuery(
@@ -203,6 +203,11 @@ void main() {
     });
   }
 
+  Finder segmentTrack() => find.ancestor(of: find.text('Pending'),
+      matching: find.byWidgetPredicate((w) => w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration! as BoxDecoration).color == InsightTheme.surface2)).first;
+
   testWidgets('Header counts only unfinished tasks due today', (tester) async {
     final today = DateTime.now().toIso8601String().split('T').first;
     jobs = [
@@ -221,41 +226,57 @@ void main() {
 
   for (final width in [320.0, 360.0, 390.0]) {
     // Exercise normal and enlarged text; this is not a platform maximum.
-    for (final scale in [1.0, 2.0]) {
+    for (final scale in [1.0, 1.3, 2.0]) {
       testWidgets('All task tabs and counts stay readable at $width / $scale', (tester) async {
         jobs = [
-          for (var i = 0; i < 5; i++)
-            {..._job(1, 'completed'), 'id': 'tab-completed-$i'},
-          for (var i = 0; i < 3; i++)
+          for (var i = 0; i < 34; i++)
+            {..._job(1, 'completed'), 'id': 'tab-completed-$i',
+              'submitted_at': DateTime(2026, 10, 27).subtract(Duration(minutes: i)).toIso8601String()},
+          for (var i = 0; i < 23; i++)
             {..._job(2, 'assigned'), 'id': 'tab-pending-$i'},
+          for (var i = 0; i < 12; i++)
+            {..._job(2, 'in_progress'), 'id': 'tab-ongoing-$i'},
         ];
         await mount(tester, width: width, scale: scale);
-        for (final label in ['Pending', 'Ongoing', 'Completed']) {
+        final track = tester.getRect(segmentTrack());
+        final cells = <Rect>[];
+        expect(find.descendant(of: segmentTrack(), matching: find.byType(Scrollable)), findsNothing);
+        for (final (label, count) in [('Pending', '23'), ('Ongoing', '12'), ('Completed', '34')]) {
           final tab = find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
-          // The bar scrolls sideways when the three tabs do not fit, so the tab
-          // is brought into view before it is measured.
-          await tester.ensureVisible(tab);
-          await tester.pumpAndSettle();
           final pill = tester.getRect(tab);
+          cells.add(pill);
           final labelRect = tester.getRect(find.text(label));
-          // The badge's own chip, not its digits: the chip is the content's
-          // right edge.
           final badge = tester.getRect(
               find.descendant(of: tab, matching: find.byType(AnimatedContainer)).last);
+          expect(pill.left, greaterThanOrEqualTo(track.left));
+          expect(pill.right, lessThanOrEqualTo(track.right + 0.01));
           expect(labelRect.left - pill.left, greaterThanOrEqualTo(5.9),
               reason: '$label has breathing room on the left');
           expect(pill.right - badge.right, greaterThanOrEqualTo(5.9),
               reason: '$label has breathing room on the right');
-          expect(labelRect.left - pill.left, closeTo(pill.right - badge.right, 1.0),
-              reason: 'the content is centred in the tab');
-          expect(labelRect.center.dy, closeTo(badge.center.dy, 1.0),
-              reason: 'the label and the count share one line');
+          expect(labelRect.center.dx, closeTo(pill.center.dx, 0.1));
+          expect(badge.center.dx, closeTo(pill.center.dx, 0.1));
+          expect(badge.top, greaterThanOrEqualTo(labelRect.bottom + 3.9),
+              reason: 'The exact count belongs below its full category label.');
+          expect(within(tab, count), findsOneWidget);
+          final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
+          expect(paragraph.didExceedMaxLines, isFalse);
+          expect(tester.widget<Text>(find.text(label)).style!.fontSize, 12);
+          expect(find.descendant(of: tab, matching: find.byType(FittedBox)), findsNothing);
           expect(pill.height, greaterThanOrEqualTo(48),
               reason: 'the tap target stays 48dp');
           expect(find.text(label).hitTestable(), findsOneWidget);
         }
+        expect(cells[0].width, closeTo(cells[1].width, 0.01));
+        expect(cells[1].width, closeTo(cells[2].width, 0.01));
+        expect(cells[0].height, closeTo(cells[2].height, 0.01));
         expect(tester.takeException(), isNull);
-        await capture(tester, 'task-tabs-$width-$scale', {'width': width, 'scale': scale});
+        await capture(tester, 'task-tabs-$width-$scale', {
+          'evidence': 'SYNTHETIC — NOT a genuine User Manual screenshot',
+          'width': width, 'scale': scale, 'track': track.toString(),
+          'cells': cells.map((rect) => rect.toString()).toList(),
+          'counts': [23, 12, 34],
+        });
         await tester.tap(find.text('Completed'));
         await tester.pumpAndSettle();
         expect(card('tab-completed-0'), findsOneWidget);
@@ -273,7 +294,7 @@ void main() {
         {..._job(2, 'assigned'), 'id': 'tab-pending-$i'},
     ];
     await mount(tester, width: 360);
-    // The gray container keeps the dimensions it always had.
+    // A taller stationary track replaces the former single-line viewport.
     final bar = tester.getRect(find.ancestor(
       of: find.text('Pending'),
       matching: find.byWidgetPredicate((w) =>
@@ -281,7 +302,7 @@ void main() {
           w.decoration is BoxDecoration &&
           (w.decoration! as BoxDecoration).color == InsightTheme.surface2),
     ).first);
-    expect(bar.height, 54, reason: 'the bar is not made taller or bulkier');
+    expect(bar.height, inInclusiveRange(64, 80), reason: 'Default label/count cells stay compact.');
 
     for (final (label, count) in [('Pending', '3'), ('Ongoing', '0'), ('Completed', '5')]) {
       await tester.tap(find.text(label));
@@ -290,8 +311,7 @@ void main() {
           find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
       final pill = tester.getRect(tab);
       final labelRect = tester.getRect(find.text(label));
-      // The badge's own chip, not its digits: the chip is the content's
-      // right edge.
+      // Label and count are independently centered in each equal-width cell.
       final badge = tester.getRect(
           find.descendant(of: tab, matching: find.byType(AnimatedContainer)).last);
       // The white indicator is the selected tab's own surface.
@@ -306,10 +326,10 @@ void main() {
           reason: '$label has breathing room on the left');
       expect(pill.right - badge.right, greaterThanOrEqualTo(5.9),
           reason: '$label has breathing room on the right');
-      expect(labelRect.left - pill.left, closeTo(pill.right - badge.right, 1.0),
-          reason: 'the content is centred in the white pill');
-      expect(labelRect.center.dy, closeTo(badge.center.dy, 1.0),
-          reason: 'the label and the count share one line');
+      expect(labelRect.center.dx, closeTo(pill.center.dx, 0.1));
+      expect(badge.center.dx, closeTo(pill.center.dx, 0.1));
+      expect(badge.top, greaterThanOrEqualTo(labelRect.bottom + 3.9));
+      expect(within(tab, count), findsOneWidget);
       expect(pill.height, greaterThanOrEqualTo(48));
       await capture(tester, 'segment-${label.toLowerCase()}', {
         'width': 360,
@@ -325,11 +345,6 @@ void main() {
   Finder indicator(String label) => find.descendant(
       of: find.ancestor(of: find.text(label), matching: find.byType(AnimatedContainer)).first,
       matching: find.byType(DecoratedBox)).first;
-  Finder segmentTrack() => find.ancestor(of: find.text('Pending'),
-      matching: find.byWidgetPredicate((w) => w is Container &&
-          w.decoration is BoxDecoration &&
-          (w.decoration! as BoxDecoration).color == InsightTheme.surface2)).first;
-
   void expectSelectedEdges(WidgetTester tester, String label) {
     final track = tester.getRect(segmentTrack());
     final pill = tester.getRect(indicator(label));
@@ -343,15 +358,17 @@ void main() {
         reason: '$label keeps its full right edge inside the track gutter');
     expect(pill.top - track.top, closeTo(4, 0.1));
     expect(track.bottom - pill.bottom, closeTo(4, 0.1));
-    expect(labelRect.left - pill.left, greaterThanOrEqualTo(11.9));
-    expect(pill.right - badge.right, closeTo(labelRect.left - pill.left, 0.1));
-    expect(badge.left - labelRect.right, closeTo(6, 0.1));
-    expect(labelRect.center.dy, closeTo(badge.center.dy, 0.1));
+    expect(labelRect.left - pill.left, greaterThanOrEqualTo(7.9));
+    expect(labelRect.center.dx, closeTo(pill.center.dx, 0.1));
+    expect(badge.center.dx, closeTo(pill.center.dx, 0.1));
+    expect(badge.top - labelRect.bottom, closeTo(4, 0.1));
     expect(tester.getSize(segment(label)).height, greaterThanOrEqualTo(48));
     expect(tester.renderObject<RenderParagraph>(find.text(label)).didExceedMaxLines, isFalse);
     expect((tester.widget<DecoratedBox>(indicator(label)).decoration as BoxDecoration).color,
         InsightTheme.surface);
-    expect(track.height, 54, reason: 'normal track dimensions are preserved');
+    expect(track.height, greaterThanOrEqualTo(64));
+    expect(pill.width, closeTo((track.width - 8) / 3, 0.1),
+        reason: 'All three categories keep equal cells inside the track.');
   }
 
   Future<void> expectRoundedPaint(WidgetTester tester, String label) async {
@@ -390,7 +407,7 @@ void main() {
         for (var i = 0; i < completedCount; i++) {..._job(1, 'completed'), 'id': 'edge-completed-$i'},
       ];
       await mount(tester, tab: tab, width: width, scale: scale);
-      // Deliberately do not call tester.ensureVisible: production owns reveal.
+      // No ensureVisible or horizontal reveal: all categories must already fit.
       final track = tester.getRect(segmentTrack());
       final measurements = <String, Object>{'label': label, 'width': width, 'scale': scale,
         'track': track.toString(), 'indicator': tester.getRect(indicator(label)).toString()};
@@ -411,7 +428,7 @@ void main() {
   }
 
   for (final scale in [1.0, 2.0]) {
-    testWidgets('selecting clipped Completed reveals both edges at $scale without moving page',
+    testWidgets('stationary Completed is selectable at $scale without moving page',
         (tester) async {
       jobs = [
         {..._job(2, 'assigned'), 'id': 'edge-pending'},
@@ -425,18 +442,22 @@ void main() {
       final horizontal = find.descendant(of: segmentTrack(),
           matching: find.byWidgetPredicate((w) => w is SingleChildScrollView &&
               w.scrollDirection == Axis.horizontal));
-      // A real swipe exposes part of Completed. Tapping that visible part must
-      // reveal the whole selected pill, rather than leaving a flat clipped edge.
-      await tester.drag(horizontal, Offset(scale == 1 ? -15 : -200, 0));
+      expect(horizontal, findsNothing);
+      final before = [for (final label in ['Pending', 'Ongoing', 'Completed']) tester.getRect(segment(label))];
+      for (final label in ['Pending', 'Ongoing', 'Completed']) {
+        expect(find.text(label).hitTestable(), findsOneWidget);
+      }
+      await tester.drag(segmentTrack(), const Offset(-100, 0));
       await tester.pumpAndSettle();
-      final visible = tester.getRect(segment('Completed')).intersect(track.deflate(8));
-      expect(visible.width, greaterThan(0));
-      await tester.tapAt(visible.center);
+      expect(tester.getRect(segmentTrack()), track);
+      expect([for (final label in ['Pending', 'Ongoing', 'Completed']) tester.getRect(segment(label))], before);
+      await tester.tap(find.text('Completed'));
       await tester.pumpAndSettle();
       expectSelectedEdges(tester, 'Completed');
       expect(within(segment('Completed'), '12'), findsOneWidget);
       expect(card('edge-completed-0'), findsOneWidget);
-      expect(page.pixels, pageOffset, reason: 'revealing a tab must not scroll the page');
+      expect(page.pixels, pageOffset, reason: 'Selecting a stationary category must not scroll the page.');
+      expect([for (final label in ['Pending', 'Ongoing', 'Completed']) tester.getRect(segment(label))], before);
       expect(tester.takeException(), isNull);
     });
   }
@@ -503,6 +524,43 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('enlarged stationary categories keep Scheduled task details reachable on a short phone', (tester) async {
+    final now = DateTime.now();
+    final visit = DateTime(now.year, now.month, now.day + 2).toIso8601String();
+    final deadline = DateTime(now.year, now.month, now.day + 3).toIso8601String();
+    jobs = [{..._job(2, 'in_progress', scheduled: true),
+      'scheduled_date': visit, 'deadline_date': deadline}];
+    await mount(tester, width: 320, height: 568, scale: 2);
+    for (final label in ['Pending', 'Ongoing', 'Completed']) {
+      expect(find.text(label).hitTestable(), findsOneWidget);
+    }
+    final page = find.byWidgetPredicate((widget) => widget is Scrollable &&
+        widget.axisDirection == AxisDirection.down).first;
+    expect(tester.state<ScrollableState>(page).position.pixels, 0,
+        reason: 'A stationary category selection must not auto-scroll the page.');
+    final info = find.descendant(of: card(_r2), matching: find.byType(FieldInfoButton));
+    // The larger header may put a lazily built card below the short viewport.
+    // Scroll the page to the card, never the stationary category selector.
+    await tester.scrollUntilVisible(info, 100, scrollable: page);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(info), const Size(48, 48));
+    await tester.tap(info);
+    await tester.pumpAndSettle();
+    expect(find.text('Task details'), findsOneWidget);
+    expect(find.text('Scheduled visit in 2 days — prepare your site inspection.'), findsOneWidget);
+    expect(find.text('PO Deadline in 3 days.'), findsOneWidget);
+    expect(find.text('Close').hitTestable(), findsOneWidget);
+    await tester.drag(find.descendant(of: find.byType(AlertDialog),
+        matching: find.byType(SingleChildScrollView)), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(find.text('Close').hitTestable(), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(await tester.runAsync(() => db.query('pending_actions')), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('same application keeps distinct top-level tasks and exact overview identities', (tester) async {
     jobs = [_job(1, 'assigned', name: 'First Applicant'), _job(2, 'assigned', name: 'Second Applicant')];

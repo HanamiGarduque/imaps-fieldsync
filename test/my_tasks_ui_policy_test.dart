@@ -221,6 +221,10 @@ void main() {
   fixture.widgetTest('notice dialog stays scrollable and dismissible at 320px and 200% text', (tester) async {
     jobs = [job(visit: 2, deadline: 3)];
     await mount(tester, scale: 2, size: const Size(320, 568));
+    await tester.scrollUntilVisible(info(), 160,
+        scrollable: find.descendant(of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable)).first);
+    await settle(tester);
     expect(tester.getSize(info()), const Size(48, 48));
     await openInfo(tester);
     expect(dialogText('Scheduled visit in 2 days — prepare your site inspection.'), findsOneWidget);

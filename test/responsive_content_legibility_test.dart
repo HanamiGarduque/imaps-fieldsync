@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -20,6 +21,25 @@ import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+class _Android200TextScaler extends TextScaler {
+  const _Android200TextScaler();
+  @override
+  double get textScaleFactor => 2;
+  @override
+  double scale(double fontSize) {
+    const from = [8.0, 10.0, 12.0, 14.0, 18.0, 20.0, 24.0, 30.0, 100.0];
+    const to = [16.0, 20.0, 24.0, 26.0, 30.0, 34.0, 36.0, 38.0, 100.0];
+    if (fontSize <= from.first) return fontSize * 2;
+    for (var i = 1; i < from.length; i++) {
+      if (fontSize <= from[i]) {
+        return to[i - 1] + (to[i] - to[i - 1]) *
+            (fontSize - from[i - 1]) / (from[i] - from[i - 1]);
+      }
+    }
+    return fontSize;
+  }
+}
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -168,6 +188,7 @@ void main() {
     Widget child,
     Size size, {
     double scale = 2,
+    TextScaler? scaler,
     FakeViewPadding padding = const FakeViewPadding(top: 24, bottom: 24),
   }) async {
     tester.view.devicePixelRatio = 1;
@@ -181,7 +202,7 @@ void main() {
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(
             context,
-          ).copyWith(textScaler: TextScaler.linear(scale)),
+          ).copyWith(textScaler: scaler ?? TextScaler.linear(scale)),
           child: child!,
         ),
         home: child,
@@ -453,44 +474,72 @@ void main() {
   testWidgets('Tasks categories retain chosen text size and remain tappable', (
     tester,
   ) async {
-    await mount(
-      tester,
-      TasksScreen(
-        profile: UserProfile(
-          id: 'legibility-inspector',
-          fullName: 'Test Inspector',
-          role: 'inspector',
-        ),
-      ),
-      const Size(320, 640),
-    );
-    expect(find.text('Pending'), findsOneWidget);
-    final editable = tester
-        .state<EditableTextState>(find.byType(EditableText))
-        .renderEditable;
-    expect(
-      tester.getSize(find.byType(TextField)).height,
-      greaterThanOrEqualTo(editable.preferredLineHeight + 22),
-      reason: 'Search text needs its full line height and vertical padding.',
-    );
-    final paragraph = tester.renderObject<RenderParagraph>(
-      find.text('Completed'),
-    );
-    final painted = MatrixUtils.transformRect(
-      paragraph.getTransformTo(null),
-      Offset.zero & paragraph.size,
-    );
-    expect(
-      painted.height,
-      closeTo(paragraph.size.height, 0.1),
-      reason: 'The category must not scale away the requested font size.',
-    );
-    await tester.ensureVisible(find.text('Completed'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Completed'));
-    await tester.pumpAndSettle();
-    expect(find.text('completed applicant'), findsOneWidget);
-    expect(tester.takeException(), isNull);
+    final semantics = tester.ensureSemantics();
+    try {
+      for (final width in [320.0, 360.0, 390.0, 412.0, 430.0]) {
+        for (final scaler in [TextScaler.noScaling, const TextScaler.linear(1.3), const TextScaler.linear(2), const _Android200TextScaler()]) {
+          await mount(
+            tester,
+            TasksScreen(profile: UserProfile(
+              id: 'legibility-inspector', fullName: 'Test Inspector', role: 'inspector',
+            )),
+            Size(width, 844),
+            scaler: scaler,
+          );
+          expect(find.text('Pending'), findsOneWidget);
+          final editable = tester.state<EditableTextState>(find.byType(EditableText)).renderEditable;
+          expect(tester.getSize(find.byType(TextField)).height,
+              greaterThanOrEqualTo(editable.preferredLineHeight + 22),
+              reason: 'Search text needs its full line height and vertical padding.');
+          final page = tester.state<ScrollableState>(find.byWidgetPredicate(
+              (widget) => widget is Scrollable && widget.axisDirection == AxisDirection.down).first).position;
+          final pageOffset = page.pixels;
+          final cells = <Rect>[];
+          for (final label in ['Pending', 'Ongoing', 'Completed']) {
+            final word = find.text(label);
+            final tab = find.ancestor(of: word, matching: find.byType(InkWell)).first;
+            final cell = tester.getRect(tab);
+            cells.add(cell);
+            expect(word.hitTestable(), findsOneWidget, reason: 'All categories are visible without reveal helpers.');
+            expect(cell.left, greaterThanOrEqualTo(20));
+            expect(cell.right, lessThanOrEqualTo(width - 20 + 0.01));
+            expect(cell.height, greaterThanOrEqualTo(48));
+            expect(tester.getSemantics(tab).flagsCollection.isSelected,
+                label == 'Ongoing' ? ui.Tristate.isTrue : ui.Tristate.isFalse);
+            final paragraph = tester.renderObject<RenderParagraph>(word);
+            final painted = MatrixUtils.transformRect(paragraph.getTransformTo(null), Offset.zero & paragraph.size);
+            expect(painted.height, closeTo(paragraph.size.height, 0.1),
+                reason: 'The category must not scale away the requested font size.');
+            expect(paragraph.didExceedMaxLines, isFalse);
+            expect(tester.widget<Text>(word).style!.fontSize, 12);
+            final count = find.descendant(of: tab, matching: find.text('1'));
+            expect(count, findsOneWidget);
+            expect(tester.getRect(count).top, greaterThanOrEqualTo(tester.getRect(word).bottom + 4));
+            for (final text in [word, count]) {
+              final render = tester.renderObject<RenderParagraph>(text);
+              final data = tester.widget<Text>(text).data!;
+              final boxes = render.getBoxesForSelection(TextSelection(baseOffset: 0, extentOffset: data.length));
+              expect(boxes, isNotEmpty);
+              for (final box in boxes) {
+                final left = render.localToGlobal(Offset(box.left, box.top));
+                final right = render.localToGlobal(Offset(box.right, box.bottom));
+                expect(cell.deflate(3.5).contains(left) && cell.deflate(3.5).contains(right), isTrue);
+              }
+            }
+          }
+          expect(cells[0].width, closeTo(cells[1].width, 0.01));
+          expect(cells[1].width, closeTo(cells[2].width, 0.01));
+          await tester.tap(find.text('Completed'));
+          await tester.pumpAndSettle();
+          expect(page.pixels, pageOffset);
+          expect(find.text('completed applicant'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        }
+      }
+    } finally {
+      semantics.dispose();
+    }
   });
 
   testWidgets('Tasks header respects landscape notch and navigation insets', (
