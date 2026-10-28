@@ -985,7 +985,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       body: SafeArea(
         bottom: false,
         child: SingleChildScrollView(
-          padding: EdgeInsets.only(bottom: kInsightBottomNavReserve),
+          padding: EdgeInsets.only(bottom: kInsightBottomNavReserve + MediaQuery.viewPaddingOf(context).bottom),
           child: ConstrainedContent.wide(
             child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1138,92 +1138,6 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
               ),
               ),
               const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                key: const ValueKey('calendar_section'),
-                padding: const EdgeInsets.only(top: 12, bottom: 4),
-                decoration: BoxDecoration(
-                  color: InsightTheme.surface,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Column(
-                  children: [
-
-                    // ----------------------------------------------------
-                    // SCHEDULE / CALENDAR
-                    // ----------------------------------------------------
-                     Padding(
-                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                       child: SpringSlide(
-                         animation: springFor(1),
-                         beginOffset: const Offset(0, 18),
-                          child: _HomeCalendarPager(
-                            key: ValueKey('home_calendar_${widget.profile.id}'),
-                            userId: widget.profile.id,
-                            month: _calendarMonth,
-                            selectedDay: _selectedDay,
-                            tasksByDay: tasksByDay,
-                            dotColorForTask: _calendarDotColor,
-                            onPick: _onFullCalendarPick,
-                            onPreviousMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
-                            onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
-                            timeDateView: _TodayScheduleCard(
-                              tasksForDate: (date) => _tasksByDayInMonth(date)[date.day] ?? const <TaskItem>[],
-                              dotColorForTask: _calendarDotColor,
-                              isLoading: _isLoadingTasks,
-                            ),
-                         ),
-                       ),
-                      ),
-                      Center(
-                        child: TextButton(
-                          onPressed: _toggleFullCalendar,
-                          child: Tooltip(
-                            message: _showFullCalendar ? 'Hide full calendar' : 'Show full calendar',
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text('Calendar', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
-                                AnimatedRotation(
-                                  turns: _showFullCalendar ? 0.5 : 0,
-                                   duration: calendarMotion,
-                                  child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: InsightTheme.blue1),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                   ],
-                 ),
-               ),
-               ),
-                       _SuspendedMonthCalendar(
-                         visible: _showFullCalendar,
-                         child: Padding(
-                                key: const ValueKey('full_calendar'),
-                                  // The monthly grid fits the card's available
-                                  // width, keeping the surrounding Home gutter.
-                                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                                 child: ConstrainedContent(
-                                   maxWidth: 560,
-                                    child: _CalendarLanyard(
-                                      child: _InlineFullCalendarCard(
-                                  month: _calendarMonth,
-                                  selectedDay: _selectedDay,
-                                  taskDaysForMonth: _taskDaysInMonth,
-                                  tasksByDayInMonth: tasksByDay,
-                                  dotColorForTask: _calendarDotColor,
-                                  onPrevMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
-                                  onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
-                                  onPick: _onFullCalendarPick,
-                                      ),
-                                     ),
-                                  ),
-                               ),
-                      ),
-               const SizedBox(height: 8),
 
               // ----------------------------------------------------
               // 2. ACTIVE ASSIGNMENTS
@@ -1424,11 +1338,97 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   );
                 }),
                  const SizedBox(height: 8),
+                    ],
+                  ),
+                 ],
+               ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Container(
+                key: const ValueKey('calendar_section'),
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                decoration: BoxDecoration(
+                  color: InsightTheme.surface,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Column(
+                  children: [
+
+                    // ----------------------------------------------------
+                    // SCHEDULE / CALENDAR
+                    // ----------------------------------------------------
+                     Padding(
+                       padding: const EdgeInsets.symmetric(horizontal: 16),
+                       child: SpringSlide(
+                         animation: springFor(1),
+                         beginOffset: const Offset(0, 18),
+                          child: _HomeCalendarPager(
+                            key: ValueKey('home_calendar_${widget.profile.id}'),
+                            userId: widget.profile.id,
+                            month: _calendarMonth,
+                            selectedDay: _selectedDay,
+                            tasksByDay: tasksByDay,
+                            dotColorForTask: _calendarDotColor,
+                            onPick: _onFullCalendarPick,
+                            onPreviousMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
+                            onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
+                            timeDateView: _TodayScheduleCard(
+                              tasksForDate: (date) => _tasksByDayInMonth(date)[date.day] ?? const <TaskItem>[],
+                              dotColorForTask: _calendarDotColor,
+                              isLoading: _isLoadingTasks,
+                            ),
+                         ),
+                       ),
+                      ),
+                      Center(
+                        child: TextButton(
+                          onPressed: _toggleFullCalendar,
+                          child: Tooltip(
+                            message: _showFullCalendar ? 'Hide full calendar' : 'Show full calendar',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('Calendar', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                                AnimatedRotation(
+                                  turns: _showFullCalendar ? 0.5 : 0,
+                                   duration: calendarMotion,
+                                  child: const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: InsightTheme.blue1),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                    ],
                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+               ),
+               ),
+                       _SuspendedMonthCalendar(
+                         visible: _showFullCalendar,
+                         child: Padding(
+                                key: const ValueKey('full_calendar'),
+                                  // The monthly grid fits the card's available
+                                  // width, keeping the surrounding Home gutter.
+                                 padding: const EdgeInsets.symmetric(horizontal: 20),
+                                 child: ConstrainedContent(
+                                   maxWidth: 560,
+                                    child: _CalendarLanyard(
+                                      child: _InlineFullCalendarCard(
+                                  month: _calendarMonth,
+                                  selectedDay: _selectedDay,
+                                  taskDaysForMonth: _taskDaysInMonth,
+                                  tasksByDayInMonth: tasksByDay,
+                                  dotColorForTask: _calendarDotColor,
+                                  onPrevMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1)),
+                                  onNextMonth: () => setState(() => _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1)),
+                                  onPick: _onFullCalendarPick,
+                                      ),
+                                     ),
+                                  ),
+                               ),
+                      ),
+               const SizedBox(height: 16),
 
               // ----------------------------------------------------
               // 3. TASK COMPLETION FLOW
@@ -2281,16 +2281,6 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
     final overdueLabel = '${widget.overdueCount} Overdue';
     final overdueStyle = InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.redInk);
     final overdueSize = measure(overdueLabel, overdueStyle);
-    // The centre gap is carved out whether or not a task is overdue: the
-    // framework is what carries the shape, and the badge is only a guest in
-    // it. With no badge the reserved slot stays empty instead of the block
-    // silently closing back into a plain 2x2 grid.
-    // Badge plus a small breathing margin; the gap between rows only has to
-    // clear this much, so a shorter badge keeps the tiles full-size.
-    // With no badge the reserved cross is only as wide as the tile gutter
-    // (36 x 10 carves an 18 x 18 cross): wide enough to still read as four
-    // tiles joined by a cross, narrow enough that the block stops looking
-    // like it has a hole punched in it.
     var notchSize = widget.overdueCount > 0
         ? Size(overdueSize.width + 20, overdueSize.height + 12)
         : const Size(36, 10);
@@ -2298,27 +2288,21 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
     return LayoutBuilder(
       key: const ValueKey('completion_chart'),
       builder: (context, constraints) {
-        // The centre gap carries the badge, so it is wider than the tile gutter.
-        // The right-column numbers need room to clear the badge without being
-        // pushed off their own tile's left edge.
-        const gutter = 8.0;
-        final gap = max(gutter, notchSize.width / 2);
-        // The badge lives in the centre gap, so the gap between rows must be
-        // taller than the badge itself — otherwise the top-row number (bottom
-        // of its tile) and the badge share the same pixels. 8 is the floor.
-        final rowGap = max(gutter, notchSize.height + 8);
+        // Badge text never sets the grid gutters. Only unused inner edges are
+        // reserved for its cutout, keeping labels, counts and icons clear.
+        const gap = 16.0;
+        const rowGap = 16.0;
         // One scale with the assignment cards: that row is the Home's normal
         // section height, and a 2x2 block taller than it turns into a hero
         // card that overpowers everything around it. Fixed (not derived from
         // width) because height here is a rhythm decision, not a fit one; text
         // scales with the scaler and the ring takes whatever square it can.
         const height = 220.0;
-        // The notch is clamped so the badge never eats more than a third of the
-        // block it sits in — at 2x text an unbounded badge swallowed the tiles.
         if (notchSize.height > height / 3) {
           notchSize = Size(min(notchSize.width, constraints.maxWidth / 2),
               height / 3);
         }
+        final badgeClearance = max(0.0, (notchSize.height - rowGap) / 2);
         final ringSize = min(constraints.maxWidth, height) - 32;
         return SizedBox(
           width: constraints.maxWidth,
@@ -2345,6 +2329,7 @@ class _CompletionRingChartState extends State<_CompletionRingChart> {
                                 index: i,
                                 label: widget.labels[i],
                                 labelWidth: labelWidth,
+                                badgeClearance: badgeClearance,
                                 count: widget.counts[i],
                                 color: widget.colors[i],
                               )),
@@ -2421,6 +2406,7 @@ class _CompletionStatusTile extends StatelessWidget {
   final int index;
   final String label;
   final double labelWidth;
+  final double badgeClearance;
   final int count;
   final Color color;
 
@@ -2428,6 +2414,7 @@ class _CompletionStatusTile extends StatelessWidget {
     required this.index,
     required this.label,
     required this.labelWidth,
+    required this.badgeClearance,
     required this.count,
     required this.color,
   });
@@ -2498,7 +2485,8 @@ class _CompletionStatusTile extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(8),
+            padding: EdgeInsets.fromLTRB(8, 8 + (index < 2 ? 0 : badgeClearance),
+                8, 8 + (index < 2 ? badgeClearance : 0)),
             child: LayoutBuilder(builder: (context, constraints) {
               final stackedHeight = 18 + 2 + scaler.scale(14) * 1.2 + 2 + scaler.scale(30) * 1.2;
               if (stackedHeight <= constraints.maxHeight) {
@@ -2513,39 +2501,25 @@ class _CompletionStatusTile extends StatelessWidget {
                   ],
                 );
               }
-              if (constraints.maxWidth >= labelWidth + scaler.scale(30) + 8) {
-                return Row(
+              // Fit the enlarged group together: fitting count and caption
+              // independently can make the smaller label dominate the count.
+              return FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.topLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(flex: 3, child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [icon, const SizedBox(height: 4), caption],
-                    )),
-                    const SizedBox(width: 8),
-                    Expanded(flex: 2, child: fittedText('$count', countStyle)),
-                  ],
-                );
-              }
-              // Give enlarged labels the full width; the icon moves beside
-              // the count so neither text scaling nor artwork grows the tile.
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.topLeft,
-                        child: Text('$count', maxLines: 1, softWrap: false, style: countStyle),
-                      )),
-                      const SizedBox(width: 4),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text('$count', maxLines: 1, softWrap: false, style: countStyle),
+                      const SizedBox(width: 8),
                       icon,
-                    ],
-                  )),
-                  const SizedBox(height: 2),
-                  caption,
-                ],
+                    ]),
+                    const SizedBox(height: 2),
+                    ConstrainedBox(constraints: BoxConstraints(minWidth: labelWidth),
+                      child: Text(label, maxLines: 1, softWrap: false, style: labelStyle)),
+                  ],
+                ),
               );
             }),
           ),

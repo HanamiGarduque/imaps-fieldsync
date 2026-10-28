@@ -50,6 +50,7 @@ void main() {
   var activityCount = 1;
   List<Map<String, Object>>? activityOverride;
   int? completionTotal;
+  var completionOverdue = 0;
   DateTime? scheduledOverride;
   Completer<void>? fontGate;
   Completer<void>? activityGate;
@@ -245,7 +246,8 @@ void main() {
             'status': ['assigned', 'assigned', 'in_progress', 'completed'][i % 4],
             'is_self_scheduled': i % 4 == 0,
             'scheduled_date': DateTime.now().add(const Duration(days: 1)).toIso8601String(),
-            'deadline_date': DateTime.now().add(const Duration(days: 2)).toIso8601String(),
+            'deadline_date': DateTime.now().add(Duration(days:
+                i % 4 != 3 && i - i ~/ 4 < completionOverdue ? -1 : 2)).toIso8601String(),
             'created_at': today,
             'supabase_zoning_applications': {'applicant_name': 'Demonstration task $i', 'barangay': 'Rosario'},
           }]);
@@ -320,6 +322,8 @@ void main() {
         if (chart.evaluate().isNotEmpty) {
           final block = tester.getRect(chart);
           File('$output/$name.geometry.json').writeAsStringSync(jsonEncode({
+            'evidence': 'SYNTHETIC WIDGET FIXTURE — NOT a genuine User Manual screenshot',
+            'fonts': Platform.environment['IMAPS_LAYOUT_FONT_DIR'] == null ? 'SDK substitute fonts' : 'external font fixture',
             'block': [block.width, block.height],
             'origin': [block.left, block.top],
             'tiles': {
@@ -329,6 +333,17 @@ void main() {
                     final tile = tester.getRect(find.byKey(ValueKey('completion_$label')));
                     return [tile.left - block.left, tile.top - block.top, tile.width, tile.height];
                   })(),
+            },
+            'badge': find.byKey(const ValueKey('completion_overdue')).evaluate().isEmpty
+                ? null : tester.getRect(find.byKey(const ValueKey('completion_overdue'))).toString(),
+            'content': {
+              for (final label in ['Scheduled', 'Pending', 'Ongoing', 'Completed'])
+                if (find.byKey(ValueKey('completion_$label')).evaluate().isNotEmpty)
+                  label: {
+                    for (final element in find.descendant(of: find.byKey(ValueKey('completion_$label')),
+                        matching: find.byType(Text)).evaluate())
+                      (element.widget as Text).data!: tester.getRect(find.byWidget(element.widget)).toString(),
+                  },
             },
           }));
         }
@@ -524,7 +539,7 @@ void main() {
       try {
       for (final size in [const Size(320, 640), const Size(360, 800), const Size(390, 844),
         const Size(640, 320), const Size(844, 390), const Size(768, 1024)]) {
-        for (final scaler in [TextScaler.noScaling, const TextScaler.linear(2), const _Android200TextScaler()]) {
+        for (final scaler in [TextScaler.noScaling, const TextScaler.linear(1.3), const TextScaler.linear(2), const _Android200TextScaler()]) {
           await mount(tester, size: size, scaler: scaler);
           final folder = find.byKey(const ValueKey('recent_activity_folder'));
           expect(folder, findsOneWidget, reason: 'The tabs and preview belong to one folder surface.');
@@ -538,6 +553,10 @@ void main() {
             await tester.pumpAndSettle();
             final tabRect = tester.getRect(tab);
             final body = tester.getRect(find.byKey(const ValueKey('activity_folder_body')));
+            final first = tester.getRect(find.byKey(const ValueKey('folder_tab_position_tasks')));
+            final second = tester.getRect(find.byKey(const ValueKey('folder_tab_position_sync')));
+            expect(first.right - second.left, inInclusiveRange(6, 10),
+                reason: 'Folder sheets should overlap gently, not hide the next tab.');
             expect(tabRect.bottom, closeTo(body.top, 0.01), reason: 'An active folder tab must touch its panel.');
             expect(tabRect.height, greaterThanOrEqualTo(48));
             expect(tabRect.width, greaterThanOrEqualTo(64));
@@ -738,7 +757,7 @@ void main() {
     testWidgets('back-face content stays inside fixed tiles on narrow landscape and 200 percent text', (tester) async {
       for (final size in [const Size(320, 640), const Size(360, 800), const Size(390, 844),
         const Size(640, 320), const Size(844, 390), const Size(1280, 800)]) {
-        for (final scaler in [TextScaler.noScaling, const TextScaler.linear(2), const _Android200TextScaler()]) {
+        for (final scaler in [TextScaler.noScaling, const TextScaler.linear(1.3), const TextScaler.linear(2), const _Android200TextScaler()]) {
           await mount(tester, size: size, scaler: scaler);
           final chart = find.byKey(const ValueKey('completion_chart'));
           await Scrollable.ensureVisible(tester.element(chart), alignment: 0.2);
@@ -963,6 +982,74 @@ void main() {
       }
       await capture(tester, 'folder-modal-empty-200');
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('completion gutters stay compact with zero one and many overdue and multi-digit counts', (tester) async {
+      completionTotal = 321;
+      addTearDown(() {
+        completionTotal = null;
+        completionOverdue = 0;
+      });
+      for (final width in [320.0, 360.0, 390.0]) {
+        for (final scaler in [TextScaler.noScaling, const TextScaler.linear(1.3), const TextScaler.linear(2), const _Android200TextScaler()]) {
+          Rect? initialTile;
+          for (final overdue in [0, 1, 12]) {
+            completionOverdue = overdue;
+            await mount(tester, size: Size(width, 844), scaler: scaler, reducedMotion: true);
+            final chart = find.byKey(const ValueKey('completion_chart'));
+            await Scrollable.ensureVisible(tester.element(chart), alignment: 0.2);
+            await tester.pumpAndSettle();
+            await showTiles(tester);
+            final block = tester.getRect(chart);
+            final scheduled = tester.getRect(find.byKey(const ValueKey('completion_Scheduled')));
+            final pending = tester.getRect(find.byKey(const ValueKey('completion_Pending')));
+            final ongoing = tester.getRect(find.byKey(const ValueKey('completion_Ongoing')));
+            final relativeTile = scheduled.shift(-block.topLeft);
+            initialTile ??= relativeTile;
+            expect(relativeTile, initialTile, reason: 'Badge text must not control tile size.');
+            expect(pending.left - scheduled.right, closeTo(16, 0.01));
+            expect(ongoing.top - scheduled.bottom, closeTo(16, 0.01));
+            expect(block.height, 220);
+            final badgeFinder = find.byKey(const ValueKey('completion_overdue'));
+            if (overdue == 0) {
+              expect(badgeFinder, findsNothing);
+            } else {
+              expect(find.text('$overdue Overdue'), findsOneWidget);
+              final badge = tester.getRect(badgeFinder);
+              expect(block.contains(badge.topLeft) && block.contains(badge.bottomRight), isTrue);
+              for (final label in ['Scheduled', 'Pending', 'Ongoing', 'Completed']) {
+                final tile = find.byKey(ValueKey('completion_$label'));
+                for (final text in find.descendant(of: tile, matching: find.byType(Text)).evaluate()) {
+                  expect(tester.getRect(find.byWidget(text.widget)).overlaps(badge), isFalse);
+                }
+                expect(tester.getRect(find.byKey(ValueKey('completion_icon_$label'))).overlaps(badge), isFalse);
+              }
+            }
+            for (final (label, count) in [('Scheduled', 81), ('Pending', 80), ('Ongoing', 80), ('Completed', 80)]) {
+              final tile = find.byKey(ValueKey('completion_$label'));
+              for (final text in [label, '$count']) {
+                final finder = find.descendant(of: tile, matching: find.text(text));
+                expect(finder, findsOneWidget);
+                final paragraph = tester.renderObject<RenderParagraph>(finder);
+                final boxes = paragraph.getBoxesForSelection(TextSelection(baseOffset: 0, extentOffset: text.length));
+                expect(boxes, hasLength(1));
+                final glyphs = Rect.fromPoints(
+                  paragraph.localToGlobal(Offset(boxes.single.left, boxes.single.top)),
+                  paragraph.localToGlobal(Offset(boxes.single.right, boxes.single.bottom)));
+                final inset = tester.getRect(tile).deflate(7.5);
+                expect(inset.contains(glyphs.topLeft) && inset.contains(glyphs.bottomRight), isTrue,
+                    reason: '$label $text must remain inside its tile at $width / $scaler.');
+              }
+              final word = tester.getRect(find.descendant(of: tile, matching: find.text(label)));
+              final number = tester.getRect(find.descendant(of: tile, matching: find.text('$count')));
+              expect(number.height, greaterThan(word.height * 1.35));
+            }
+            await capture(tester, 'compact-${width.toInt()}-${scaler.runtimeType}-${scaler.scale(14).round()}-overdue-$overdue');
+            expect(tester.takeException(), isNull);
+            await tester.pumpWidget(const SizedBox.shrink());
+          }
+        }
+      }
     });
 
     testWidgets('the chart opens the block and flips to one equally sized tile grid', (tester) async {
@@ -1585,6 +1672,8 @@ void main() {
     await tester.ensureVisible(find.byTooltip('Show full calendar'));
     await tester.tap(find.byTooltip('Show full calendar'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('calendar_lanyard_clip')));
+    await tester.pumpAndSettle();
     final clip = tester.getRect(find.byKey(const ValueKey('calendar_lanyard_clip')));
     final boundary = captureKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final pixel = boundary.globalToLocal(Offset(clip.center.dx, clip.bottom - 2));
@@ -1682,9 +1771,10 @@ void main() {
         tester.renderObject<RenderBox>(card).localToGlobal(
           Offset(tester.getSize(card).width / 2, tester.getSize(card).height),
         );
+    await tester.ensureVisible(find.byTooltip('Hide full calendar'));
+    await tester.pumpAndSettle();
     final restStrap = pivot(tester);
     final restCard = cardFoot(tester);
-    await tester.ensureVisible(find.byTooltip('Hide full calendar'));
     await tester.tap(find.byTooltip('Hide full calendar'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 60));
@@ -1808,10 +1898,16 @@ void main() {
   });
 
   for (final size in [
+    const Size(320, 568),
     const Size(320, 640),
+    const Size(360, 640),
     const Size(360, 800),
+    const Size(390, 640),
     const Size(390, 844),
+    const Size(412, 640),
+    const Size(412, 915),
     const Size(844, 390),
+    const Size(430, 640),
     const Size(430, 932),
     const Size(932, 430),
     const Size(800, 1280),
@@ -1827,8 +1923,11 @@ void main() {
         try {
           tester.view.devicePixelRatio = 1;
           tester.view.physicalSize = size;
-          tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
-          tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 24);
+          final insets = size.width == 412
+              ? const FakeViewPadding(top: 32, bottom: 48)
+              : const FakeViewPadding(top: 24, bottom: 24);
+          tester.view.padding = insets;
+          tester.view.viewPadding = insets;
           addTearDown(tester.view.reset);
           final tabs = <int>[];
           await tester.pumpWidget(
@@ -1870,10 +1969,26 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(find.byKey(const ValueKey('calendar_preview')), findsOneWidget);
-          if (size.height < 600 || scale > 1) {
-            await tester.ensureVisible(find.byTooltip('Show Time and Date'));
-            await tester.pumpAndSettle();
+          if (scale == 1 &&
+              size.width < size.height &&
+              size.width <= 430 &&
+              size.height >= 800) {
+            final page = tester.state<ScrollableState>(find.byWidgetPredicate(
+                (widget) => widget is Scrollable && widget.axisDirection == AxisDirection.down).first).position;
+            expect(page.pixels, 0, reason: 'First-assignment clearance is measured before any page scrolling.');
+            final card = tester.getRect(find.byType(ActiveAssignmentsFolderCard).first);
+            expect(card.width, greaterThanOrEqualTo(size.width * 0.8),
+                reason: 'The assignment carousel keeps its original full-bleed card width.');
+            final trigger = tester.getRect(find.byWidgetPredicate(
+                (widget) => widget is Semantics && widget.properties.label == 'Quick actions'));
+            expect(card.bottom, lessThanOrEqualTo(trigger.top - 8),
+                reason: 'The first assignment must be fully visible before scrolling, above the floating nav controls.');
+            if (size == const Size(360, 800)) {
+              debugPrint('QA-01 360x800 / 1x: first assignment bottom=${card.bottom}; maximum=${trigger.top - 8}; scroll=${page.pixels}');
+            }
           }
+          await tester.ensureVisible(find.byTooltip('Show Time and Date'));
+          await tester.pumpAndSettle();
           final initialCalendarButton = tester.getRect(find.ancestor(
             of: find.text('Calendar'), matching: find.byType(TextButton),
           ));
@@ -1908,12 +2023,16 @@ void main() {
           );
           expect(
             tester.getRect(inspectorSection).bottom,
-            lessThan(tester.getRect(calendarSection).top),
-          );
-          expect(
-            tester.getRect(calendarSection).bottom,
             lessThan(tester.getRect(assignmentSection).top),
           );
+          expect(
+            tester.getRect(assignmentSection).bottom,
+            lessThan(tester.getRect(calendarSection).top),
+          );
+          expect(tester.getRect(calendarSection).bottom,
+              lessThan(tester.getRect(find.text('Task completion flow')).top));
+          expect(tester.getRect(find.byKey(const ValueKey('completion_chart'))).bottom,
+              lessThan(tester.getRect(find.text('Recent activity')).top));
           expect(
             tester.getSize(find.text('FieldSync')).height,
             lessThanOrEqualTo(scale * 16 * 1.2 + 2),
@@ -1951,33 +2070,6 @@ void main() {
             final bounds = tester.getRect(section);
             expect(bounds.left, closeTo(pageBounds.left, 0.01));
             expect(bounds.right, closeTo(pageBounds.right, 0.01));
-          }
-          if (scale == 1 &&
-              size.width < size.height &&
-              size.width <= 430 &&
-              size.height >= 800) {
-            final card = tester.getRect(
-              find.byType(ActiveAssignmentsFolderCard).first,
-            );
-            expect(
-              card.width,
-              greaterThanOrEqualTo(size.width * 0.8),
-              reason:
-                  'The assignment carousel keeps its original full-bleed card width.',
-            );
-            final trigger = tester.getRect(
-              find.byWidgetPredicate(
-                (widget) =>
-                    widget is Semantics &&
-                    widget.properties.label == 'Quick actions',
-              ),
-            );
-            expect(
-              card.bottom,
-              lessThanOrEqualTo(trigger.top - 8),
-              reason:
-                  'The first assignment must be fully visible before scrolling, above the floating nav controls.',
-            );
           }
           expect(find.byKey(const ValueKey('full_calendar')), findsNothing);
           await tester.ensureVisible(
@@ -2368,6 +2460,8 @@ void main() {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 200)),
       );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Show Time and Date'));
       await tester.pumpAndSettle();
       final pager = tester.getRect(find.byKey(const ValueKey('home_calendar_pager')));
       final button = find.ancestor(of: find.text('Calendar'), matching: find.byType(TextButton));

@@ -68,13 +68,13 @@ class _RecentActivityFolderState extends State<RecentActivityFolder> {
     );
     final headerHeight = math.max(52.0, ((scaler.scale(13) * 1.2 + 28) / 4).ceil() * 4.0);
     return LayoutBuilder(builder: (context, constraints) {
-      const overlap = 14.0;
+      const overlap = 8.0;
       final widths = [for (final tab in widget.categories) (() {
         final painter = TextPainter(
           text: TextSpan(text: tab.label, style: tabStyle),
           textDirection: Directionality.of(context), textScaler: scaler,
         )..layout();
-        final width = math.max(72.0, painter.width + 50);
+        final width = math.max(72.0, painter.width + 52);
         painter.dispose();
         return width;
       })()];
@@ -125,7 +125,7 @@ class _RecentActivityFolderState extends State<RecentActivityFolder> {
                               child: InkWell(
                                 onTap: () => widget.onCategorySelected(widget.categories[i].key),
                                 child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(8, 8, 20, 8),
+                                  padding: const EdgeInsets.fromLTRB(12, 8, 20, 8),
                                   child: Center(child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -183,8 +183,8 @@ Path _tabPath(Rect rect, {double bodyOverlap = 0}) {
     ..moveTo(rect.left, rect.bottom + bodyOverlap)
     ..lineTo(rect.left, rect.top + 12)
     ..quadraticBezierTo(rect.left, rect.top, rect.left + 12, rect.top)
-    ..lineTo(rect.right - 26, rect.top)
-    ..quadraticBezierTo(rect.right - 16, rect.top, rect.right - 12, rect.top + 12)
+    ..lineTo(rect.right - 24, rect.top)
+    ..quadraticBezierTo(rect.right - 14, rect.top, rect.right - 10, rect.top + 12)
     ..lineTo(rect.right - 4, rect.bottom - 10)
     ..quadraticBezierTo(rect.right, rect.bottom, rect.right, rect.bottom)
     ..lineTo(rect.right, rect.bottom + bodyOverlap)
@@ -219,7 +219,8 @@ class _ActivityFolderPainter extends CustomPainter {
       if (i == selected) continue;
       final tab = _tabPath(Rect.fromLTRB(tabs[i].left + offset.dx, 4, tabs[i].right + offset.dx, headerHeight));
       canvas.drawPath(tab, Paint()..color = InsightTheme.surface2);
-      canvas.drawPath(tab, Paint()..color = InsightTheme.surface..style = PaintingStyle.stroke..strokeWidth = 1);
+      canvas.drawPath(tab, Paint()..color = InsightTheme.ink3.withValues(alpha: 0.10)
+        ..style = PaintingStyle.stroke..strokeWidth = 0.75);
     }
     canvas.restore();
     final body = Path()..addRRect(RRect.fromRectAndRadius(
