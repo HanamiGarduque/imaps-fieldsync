@@ -121,7 +121,7 @@ void main() {
       .toList();
 
   fixture.widgetTest(
-    'durable offline final submit opens Pending Sync and returns Home without profile HTTP',
+    'durable offline final submit opens Pending Sync and returns My Tasks without profile HTTP',
     (tester) async {
       final photo = await tester.runAsync(seedDraft);
       final cachedBefore = await tester.runAsync(
@@ -158,14 +158,14 @@ void main() {
       expect(cachedBefore!['notes'], 'Fixture findings');
       expect(fixture.remoteWrites, 0);
       await fixture.capture(tester, 'local-submit-success');
-      await tester.tap(find.text('Back to Home'));
+      await tester.tap(find.text('Back to My Tasks'));
       await fixture.flush(tester);
       await tester.pump(const Duration(seconds: 1));
       await fixture.flush(tester);
       final shell = tester.widget<MainShellScreen>(
         find.byType(MainShellScreen),
       );
-      expect(shell.initialIndex, 0);
+      expect(shell.initialIndex, 1);
       expect(shell.profile.id, offlineInspector);
       expect(
         fixture.requests.where((r) => r.url.path.contains('/profiles')),
@@ -175,15 +175,15 @@ void main() {
         (await tester.runAsync(() => DBHelper.getActionableActions())),
         hasLength(1),
       );
-      // Advance actual entrance frames before capturing Home; a single large
+      // Advance actual entrance frames before capturing My Tasks; a single large
       // pump starts each delayed spring but can still capture zero opacity.
       for (var frame = 0; frame < 8; frame++) {
         await tester.pump(const Duration(milliseconds: 200));
         await fixture.flush(tester);
       }
       expect(find.text('Fixture Inspector').hitTestable(), findsOneWidget);
-      expect(find.text('Active Assignments').hitTestable(), findsOneWidget);
-      await fixture.capture(tester, 'local-submit-home');
+      expect(find.text('Active Assignments').hitTestable(), findsNothing);
+      await fixture.capture(tester, 'local-submit-my-tasks');
       expect(tester.takeException(), isNull);
     },
   );
@@ -893,7 +893,7 @@ void main() {
 
   for (final size in [const Size(375, 667), const Size(844, 390)]) {
     fixture.widgetTest(
-      'Pending Sync Home action remains usable at $size enlarged text',
+      'Pending Sync My Tasks action remains usable at $size enlarged text',
       (tester) async {
         await fixture.mount(
           tester,
@@ -906,14 +906,14 @@ void main() {
           textScale: 1.5,
         );
         await tester.scrollUntilVisible(
-          find.text('Back to Home'),
+          find.text('Back to My Tasks'),
           200,
           scrollable: find.byType(Scrollable).first,
         );
         await fixture.flush(tester);
-        expect(find.text('Back to Home').hitTestable(), findsOneWidget);
+        expect(find.text('Back to My Tasks').hitTestable(), findsOneWidget);
         final button = find.ancestor(
-          of: find.text('Back to Home'),
+          of: find.text('Back to My Tasks'),
           matching: find.byType(ElevatedButton),
         );
         expect(button, findsOneWidget);
@@ -921,8 +921,8 @@ void main() {
         await fixture.capture(
           tester,
           size.width < 400
-              ? 'pending-sync-small-text'
-              : 'pending-sync-landscape-text',
+              ? 'pending-sync-my-tasks-small-text'
+              : 'pending-sync-my-tasks-landscape-text',
         );
         expect(tester.takeException(), isNull);
       },

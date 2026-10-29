@@ -914,13 +914,14 @@ class SubmissionSuccessScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    final destinationLabel = queuedOffline ? 'My Tasks' : 'Home';
     return SensitiveScreen(
       child: Scaffold(
         backgroundColor: InsightTheme.bg,
         body: FieldFormBody(
           header: const SizedBox(height: 40),
           action: FieldPrimaryButton(
-            label: 'Back to Home',
+            label: 'Back to $destinationLabel',
             onPressed: () async {
               try {
                 final uid = inspectorId ?? DBHelper.requireInspector();
@@ -937,6 +938,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) => MainShellScreen(
                       profile: profile,
+                      initialIndex: queuedOffline ? 1 : 0,
                       offlineSession: queuedOffline,
                     ),
                   ),
@@ -947,7 +949,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text(
-                      'Your saved submission is preserved. Sign in again to return Home.',
+                      'Your saved submission is preserved. Sign in again to return to $destinationLabel.',
                     ),
                   ),
                 );
