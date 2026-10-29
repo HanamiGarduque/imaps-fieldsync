@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:imaps_fieldsync/modules/auth_startup/services/native_screen_protection_ack.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_service.dart';
 
 void main() {
@@ -182,6 +184,111 @@ void main() {
       expect(protection.appliedProtection, isTrue);
     },
   );
+
+  testWidgets('Stale ON cannot uncover a newer security epoch', (tester) async {
+    protection.dispose();
+    final stale = Completer<void>();
+    final current = Completer<void>();
+    protection = ScreenProtectionService(
+      applyProtection: (secure) {
+        calls.add(secure);
+        return calls.length == 1 ? stale.future : current.future;
+      },
+      verifyIdentity: () async => true,
+    );
+    protection.register(Object(), null);
+    await tester.pump();
+    protection.invalidateDocumentation();
+    await tester.pump();
+    stale.complete();
+    await tester.pump();
+    expect(protection.mustObscure, isTrue);
+    expect(protection.appliedProtection, isNull);
+    expect(calls, [true, true]);
+    current.complete();
+    await tester.pump();
+    expect(protection.appliedProtection, isTrue);
+    expect(protection.mustObscure, isFalse);
+  });
+
+  testWidgets('Stale OFF cannot activate capture after a scope change', (
+    tester,
+  ) async {
+    protection.dispose();
+    final off = Completer<void>();
+    final restored = Completer<void>();
+    var offStarted = false;
+    protection = ScreenProtectionService(
+      applyProtection: (secure) {
+        calls.add(secure);
+        if (!secure) {
+          offStarted = true;
+          return off.future;
+        }
+        return offStarted ? restored.future : Future.value();
+      },
+      verifyIdentity: () async => true,
+    );
+    await enter(tester);
+    await protection.beginDocumentation();
+    await tester.pump();
+    protection.register(Object(), null);
+    await tester.pump();
+    off.complete();
+    await tester.pump();
+    expect(protection.isDocumentationActive, isFalse);
+    expect(protection.mustObscure, isTrue);
+    expect(protection.appliedProtection, isNull);
+    expect(calls, [true, false, true]);
+    restored.complete();
+    await tester.pump();
+    expect(protection.appliedProtection, isTrue);
+    expect(protection.isDocumentationActive, isFalse);
+  });
+
+  testWidgets('Revocation serializes native ON requests', (tester) async {
+    protection.dispose();
+    final first = Completer<void>();
+    protection = ScreenProtectionService(
+      applyProtection: (secure) {
+        calls.add(secure);
+        return calls.length == 1 ? first.future : Future.value();
+      },
+    );
+    protection.register(Object(), null);
+    await tester.pump();
+    protection.revokeQaDocumentation();
+    await tester.pump();
+    expect(calls, [true]);
+    expect(protection.mustObscure, isTrue);
+    first.completeError(StateError('superseded ON'));
+    await tester.pump();
+    expect(calls, [true, true]);
+    expect(protection.appliedProtection, isTrue);
+    expect(protection.nativeFailure, isFalse);
+  });
+
+  testWidgets('Stale ON failure cannot poison the current security epoch', (
+    tester,
+  ) async {
+    protection.dispose();
+    final first = Completer<void>();
+    protection = ScreenProtectionService(
+      applyProtection: (secure) {
+        calls.add(secure);
+        return calls.length == 1 ? first.future : Future.value();
+      },
+    );
+    protection.register(Object(), null);
+    await tester.pump();
+    protection.invalidateDocumentation();
+    first.completeError(StateError('old window failed'));
+    await tester.pump();
+    expect(calls, [true, true]);
+    expect(protection.appliedProtection, isTrue);
+    expect(protection.nativeFailure, isFalse);
+    expect(protection.mustObscure, isFalse);
+  });
 
   testWidgets(
     'Documentation can be restricted but never enabled outside debug',
@@ -464,6 +571,261 @@ void main() {
       expect(await pending, isFalse);
       expect(identities, isEmpty);
       expect(calls, [true]);
+    });
+  });
+
+  group('Android native acknowledgment', () {
+    const channel = MethodChannel('imaps_fieldsync/screen_protection_ack');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    late NativeScreenProtectionAck adapter;
+    late List<MethodCall> nativeCalls;
+    late int session;
+
+    Map<String, Object> acknowledgment(MethodCall call) {
+      final args = call.arguments as Map;
+      if (call.method == 'beginSession') session++;
+      return {
+        'success': true,
+        'sessionId': call.method == 'beginSession' ? session : args['sessionId'],
+        'requestId': args['requestId'],
+        'secure': call.method == 'beginSession' ? true : args['secure'],
+      };
+    }
+
+    void bridge(Future<Object?> Function(MethodCall) handler) {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        nativeCalls.add(call);
+        return handler(call);
+      });
+    }
+
+    setUp(() {
+      protection.dispose();
+      adapter = NativeScreenProtectionAck(
+        onWindowChanged: () => protection.retryProtection(),
+      );
+      nativeCalls = [];
+      session = 0;
+      bridge((call) async => acknowledgment(call));
+      protection = ScreenProtectionService(
+        applyProtection: adapter.setSecure,
+        verifyIdentity: () async => true,
+      );
+    });
+
+    tearDown(() {
+      messenger.setMockMethodCallHandler(channel, null);
+      channel.setMethodCallHandler(null);
+    });
+
+    testWidgets('Window replacement invalidates the previous native acknowledgment', (
+      tester,
+    ) async {
+      // Incoming platform messages execute in their listener's registration
+      // zone. Register this listener inside the widget test's FakeAsync zone.
+      protection.dispose();
+      adapter = NativeScreenProtectionAck(
+        onWindowChanged: () => protection.retryProtection(),
+      );
+      protection = ScreenProtectionService(
+        applyProtection: adapter.setSecure,
+        verifyIdentity: () async => true,
+      );
+      await enter(tester);
+      final attached = Completer<Object?>();
+      Object? reply;
+      bridge((call) async {
+        final acknowledgmentForCall = acknowledgment(call);
+        if (call.method == 'beginSession') {
+          reply = acknowledgmentForCall;
+          return attached.future;
+        }
+        return acknowledgmentForCall;
+      });
+      tester.binding.channelBuffers.push(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('windowChanged'),
+        ),
+        (_) {},
+      );
+      await tester.pump();
+      expect(protection.appliedProtection, isNull);
+      expect(protection.mustObscure, isTrue);
+      expect(protection.isDocumentationActive, isFalse);
+      await tester.pump();
+      expect(session, 2, reason: 'Native calls: $nativeCalls');
+      attached.complete(reply);
+      await tester.pump();
+      expect(protection.appliedProtection, isTrue);
+      expect((nativeCalls.last.arguments as Map)['sessionId'], 2);
+      expect(protection.isDocumentationActive, isFalse);
+    });
+
+    testWidgets('ON and OFF require correlated observed window state', (
+      tester,
+    ) async {
+      await enter(tester);
+      await protection.beginDocumentation();
+      await tester.pump();
+      expect(protection.appliedProtection, isFalse);
+      expect(protection.isDocumentationActive, isTrue);
+      expect(nativeCalls.map((call) => call.method), [
+        'beginSession', 'setSecure', 'setSecure',
+      ]);
+      expect(nativeCalls[1].arguments, {
+        'sessionId': 1, 'requestId': 1, 'secure': true,
+      });
+      expect(nativeCalls[2].arguments, {
+        'sessionId': 1, 'requestId': 2, 'secure': false,
+      });
+      protection.endDocumentation();
+      await tester.pump();
+      expect(protection.appliedProtection, isTrue);
+      expect(protection.isDocumentationActive, isFalse);
+    });
+
+    for (final invalid in [
+      'false', 'null', 'empty', 'failure', 'wrong request', 'wrong session',
+      'wrong state', 'nonboolean state', 'noninteger request', 'begin failure',
+    ]) {
+      testWidgets('$invalid acknowledgment keeps sensitive content covered', (
+        tester,
+      ) async {
+        bridge((call) async {
+          if (call.method == 'beginSession') {
+            return invalid == 'begin failure' ? false : acknowledgment(call);
+          }
+          final reply = acknowledgment(call);
+          return switch (invalid) {
+            'false' => false,
+            'null' => null,
+            'empty' => <String, Object>{},
+            'failure' => {...reply, 'success': false},
+            'wrong request' => {...reply, 'requestId': 999},
+            'wrong session' => {...reply, 'sessionId': 999},
+            'wrong state' => {...reply, 'secure': false},
+            'nonboolean state' => {...reply, 'secure': 'true'},
+            'noninteger request' => {...reply, 'requestId': 1.0},
+            _ => reply,
+          };
+        });
+        protection.register(Object(), null);
+        await tester.pump();
+        expect(protection.appliedProtection, isNull);
+        expect(protection.nativeFailure, isTrue);
+        expect(protection.mustObscure, isTrue);
+        expect(await protection.beginDocumentation(), isFalse);
+        protection.dispose();
+        await tester.pump();
+      });
+    }
+
+    for (final failure in ['missing channel', 'activity_unavailable',
+      'window_unavailable', 'native_failure']) {
+      testWidgets('$failure is not a protection acknowledgment', (tester) async {
+        if (failure == 'missing channel') {
+          // An unregistered native channel replies with no codec envelope.
+          messenger.setMockMessageHandler(channel.name, (_) async => null);
+        } else {
+          bridge((_) async => throw PlatformException(code: failure));
+        }
+        protection.register(Object(), null);
+        await tester.pump();
+        expect(protection.nativeFailure, isTrue);
+        expect(protection.appliedProtection, isNull);
+        expect(protection.mustObscure, isTrue);
+        protection.dispose();
+        await tester.pump();
+      });
+    }
+
+    testWidgets('Timed-out initial ON stays covered and permits a fresh retry', (
+      tester,
+    ) async {
+      final pending = Completer<Object?>();
+      Object? lateReply;
+      bridge((call) async {
+        final reply = acknowledgment(call);
+        if (call.method == 'beginSession' && session == 1) {
+          lateReply = reply;
+          return pending.future;
+        }
+        return reply;
+      });
+      protection.register(Object(), null);
+      await tester.pump();
+      expect(protection.mustObscure, isTrue);
+      expect(protection.appliedProtection, isNull);
+      await tester.pump(ScreenProtectionService.nativeTimeout);
+      expect(protection.nativeFailure, isTrue);
+      expect(protection.mustObscure, isTrue);
+      expect(await protection.beginDocumentation(), isFalse);
+      protection.retryProtection();
+      await tester.pump();
+      expect(protection.appliedProtection, isTrue);
+      expect(session, 2);
+      pending.complete(lateReply);
+      await tester.pump();
+      expect(protection.appliedProtection, isTrue);
+      expect(protection.isDocumentationActive, isFalse);
+      expect(nativeCalls.where((call) => call.method == 'setSecure'), hasLength(1));
+    });
+
+    testWidgets('Timed-out OFF is fenced by a new protective native session', (
+      tester,
+    ) async {
+      final off = Completer<Object?>();
+      MethodCall? pending;
+      bridge((call) async {
+        if (call.method == 'setSecure' &&
+            (call.arguments as Map)['secure'] == false) {
+          pending = call;
+          return off.future;
+        }
+        return acknowledgment(call);
+      });
+      await enter(tester);
+      await protection.beginDocumentation();
+      await tester.pump();
+      expect(protection.mustObscure, isTrue);
+      await tester.pump(ScreenProtectionService.nativeTimeout);
+      expect(protection.appliedProtection, isTrue);
+      expect(protection.isDocumentationActive, isFalse);
+      expect(session, 2);
+      expect((nativeCalls.last.arguments as Map)['sessionId'], 2);
+      off.complete(acknowledgment(pending!));
+      await tester.pump();
+      expect(protection.appliedProtection, isTrue);
+      expect(protection.isDocumentationActive, isFalse);
+    });
+
+    testWidgets('Disposal ON supersedes an outstanding native OFF', (
+      tester,
+    ) async {
+      final off = Completer<Object?>();
+      MethodCall? pending;
+      bridge((call) async {
+        if (call.method == 'setSecure' &&
+            (call.arguments as Map)['secure'] == false) {
+          pending = call;
+          return off.future;
+        }
+        return acknowledgment(call);
+      });
+      await enter(tester);
+      await protection.beginDocumentation();
+      await tester.pump();
+      protection.dispose();
+      await tester.pump();
+      expect(nativeCalls.last.arguments, {
+        'sessionId': 1, 'requestId': 3, 'secure': true,
+      });
+      off.complete(acknowledgment(pending!));
+      await tester.pump();
+      expect(protection.isDocumentationActive, isFalse);
+      expect(protection.appliedProtection, isNot(false));
     });
   });
 }

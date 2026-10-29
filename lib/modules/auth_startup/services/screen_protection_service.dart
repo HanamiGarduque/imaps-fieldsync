@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../qa/demo_fixtures.dart';
 import '../../../qa/demo_watermark.dart';
+import 'native_screen_protection_ack.dart';
 
 enum DocumentationPhase { off, active }
 
@@ -23,7 +24,7 @@ typedef _DemoReadiness = ({
 });
 
 /// Visible-scope policy, independently observable from native acknowledgments.
-/// The plugin remains the only native protection mechanism.
+/// Android uses app-owned window readback; other platforms retain their policy.
 class ScreenProtectionService extends ChangeNotifier
     with WidgetsBindingObserver {
   ScreenProtectionService({
@@ -35,7 +36,10 @@ class ScreenProtectionService extends ChangeNotifier
        _documentationEnabled = kDebugMode && documentationEnabled;
 
   static final instance = ScreenProtectionService();
-  static const nativeTimeout = Duration(seconds: 2);
+  static const nativeTimeout = NativeScreenProtectionAck.timeout;
+  static final _androidAck = NativeScreenProtectionAck(
+    onWindowChanged: () => instance.retryProtection(),
+  );
 
   /// The isolated demo application id (`android/app/build.gradle.kts`).
   static const demoPackageName = 'com.example.imaps_fieldsync.demo';
@@ -77,8 +81,11 @@ class ScreenProtectionService extends ChangeNotifier
   StreamSubscription<AuthState>? _demoAuthSubscription;
 
   static Future<void> _applyNative(bool secure) async {
+    // Demo permission never substitutes for Android window acknowledgment.
+    // There is exactly one Android writer: the application-owned channel.
+    if (!kIsWeb && Platform.isAndroid) return _androidAck.setSecure(secure);
     // Capture-only opt-out, granted exclusively through a verified demo
-    // identity. No production entry point can grant it.
+    // identity. Preserve the existing non-Android behavior only.
     if (_qaScreenshotsAllowed) return;
     // screen_protector only ships an Android/iOS implementation. On other
     // platforms (desktop dev runs, widget tests) there is no channel to call,
@@ -552,10 +559,17 @@ class ScreenProtectionService extends ChangeNotifier
   }
 
   Future<void> _reconcile() async {
+    if (_running || _disposed) return;
     _running = true;
     try {
       while (!_disposed && _applied != _desired) {
         final target = _desired;
+        final generation = _generation;
+        final epoch = _securityEpoch;
+        final authorization = _authorizationRevision;
+        bool current() => !_disposed && target == _desired &&
+            generation == _generation && epoch == _securityEpoch &&
+            authorization == _authorizationRevision;
         _applied = null;
         _notifyLater();
         var timedOut = false;
@@ -571,6 +585,7 @@ class ScreenProtectionService extends ChangeNotifier
                 return;
               }
               _applied = null;
+              _revokeDocumentation();
               _changed();
             }, onError: (Object _) {}),
           );
@@ -584,6 +599,13 @@ class ScreenProtectionService extends ChangeNotifier
             },
           );
           if (_disposed) return;
+          if (!current()) {
+            // A real native result for an older policy is not confirmation of
+            // the current policy, and can never activate documentation.
+            _applied = null;
+            _revokeDocumentation();
+            continue;
+          }
           _applied = target;
           _failed = false;
           if (!target && _documentationRequested) {
@@ -591,6 +613,13 @@ class ScreenProtectionService extends ChangeNotifier
           }
         } catch (_) {
           if (_disposed) return;
+          if (!current()) {
+            // Superseded failures cannot poison a newer policy. Serialization
+            // guarantees no newer result is overwritten while we retry it.
+            _applied = null;
+            _revokeDocumentation();
+            continue;
+          }
           _applied = null;
           _failed = true;
           _revokeDocumentation();
