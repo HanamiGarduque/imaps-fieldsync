@@ -36,7 +36,6 @@ import 'core/services/sync_outbox_service.dart';
 import 'core/theme/insight_theme.dart';
 import 'modules/inspection/screens/inspection_progress.dart';
 import 'modules/inspection/providers/inspection_provider.dart';
-import 'modules/auth_startup/services/screen_protection_service.dart';
 
 /// Fictional QA inspector. Not a real account, not a real UUID from any
 /// environment.
@@ -63,8 +62,6 @@ Future<void> main() async {
   }
 
   WidgetsFlutterBinding.ensureInitialized();
-  // Capture-only: lets on-device screenshots record synthetic QA screens.
-  ScreenProtectionService.allowQaScreenshots = true;
   await dotenv.load(fileName: '.env');
 
   // Structural isolation: the client can only ever talk to this device.

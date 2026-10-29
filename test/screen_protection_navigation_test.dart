@@ -9,9 +9,11 @@ import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  const validPin =
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
   final calls = <String>[];
   late ScreenProtectionService protection;
-  setUp(() {
+  setUp(() async {
     calls.clear();
     // The service applies through this hook (real platforms additionally run
     // the screen_protector channel; desktop builds and tests carry none).
@@ -20,9 +22,27 @@ void main() {
         calls.add(secure ? 'preventScreenshotOn' : 'preventScreenshotOff');
         return Future.value();
       },
+      verifyIdentity: () async => true,
+    );
+    // Route-policy tests run as a verified demo identity; the denial path is
+    // asserted explicitly at the end of this file.
+    expect(
+      await protection.grantQaDocumentation(
+        debugMode: true,
+        onAndroid: true,
+        qaPreview: true,
+        flavor: 'demo',
+        pin: validPin,
+        packageName: ScreenProtectionService.demoPackageName,
+        buildSignature: validPin,
+      ),
+      isTrue,
     );
   });
-  tearDown(() => protection.dispose());
+  tearDown(() {
+    protection.revokeQaDocumentation();
+    protection.dispose();
+  });
 
   Future<GlobalKey<NavigatorState>> mount(
     WidgetTester tester,
@@ -47,7 +67,7 @@ void main() {
   Future<void> authorize(WidgetTester tester) async {
     // The settings UI/attestation is exercised end-to-end in
     // debug_screenshot_settings_test.dart; these tests isolate route policy.
-    expect(protection.beginDocumentation(), isTrue);
+    expect(await protection.beginDocumentation(), isTrue);
     await tester.pumpAndSettle();
   }
 
@@ -173,8 +193,11 @@ void main() {
     final ready = Completer<void>();
     var hold = false;
     protection.dispose();
-    protection = ScreenProtectionService(applyProtection: (secure) =>
-        secure && hold ? ready.future : Future.value());
+    protection = ScreenProtectionService(
+      applyProtection: (secure) =>
+          secure && hold ? ready.future : Future.value(),
+      verifyIdentity: () async => true,
+    );
     addTearDown(() async {
       if (!ready.isCompleted) ready.complete();
       await tester.pump();
@@ -403,4 +426,23 @@ void main() {
       expect(protection.requiresProtection, isFalse);
     },
   );
+
+  testWidgets('An unverified identity cannot open a documentation session', (
+    tester,
+  ) async {
+    // Start from the regular-app posture: no verified demo identity.
+    protection.revokeQaDocumentation();
+    await mount(
+      tester,
+      const SensitiveScreen(
+        child: Scaffold(body: Text('Fictional secured page')),
+      ),
+    );
+    expect(protection.documentationEnabled, isFalse);
+    expect(await protection.beginDocumentation(), isFalse);
+    await tester.pumpAndSettle();
+    expect(protection.appliedProtection, isTrue);
+    expect(protection.isDocumentationActive, isFalse);
+    expect(find.byIcon(Icons.camera_alt_outlined), findsNothing);
+  });
 }

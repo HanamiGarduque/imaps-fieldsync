@@ -83,7 +83,10 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
           accepted == true &&
           authorizationEpoch == protection.securityEpoch &&
           identical(owner, protection.visibleScope)) {
-        protection.beginDocumentation();
+        await protection.beginDocumentation();
+        // Recheck: the demo identity/permission can be revoked while the
+        // confirmation dialog was up.
+        if (!protection.documentationEnabled) protection.endDocumentation();
       }
     } finally {
       _confirming = false;

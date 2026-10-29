@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:screen_protector/screen_protector.dart';
 
 enum DocumentationPhase { off, active }
@@ -14,16 +15,31 @@ class ScreenProtectionService extends ChangeNotifier
   ScreenProtectionService({
     Future<void> Function(bool)? applyProtection,
     bool documentationEnabled = true,
+    Future<bool> Function()? verifyIdentity,
   }) : _apply = applyProtection ?? _applyNative,
+       _verifyIdentity = verifyIdentity ?? isVerifiedDemoContext,
        _documentationEnabled = kDebugMode && documentationEnabled;
 
   static final instance = ScreenProtectionService();
   static const nativeTimeout = Duration(seconds: 2);
 
-  /// Set only by the isolated QA preview (`lib/main_qa.dart`) so synthetic
-  /// screens can be captured on-device. No production entry point sets it, so
-  /// a normal build always applies native protection.
-  static bool allowQaScreenshots = false;
+  /// The isolated demo application id (`android/app/build.gradle.kts`).
+  static const demoPackageName = 'com.example.imaps_fieldsync.demo';
+
+  /// Capture permission, granted only through a fully verified demo identity
+  /// ([grantQaDocumentation]) and withdrawn again by [revokeQaDocumentation].
+  /// No production entry point grants it, so a normal build always applies
+  /// native protection. Static because [_applyNative] is a static tear-off.
+  // ponytail: static capture flags leak across instances; every test tearDown
+  // must revokeQaDocumentation. Split per-instance if lifecycle scoping lands.
+  static bool _qaScreenshotsAllowed = false;
+  static bool _identityVerified = false;
+  // Shared flags require a shared fence, including revoke/regrant by another instance.
+  static int _authorizationRevision = 0;
+
+  /// Explicit trusted-identity source for tests; defaults to the live
+  /// device/package attestation.
+  final Future<bool> Function() _verifyIdentity;
 
   final Future<void> Function(bool) _apply;
   final bool _documentationEnabled;
@@ -44,10 +60,9 @@ class ScreenProtectionService extends ChangeNotifier
   int _biometricPrompts = 0;
 
   static Future<void> _applyNative(bool secure) async {
-    // QA preview: capture-only opt-out for synthetic screens, and only in a
-    // debug build. A release build ignores the flag, and no production entry
-    // point ever sets it.
-    if (kDebugMode && allowQaScreenshots) return;
+    // Capture-only opt-out, granted exclusively through a verified demo
+    // identity. No production entry point can grant it.
+    if (_qaScreenshotsAllowed) return;
     // screen_protector only ships an Android/iOS implementation. On other
     // platforms (desktop dev runs, widget tests) there is no channel to call,
     // so report instant success instead of leaving a hanging plugin future
@@ -58,7 +73,7 @@ class ScreenProtectionService extends ChangeNotifier
         : ScreenProtector.preventScreenshotOff();
   }
 
-  bool get documentationEnabled => _documentationEnabled;
+  bool get documentationEnabled => _documentationEnabled && _identityVerified;
   bool get foreground => _lifecycle == AppLifecycleState.resumed;
   DocumentationPhase get documentationPhase => _phase;
   bool get isDocumentationActive => _phase == DocumentationPhase.active;
@@ -98,7 +113,11 @@ class ScreenProtectionService extends ChangeNotifier
   bool get transitioning => _visibleNavigators.any((nav) => nav.transitioning);
   bool get hasPopup => _visibleNavigators.any((nav) => nav.popup);
   bool get showControl =>
+      !_disposed &&
+      !_documentationRequested &&
       _documentationEnabled &&
+      _identityVerified &&
+      _qaScreenshotsAllowed &&
       foreground &&
       requiresProtection &&
       !transitioning &&
@@ -184,11 +203,114 @@ class ScreenProtectionService extends ChangeNotifier
     invalidateDocumentation();
   }
 
-  bool beginDocumentation() {
+  Future<bool> beginDocumentation() async {
     if (!showControl) return false;
+    final generation = _generation;
+    final epoch = _securityEpoch;
+    final authorization = _authorizationRevision;
+    // Re-attest the demo identity at activation time, not only at grant
+    // time; a stale grant cannot open a capture session.
+    if (!await _verifyIdentity()) return false;
+    if (!showControl || generation != _generation || epoch != _securityEpoch ||
+        authorization != _authorizationRevision) {
+      return false;
+    }
     _generation++;
     _documentationRequested = true;
     _changed();
+    return true;
+  }
+
+  /// Attaches the capture permission to a fully verified demo identity
+  /// ([isVerifiedDemoContext]). Tests pass the explicit matrix; the real
+  /// demo flow (B3) will use the live attestation. Regular builds never
+  /// pass, and no production entry point calls this.
+  @visibleForTesting
+  Future<bool> grantQaDocumentation({
+    bool? debugMode,
+    bool? onAndroid,
+    bool? qaPreview,
+    String? flavor,
+    String? pin,
+    String? packageName,
+    String? buildSignature,
+  }) async {
+    if (_disposed) return false;
+    final generation = _generation;
+    final authorization = _authorizationRevision;
+    if (!await isVerifiedDemoContext(
+      debugMode: debugMode,
+      onAndroid: onAndroid,
+      qaPreview: qaPreview,
+      flavor: flavor,
+      pin: pin,
+      packageName: packageName,
+      buildSignature: buildSignature,
+    )) {
+      return false;
+    }
+    if (_disposed || generation != _generation ||
+        authorization != _authorizationRevision) {
+      return false;
+    }
+    _authorizationRevision++;
+    _identityVerified = true;
+    _qaScreenshotsAllowed = true;
+    // No _changed(): the flags are not part of _desired, and a microtask
+    // queued from a real-zone setUp would never be flushed by a later
+    // FakeAsync test body (it would also swallow the body's own scheduling).
+    return true;
+  }
+
+  /// Test/teardown hook: withdraws the capture permission entirely.
+  @visibleForTesting
+  void revokeQaDocumentation() {
+    _authorizationRevision++;
+    _identityVerified = false;
+    _qaScreenshotsAllowed = false;
+    _revokeDocumentation();
+    // Direct re-apply instead of _changed(): revoke can run in a real-zone
+    // tearDown, whose microtasks a later FakeAsync test never flushes. The
+    // reconcile loop re-reads _desired each iteration, so an overlapping
+    // run self-heals.
+    unawaited(_reconcile());
+  }
+
+  /// Full demo identity matrix, fail-closed in this order: debug build,
+  /// Android, QA_PREVIEW define, demo flavor define, demo package name, a
+  /// 64-hex approved-signer pin, and a signing-certificate signature that
+  /// matches the pin. Anything absent or mismatched denies.
+  @visibleForTesting
+  static Future<bool> isVerifiedDemoContext({
+    bool? debugMode,
+    bool? onAndroid,
+    bool? qaPreview,
+    String? flavor,
+    String? pin,
+    String? packageName,
+    String? buildSignature,
+  }) async {
+    if (!(debugMode ?? kDebugMode)) return false;
+    if (!(onAndroid ?? (kIsWeb ? false : Platform.isAndroid))) return false;
+    if (!(qaPreview ?? const bool.fromEnvironment('QA_PREVIEW'))) {
+      return false;
+    }
+    if ((flavor ?? const String.fromEnvironment('FLUTTER_APP_FLAVOR')) !=
+        'demo') {
+      return false;
+    }
+    final info =
+        packageName == null || buildSignature == null
+            ? await PackageInfo.fromPlatform()
+            : null;
+    if ((packageName ?? info!.packageName) != demoPackageName) return false;
+    final approvedPin =
+        pin ?? const String.fromEnvironment('FIELDSYNC_DEMO_SIGNER_SHA256');
+    if (!RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(approvedPin)) return false;
+    if ((buildSignature ?? info!.buildSignature).toUpperCase() !=
+        approvedPin.toUpperCase()) {
+      return false;
+    }
     return true;
   }
 
