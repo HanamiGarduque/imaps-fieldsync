@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../../qa/demo_watermark.dart';
 import '../services/screen_protection_service.dart';
 
-/// Manual debug-only setting, shown only in Security & Protection.
+/// Manual debug-only setting in Security & Protection and the isolated demo root.
 class DebugScreenshotToggle extends StatefulWidget {
-  const DebugScreenshotToggle({super.key});
+  const DebugScreenshotToggle({super.key, this.navigatorKey});
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   State<DebugScreenshotToggle> createState() => _DebugScreenshotToggleState();
@@ -27,7 +29,8 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
 
   Future<void> _confirm() async {
     final protection = _protection!;
-    final navigator = Navigator.of(context);
+    final demo = DemoCaptureScope.maybeOf(context);
+    final navigator = widget.navigatorKey?.currentState ?? Navigator.of(context);
     if (_confirming || !protection.showControl) return;
     _confirming = true;
     final owner = protection.visibleScope;
@@ -44,8 +47,10 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
             children: [
               const Text(
                 'DEBUG ONLY. Use fictional/demo or redacted information. '
-                'Screenshots stay enabled until you switch them off here, '
-                'lock/sign out, restart, or leave the foreground.',
+                'Screenshots and screen recording stay enabled until you switch '
+                'them off, lock/sign out, restart, or leave the foreground. '
+                'Start your recorder first, return here, then confirm. '
+                'Recorder prompts can revoke capture; confirm again after returning.',
               ),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
@@ -83,7 +88,7 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
           accepted == true &&
           authorizationEpoch == protection.securityEpoch &&
           identical(owner, protection.visibleScope)) {
-        await protection.beginDocumentation();
+        await (demo?.beginDocumentation() ?? protection.beginDocumentation());
         // Recheck: the demo identity/permission can be revoked while the
         // confirmation dialog was up.
         if (!protection.documentationEnabled) protection.endDocumentation();
@@ -107,8 +112,8 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
           title: Text('Demo screenshots',
               style: InsightTheme.inter(14, w: FontWeight.w600)),
           subtitle: Text(active
-              ? 'On — screenshots allowed for this debug session. Switch off here to restore protection.'
-              : 'Off — screenshot protection is on. Enable only for fictional or redacted data.',
+              ? 'On — screenshots and recording allowed in the foreground. Switch off to restore protection.'
+              : 'Off — capture protection is on. Start recording first, then enable for fictional data.',
               style: InsightTheme.inter(12.5, c: InsightTheme.ink2)),
           value: active,
           activeTrackColor: InsightTheme.blue1,

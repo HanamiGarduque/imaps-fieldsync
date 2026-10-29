@@ -21,9 +21,10 @@
 // memory through dotenv.testLoad — the prod-scoped `.env` asset is not
 // readable by this build.
 //
-// Screen capture stays OFF at B1: nothing in this file grants documentation
-// screenshots; the permission only exists behind the verified-identity
-// grant/revoke API and no entry point calls it yet.
+// Capture eligibility is granted only by the rendered demo root after live
+// identity/fixture/watermark readiness. Protection stays ON until an explicit
+// manual confirmation and native OFF acknowledgment. No automatic resume grant
+// can resume a recording: every invalidated session needs fresh confirmation.
 //
 // Nothing in this file is imported by `lib/main.dart`.
 
@@ -157,6 +158,7 @@ class _QaApp extends StatefulWidget {
 }
 
 class _QaAppState extends State<_QaApp> {
+  final _navigator = GlobalKey<NavigatorState>();
   late final _observer = ScreenProtectionObserver(
     ScreenProtectionService.instance,
   );
@@ -166,9 +168,12 @@ class _QaAppState extends State<_QaApp> {
     return MaterialApp(
       title: 'FieldSync DEMO (Synthetic)',
       debugShowCheckedModeBanner: true,
+      navigatorKey: _navigator,
       navigatorObservers: [_observer],
       builder: (context, child) => DemoWatermark(
         fixtures: DemoFixtures.instance,
+        protection: ScreenProtectionService.instance,
+        navigatorKey: _navigator,
         child: ScreenProtectionHost(child: child!),
       ),
       theme: ThemeData(
