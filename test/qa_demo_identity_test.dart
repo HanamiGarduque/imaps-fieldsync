@@ -1,7 +1,13 @@
+// B1 verification for the isolated demo identity: the fail-closed identity
+// matrix, the fixed fictional configuration values, and the deny-by-default
+// demo transport. Capture stays OFF: grants here only prove the revocable
+// permission contract, and every grant is revoked in teardown.
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:imaps_fieldsync/main_qa.dart';
 import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_service.dart';
 
 void main() {
@@ -107,6 +113,26 @@ void main() {
     expect(protection.documentationEnabled, isFalse);
     expect(protection.isDocumentationActive, isFalse);
     expect(await protection.beginDocumentation(), isFalse);
+  });
+
+  test('demo environment values are fixed, fictional and loopback-only', () {
+    expect(demoSupabaseUrl, 'http://127.0.0.1:54321');
+    expect(Uri.parse(demoSupabaseUrl).host, '127.0.0.1');
+    expect(demoPublishableKey, 'demo-fictional-local-only');
+  });
+
+  test('demo transport refuses every request without forwarding', () async {
+    // MockClient answers every call from its handler; it never opens a
+    // socket, so even this loopback URL is never contacted.
+    final response = await demoTransport.post(
+      Uri.parse('$demoSupabaseUrl/rest/v1/qa_table'),
+      headers: {'apikey': demoPublishableKey},
+      body: jsonEncode({'id': '11111111-1111-4111-8111-111111111111'}),
+    );
+    expect(response.statusCode, 403);
+    expect(response.headers['content-type'], 'application/json');
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    expect(body['error'], 'demo_offline');
   });
 
   group('authorization races', () {

@@ -1,0 +1,23 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Highest-priority overlay for the demoDebug variant only (Task 4 B1).
+         The isolated demo must have no INTERNET permission at all: its
+         deny-by-default HTTP client and pinned-offline queues are independent
+         layers, and this removal also blocks native/plugin socket paths such
+         as accidental realtime, map-tile or font requests. VM service and
+         hot-reload diagnostics are deliberately sacrificed for this offline
+         documentation variant; do not re-add INTERNET as a tooling
+         workaround. Regular debug/profile declarations stay untouched. -->
+    <uses-permission
+        android:name="android.permission.INTERNET"
+        tools:node="remove"/>
+
+    <!-- Distinct launcher presentation for the demo: the unique vector below
+         replaces the regular adaptive icon, and backups are disabled so the
+         synthetic sandbox is never copied with the regular app's rules. The
+         label stays ${appLabel} and resolves to "FieldSync DEMO" from Gradle. -->
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher_demo"
+        tools:replace="android:icon,android:allowBackup"/>
+</manifest>

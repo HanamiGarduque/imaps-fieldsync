@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:geolocator/geolocator.dart';
+import '../../../qa/demo_fixtures.dart';
 
 class LocationService {
   static Future<void> _ensureReady() async {
@@ -35,14 +36,16 @@ class LocationService {
   /// same limit is handed to the native settings and enforced Dart-side so a
   /// non-responsive platform cannot hang the caller.
   static Future<Position> getCurrentLocation({Duration? timeout}) async {
-    await _ensureReady();
-    final request = Geolocator.getCurrentPosition(
-      locationSettings: LocationSettings(
-        accuracy: LocationAccuracy.high,
-        timeLimit: timeout,
-      ),
-    );
-    return timeout == null ? request : request.timeout(timeout);
+    return DemoFixtures.instance.positionOrNative(() async {
+      await _ensureReady();
+      final request = Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: timeout,
+        ),
+      );
+      return timeout == null ? request : request.timeout(timeout);
+    });
   }
 
   /// Live position updates, gated on permission/service readiness.
@@ -56,6 +59,32 @@ class LocationService {
     controller = StreamController<Position>(
       onListen: () async {
         try {
+          final demo = DemoFixtures.instance;
+          final mode = await demo.hardwareMode();
+          if (cancelled) return;
+          if (mode == DemoHardwareMode.denied) {
+            throw StateError('Demo position stream requires verified trust.');
+          }
+          if (mode == DemoHardwareMode.synthetic) {
+            Future<Position> fix() => demo.positionOrNative(() async {
+              throw StateError('A demo stream cannot fall back to native GPS.');
+            });
+            final first = await fix();
+            if (cancelled) return;
+            controller.add(first);
+            sub = Stream<void>.periodic(const Duration(seconds: 2))
+                .asyncMap((_) => fix())
+                .listen(
+                  controller.add,
+                  onError: (Object e, StackTrace s) {
+                    if (cancelled) return;
+                    controller.addError(e, s);
+                    sub?.cancel();
+                    controller.close();
+                  },
+                );
+            return;
+          }
           await _ensureReady();
           // The listener may cancel while the readiness gate awaits.
           if (cancelled) return;

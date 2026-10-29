@@ -42,6 +42,11 @@ dependencies:
   sqflite: ^2.3.3
   path_provider: ^2.1.4
 
+  # Promoted from dev_dependencies: the demo entry point needs the
+  # deny-by-default MockClient transport (lib/main_qa.dart); tests fake the
+  # PostgREST boundary with it too.
+  http: ^1.6.0
+
   # Connectivity check
   connectivity_plus: ^6.0.5
   uuid: ^4.5.3
@@ -80,10 +85,6 @@ dev_dependencies:
 
   flutter_lints: ^6.0.0
 
-  # Already present transitively through supabase_flutter. Used directly only to
-  # fake the PostgREST boundary in test/report_notification_test.dart.
-  http: ^1.6.0
-
   # App icon generator
   flutter_launcher_icons: ^0.13.1
   integration_test:
@@ -91,8 +92,15 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Regular launches default to the prod flavor; the demo flavor is explicit.
+  default-flavor: prod
   assets:
-    - .env
+    # Scoped to prod so the demo build cannot bundle the production
+    # environment file; its values are fictional in-memory constants
+    # (lib/main_qa.dart dotenv.testLoad).
+    - path: .env
+      flavors:
+        - prod
     - assets/icon/
     - assets/branding/
     - assets/maps/

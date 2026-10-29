@@ -27,6 +27,7 @@ import '../widgets/photo_viewer.dart';
 import '../services/photo_source_resolver.dart';
 import '../services/pending_capture_store.dart';
 import '../widgets/inspection_step_header.dart';
+import '../../../qa/demo_fixtures.dart';
 
 class CapturePhotoScreen extends StatefulWidget {
   final TaskItem task;
@@ -55,6 +56,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   List<Map<String, dynamic>> get _capturedPhotos =>
       _sameInspection ? _provider.capturedPhotos : [];
   bool _isCameraMode = false;
+  bool _demoEvidence = false;
 
   final TextEditingController _notesController = TextEditingController();
   CameraController? _cameraController;
@@ -103,6 +105,26 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _initCamera() async {
+    try {
+      await DemoFixtures.instance.cameraEntry(
+        jobId: widget.task.id,
+        native: _initPhysicalCamera,
+        synthetic: () async {
+          if (mounted) setState(() => _demoEvidence = true);
+        },
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _cameraError =
+              'Demo evidence is unavailable: verified identity and fixtures are required. '
+              'Physical camera and gallery remain disabled.',
+        );
+      }
+    }
+  }
+
+  Future<void> _initPhysicalCamera() async {
     try {
       final cameras = await availableCameras();
       final backCamera = cameras.firstWhere(
@@ -200,7 +222,8 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
       debugPrint('Shutter GPS error: $e');
     }
     final cached = _currentPosition;
-    if (cached != null && _isReliableCaptureFix(cached, capturedAt: capturedAt)) {
+    if (cached != null &&
+        _isReliableCaptureFix(cached, capturedAt: capturedAt)) {
       return cached;
     }
     return null;
@@ -222,6 +245,10 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _capturePhoto() async {
+    if (_demoEvidence) {
+      await _prepareSyntheticEvidence();
+      return;
+    }
     if (!_sameInspection ||
         _isSavingPhoto ||
         _cameraController == null ||
@@ -311,7 +338,74 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   void _retakePhoto() {
     if (_isSavingPhoto || _isCapturing) return;
     _discardPendingCapture();
+    if (_demoEvidence) {
+      unawaited(_prepareSyntheticEvidence());
+      return;
+    }
     setState(() {});
+  }
+
+  Future<void> _enterCamera() async {
+    if (!_sameInspection || _isCapturing || _isSavingPhoto) return;
+    try {
+      await DemoFixtures.instance.cameraEntry(
+        jobId: widget.task.id,
+        native: () async {
+          if (mounted) setState(() => _isCameraMode = true);
+        },
+        synthetic: _prepareSyntheticEvidence,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Verified demo evidence is unavailable. No hardware was opened.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Uses the same staging, acceptance, list and validation path as a camera
+  /// capture, but bytes are generated locally. No picker or physical camera.
+  Future<void> _prepareSyntheticEvidence() async {
+    if (!_sameInspection || _isCapturing || _isSavingPhoto) return;
+    setState(() => _isCapturing = true);
+    try {
+      final bytes = await DemoFixtures.instance.generateSitePhoto(
+        widget.task.id,
+      );
+      final position = await LocationService.getCurrentLocation();
+      if (!_sameInspection) return;
+      final photoId = const Uuid().v4();
+      final path = await PendingCaptureStore.stage(
+        owner: _inspectorId!,
+        jobId: widget.task.id,
+        round: _round,
+        id: photoId,
+        bytes: bytes,
+      );
+      if (!_sameInspection ||
+          await DemoFixtures.instance.hardwareMode(jobId: widget.task.id) !=
+              DemoHardwareMode.synthetic) {
+        await PendingCaptureStore.discard(path);
+        return;
+      }
+      setState(() {
+        _demoEvidence = true;
+        _isCameraMode = true;
+        _capturedPhotoPath = path;
+        _capturedPosition = position;
+        _capturedAt = DateTime.now();
+        _pendingPhotoId = photoId;
+        _notesController.text =
+            'DEMO · SYNTHETIC DATA — generated model evidence, not a camera photograph.';
+      });
+    } finally {
+      if (mounted) setState(() => _isCapturing = false);
+    }
   }
 
   void _confirmRemovePhoto(int index) {
@@ -458,6 +552,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Future<void> _ensureLocationReference() async {
     if (_referenceEnsuring || !_sameInspection) return;
+    if (await DemoFixtures.instance.hardwareMode(jobId: widget.task.id) ==
+        DemoHardwareMode.denied) {
+      return;
+    }
+    if (!_sameInspection) return;
     Map<String, dynamic>? existing;
     for (final photo in _capturedPhotos) {
       if (isLocationReferencePhoto(photo)) {
@@ -716,10 +815,12 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
           children: [
             FieldSectionHeading(
               title: 'Site photos',
-              hint:
-                  'Attach at least one photo to continue. Add as many site '
-                  'photos as this device can store; the generated location '
-                  'reference is not counted as a site photo.',
+              hint: _demoEvidence
+                  ? 'DEMO · SYNTHETIC DATA. Generated model evidence only; physical camera and gallery are disabled. '
+                        'The location reference is separate and is not counted as a site photo.'
+                  : 'Attach at least one photo to continue. Add as many site '
+                        'photos as this device can store; the generated location '
+                        'reference is not counted as a site photo.',
               trailing: Text(
                 '$realPhotoCount ${realPhotoCount == 1 ? 'site photo' : 'site photos'}',
                 style: InsightTheme.inter(
@@ -776,16 +877,18 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                     index: index,
                     isLocationReference: isReference,
                     label: isReference
-                        ? 'Location reference'
-                        : 'Photo $realIndex',
+                        ? (_demoEvidence
+                              ? 'Demo location reference'
+                              : 'Location reference')
+                        : (_demoEvidence
+                              ? 'Demo evidence $realIndex'
+                              : 'Photo $realIndex'),
                     onRemove: isReference
                         ? null
                         : () => _confirmRemovePhoto(index),
                   );
                 }
-                return _AddPhotoCell(
-                  onTap: () => setState(() => _isCameraMode = true),
-                );
+                return _AddPhotoCell(onTap: _enterCamera);
               },
             ),
           ],
@@ -860,7 +963,9 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                'Capture Site Photo',
+                                _demoEvidence
+                                    ? 'Generated Demo Evidence'
+                                    : 'Capture Site Photo',
                                 style: InsightTheme.poppins(
                                   18,
                                   w: FontWeight.w700,
@@ -1229,7 +1334,10 @@ class _PhotoCell extends StatelessWidget {
                             (constraints.maxWidth *
                                     MediaQuery.devicePixelRatioOf(context))
                                 .round()
-                                .clamp(200, CapturePhotoScreen.thumbnailCacheWidth);
+                                .clamp(
+                                  200,
+                                  CapturePhotoScreen.thumbnailCacheWidth,
+                                );
                         return AdaptivePhotoImage(
                           path: photoPath,
                           cacheWidth: width,

@@ -2,11 +2,25 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:screen_protector/screen_protector.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../../qa/demo_fixtures.dart';
+import '../../../qa/demo_watermark.dart';
 
 enum DocumentationPhase { off, active }
+
+typedef _DemoReadiness = ({
+  BuildContext context,
+  RenderParagraph watermark,
+  Session session,
+  int generation,
+  int epoch,
+  int authorization,
+});
 
 /// Visible-scope policy, independently observable from native acknowledgments.
 /// The plugin remains the only native protection mechanism.
@@ -58,6 +72,9 @@ class ScreenProtectionService extends ChangeNotifier
   int _generation = 0;
   int _securityEpoch = 0;
   int _biometricPrompts = 0;
+  int _readinessRevision = 0;
+  _DemoReadiness? _demoReadiness;
+  StreamSubscription<AuthState>? _demoAuthSubscription;
 
   static Future<void> _applyNative(bool secure) async {
     // Capture-only opt-out, granted exclusively through a verified demo
@@ -130,6 +147,178 @@ class ScreenProtectionService extends ChangeNotifier
           _biometricPrompts > 0 && _applied == true)) ||
           (!isDocumentationActive && _applied != true));
   bool get _desired => requiresProtection && !_documentationRequested;
+
+  /// Source readiness only, never a native capture grant. The B2 root must
+  /// register its actual DemoWatermark context after layout and revoke on exit.
+  /// Caller-supplied flags, test instances and identity overrides cannot grant it.
+  Future<bool> registerDemoReadiness(BuildContext watermarkContext) async {
+    revokeDemoReadiness();
+    final revision = _readinessRevision;
+    try {
+      final auth = Supabase.instance.client.auth;
+      final session = auth.currentSession;
+      final watermark = _visibleDemoWatermark(watermarkContext);
+      if (session == null || watermark == null) return false;
+      final candidate = (
+        context: watermarkContext,
+        watermark: watermark,
+        session: session,
+        generation: _generation,
+        epoch: _securityEpoch,
+        authorization: _authorizationRevision,
+      );
+      if (!_currentDemoReadiness(candidate, revision)) return false;
+      void revokeIfCurrent() {
+        if (revision == _readinessRevision) revokeDemoReadiness();
+      }
+      _demoAuthSubscription = auth.onAuthStateChange.listen(
+        (state) {
+          if (!identical(state.session, session)) revokeIfCurrent();
+        },
+        onError: (Object _) => revokeIfCurrent(),
+        onDone: revokeIfCurrent,
+      );
+      if (await _validateDemoReadiness(candidate, revision) &&
+          _currentDemoReadiness(candidate, revision)) {
+        _demoReadiness = candidate;
+        _notifyLater();
+        return true;
+      }
+    } catch (_) {
+      // Uninitialized auth, failed trust or layout is never readiness.
+    }
+    if (revision == _readinessRevision) revokeDemoReadiness();
+    return false;
+  }
+
+  /// Re-attests every read; no cached Boolean can outlive fixture/session trust.
+  Future<bool> get demoCaptureReady async {
+    final registration = _demoReadiness;
+    if (registration == null) return false;
+    final revision = _readinessRevision;
+    if (await _validateDemoReadiness(registration, revision) &&
+        _currentDemoReadiness(registration, revision)) {
+      return true;
+    }
+    if (revision == _readinessRevision) revokeDemoReadiness();
+    return false;
+  }
+
+  void revokeDemoReadiness() {
+    _readinessRevision++;
+    final hadRegistration = _demoReadiness != null;
+    _demoReadiness = null;
+    final subscription = _demoAuthSubscription;
+    _demoAuthSubscription = null;
+    if (subscription != null) {
+      unawaited(subscription.cancel().catchError((Object _) {}));
+    }
+    if (hadRegistration) _notifyLater();
+  }
+
+  Future<bool> _validateDemoReadiness(
+    _DemoReadiness registration,
+    int revision,
+  ) async {
+    try {
+      if (!_currentDemoReadiness(registration, revision) ||
+          !await isVerifiedDemoContext().timeout(nativeTimeout) ||
+          !_currentDemoReadiness(registration, revision)) {
+        return false;
+      }
+      // The live B2 singleton checks successful owner-scoped initialization
+      // against the persisted ready revision, not just watermarkMounted(bool).
+      return await DemoFixtures.instance.captureSourceReady.timeout(
+            nativeTimeout,
+          ) &&
+          _currentDemoReadiness(registration, revision);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _currentDemoReadiness(_DemoReadiness registration, int revision) {
+    try {
+      return identical(this, instance) &&
+          !_disposed &&
+          _documentationEnabled &&
+          _hosts > 0 && foreground && requiresProtection &&
+          !transitioning && !hasPopup && !_failed && _applied == true &&
+          !_documentationRequested && _phase == DocumentationPhase.off &&
+          !_qaScreenshotsAllowed &&
+          revision == _readinessRevision &&
+          registration.generation == _generation &&
+          registration.epoch == _securityEpoch &&
+          registration.authorization == _authorizationRevision &&
+          DemoFixtures.owner == '11111111-1111-4111-8111-111111111111' &&
+          DemoFixtures.revision == 'demo-fixtures-20261028-v1' &&
+          registration.session.user.id == DemoFixtures.owner &&
+          registration.session.accessToken == DemoFixtures.accessToken &&
+          registration.session.user.appMetadata['provider'] == 'demo-preview' &&
+          identical(
+            registration.session,
+            Supabase.instance.client.auth.currentSession,
+          ) &&
+          identical(
+            _visibleDemoWatermark(registration.context),
+            registration.watermark,
+          );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static RenderParagraph? _visibleDemoWatermark(BuildContext context) {
+    if (!context.mounted || context is! Element) return null;
+    final widget = context.widget;
+    if (widget is! DemoWatermark ||
+        !identical(widget.fixtures, DemoFixtures.instance)) {
+      return null;
+    }
+    RenderParagraph? mark;
+    void findMark(Element element) {
+      if (mark != null) return;
+      if (element is RenderObjectElement) {
+        final render = element.renderObject;
+        if (render is RenderParagraph &&
+            render.text.toPlainText() == 'DEMO · SYNTHETIC DATA') {
+          mark = render;
+          return;
+        }
+      }
+      element.visitChildElements(findMark);
+    }
+    context.visitChildElements(findMark);
+    final paragraph = mark;
+    if (paragraph == null || !paragraph.attached ||
+        !paragraph.hasSize || paragraph.size.isEmpty) {
+      return null;
+    }
+    final local = Offset.zero & paragraph.size;
+    final bounds = MatrixUtils.transformRect(
+      paragraph.getTransformTo(null), local,
+    );
+    final view = View.of(context);
+    final screen = Offset.zero & (view.physicalSize / view.devicePixelRatio);
+    if (!bounds.isFinite || bounds.isEmpty || screen.intersect(bounds) != bounds) {
+      return null;
+    }
+    RenderObject child = paragraph;
+    for (var parent = child.parent; parent != null; parent = parent.parent) {
+      if ((parent is RenderOffstage && parent.offstage) ||
+          (parent is RenderOpacity && parent.opacity != 1) ||
+          (parent is RenderAnimatedOpacity && parent.opacity.value != 1)) {
+        return null;
+      }
+      final clip = parent.describeApproximatePaintClip(child);
+      final rect = MatrixUtils.transformRect(
+        paragraph.getTransformTo(parent), local,
+      );
+      if (clip != null && clip.intersect(rect) != rect) return null;
+      child = parent;
+    }
+    return paragraph;
+  }
 
   /// Presentation only: the OS prompt may make a secured window inactive.
   /// Hidden/paused windows and unconfirmed native protection stay covered.
@@ -210,7 +399,10 @@ class ScreenProtectionService extends ChangeNotifier
     final authorization = _authorizationRevision;
     // Re-attest the demo identity at activation time, not only at grant
     // time; a stale grant cannot open a capture session.
-    if (!await _verifyIdentity()) return false;
+    if (!await _verifyIdentity()) {
+      revokeDemoReadiness();
+      return false;
+    }
     if (!showControl || generation != _generation || epoch != _securityEpoch ||
         authorization != _authorizationRevision) {
       return false;
@@ -247,6 +439,7 @@ class ScreenProtectionService extends ChangeNotifier
       packageName: packageName,
       buildSignature: buildSignature,
     )) {
+      revokeDemoReadiness();
       return false;
     }
     if (_disposed || generation != _generation ||
@@ -315,6 +508,7 @@ class ScreenProtectionService extends ChangeNotifier
   }
 
   void _revokeDocumentation() {
+    revokeDemoReadiness();
     _generation++;
     _documentationRequested = false;
     _phase = DocumentationPhase.off;
@@ -416,6 +610,7 @@ class ScreenProtectionService extends ChangeNotifier
   @override
   void dispose() {
     if (_disposed) return;
+    revokeDemoReadiness();
     final restore =
         requiresProtection && (_documentationRequested || _applied != true);
     if (_hosts > 0) WidgetsBinding.instance.removeObserver(this);
