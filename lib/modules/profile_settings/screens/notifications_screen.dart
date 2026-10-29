@@ -330,7 +330,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       }
     } else {
       setState(() {
-        _syncLogs.clear();
+        _syncLogs = [];
+        _syncLogHasMore = false;
       });
       try {
         await DBHelper.clearSyncLogEntries();
