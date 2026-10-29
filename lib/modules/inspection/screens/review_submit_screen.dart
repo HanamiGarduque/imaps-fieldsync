@@ -947,7 +947,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
               } catch (_) {
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
+                  SnackBar(
                     content: Text(
                       'Your saved submission is preserved. Sign in again to return to $destinationLabel.',
                     ),
