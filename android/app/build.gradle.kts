@@ -160,7 +160,20 @@ gradle.taskGraph.whenReady {
         return flavor to variantName.drop(flavor.length).lowercase()
     }
 
-    val target = (project.findProperty("target") as String?) ?: "lib/main.dart"
+    // `flutter build` passes a relative entry point, while `flutter run`
+    // passes an absolute one (ResidentRunner.mainPath). Canonicalise both
+    // spellings against the Flutter project root; anything outside it stays
+    // unmatched and is rejected below.
+    val flutterRoot = rootProject.projectDir.parentFile.canonicalFile
+    val rawTarget = (project.findProperty("target") as String?) ?: "lib/main.dart"
+    val targetFile =
+        File(rawTarget)
+            .let { if (it.isAbsolute) it else File(flutterRoot, rawTarget) }
+            .canonicalFile
+    val target =
+        runCatching {
+            flutterRoot.toPath().relativize(targetFile.toPath()).toString().replace('\\', '/')
+        }.getOrElse { "" }
     val defines: Set<String> = (project.findProperty("dart-defines") as String?)
         ?.split(',')
         ?.filter { it.isNotBlank() }

@@ -12,17 +12,16 @@ import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// ==================================================================
-/// SCREEN 4 — NOTIFICATIONS / ACTIVITY
+/// SCREEN 4 — NOTIFICATIONS
 /// Real data from activity_log (via fetchRecentActivity), with real
 /// unread tracking (activity_log.is_read) instead of hardcoded rows.
 /// Now with spring entrance animations, Clear All button, and
 /// swipe-to-dismiss.
 ///
-/// Phase 6 (Detailed Sync Logs): this screen is also the reused
-/// architecture home for synchronization history — a top-level
-/// "Activity | Sync" mode switch was added instead of building a
-/// separate standalone Sync Logs page. "Activity" is the pre-existing
-/// user-activity feed (unchanged). "Sync" is new: a paginated,
+/// This screen is the shared home for notifications and synchronization
+/// history — a top-level mode switch keeps both timelines together instead of
+/// building a separate standalone Sync Logs page. Notifications remain the
+/// user-facing activity feed. Sync is a paginated,
 /// local-first (SQLite `sync_log_entries`) timeline of synchronization
 /// engine events, with user-friendly messages by default and technical
 /// details available behind an expandable section per entry.
@@ -70,14 +69,23 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Future<void> _load() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final activity = await SupabaseService.fetchRecentActivity(limit: 50);
       if (!mounted) return;
-      setState(() { _activity = activity; _isLoading = false; });
+      setState(() {
+        _activity = activity;
+        _isLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _error = 'Could not load notifications.'; _isLoading = false; });
+      setState(() {
+        _error = 'Could not load notifications.';
+        _isLoading = false;
+      });
     }
   }
 
@@ -87,7 +95,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   /// a long-lived install's history never pulls the whole table at once.
   Future<void> _loadSyncLogs({bool reset = false}) async {
     if (reset) {
-      setState(() { _isLoadingSyncLogs = true; _syncLogs = []; _syncLogHasMore = true; });
+      setState(() {
+        _isLoadingSyncLogs = true;
+        _syncLogs = [];
+        _syncLogHasMore = true;
+      });
     }
     try {
       final page = await DBHelper.getSyncLogEntries(
@@ -102,7 +114,9 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _isLoadingSyncLogs = false; });
+      setState(() {
+        _isLoadingSyncLogs = false;
+      });
     }
   }
 
@@ -112,13 +126,33 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   Map<String, dynamic> _syncResultTheme(String result) {
     switch (result) {
       case 'success':
-        return {'icon': Icons.check_circle_rounded, 'bg': InsightTheme.greenTint, 'fg': InsightTheme.greenInk};
+        return {
+          'icon': Icons.check_circle_rounded,
+          'bg': InsightTheme.greenTint,
+          'fg': InsightTheme.greenInk,
+          'label': 'Synced',
+        };
       case 'error':
-        return {'icon': Icons.error_rounded, 'bg': InsightTheme.redTint, 'fg': InsightTheme.redInk};
+        return {
+          'icon': Icons.error_rounded,
+          'bg': InsightTheme.redTint,
+          'fg': InsightTheme.redInk,
+          'label': 'Needs attention',
+        };
       case 'warning':
-        return {'icon': Icons.warning_rounded, 'bg': InsightTheme.amberTint, 'fg': InsightTheme.amberInk};
+        return {
+          'icon': Icons.warning_rounded,
+          'bg': InsightTheme.amberTint,
+          'fg': InsightTheme.amberInk,
+          'label': 'Warning',
+        };
       default:
-        return {'icon': Icons.sync_rounded, 'bg': InsightTheme.blueTint, 'fg': InsightTheme.blueInk};
+        return {
+          'icon': Icons.sync_rounded,
+          'bg': InsightTheme.blueTint,
+          'fg': InsightTheme.blueInk,
+          'label': 'In progress',
+        };
     }
   }
 
@@ -136,20 +170,25 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   int get _unreadCount => _activity.where((a) => a['is_read'] != true).length;
-  int get _syncUnreadCount => _syncLogs.where((entry) => entry['is_read'] != true).length;
+  int get _syncUnreadCount =>
+      _syncLogs.where((entry) => entry['is_read'] != true).length;
 
-  List<Map<String, dynamic>> get _visibleActivity =>
-      _activityUnreadOnly ? _activity.where((a) => a['is_read'] != true).toList() : _activity;
+  List<Map<String, dynamic>> get _visibleActivity => _activityUnreadOnly
+      ? _activity.where((a) => a['is_read'] != true).toList()
+      : _activity;
 
-  List<Map<String, dynamic>> get _visibleSyncLogs =>
-      _syncUnreadOnly ? _syncLogs.where((entry) => entry['is_read'] != true).toList() : _syncLogs;
+  List<Map<String, dynamic>> get _visibleSyncLogs => _syncUnreadOnly
+      ? _syncLogs.where((entry) => entry['is_read'] != true).toList()
+      : _syncLogs;
 
   Future<void> _markOneRead(Map<String, dynamic> item) async {
     if (item['is_read'] == true) return;
     final id = item['id']?.toString();
     if (id == null) return;
     setState(() {
-      _activity = _activity.map((a) => a['id'] == item['id'] ? {...a, 'is_read': true} : a).toList();
+      _activity = _activity
+          .map((a) => a['id'] == item['id'] ? {...a, 'is_read': true} : a)
+          .toList();
     });
     await SupabaseService.markActivityRead(id);
   }
@@ -157,7 +196,12 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   Future<void> _markSyncEntryRead(Map<String, dynamic> entry) async {
     if (entry['is_read'] == true) return;
     setState(() {
-      _syncLogs = _syncLogs.map((item) => item['id'] == entry['id'] ? {...item, 'is_read': true} : item).toList();
+      _syncLogs = _syncLogs
+          .map(
+            (item) =>
+                item['id'] == entry['id'] ? {...item, 'is_read': true} : item,
+          )
+          .toList();
     });
   }
 
@@ -166,9 +210,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     if (!mounted) return;
 
     final title = item['title']?.toString() ?? 'Activity update';
-    final subtitle = item['subtitle']?.toString() ?? 'No additional details available.';
+    final subtitle =
+        item['subtitle']?.toString() ?? 'No additional details available.';
     final occurredAt = item['occurred_at']?.toString();
-    final eventType = (item['event_type']?.toString() ?? 'activity').replaceAll('_', ' ');
+    final eventType = (item['event_type']?.toString() ?? 'activity').replaceAll(
+      '_',
+      ' ',
+    );
 
     await showModalBottomSheet(
       context: context,
@@ -193,52 +241,62 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                  Center(
-                    child: Container(
-                      width: 48,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: InsightTheme.line,
-                        borderRadius: BorderRadius.circular(99),
+                    Center(
+                      child: Container(
+                        width: 48,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: InsightTheme.line,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    title,
-                    style: InsightTheme.poppins(18, w: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    eventType,
-                    style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk),
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    subtitle,
-                    style: InsightTheme.inter(14, c: InsightTheme.ink, h: 1.5),
-                  ),
-                  if (occurredAt != null && occurredAt.isNotEmpty) ...[
                     const SizedBox(height: 18),
                     Text(
-                      'Received: ${_timeAgo(occurredAt)}',
-                      style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                      title,
+                      style: InsightTheme.poppins(18, w: FontWeight.w700),
                     ),
-                  ],
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(sheetContext),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: InsightTheme.blue1,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    const SizedBox(height: 8),
+                    Text(
+                      eventType,
+                      style: InsightTheme.inter(
+                        12,
+                        w: FontWeight.w600,
+                        c: InsightTheme.blueInk,
                       ),
-                      child: const Text('Close'),
                     ),
-                  ),
+                    const SizedBox(height: 18),
+                    Text(
+                      subtitle,
+                      style: InsightTheme.inter(
+                        14,
+                        c: InsightTheme.ink,
+                        h: 1.5,
+                      ),
+                    ),
+                    if (occurredAt != null && occurredAt.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      Text(
+                        'Received: ${_timeAgo(occurredAt)}',
+                        style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: InsightTheme.blue1,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text('Close'),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -299,11 +357,25 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink3)),
+            child: Text(
+              'Cancel',
+              style: InsightTheme.inter(
+                13,
+                w: FontWeight.w600,
+                c: InsightTheme.ink3,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Clear All', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.redInk)),
+            child: Text(
+              'Clear All',
+              style: InsightTheme.inter(
+                13,
+                w: FontWeight.w600,
+                c: InsightTheme.redInk,
+              ),
+            ),
           ),
         ],
       ),
@@ -352,15 +424,35 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   Map<String, dynamic> _eventTheme(String eventType) {
     switch (eventType) {
       case 'inspection_completed':
-        return {'icon': Icons.check_rounded, 'bg': InsightTheme.greenTint, 'fg': InsightTheme.greenInk};
+        return {
+          'icon': Icons.check_rounded,
+          'bg': InsightTheme.greenTint,
+          'fg': InsightTheme.greenInk,
+        };
       case 'rework_started':
-        return {'icon': Icons.refresh_rounded, 'bg': InsightTheme.amberTint, 'fg': InsightTheme.amberInk};
+        return {
+          'icon': Icons.refresh_rounded,
+          'bg': InsightTheme.amberTint,
+          'fg': InsightTheme.amberInk,
+        };
       case 'gps_confirmed':
-        return {'icon': Icons.gps_fixed_rounded, 'bg': InsightTheme.blueTint, 'fg': InsightTheme.blueInk};
+        return {
+          'icon': Icons.gps_fixed_rounded,
+          'bg': InsightTheme.blueTint,
+          'fg': InsightTheme.blueInk,
+        };
       case 'push_received':
-        return {'icon': Icons.campaign_rounded, 'bg': InsightTheme.redTint, 'fg': InsightTheme.redInk};
+        return {
+          'icon': Icons.campaign_rounded,
+          'bg': InsightTheme.redTint,
+          'fg': InsightTheme.redInk,
+        };
       default:
-        return {'icon': Icons.notifications_rounded, 'bg': InsightTheme.blueTint, 'fg': InsightTheme.blueInk};
+        return {
+          'icon': Icons.notifications_rounded,
+          'bg': InsightTheme.blueTint,
+          'fg': InsightTheme.blueInk,
+        };
     }
   }
 
@@ -383,12 +475,16 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   /// days) / Earlier. Only these four labels exist; a bucket with no items
   /// never renders a header.
   String _sectionLabel(String? isoTimestamp) {
-    final when = isoTimestamp == null ? null : DateTime.tryParse(isoTimestamp)?.toLocal();
+    final when = isoTimestamp == null
+        ? null
+        : DateTime.tryParse(isoTimestamp)?.toLocal();
     if (when == null) return 'Earlier';
     final now = DateTime.now();
-    final days = DateTime(now.year, now.month, now.day)
-        .difference(DateTime(when.year, when.month, when.day))
-        .inDays;
+    final days = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).difference(DateTime(when.year, when.month, when.day)).inDays;
     if (days <= 0) return 'Today';
     if (days == 1) return 'Yesterday';
     if (days <= 7) return 'This week';
@@ -417,106 +513,130 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final visible = _visibleActivity;
 
-    return SensitiveScreen(child: Scaffold(
-      backgroundColor: InsightTheme.bg,
-      body: Stack(
-        children: [
-          SafeArea(
-            bottom: false,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Header ──
-                SpringSlide(
-                  animation: springFor(0),
-                  beginOffset: const Offset(0, -30),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    child: Row(
-                      children: [
-                        FieldBackButton(onPressed: () => Navigator.pop(context)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _mode == 0 ? 'Notifications' : 'Synchronization History',
-                            style: InsightTheme.urbanist(20, w: FontWeight.w700),
+    return SensitiveScreen(
+      child: Scaffold(
+        backgroundColor: InsightTheme.bg,
+        body: Stack(
+          children: [
+            SafeArea(
+              bottom: false,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Header ──
+                  SpringSlide(
+                    animation: springFor(0),
+                    beginOffset: const Offset(0, -30),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          FieldBackButton(
+                            onPressed: () => Navigator.pop(context),
                           ),
-                        ),
-                        if ((_mode == 0 && _activity.isNotEmpty) || (_mode == 1 && _syncLogs.isNotEmpty))
-                          TextButton(
-                            onPressed: _clearAll,
-                            style: TextButton.styleFrom(
-                              minimumSize: const Size(48, 48),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                              foregroundColor: InsightTheme.redInk,
-                              shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Notifications',
+                              style: InsightTheme.urbanist(
+                                20,
+                                w: FontWeight.w700,
+                              ),
                             ),
+                          ),
+                          if ((_mode == 0 && _activity.isNotEmpty) ||
+                              (_mode == 1 && _syncLogs.isNotEmpty))
+                            TextButton(
+                              onPressed: _clearAll,
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(48, 48),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                foregroundColor: InsightTheme.redInk,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: InsightTheme.roundedSm,
+                                ),
+                              ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.delete_outline_rounded, size: 16),
+                                  const Icon(
+                                    Icons.delete_outline_rounded,
+                                    size: 16,
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
                                     'Clear All',
                                     style: InsightTheme.inter(
-                                      12, w: FontWeight.w700,
+                                      12,
+                                      w: FontWeight.w700,
                                       c: InsightTheme.redInk,
                                     ),
                                   ),
                                 ],
                               ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // ── Controls: Activity / Sync history switch, then the
+                  // single Unread filter. No "All" chip: rows are already the
+                  // full list when Unread is off.
+                  SpringSlide(
+                    animation: springFor(1),
+                    beginOffset: const Offset(0, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _ModeSegment(
+                            mode: _mode,
+                            onChanged: (mode) => setState(() => _mode = mode),
                           ),
+                        ),
+                        const SizedBox(height: 12),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: _UnreadFilterChip(
+                            count: _mode == 0 ? _unreadCount : _syncUnreadCount,
+                            isActive: _mode == 0
+                                ? _activityUnreadOnly
+                                : _syncUnreadOnly,
+                            onTap: () => setState(() {
+                              if (_mode == 0) {
+                                _activityUnreadOnly = !_activityUnreadOnly;
+                              } else {
+                                _syncUnreadOnly = !_syncUnreadOnly;
+                              }
+                            }),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                ),
+                  const SizedBox(height: 4),
 
-                // ── Controls: Notifications / Sync history switch, then the
-                // single Unread filter. No "All" chip: rows are already the
-                // full list when Unread is off.
-                SpringSlide(
-                  animation: springFor(1),
-                  beginOffset: const Offset(0, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: _ModeSegment(
-                          mode: _mode,
-                          onChanged: (mode) => setState(() => _mode = mode),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: _UnreadFilterChip(
-                          count: _mode == 0 ? _unreadCount : _syncUnreadCount,
-                          isActive: _mode == 0 ? _activityUnreadOnly : _syncUnreadOnly,
-                          onTap: () => setState(() {
-                            if (_mode == 0) {
-                              _activityUnreadOnly = !_activityUnreadOnly;
-                            } else {
-                              _syncUnreadOnly = !_syncUnreadOnly;
-                            }
-                          }),
-                        ),
-                      ),
-                    ],
+                  // ── List — Activity feed or Sync log, per _mode ──
+                  Expanded(
+                    child: _mode == 1
+                        ? _buildSyncLogList()
+                        : _buildActivityList(visible),
                   ),
-                ),
-                const SizedBox(height: 4),
-
-                // ── List — Activity feed or Sync log, per _mode ──
-                Expanded(
-                  child: _mode == 1 ? _buildSyncLogList() : _buildActivityList(visible),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ));
+    );
   }
 
   Widget _buildActivityList(List<Map<String, dynamic>> visible) {
@@ -530,7 +650,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(_error!, textAlign: TextAlign.center, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: InsightTheme.inter(13, c: InsightTheme.ink2),
+              ),
               const SizedBox(height: 12),
               OutlinedButton(onPressed: _load, child: const Text('Try again')),
             ],
@@ -543,10 +667,16 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.notifications_none_rounded, size: 40, color: InsightTheme.ink3),
+            const Icon(
+              Icons.notifications_none_rounded,
+              size: 40,
+              color: InsightTheme.ink3,
+            ),
             const SizedBox(height: 12),
             Text(
-              _activityUnreadOnly ? 'No unread notifications.' : 'No notifications yet.',
+              _activityUnreadOnly
+                  ? 'No unread notifications.'
+                  : 'No notifications yet.',
               style: InsightTheme.inter(13, c: InsightTheme.ink2),
             ),
           ],
@@ -559,15 +689,17 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     var bucketIndex = 0;
     for (final bucket in buckets.entries) {
       final rows = bucket.value;
-      children.add(_SectionHeader(
-        label: bucket.key,
-        count: rows.length,
-        isFirst: bucketIndex == 0,
-      ));
-      children.add(_ListCard(
-        children: [
-          for (var i = 0; i < rows.length; i++)
-            Builder(builder: (context) {
+      children.add(
+        _SectionHeader(
+          label: bucket.key,
+          count: rows.length,
+          isFirst: bucketIndex == 0,
+        ),
+      );
+      children.addAll([
+        for (var i = 0; i < rows.length; i++)
+          Builder(
+            builder: (context) {
               final item = rows[i];
               final theme = _eventTheme(item['event_type'] as String? ?? '');
               return SpringSlide(
@@ -596,14 +728,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     subtitle: item['subtitle'] as String? ?? '',
                     time: _timeAgo(item['occurred_at'] as String?),
                     isUnread: item['is_read'] != true,
-                    isLast: i == rows.length - 1,
                     onTap: () => _openNotificationDetail(item),
                   ),
                 ),
               );
-            }),
-        ],
-      ));
+            },
+          ),
+      ]);
       bucketIndex++;
     }
 
@@ -611,7 +742,9 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
         children: children,
       ),
     );
@@ -631,7 +764,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           children: [
             const Icon(Icons.sync_rounded, size: 40, color: InsightTheme.ink3),
             const SizedBox(height: 12),
-            Text('No synchronization activity yet.', style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+            Text(
+              'No synchronization activity yet.',
+              style: InsightTheme.inter(13, c: InsightTheme.ink2),
+            ),
           ],
         ),
       );
@@ -645,7 +781,9 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             const Icon(Icons.sync_rounded, size: 40, color: InsightTheme.ink3),
             const SizedBox(height: 12),
             Text(
-              _syncUnreadOnly ? 'No unread sync activity.' : 'No synchronization activity yet.',
+              _syncUnreadOnly
+                  ? 'No unread sync activity.'
+                  : 'No synchronization activity yet.',
               style: InsightTheme.inter(13, c: InsightTheme.ink2),
             ),
           ],
@@ -658,121 +796,191 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     var bucketIndex = 0;
     for (final bucket in buckets.entries) {
       final rows = bucket.value;
-      children.add(_SectionHeader(
-        label: bucket.key,
-        count: rows.length,
-        isFirst: bucketIndex == 0,
-      ));
+      children.add(
+        _SectionHeader(
+          label: bucket.key,
+          count: rows.length,
+          isFirst: bucketIndex == 0,
+        ),
+      );
       final rowWidgets = <Widget>[];
       for (var i = 0; i < rows.length; i++) {
         final entry = rows[i];
         final theme = _syncResultTheme(entry['result'] as String? ?? 'info');
-        final hasDetails = (entry['technical_details'] as String?)?.isNotEmpty == true;
+        final hasDetails =
+            (entry['technical_details'] as String?)?.isNotEmpty == true;
         final isEntryUnread = entry['is_read'] != true;
-        rowWidgets.add(Theme(
-          data: Theme.of(context).copyWith(
-            dividerColor: Colors.transparent,
-            listTileTheme: Theme.of(context).listTileTheme.copyWith(
-              titleAlignment: ListTileTitleAlignment.top,
-              horizontalTitleGap: 16,
-              minLeadingWidth: 40,
-            ),
-          ),
-          child: ExpansionTile(
-            enabled: hasDetails,
-            tilePadding: const EdgeInsets.all(16),
-            childrenPadding: const EdgeInsets.fromLTRB(72, 0, 16, 16),
-            shape: const Border(),
-            collapsedShape: const Border(),
-            onExpansionChanged: (expanded) {
-              if (expanded && isEntryUnread) {
-                _markSyncEntryRead(entry);
-              }
-            },
-            leading: Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(color: theme['bg'] as Color, borderRadius: BorderRadius.circular(12)),
-              child: Icon(theme['icon'] as IconData, size: 18, color: theme['fg'] as Color),
-            ),
-            title: Text(
-              entry['message'] as String? ?? '',
-              style: InsightTheme.inter(13.5, w: FontWeight.w600, c: InsightTheme.ink),
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _timeAgo(entry['created_at'] as String?),
-                style: InsightTheme.inter(12, c: InsightTheme.ink3),
+        rowWidgets.add(
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: BoxDecoration(
+              color: isEntryUnread
+                  ? InsightTheme.blueTint.withValues(alpha: 0.32)
+                  : InsightTheme.surface,
+              border: Border.all(
+                color: isEntryUnread
+                    ? InsightTheme.blue1.withValues(alpha: 0.28)
+                    : InsightTheme.line,
               ),
+              borderRadius: InsightTheme.roundedMd,
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isEntryUnread)
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle),
+            clipBehavior: Clip.antiAlias,
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                dividerColor: Colors.transparent,
+                listTileTheme: Theme.of(context).listTileTheme.copyWith(
+                  titleAlignment: ListTileTitleAlignment.top,
+                  horizontalTitleGap: 16,
+                  minLeadingWidth: 40,
+                ),
+              ),
+              child: ExpansionTile(
+                enabled: hasDetails,
+                tilePadding: const EdgeInsets.all(16),
+                childrenPadding: const EdgeInsets.fromLTRB(72, 0, 16, 16),
+                shape: const Border(),
+                collapsedShape: const Border(),
+                onExpansionChanged: (expanded) {
+                  if (expanded && isEntryUnread) {
+                    _markSyncEntryRead(entry);
+                  }
+                },
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: theme['bg'] as Color,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                if (hasDetails)
-                  const SizedBox(width: 8),
-                hasDetails
-                    ? const Icon(Icons.expand_more_rounded, size: 18, color: InsightTheme.ink3)
-                    : const SizedBox.shrink(),
-              ],
-            ),
-            children: hasDetails
-                ? [
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _formatTechnicalDetails(entry['technical_details'] as String?),
-                        style: InsightTheme.inter(11, c: InsightTheme.ink3, h: 1.5),
+                  child: Icon(
+                    theme['icon'] as IconData,
+                    size: 18,
+                    color: theme['fg'] as Color,
+                  ),
+                ),
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry['message'] as String? ?? '',
+                      style: InsightTheme.inter(
+                        13.5,
+                        w: isEntryUnread ? FontWeight.w700 : FontWeight.w600,
+                        c: InsightTheme.ink,
                       ),
                     ),
-                  ]
-                : const [],
+                    const SizedBox(height: 7),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme['bg'] as Color,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        theme['label'] as String,
+                        style: InsightTheme.inter(
+                          10,
+                          w: FontWeight.w700,
+                          c: theme['fg'] as Color,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    _timeAgo(entry['created_at'] as String?),
+                    style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                  ),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isEntryUnread)
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: InsightTheme.blue1,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    if (hasDetails) const SizedBox(width: 8),
+                    hasDetails
+                        ? const Icon(
+                            Icons.expand_more_rounded,
+                            size: 18,
+                            color: InsightTheme.ink3,
+                          )
+                        : const SizedBox.shrink(),
+                  ],
+                ),
+                children: hasDetails
+                    ? [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            _formatTechnicalDetails(
+                              entry['technical_details'] as String?,
+                            ),
+                            style: InsightTheme.inter(
+                              11,
+                              c: InsightTheme.ink3,
+                              h: 1.5,
+                            ),
+                          ),
+                        ),
+                      ]
+                    : const [],
+              ),
+            ),
           ),
-        ));
-        if (i != rows.length - 1) {
-          rowWidgets.add(const Divider(
-            height: 1,
-            color: InsightTheme.line,
-            indent: 72,
-            endIndent: 16,
-          ));
-        }
+        );
       }
-      children.add(_ListCard(children: rowWidgets));
+      children.addAll(rowWidgets);
       bucketIndex++;
     }
 
     if (_syncLogHasMore) {
-      children.add(Padding(
-        padding: const EdgeInsets.only(top: 14),
-        child: SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            onPressed: () => _loadSyncLogs(),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(48, 48),
-              side: const BorderSide(color: InsightTheme.lineStrong),
-              shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
-            ),
-            child: Text(
-              'Load more',
-              style: InsightTheme.inter(12.5, w: FontWeight.w700, c: InsightTheme.ink2),
+      children.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () => _loadSyncLogs(),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                side: const BorderSide(color: InsightTheme.lineStrong),
+                shape: RoundedRectangleBorder(
+                  borderRadius: InsightTheme.roundedSm,
+                ),
+              ),
+              child: Text(
+                'Load more',
+                style: InsightTheme.inter(
+                  12.5,
+                  w: FontWeight.w700,
+                  c: InsightTheme.ink2,
+                ),
+              ),
             ),
           ),
         ),
-      ));
+      );
     }
 
     return RefreshIndicator(
       onRefresh: () => _loadSyncLogs(reset: true),
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
         children: children,
       ),
     );
@@ -791,7 +999,6 @@ class _NotificationRow extends StatelessWidget {
   final Color iconBgColor;
   final Color iconColor;
   final bool isUnread;
-  final bool isLast;
   final VoidCallback onTap;
 
   const _NotificationRow({
@@ -803,69 +1010,92 @@ class _NotificationRow extends StatelessWidget {
     required this.iconColor,
     required this.onTap,
     this.isUnread = false,
-    this.isLast = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(color: iconBgColor, borderRadius: BorderRadius.circular(12)),
-                  child: Icon(icon, size: 18, color: iconColor),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isUnread
+            ? InsightTheme.blueTint.withValues(alpha: 0.32)
+            : InsightTheme.surface,
+        border: Border.all(
+          color: isUnread
+              ? InsightTheme.blue1.withValues(alpha: 0.28)
+              : InsightTheme.line,
+        ),
+        borderRadius: InsightTheme.roundedMd,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          onTap();
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: InsightTheme.inter(
-                          13.5,
-                          w: isUnread ? FontWeight.w800 : FontWeight.w600,
-                          c: InsightTheme.ink,
-                        ),
+                child: Icon(icon, size: 18, color: iconColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: InsightTheme.inter(
+                        13.5,
+                        w: isUnread ? FontWeight.w800 : FontWeight.w600,
+                        c: InsightTheme.ink,
                       ),
-                      if (subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(subtitle, style: InsightTheme.inter(11.5, c: InsightTheme.ink2)),
-                      ],
-                      if (time.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(time, style: InsightTheme.inter(12, c: InsightTheme.ink3)),
-                      ],
+                    ),
+                    if (subtitle.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                      ),
                     ],
-                  ),
+                    if (time.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        time,
+                        style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                      ),
+                    ],
+                  ],
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(left: 12, top: 8),
-                  child: isUnread
-                      ? Container(
-                          width: 8, height: 8,
-                          decoration: const BoxDecoration(color: InsightTheme.blue1, shape: BoxShape.circle),
-                        )
-                      : const SizedBox.square(dimension: 8),
-                ),
-              ],
-            ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 8, top: 6),
+                child: isUnread
+                    ? Semantics(
+                        label: 'Unread',
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: InsightTheme.blue1,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      )
+                    : const SizedBox.square(dimension: 8),
+              ),
+            ],
           ),
-          if (!isLast)
-            const Divider(height: 1, thickness: 1, indent: 72, endIndent: 16, color: InsightTheme.line),
-        ],
+        ),
       ),
     );
   }
@@ -889,7 +1119,7 @@ class _ModeSegment extends StatelessWidget {
         children: [
           Expanded(
             child: _ModeTab(
-              label: 'Notifications',
+              label: 'Activity',
               isActive: mode == 0,
               onTap: () {
                 HapticFeedback.selectionClick();
@@ -919,7 +1149,11 @@ class _ModeTab extends StatelessWidget {
   final bool isActive;
   final VoidCallback onTap;
 
-  const _ModeTab({required this.label, required this.isActive, required this.onTap});
+  const _ModeTab({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -939,7 +1173,13 @@ class _ModeTab extends StatelessWidget {
             color: isActive ? InsightTheme.surface : Colors.transparent,
             borderRadius: BorderRadius.circular(9),
             boxShadow: isActive
-                ? const [BoxShadow(color: Color(0x0F0F172A), blurRadius: 3, offset: Offset(0, 1))]
+                ? const [
+                    BoxShadow(
+                      color: Color(0x0F0F172A),
+                      blurRadius: 3,
+                      offset: Offset(0, 1),
+                    ),
+                  ]
                 : null,
           ),
           child: Text(
@@ -1006,7 +1246,10 @@ class _UnreadFilterChip extends StatelessWidget {
                   ),
                   const SizedBox(width: 5),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
                     decoration: BoxDecoration(
                       color: isActive
                           ? InsightTheme.blue1.withValues(alpha: 0.12)
@@ -1033,26 +1276,6 @@ class _UnreadFilterChip extends StatelessWidget {
   }
 }
 
-class _ListCard extends StatelessWidget {
-  final List<Widget> children;
-
-  const _ListCard({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: InsightTheme.roundedMd,
-        border: Border.all(color: InsightTheme.line),
-        boxShadow: InsightTheme.cardShadow,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(children: children),
-    );
-  }
-}
-
 /// Uppercase time-bucket label ("TODAY", "YESTERDAY", ...) that opens each
 /// non-empty section in both the Activity and Sync lists.
 class _SectionHeader extends StatelessWidget {
@@ -1075,12 +1298,21 @@ class _SectionHeader extends StatelessWidget {
           Expanded(
             child: Text(
               label.toUpperCase(),
-              style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.8),
+              style: InsightTheme.inter(
+                11,
+                w: FontWeight.w700,
+                c: InsightTheme.ink3,
+                ls: 0.8,
+              ),
             ),
           ),
           Text(
             '$count',
-            style: InsightTheme.inter(11, w: FontWeight.w700, c: InsightTheme.ink3),
+            style: InsightTheme.inter(
+              11,
+              w: FontWeight.w700,
+              c: InsightTheme.ink3,
+            ),
           ),
         ],
       ),

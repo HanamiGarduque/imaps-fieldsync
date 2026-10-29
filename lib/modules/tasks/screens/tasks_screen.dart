@@ -30,6 +30,7 @@ import '../../../core/widgets/field_form_widgets.dart';
 
 import '../../../core/theme/insight_theme.dart';
 import '../models/task_lifecycle.dart';
+import '../widgets/task_notices.dart';
 
 /// ==================================================================
 /// CONSTANTS
@@ -2017,56 +2018,33 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     final p = task.presentation;
     final statusColor = _getStatusColor(p);
     final borderExplanation = _borderExplanation(p);
+    if (_displayCategory != 'Completed') {
+      return showTaskNoticeDetails(context,
+        presentation: p,
+        applicantName: task.name,
+        referenceNumber: task.inspectionNo,
+        roundLabel: task.roundLabel,
+        borderExplanation: borderExplanation,
+      );
+    }
+
     final indicators = <MapEntry<String, String>>[];
-    final isCompleted = _displayCategory == 'Completed';
-    final isScheduled =
-        task.pendingSection == PendingTaskSection.scheduled;
-    if (!isCompleted) {
-      if (isScheduled) {
-        indicators.add(MapEntry('Visit date', p.visitDay?.toIso8601String().split('T').first ?? 'Not verified'));
-      }
-      indicators.add(MapEntry('PO Deadline', p.deadlineDay?.toIso8601String().split('T').first ?? 'Not verified'));
-      for (final notice in p.notices) {
-        final title = switch (notice) {
-          MyTaskNotice.visitInDays || MyTaskNotice.visitTomorrow ||
-          MyTaskNotice.visitToday || MyTaskNotice.visitMissed => 'Visit notice',
-          MyTaskNotice.scheduleConflict => 'Visit / PO Deadline conflict',
-          _ => 'PO Deadline notice',
-        };
-        indicators.add(MapEntry(title, p.noticeText(notice)));
-      }
-      indicators.add(MapEntry('Next action', p.scheduleBlockReason ??
-          'Continue your inspection before the PO Deadline. To ${isScheduled ? 'reschedule' : 'schedule'} a Visit, choose a date from tomorrow through the verified PO Deadline.'));
-    }
-
-    if (isCompleted) {
-      // Completion and delivery are different facts. Only a readable synced
-      // receipt proves server acceptance; a completed task with no receipt is
-      // honestly unverified.
-      final submission = widget.submission;
-      if (submission == null) {
-        indicators.add(const MapEntry(TaskSubmission.syncUnverifiedBadge,
-            'This task is completed, but this device has no saved final-submission receipt. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'));
-      } else if (_awaitingAcceptance) {
-        indicators.add(const MapEntry('Completed on Device',
-            'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'));
-      } else {
-        indicators.add(const MapEntry('Completed — Synced',
-            'The server has confirmed this inspection.'));
-      }
-      if (task.reworkStartedAt != null) {
-        indicators.add(const MapEntry('Modified', 'This completed inspection was changed after it was submitted. The Modified label lets you know that the original submitted information was edited.'));
-      }
-    } else if (isScheduled) {
-      indicators.add(const MapEntry('Scheduled', 'You have chosen a visit date for this task. The task stays Scheduled until the inspection is completed and submitted. You can reschedule the visit when needed, as long as the new date is still allowed by the deadline.'));
-    } else if (task.category == 'Ongoing') {
-      indicators.add(const MapEntry('Ongoing', 'This task is already being worked on, but no fixed visit date was set. You can continue the inspection without scheduling a visit.'));
+    // Completion and delivery are different facts. Only a readable synced
+    // receipt proves server acceptance; a completed task with no receipt is
+    // honestly unverified.
+    final submission = widget.submission;
+    if (submission == null) {
+      indicators.add(const MapEntry(TaskSubmission.syncUnverifiedBadge,
+          'This task is completed, but this device has no saved final-submission receipt. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'));
+    } else if (_awaitingAcceptance) {
+      indicators.add(const MapEntry('Completed on Device',
+          'Your final submission is saved on this device. Server acceptance is not confirmed. Check Sync Center for delivery or review actions.'));
     } else {
-      indicators.add(const MapEntry('Available Anytime', 'This task does not have a fixed visit date yet. You can inspect it anytime before the admin-set deadline. If you want a specific visit date, you can schedule one.'));
+      indicators.add(const MapEntry('Completed — Synced',
+          'The server has confirmed this inspection.'));
     }
-
-    if (!isCompleted && p.showInProgress) {
-      indicators.add(const MapEntry('In Progress', 'You have already started this scheduled inspection. Continue working through the remaining steps until it is completed.'));
+    if (task.reworkStartedAt != null) {
+      indicators.add(const MapEntry('Modified', 'This completed inspection was changed after it was submitted. The Modified label lets you know that the original submitted information was edited.'));
     }
 
     if (!mounted) return;
@@ -2134,13 +2112,23 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     }
   }
 
-  // Removed: _deadlineUrgencyLabel getter. It duplicated (and mis-computed)
-  // what the fixed `scheduleUrgency` getter already correctly returns
-  // ('Due today' / 'Overdue' / null) — its own logic returned 'Deadline
-  // tomorrow' for ANY future date (not just 1-day-out) and 'Deadline near'
-  // whenever deadlineDate was missing, which is what caused those labels to
-  // appear on brand-new tasks with a deadline a week away. Call sites now
-  // use `scheduleUrgency` directly (see below).
+  void _toggleExpanded() {
+    setState(() => _isExpanded = !_isExpanded);
+    HapticFeedback.selectionClick();
+  }
+
+  Widget _dateField(String label, DateTime? day, IconData icon, Color color) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Icon(icon, size: 16, color: color),
+      const SizedBox(width: 8),
+      Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: InsightTheme.inter(12, c: InsightTheme.ink3)),
+        Text(formatTaskNoticeDate(day),
+            style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink)),
+      ])),
+    ],
+  );
 
   // BUG FIX #1 (v2) — canLaunchUrl() itself was returning a null component
   // on real devices even with a real number/email, because it depends on
@@ -2391,13 +2379,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     final String taskCategory = _displayCategory;
     final p = widget.task.presentation;
     final notices = taskCategory == 'Completed' ? const <MyTaskNotice>[] : p.notices;
-    final criticalNotice = notices.any((notice) => switch (notice) {
-      MyTaskNotice.visitTomorrow || MyTaskNotice.visitToday ||
-      MyTaskNotice.visitMissed || MyTaskNotice.deadlineToday ||
-      MyTaskNotice.deadlinePassed || MyTaskNotice.scheduleConflict => true,
-      MyTaskNotice.deadlineInDays => p.deadlineDaysUntil == 1,
-      _ => false,
-    });
+    final criticalNotice = taskCategory != 'Completed' && hasCriticalTaskNotice(p);
     final bool isOverdue = taskCategory != 'Completed' && p.isOverdue;
     final statusColor = _getStatusColor(p);
     final bool showInProgress = taskCategory != 'Completed' && p.showInProgress;
@@ -2405,6 +2387,54 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         .clamp(0, InspectionProgress.totalSteps);
     final bool canSchedule = taskCategory != 'Completed' && p.canSchedule;
     final borderColor = statusColor;
+    final avatar = ExcludeSemantics(child: Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 44, height: 44,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: statusColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+          ),
+          child: Text(_getInitials(widget.task.name), textScaler: TextScaler.noScaling,
+              style: InsightTheme.urbanist(14, w: FontWeight.w800, c: statusColor)),
+        ),
+        if (taskCategory == 'Ongoing')
+          Positioned(top: -2, right: -2, child: Container(
+            width: 12, height: 12,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor,
+                border: Border.all(color: InsightTheme.surface, width: 2)),
+          )),
+      ],
+    ));
+    final identity = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(widget.task.name, style: InsightTheme.urbanist(17, w: FontWeight.w800),
+          maxLines: 2, overflow: TextOverflow.ellipsis),
+      const SizedBox(height: 4),
+      Text(widget.task.inspectionNo,
+          style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk)),
+    ]);
+    final controls = Row(mainAxisSize: MainAxisSize.min, children: [
+      FieldInfoButton(
+        label: 'About task details for ${widget.task.name}',
+        onPressed: _showContextualInfo,
+        color: criticalNotice ? InsightTheme.redInk : notices.isNotEmpty ? InsightTheme.orangeInk : InsightTheme.blueInk,
+        backgroundColor: criticalNotice ? InsightTheme.redTint : notices.isNotEmpty ? InsightTheme.orangeTint : InsightTheme.blueTint,
+      ),
+      IconButton(
+        tooltip: '${_isExpanded ? 'Collapse' : 'Expand'} task actions',
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        onPressed: _toggleExpanded,
+        icon: AnimatedRotation(
+          turns: _isExpanded ? 0.5 : 0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+          child: const Icon(Icons.keyboard_arrow_down_rounded, color: InsightTheme.ink3, size: 20),
+        ),
+      ),
+    ]);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -2422,353 +2452,125 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            GestureDetector(
-              onTap: () {
-                setState(() => _isExpanded = !_isExpanded);
-                HapticFeedback.selectionClick();
-              },
-              // One deadline window controls every scheduling entry point.
-              onLongPress: canSchedule ? () => _scheduleTask(context) : null,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Avatar — enlarged (32->44) per reference; status dot
-                    // moved onto the avatar corner instead of a separate
-                    // free-floating dot, same statusColor source.
-                    Stack(
-                      clipBehavior: Clip.none,
+            Semantics(
+              expanded: _isExpanded,
+              child: Material(color: Colors.transparent, child: InkWell(
+                onTap: _toggleExpanded,
+                // One deadline window controls every scheduling entry point.
+                onLongPress: canSchedule ? () => _scheduleTask(context) : null,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    LayoutBuilder(builder: (context, constraints) {
+                      final stacked = constraints.maxWidth < 270 ||
+                          (constraints.maxWidth < 480 && MediaQuery.textScalerOf(context).scale(12) >= 18);
+                      if (stacked) {
+                        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                          Row(children: [avatar, const Spacer(), controls]),
+                          const SizedBox(height: 8), identity,
+                        ]);
+                      }
+                      return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        avatar, const SizedBox(width: 12), Expanded(child: identity), controls,
+                      ]);
+                    }),
+                    Padding(padding: const EdgeInsets.only(right: 8, top: 8), child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Container(
-                          width: 44, height: 44,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: statusColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: statusColor.withValues(alpha: 0.3)),
-                          ),
-                          child: Text(_getInitials(widget.task.name), style: InsightTheme.poppins(13, w: FontWeight.w800, c: statusColor)),
-                        ),
-                        if (taskCategory == 'Ongoing')
-                          Positioned(
-                            top: -2, right: -2,
-                            child: Container(
-                              width: 12, height: 12,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: statusColor,
-                                border: Border.all(color: InsightTheme.surface, width: 2),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      widget.task.name,
-                                      style: InsightTheme.poppins(14.5, w: FontWeight.w700, c: InsightTheme.ink),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                      decoration: BoxDecoration(color: InsightTheme.surface2, borderRadius: BorderRadius.circular(6)),
-                                      child: Text(
-                                        widget.task.inspectionNo,
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blueInk, ls: 0.2),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              FieldInfoButton(
-                                label: 'About task details for ${widget.task.name}',
-                                onPressed: _showContextualInfo,
-                                color: criticalNotice ? InsightTheme.redInk : notices.isNotEmpty ? InsightTheme.orangeInk : InsightTheme.blueInk,
-                                backgroundColor: criticalNotice ? InsightTheme.redTint : notices.isNotEmpty ? InsightTheme.orangeTint : InsightTheme.blueTint,
-                              ),
-                              const SizedBox(width: 6),
-                              AnimatedRotation(
-                                turns: _isExpanded ? 0.5 : 0.0,
-                                duration: const Duration(milliseconds: 250),
-                                curve: Curves.easeOutCubic,
-                                child: const Icon(
-                                  Icons.keyboard_arrow_down_rounded,
-                                  color: InsightTheme.ink3, size: 20,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (widget.task.roundLabel != null) ...[
-                            const SizedBox(height: 6),
+                        Wrap(spacing: 12, runSpacing: 4, children: [
+                          if (widget.task.roundLabel != null)
                             Text(widget.task.roundLabel!, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk)),
-                          ],
-                          const SizedBox(height: 7),
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on_rounded, size: 13, color: InsightTheme.blue1),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  widget.task.location,
-                                  style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
-                                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          // A started inspector-committed Visit stays Scheduled.
-                          if (taskCategory == 'Pending' && widget.task.pendingSection ==
-                                  PendingTaskSection.scheduled &&
-                              widget.task.scheduledDate.isNotEmpty) ...[
-                            const SizedBox(height: 5),
-                            Row(
-                              children: [
-                                const Icon(Icons.event_available_rounded, size: 13, color: InsightTheme.blue1),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    'Visit: ${widget.task.scheduledDate}',
-                                    style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
-                                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          if (taskCategory != 'Completed' && widget.task.deadlineDate != null && widget.task.deadlineDate!.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                const Icon(Icons.flag_rounded, size: 13, color: InsightTheme.orangeInk),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    'Deadline: ${widget.task.deadlineDate}',
-                                    style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
-                                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          // Final lifecycle semantics: Completed cards show
-                          // the real original completion date from
-                          // field_jobs.submitted_at (never updated_at /
-                          // Last-saved — those belong to Modified/Rework).
-                          if (widget.task.category == 'Completed' &&
-                              widget.task.submittedAt != null &&
-                              widget.task.submittedAt!.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                const Icon(Icons.check_circle_rounded, size: 13, color: InsightTheme.green),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    'Completed: ${_formatCompletionDate(widget.task.submittedAt!)}',
-                                    style: InsightTheme.inter(11.5, w: FontWeight.w600, c: InsightTheme.ink2),
-                                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          // Status badges — same three conditions as before
-                          // (Ongoing / Modified / scheduleUrgency), now
-                          // wrapped instead of a single spaceBetween Row so
-                          // they can co-occur without overflow, each as a
-                          // rounded pill w/ icon.
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: [
-                              if (taskCategory == 'Completed')
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                  decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                                  child: Text(TaskSubmission.badgeOrUnverified(widget.submission, canonicalCompleted: widget.task.category == 'Completed'),
-                                    style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor)),
-                                ),
-                              // NOTE: no standalone "Scheduled" pill — it was
-                              // redundant inside the Pending tab's Scheduled
-                              // section (the section header + orange border +
-                              // Visit row already say it) and added clutter
-                              // on urgent cards. Scheduled state is carried
-                              // by the orange border + avatar instead.
-                              if (taskCategory != 'Completed' && p.forReschedule)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.orangeTint,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.pending_actions_rounded, size: 11, color: InsightTheme.orangeInk),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'For Reschedule',
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              if (showInProgress)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.blue1.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.autorenew_rounded, size: 11, color: InsightTheme.blue1),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'In Progress',
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.blue1),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              if (taskCategory != 'Completed' && p.deadlineState == MyTaskDeadlineState.today)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(color: InsightTheme.orangeTint,
-                                      borderRadius: BorderRadius.circular(999)),
-                                  child: Text('PO Deadline Today',
-                                      style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk)),
-                                ),
-                              // Rework redesign: status stays 'completed' for
-                              // the whole rework session now (see
-                              // SupabaseService.reopenForRework), so this
-                              // badge — keyed off reworkStartedAt, not status
-                              // — is the only signal that a completed task
-                              // has an unfinished rework in progress.
-                              if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.orangeTint,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.schedule_rounded, size: 11, color: InsightTheme.orangeInk),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Modified',
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              // Double-Overdue fix: this pill (visit-date
-                              // driven) is suppressed when the deadline pill
-                              // below is already showing the exact same
-                              // label (e.g. both say "Overdue") — two
-                              // identical pills for different data sources
-                              // read as a rendering bug. Non-identical
-                              // labels ("Due today" vs "Deadline tomorrow")
-                              // still both render.
-                              if (taskCategory != 'Completed' &&
-                                  widget.task.scheduleUrgency != null &&
-                                  widget.task.scheduleUrgency != 'Overdue' &&
-                                  widget.task.forReschedule == null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.orangeTint,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.access_time_rounded, size: 11, color: InsightTheme.orangeInk),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        widget.task.scheduleUrgency!,
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.orangeInk),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              if (taskCategory != 'Completed' && widget.task.scheduleUrgency == 'Overdue')
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.redTint,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.warning_rounded, size: 11, color: InsightTheme.redInk),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Overdue',
-                                        style: InsightTheme.inter(10, w: FontWeight.w700, c: InsightTheme.redInk),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              // Removed the old separate "Deadline urgency
-                              // pill" here — it duplicated the Overdue/Due
-                              // Today pills above using the buggy
-                              // _deadlineUrgencyLabel getter (now deleted).
-                              // The two pills above (from the corrected
-                              // scheduleUrgency getter) already cover every
-                              // category correctly.
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(999),
-                                  child: LinearProgressIndicator(
-                                    value: InspectionProgress.totalSteps == 0 ? 0 : stepValue / InspectionProgress.totalSteps,
-                                    minHeight: 5,
-                                    backgroundColor: InsightTheme.surface2,
-                                    valueColor: AlwaysStoppedAnimation(statusColor),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'STEP $stepValue/${InspectionProgress.totalSteps}',
-                                style: InsightTheme.inter(9.5, w: FontWeight.w700, c: InsightTheme.ink3),
-                              ),
-                            ],
-                          ),
+                          Row(mainAxisSize: MainAxisSize.min, children: [
+                            const Icon(Icons.location_on_outlined, size: 14, color: InsightTheme.blue1),
+                            const SizedBox(width: 4),
+                            Flexible(child: Text(widget.task.location, style: InsightTheme.inter(12, c: InsightTheme.ink2))),
+                          ]),
+                        ]),
+                        if (taskCategory != 'Completed') ...[
+                          const SizedBox(height: 12),
+                          LayoutBuilder(builder: (context, constraints) {
+                            final visit = p.lifecycle == MyTaskLifecycle.scheduled
+                                ? _dateField('Visit date', p.visitDay, Icons.event_available_outlined, InsightTheme.blue1)
+                                : null;
+                            final deadline = _dateField('PO Deadline', p.deadlineDay, Icons.outlined_flag, InsightTheme.orangeInk);
+                            if (visit != null && constraints.maxWidth >= 280 && MediaQuery.textScalerOf(context).scale(12) < 18) {
+                              return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Expanded(child: visit), const SizedBox(width: 16), Expanded(child: deadline),
+                              ]);
+                            }
+                            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              if (visit != null) ...[visit, const SizedBox(height: 8)], deadline,
+                            ]);
+                          }),
                         ],
-                      ),
-                    ),
-                  ],
+                        // Completion dates still use submitted_at, never updated_at.
+                        if (widget.task.category == 'Completed' &&
+                            widget.task.submittedAt != null && widget.task.submittedAt!.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            const Icon(Icons.check_circle_rounded, size: 13, color: InsightTheme.green),
+                            const SizedBox(width: 4),
+                            Expanded(child: Text('Completed: ${_formatCompletionDate(widget.task.submittedAt!)}',
+                                style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2))),
+                          ]),
+                        ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          alignment: WrapAlignment.spaceBetween,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 12, runSpacing: 8,
+                          children: [
+                            if (taskCategory == 'Completed')
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                                child: Text(TaskSubmission.badgeOrUnverified(widget.submission, canonicalCompleted: widget.task.category == 'Completed'),
+                                    style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor)),
+                              ),
+                            if (showInProgress || taskCategory == 'Ongoing')
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(color: InsightTheme.blue1.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
+                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  const Icon(Icons.autorenew_rounded, size: 14, color: InsightTheme.blue1),
+                                  const SizedBox(width: 4),
+                                  Flexible(child: Text(showInProgress ? 'In Progress' : 'Ongoing',
+                                      style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk))),
+                                ]),
+                              ),
+                            if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(color: InsightTheme.orangeTint, borderRadius: BorderRadius.circular(999)),
+                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  const Icon(Icons.schedule_rounded, size: 14, color: InsightTheme.orangeInk),
+                                  const SizedBox(width: 4),
+                                  Flexible(child: Text('Modified', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.orangeInk))),
+                                ]),
+                              ),
+                            Text('STEP $stepValue/${InspectionProgress.totalSteps}',
+                                style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            value: InspectionProgress.totalSteps == 0 ? 0 : stepValue / InspectionProgress.totalSteps,
+                            minHeight: 5,
+                            backgroundColor: InsightTheme.surface2,
+                            valueColor: AlwaysStoppedAnimation(statusColor),
+                          ),
+                        ),
+                      ],
+                    )),
+                  ]),
                 ),
-              ),
+              )),
             ),
+            if (taskCategory != 'Completed')
+              TaskNoticeSummary(presentation: p, applicantName: widget.task.name,
+                  onDetails: _showContextualInfo),
             AnimatedCrossFade(
               firstChild: const SizedBox(width: double.infinity, height: 0),
               secondChild: Column(
@@ -2790,12 +2592,16 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           ],
                         ),
                         const SizedBox(height: 10),
-                        GestureDetector(
+                        Material(
+                          color: InsightTheme.bg,
+                          borderRadius: BorderRadius.circular(8),
+                          child: InkWell(
                           onTap: widget.onTapDetail,
+                          borderRadius: BorderRadius.circular(8),
                           child: Container(
+                            constraints: const BoxConstraints(minHeight: 48),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                             decoration: BoxDecoration(
-                              color: InsightTheme.bg,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(color: InsightTheme.line),
                             ),
@@ -2807,12 +2613,11 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('Application Details', style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink)), 
+                                      Text('Application Details', style: InsightTheme.inter(13, w: FontWeight.w600, c: InsightTheme.ink)),
                                       const SizedBox(height: 1),
                                       Text(
                                         '${widget.task.applicationType ?? 'General'} • ${widget.task.landUseClass}',
-                                        style: InsightTheme.inter(10, c: InsightTheme.ink2),
-                                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                                        style: InsightTheme.inter(12, c: InsightTheme.ink2),
                                       ),
                                     ],
                                   ),
@@ -2821,37 +2626,37 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               ],
                             ),
                           ),
+                          ),
                         ),
                         if (canSchedule) ...[
                           const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: () => _scheduleTask(context),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                              constraints: const BoxConstraints(minHeight: 48),
-                              decoration: BoxDecoration(
-                                color: InsightTheme.orangeTint,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: InsightTheme.orange.withValues(alpha: 0.3)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.calendar_today_rounded, color: InsightTheme.orange, size: 14),
-                                  const SizedBox(width: 6),
-                                    Flexible(child: Text(
-                                      widget.task.isSelfScheduled
-                                        ? 'Reschedule Inspection Date'
-                                        : 'Schedule Inspection Date',
-                                    style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.orangeInk),
-                                    )),
-                                ],
-                              ),
+                          SizedBox(width: double.infinity, child: TextButton.icon(
+                            onPressed: () => _scheduleTask(context),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(48, 48),
+                              foregroundColor: InsightTheme.orangeInk,
+                              backgroundColor: InsightTheme.orangeTint,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              side: BorderSide(color: InsightTheme.orange.withValues(alpha: 0.3)),
                             ),
-                          ),
+                            icon: const Icon(Icons.calendar_today_rounded, size: 16),
+                            label: Text(widget.task.isSelfScheduled
+                                ? 'Reschedule Inspection Date' : 'Schedule Inspection Date',
+                                textAlign: TextAlign.center,
+                                style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.orangeInk)),
+                          )),
                         ] else if (taskCategory != 'Completed') ...[
                           const SizedBox(height: 8),
-                          Text(p.scheduleBlockReason!, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                          Row(children: [
+                            const Icon(Icons.lock_outline_rounded, size: 16, color: InsightTheme.ink3),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text('Scheduling unavailable',
+                                style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink3))),
+                            TextButton(onPressed: _showContextualInfo,
+                              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                              child: Text('Why?', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                            ),
+                          ]),
                         ],
                       ],
                     ),
@@ -2880,29 +2685,22 @@ class _ActionBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: InsightTheme.surface,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: InsightTheme.line),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: InsightTheme.ink2, size: 14), 
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label, 
-                style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink), 
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        backgroundColor: InsightTheme.surface,
+        foregroundColor: InsightTheme.ink2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: const BorderSide(color: InsightTheme.line),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 6, runSpacing: 4,
+        children: [Icon(icon, size: 16),
+          Text(label, style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink))],
       ),
     );
   }
