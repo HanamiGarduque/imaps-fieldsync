@@ -17,6 +17,14 @@ import 'support/offline_reliability_fixture.dart';
 void main() {
   final fixture = OfflineReliabilityFixture();
 
+  Future<void> settleOfflineDrain() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (SyncOutboxService.isDraining && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    expect(SyncOutboxService.isDraining, isFalse);
+  }
+
   setUpAll(fixture.initialize);
   setUp(() async {
     StructuredChecklist.remoteTransmissionEnabledForTesting = null;
@@ -26,10 +34,7 @@ void main() {
     StructuredChecklist.remoteTransmissionEnabledForTesting = null;
     // saveStepChecklist starts an unawaited drain. Let it observe the offline
     // fixture and finish before the fixture resets the outbox session.
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
-    while (SyncOutboxService.isDraining && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-    }
+    await settleOfflineDrain();
     await fixture.closeCase();
   });
   tearDownAll(fixture.dispose);
@@ -53,6 +58,43 @@ void main() {
           ? secondChecked
           : false,
   };
+
+  List<Map<String, dynamic>> remoteStructuredAnswers({
+    int round = 1,
+    String inspectorId = offlineInspector,
+  }) => [
+    for (final (key, answer) in <(String, String)>[
+      (StructuredChecklist.existingDevelopment, 'Yes'),
+      (StructuredChecklist.existingUse, 'Fictional clinic'),
+      (StructuredChecklist.extensionOfExisting, 'Not Applicable'),
+      (StructuredChecklist.proposalStage, 'Yes'),
+      (StructuredChecklist.treesPresent, 'No'),
+      (StructuredChecklist.canalWaterway, 'Unable to Verify'),
+      (StructuredChecklist.mojonObserved, 'No'),
+    ])
+      {
+        'item': StructuredChecklist.questionLabels[key],
+        'answer': answer,
+        'inspector_id': inspectorId,
+        'inspection_round_number': round,
+      },
+  ];
+
+  TaskItem taskWithRemoteChecklist({
+    String id = offlineJob,
+    int round = 1,
+    required List<Map<String, dynamic>> checklistData,
+  }) => TaskItem(
+    id: id,
+    parcelId: 'fictional-parcel',
+    name: 'Fictional site',
+    location: 'Isolated fixture only',
+    parcels: '1',
+    status: 'in_progress',
+    inspectionNo: 'DEMO-FS05-R$round',
+    inspectionRoundNumber: round,
+    checklistData: checklistData,
+  );
 
   Future<List<Map<String, dynamic>>> actionRows(
     String type, {
@@ -238,6 +280,355 @@ void main() {
     expect(unanswered, hasLength(5));
     expect(unanswered.every((entry) => !entry.containsKey('answer')), isTrue);
   });
+
+  test(
+    'remote label rows decode only the seven allowed structured questions',
+    () {
+      final decoded = StructuredChecklist.decodeRemoteChecklist(
+        remoteStructuredAnswers(),
+        inspectorId: offlineInspector,
+        inspectionRoundNumber: 1,
+      );
+      expect(decoded, {
+        StructuredChecklist.existingDevelopment: StructuredChecklist.yes,
+        StructuredChecklist.existingUse: 'Fictional clinic',
+        StructuredChecklist.extensionOfExisting:
+            StructuredChecklist.notApplicable,
+        StructuredChecklist.proposalStage: StructuredChecklist.yes,
+        StructuredChecklist.treesPresent: StructuredChecklist.no,
+        StructuredChecklist.canalWaterway: StructuredChecklist.unable,
+        StructuredChecklist.mojonObserved: StructuredChecklist.no,
+      });
+    },
+  );
+
+  test('ambiguous rows are omitted and inactive children stay hidden', () {
+    final rows = [
+      {
+        'item': StructuredChecklist
+            .questionLabels[StructuredChecklist.existingDevelopment],
+        'answer': 'Yes',
+      },
+      {
+        'item': StructuredChecklist
+            .questionLabels[StructuredChecklist.existingDevelopment],
+        'answer': 'Yes',
+      },
+      {
+        'item': StructuredChecklist
+            .questionLabels[StructuredChecklist.extensionOfExisting],
+        'answer': 'Maybe',
+      },
+      {
+        'item': StructuredChecklist
+            .questionLabels[StructuredChecklist.proposalStage],
+        'answer': 'No',
+      },
+      {
+        'item': StructuredChecklist
+            .questionLabels[StructuredChecklist.treesPresent],
+        'answer': 'Yes',
+      },
+      {
+        'item': StructuredChecklist
+            .questionLabels[StructuredChecklist.mojonObserved],
+        'answer': 'Yes',
+        'checked': false,
+      },
+      {
+        'item': StructuredChecklist
+            .questionLabels[StructuredChecklist.canalWaterway],
+        'answer': 'Unable to Verify',
+      },
+      {
+        'item':
+            StructuredChecklist.questionLabels[StructuredChecklist.existingUse],
+        'answer': 'Wrong-owner value',
+        'inspector_id': otherOfflineInspector,
+      },
+    ];
+
+    final decoded = StructuredChecklist.decodeRemoteChecklist(
+      rows,
+      inspectorId: offlineInspector,
+      inspectionRoundNumber: 1,
+    );
+    expect(decoded, {
+      // A hidden child does not invalidate its explicitly recorded parent.
+      StructuredChecklist.proposalStage: StructuredChecklist.no,
+    });
+    expect(
+      StructuredChecklist.decodeRemoteChecklist(
+        remoteStructuredAnswers(round: 1),
+        inspectorId: offlineInspector,
+        inspectionRoundNumber: 2,
+      ),
+      isEmpty,
+    );
+    expect(
+      StructuredChecklist.decodeRemoteChecklist(
+        [
+          {
+            'item': 'Existing mojon or property marker observed',
+            'answer': 'Yes',
+            'inspection_round_number': 1.5,
+          },
+        ],
+        inspectorId: offlineInspector,
+        inspectionRoundNumber: 1,
+      ),
+      isEmpty,
+      reason: 'A fractional round must not be truncated into this round.',
+    );
+  });
+
+  test(
+    'remote answers restore without a local draft for the selected round',
+    () async {
+      final task = taskWithRemoteChecklist(
+        id: offlineRound2,
+        round: 2,
+        checklistData: remoteStructuredAnswers(round: 2),
+      );
+      expect(await DBHelper.getLocalInspection(offlineRound2), isNull);
+
+      await fixture.provider.startInspection(task);
+
+      expect(fixture.provider.structuredAnswers, {
+        StructuredChecklist.existingDevelopment: StructuredChecklist.yes,
+        StructuredChecklist.existingUse: 'Fictional clinic',
+        StructuredChecklist.extensionOfExisting:
+            StructuredChecklist.notApplicable,
+        StructuredChecklist.proposalStage: StructuredChecklist.yes,
+        StructuredChecklist.treesPresent: StructuredChecklist.no,
+        StructuredChecklist.canalWaterway: StructuredChecklist.unable,
+        StructuredChecklist.mojonObserved: StructuredChecklist.no,
+      });
+    },
+  );
+
+  test(
+    'owned local answers and in-session edits take precedence over remote data',
+    () async {
+      fixture.provider
+        ..setStructuredAnswer(
+          StructuredChecklist.existingDevelopment,
+          StructuredChecklist.no,
+        )
+        ..setStructuredAnswer(
+          StructuredChecklist.mojonObserved,
+          StructuredChecklist.yes,
+        );
+      expect(await fixture.provider.saveStepChecklist(), isTrue);
+
+      final task = taskWithRemoteChecklist(
+        checklistData: remoteStructuredAnswers(),
+      );
+      await fixture.provider.startInspection(task);
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist
+            .existingDevelopment],
+        StructuredChecklist.no,
+      );
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.mojonObserved],
+        StructuredChecklist.yes,
+      );
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.existingUse],
+        isNull,
+        reason: 'A remote child answer cannot override a local No parent.',
+      );
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist
+            .extensionOfExisting],
+        isNull,
+        reason:
+            'Not recorded in an owned snapshot must not become a remote answer.',
+      );
+
+      fixture.provider
+        ..setStructuredAnswer(
+          StructuredChecklist.existingDevelopment,
+          StructuredChecklist.yes,
+        )
+        ..setStructuredAnswer(
+          StructuredChecklist.existingUse,
+          'In-session declared use',
+        );
+      await fixture.provider.restoreStructuredChecklist();
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.existingUse],
+        'In-session declared use',
+      );
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.mojonObserved],
+        StructuredChecklist.yes,
+      );
+    },
+  );
+
+  test(
+    'rework keeps remote answers when no structured local snapshot exists',
+    () async {
+      final task = taskWithRemoteChecklist(
+        checklistData: remoteStructuredAnswers(),
+      );
+      fixture.provider.hydrateForRework(task);
+      await fixture.provider.restoreStructuredChecklist();
+      expect(fixture.provider.structuredAnswers, {
+        StructuredChecklist.existingDevelopment: StructuredChecklist.yes,
+        StructuredChecklist.existingUse: 'Fictional clinic',
+        StructuredChecklist.extensionOfExisting:
+            StructuredChecklist.notApplicable,
+        StructuredChecklist.proposalStage: StructuredChecklist.yes,
+        StructuredChecklist.treesPresent: StructuredChecklist.no,
+        StructuredChecklist.canalWaterway: StructuredChecklist.unable,
+        StructuredChecklist.mojonObserved: StructuredChecklist.no,
+      });
+      expect(
+        fixture.requests,
+        isEmpty,
+        reason: 'Opening rework is not an edit.',
+      );
+      expect(await DBHelper.getLocalInspection(offlineJob), isNull);
+    },
+  );
+
+  test(
+    'edits and clears made during restore win over its awaited read',
+    () async {
+      final task = taskWithRemoteChecklist(
+        checklistData: remoteStructuredAnswers(),
+      );
+      fixture.provider.hydrateForRework(task);
+      final restoring = fixture.provider.restoreStructuredChecklist();
+      fixture.provider
+        ..setStructuredAnswer(
+          StructuredChecklist.mojonObserved,
+          StructuredChecklist.yes,
+        )
+        ..setStructuredAnswer(StructuredChecklist.existingUse, null);
+      await restoring;
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.mojonObserved],
+        StructuredChecklist.yes,
+      );
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.existingUse],
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'revisiting the same rework preserves unsaved answers and clears',
+    () async {
+      final task = taskWithRemoteChecklist(
+        checklistData: remoteStructuredAnswers(),
+      );
+      fixture.provider.hydrateForRework(task);
+      fixture.provider
+        ..setStructuredAnswer(
+          StructuredChecklist.mojonObserved,
+          StructuredChecklist.yes,
+        )
+        ..setStructuredAnswer(StructuredChecklist.existingUse, null);
+      fixture.provider.hydrateForRework(task);
+      await fixture.provider.restoreStructuredChecklist();
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.mojonObserved],
+        StructuredChecklist.yes,
+      );
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.existingUse],
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'saved empty structured snapshot stays empty after restart and rework',
+    () async {
+      final task = taskWithRemoteChecklist(
+        checklistData: [
+          {
+            'item': 'Existing mojon or property marker observed',
+            'answer': 'Yes',
+          },
+        ],
+      );
+      fixture.provider.hydrateForRework(task);
+      fixture.provider.setStructuredAnswer(
+        StructuredChecklist.mojonObserved,
+        null,
+      );
+      expect(await fixture.provider.saveStepChecklist(), isTrue);
+      await settleOfflineDrain();
+      await fixture.restartDatabase();
+
+      final restored = InspectionProvider();
+      addTearDown(restored.dispose);
+      await restored.startInspection(task);
+      expect(restored.structuredAnswers, isEmpty);
+      restored.hydrateForRework(task);
+      await restored.restoreStructuredChecklist();
+      expect(restored.structuredAnswers, isEmpty);
+      final payload = await actionPayload('checklist_update');
+      expect((payload['checklistData'] as List), hasLength(5));
+    },
+  );
+
+  test(
+    'stale restore cannot write into a reentered session of the same round',
+    () async {
+      final task = taskWithRemoteChecklist(
+        checklistData: remoteStructuredAnswers(),
+      );
+      fixture.provider.hydrateForRework(task);
+      final restoring = fixture.provider.restoreStructuredChecklist();
+      fixture.provider.hydrateForRework(task);
+      await expectLater(restoring, throwsStateError);
+      expect(
+        fixture.provider.structuredAnswers[StructuredChecklist.existingUse],
+        'Fictional clinic',
+      );
+    },
+  );
+
+  test('pending start cannot replace a newly selected rework round', () async {
+    final starting = fixture.provider.startInspection(
+      taskWithRemoteChecklist(checklistData: remoteStructuredAnswers()),
+    );
+    final selected = taskWithRemoteChecklist(
+      id: offlineRound2,
+      round: 2,
+      checklistData: remoteStructuredAnswers(round: 2),
+    );
+    fixture.provider.hydrateForRework(selected);
+    await expectLater(starting, throwsStateError);
+    expect(fixture.provider.activeTask?.id, offlineRound2);
+    expect(fixture.provider.isReworkMode, isTrue);
+  });
+
+  test(
+    'foreign structured drafts and remote rows cannot cross inspectors',
+    () async {
+      recordAll();
+      expect(await fixture.provider.saveStepChecklist(), isTrue);
+      final task = taskWithRemoteChecklist(
+        checklistData: remoteStructuredAnswers(),
+      );
+      DBHelper.inspectorIdForTesting = otherOfflineInspector;
+      try {
+        fixture.provider.hydrateForRework(task);
+        await fixture.provider.restoreStructuredChecklist();
+        expect(fixture.provider.structuredAnswers, isEmpty);
+      } finally {
+        DBHelper.inspectorIdForTesting = null;
+      }
+    },
+  );
 
   test(
     'offline saves replace one queued action without duplicate entries',

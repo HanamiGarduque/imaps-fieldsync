@@ -17,6 +17,7 @@ import '../screens/inspection_progress.dart';
 class InspectionProvider extends ChangeNotifier {
   TaskItem? _activeTask;
   String? _inspectorId;
+  int _inspectionSession = 0;
   void _requireOwner() {
     if (_inspectorId == null) {
       throw StateError('Inspection has no recorded session owner');
@@ -44,6 +45,8 @@ class InspectionProvider extends ChangeNotifier {
   // corrected iMAPS reader is released; a missing key means "not recorded",
   // never an implicit No.
   final Map<String, String?> _structuredAnswers = {};
+  final Set<String> _structuredAnswerEditsInSession = {};
+  bool _hasLocalStructuredSnapshot = false;
 
   // Photo Evidence State
   final List<Map<String, dynamic>> _capturedPhotos = [];
@@ -169,12 +172,16 @@ class InspectionProvider extends ChangeNotifier {
 
   void requireOwner() => _requireOwner();
 
-  /// Clears every field observation. Used by both entry paths so no session's
-  /// answers can reach another session's report.
-  void _resetFieldState() {
+  /// Clears field observations at entry; only a same-owner/round rework
+  /// revisit may keep its structured answers and unsaved edits.
+  void _resetFieldState({bool keepStructuredAnswers = false}) {
     _siteCondition.updateAll((key, value) => false);
     _zoningObservations.updateAll((key, value) => false);
-    _structuredAnswers.clear();
+    if (!keepStructuredAnswers) {
+      _structuredAnswers.clear();
+      _structuredAnswerEditsInSession.clear();
+      _hasLocalStructuredSnapshot = false;
+    }
     _capturedPhotos.clear();
     _actualLandUse = 'Single-detached residential';
     _notes = '';
@@ -191,12 +198,15 @@ class InspectionProvider extends ChangeNotifier {
   // --- INITIALIZATION & NAVIGATION ---
 
   Future<void> startInspection(TaskItem task) async {
-    _inspectorId = DBHelper.requireInspector();
+    final inspectorId = DBHelper.requireInspector();
+    final session = ++_inspectionSession;
     await DBHelper.requireOwnedJob(
       await DBHelper.database,
       task.id,
-      _inspectorId!,
+      inspectorId,
     );
+    _requireInspectionSession(inspectorId, session);
+    _inspectorId = inspectorId;
     _activeTask = task;
     _isReworkMode = false;
 
@@ -208,6 +218,7 @@ class InspectionProvider extends ChangeNotifier {
     // photos, AND current_step from the task's own SQLite row.
     // Each task has its own row so step can never bleed across tasks.
     final draft = await DBHelper.getLocalInspection(task.id);
+    _requireInspectionSession(inspectorId, session);
     final storedStep = (draft?['current_step'] as int?) ?? 0;
     _currentStep = storedStep < 1 ? 1 : storedStep;
     _persistedStepTimestamps
@@ -229,9 +240,19 @@ class InspectionProvider extends ChangeNotifier {
     }
 
     await _loadLocalDraftIfExists(task.id);
-    _gpsVerification = _snapshotFromRow(
-      await DBHelper.getGpsVerification(task.id),
-    );
+    _requireInspectionSession(inspectorId, session);
+    if (!_hasLocalStructuredSnapshot) {
+      _restoreStructuredAnswers(
+        StructuredChecklist.decodeRemoteChecklist(
+          task.checklistData,
+          inspectorId: inspectorId,
+          inspectionRoundNumber: task.inspectionRoundNumber,
+        ),
+      );
+    }
+    final gps = await DBHelper.getGpsVerification(task.id);
+    _requireInspectionSession(inspectorId, session);
+    _gpsVerification = _snapshotFromRow(gps);
     _gpsVerification ??= _snapshotFromTask(task);
     notifyListeners();
   }
@@ -306,6 +327,7 @@ class InspectionProvider extends ChangeNotifier {
     } else {
       _structuredAnswers[key] = normalised;
     }
+    _structuredAnswerEditsInSession.add(key);
     _markReworkModifiedIfNeeded();
     notifyListeners();
   }
@@ -605,6 +627,11 @@ class InspectionProvider extends ChangeNotifier {
   /// step" — unlike startInspection, this does NOT reset anything, so the
   /// inspector doesn't lose the other steps' answers.
   void hydrateForRework(TaskItem task) {
+    final keepStructured =
+        _visible &&
+        _isReworkMode &&
+        _activeTask?.id == task.id &&
+        _activeTask?.inspectionRoundNumber == task.inspectionRoundNumber;
     // Keep this owner's same-job draft across a revisit: entering rework
     // again after leaving without Save must not wipe unsaved text. Anything
     // else hydrates normally; another job or session starts fresh.
@@ -622,6 +649,7 @@ class InspectionProvider extends ChangeNotifier {
       pending: _pendingFindingsSignature,
     );
     _inspectorId = DBHelper.requireInspector();
+    _inspectionSession++;
     _activeTask = task;
     _isReworkMode = true;
     _currentStep = 6;
@@ -633,7 +661,7 @@ class InspectionProvider extends ChangeNotifier {
     // into this one. The rework payload below re-populates what it actually
     // carries; anything it does not carry starts from the same defaults
     // startInspection() uses rather than leaking a prior inspector's answer.
-    _resetFieldState();
+    _resetFieldState(keepStructuredAnswers: keepStructured);
     _gpsVerification = _snapshotFromTask(task);
 
     // Match stored checklist entries back onto the two known maps.
@@ -656,6 +684,15 @@ class InspectionProvider extends ChangeNotifier {
       } else if (_zoningObservations.containsKey(key)) {
         _zoningObservations[key] = value == true;
       }
+    }
+    if (!keepStructured) {
+      _restoreStructuredAnswers(
+        StructuredChecklist.decodeRemoteChecklist(
+          task.checklistData,
+          inspectorId: _inspectorId!,
+          inspectionRoundNumber: task.inspectionRoundNumber,
+        ),
+      );
     }
 
     // Photos — only paths were persisted on field_jobs.photo_paths (no
@@ -784,8 +821,10 @@ class InspectionProvider extends ChangeNotifier {
   Future<void> _loadLocalDraftIfExists(String jobId) async {
     // Ownership was already established at entry, and every read below is
     // inspector-scoped, so this only hydrates memory.
+    final inspectorId = _inspectorId!;
+    final session = _inspectionSession;
     final draft = await DBHelper.getLocalInspection(jobId);
-    _requireOwner();
+    _requireInspectionSession(inspectorId, session);
     var hasFindingsSnapshot = false;
     if (draft != null) {
       _actualLandUse = draft['actual_land_use'] ?? _actualLandUse;
@@ -814,10 +853,9 @@ class InspectionProvider extends ChangeNotifier {
             }
           });
           final structured = checklist[StructuredChecklist.jsonKey];
-          if (structured != null) {
-            _structuredAnswers
-              ..clear()
-              ..addAll(StructuredChecklist.decode(structured));
+          if (structured is Map) {
+            _hasLocalStructuredSnapshot = true;
+            _restoreStructuredAnswers(StructuredChecklist.decode(structured));
           }
         } catch (e) {
           debugPrint('Error decoding local checklist: $e');
@@ -826,7 +864,7 @@ class InspectionProvider extends ChangeNotifier {
     }
 
     final pending = await DBHelper.getLocalFindingsIntent(jobId);
-    _requireOwner();
+    _requireInspectionSession(inspectorId, session);
     final queuedAt = DateTime.tryParse(
       pending?['localCreatedAt'] as String? ?? '',
     );
@@ -845,7 +883,7 @@ class InspectionProvider extends ChangeNotifier {
     }
 
     final localPhotos = await DBHelper.getLocalPhotos(jobId);
-    _requireOwner();
+    _requireInspectionSession(inspectorId, session);
     if (localPhotos.isNotEmpty) {
       _capturedPhotos.clear();
       for (final p in localPhotos) {
@@ -865,30 +903,68 @@ class InspectionProvider extends ChangeNotifier {
 
   // --- LOCAL SAVE & ONLINE SYNC ---
 
-  /// Restores CE-05 answers from this job's owned local draft after rework
-  /// hydration. Remote transmission remains gated by
+  /// An owned structured snapshot wins over remote evidence, including its
+  /// unanswered fields. In-session edits/clears win over either source.
+  /// Remote transmission remains gated by
   /// [StructuredChecklist.isRemoteTransmissionEnabled].
   Future<void> restoreStructuredChecklist() async {
     _requireOwner();
-    if (_activeTask == null) return;
-    final draft = await DBHelper.getLocalInspection(_activeTask!.id);
-    _requireOwner();
-    _structuredAnswers.clear();
-    if (draft == null || draft['checklist_json'] == null) {
-      notifyListeners();
-      return;
-    }
+    final task = _activeTask;
+    if (task == null) return;
+    final inspectorId = _inspectorId!;
+    final session = _inspectionSession;
+    final draft = await DBHelper.getLocalInspection(task.id);
+    _requireInspectionSession(inspectorId, session);
+
+    Map<String, String>? localAnswers;
     try {
-      final checklist = jsonDecode(draft['checklist_json'] as String);
-      if (checklist is Map) {
-        _structuredAnswers.addAll(
-          StructuredChecklist.decode(checklist[StructuredChecklist.jsonKey]),
-        );
+      final checklistJson = draft?['checklist_json'];
+      if (checklistJson is String) {
+        final checklist = jsonDecode(checklistJson);
+        if (checklist is Map && checklist[StructuredChecklist.jsonKey] is Map) {
+          localAnswers = StructuredChecklist.decode(
+            checklist[StructuredChecklist.jsonKey],
+          );
+        }
       }
     } catch (e) {
       debugPrint('Error restoring structured checklist: $e');
     }
+
+    _hasLocalStructuredSnapshot = localAnswers != null;
+    _restoreStructuredAnswers(
+      localAnswers ??
+          StructuredChecklist.decodeRemoteChecklist(
+            task.checklistData,
+            inspectorId: inspectorId,
+            inspectionRoundNumber: task.inspectionRoundNumber,
+          ),
+    );
     notifyListeners();
+  }
+
+  void _requireInspectionSession(String inspectorId, int session) {
+    DBHelper.requireSameInspector(inspectorId);
+    if (_inspectionSession != session) {
+      throw StateError(
+        'The active inspection changed. Checklist answers were not restored to another task.',
+      );
+    }
+  }
+
+  void _restoreStructuredAnswers(Map<String, String> answers) {
+    // Read edits after awaited local reads, not before: typing may continue.
+    for (final key in _structuredAnswerEditsInSession) {
+      final answer = _structuredAnswers[key];
+      if (answer == null) {
+        answers.remove(key);
+      } else {
+        answers[key] = answer;
+      }
+    }
+    _structuredAnswers
+      ..clear()
+      ..addAll(answers);
   }
 
   Future<void> _saveLocalInspection() {
@@ -904,7 +980,12 @@ class InspectionProvider extends ChangeNotifier {
       checklist: {
         ..._siteCondition,
         ..._zoningObservations,
-        if (structured.isNotEmpty) StructuredChecklist.jsonKey: structured,
+        // An explicit empty snapshot prevents remote answers resurrecting
+        // after the inspector cleared them and restarted the app.
+        if (structured.isNotEmpty ||
+            _hasLocalStructuredSnapshot ||
+            _structuredAnswerEditsInSession.isNotEmpty)
+          StructuredChecklist.jsonKey: structured,
       },
       boundaryStatus: _boundaryStatus,
       currentStep: _currentStep,

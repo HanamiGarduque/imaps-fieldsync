@@ -150,6 +150,72 @@ class StructuredChecklist {
     return decoded;
   }
 
+  /// Decodes the label-based rows stored on a remote inspection. Ambiguous
+  /// rows are omitted so callers keep them as unrecorded rather than guessing.
+  static Map<String, String> decodeRemoteChecklist(
+    Object? raw, {
+    required String inspectorId,
+    int? inspectionRoundNumber,
+  }) {
+    if (raw is! List) return {};
+
+    final keysByLabel = {
+      for (final entry in questionLabels.entries) entry.value: entry.key,
+    };
+    final rowsByKey = <String, List<Map>>{};
+    for (final value in raw) {
+      if (value is! Map) continue;
+      final item = value['item'];
+      if (item is! String) continue;
+      final key = keysByLabel[item.trim()];
+      if (key == null) continue;
+      rowsByKey.putIfAbsent(key, () => []).add(value);
+    }
+
+    final decoded = <String, String>{};
+    for (final entry in rowsByKey.entries) {
+      final rows = entry.value;
+      if (rows.length != 1) continue;
+      final row = rows.single;
+      if (row.containsKey('checked') || row.containsKey('passed')) continue;
+
+      final rowInspector = row['inspector_id'];
+      if (row.containsKey('inspector_id') &&
+          (rowInspector is! String || rowInspector != inspectorId)) {
+        continue;
+      }
+      final rowRound = row['inspection_round_number'];
+      if (row.containsKey('inspection_round_number') &&
+          (rowRound is! num ||
+              inspectionRoundNumber == null ||
+              rowRound != inspectionRoundNumber)) {
+        continue;
+      }
+
+      final rawAnswer = row['answer'];
+      if (rawAnswer is! String) continue;
+      final answer = rawAnswer.trim();
+      if (answer.isEmpty) continue;
+      if (entry.key == existingUse) {
+        decoded[entry.key] = answer;
+        continue;
+      }
+
+      final normalized = answer.toLowerCase();
+      String? allowedValue;
+      for (final option in optionsFor(entry.key).entries) {
+        if (normalized == option.key ||
+            normalized == option.value.toLowerCase()) {
+          allowedValue = option.key;
+          break;
+        }
+      }
+      if (allowedValue != null) decoded[entry.key] = allowedValue;
+    }
+
+    return activeAnswers(decoded);
+  }
+
   static String labelFor(String key, String? value) {
     if (value == null || value.isEmpty) return 'Not recorded';
     if (key == existingUse) return value;
