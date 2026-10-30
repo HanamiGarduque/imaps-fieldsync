@@ -63,6 +63,10 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   // real refresh instead of a second, divergent indicator.
   TaskRefreshPhase _refreshPhase = TaskRefreshPhase.checking;
   DateTime? _lastRefreshAt;
+  // Fail closed: a failed local DB read is UNKNOWN, never an empty queue.
+  bool _queueReadable = false;
+  bool _storageUnreadable = false;
+  bool _cacheStatsReadable = false;
 
   // --- Phase 7: Storage Management state ---
   int _cachedJobsCount = 0;
@@ -143,7 +147,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refresh());
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
-      if (online) SyncOutboxService.drain();
+      if (online && _queueReadable) {
+        unawaited(SyncOutboxService.drain());
+      }
       _refresh();
     });
   }
@@ -228,6 +234,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         _photosWaiting = photos;
         _pendingBytes = bytes;
         _lastSync = lastReceipt;
+        _queueReadable = true;
+        _storageUnreadable = false;
         _loading = false;
         _syncingNow = SyncOutboxService.isDraining;
         _refreshPhase = online
@@ -241,6 +249,10 @@ class _UpdatesScreenState extends State<UpdatesScreen>
       if (!mounted) return;
       setState(() {
         _loading = false;
+        _queueReadable = false;
+        _storageUnreadable = e.toString().contains(
+          'Local database exists but is unreadable',
+        );
         _refreshPhase = TaskRefreshPhase.failed;
       });
     }
@@ -251,18 +263,29 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   /// which is unnecessary work to repeat every 4 seconds. Loaded once at
   /// open and again right after a manual clear.
   Future<void> _loadCacheStats() async {
-    final stats = await DBHelper.getCacheStats();
-    if (!mounted) return;
-    setState(() {
-      _cachedJobsCount = stats['cachedJobsCount'] as int;
-      _syncedPhotoFileCount = stats['syncedPhotoFileCount'] as int;
-      _unsyncedPhotoFileCount = stats['unsyncedPhotoFileCount'] as int;
-      _clearableBytes = stats['clearableBytes'] as int;
-    });
+    try {
+      final stats = await DBHelper.getCacheStats();
+      if (!mounted) return;
+      setState(() {
+        _cachedJobsCount = stats['cachedJobsCount'] as int;
+        _syncedPhotoFileCount = stats['syncedPhotoFileCount'] as int;
+        _unsyncedPhotoFileCount = stats['unsyncedPhotoFileCount'] as int;
+        _clearableBytes = stats['clearableBytes'] as int;
+        _cacheStatsReadable = true;
+      });
+    } catch (e) {
+      debugPrint('[SYNC] local cache stats unavailable: $e');
+      if (!mounted) return;
+      setState(() => _cacheStatsReadable = false);
+    }
   }
 
   Future<void> _handleClearCache() async {
-    if (_clearingCache) return;
+    if (_clearingCache || !_queueReadable || !_cacheStatsReadable) {
+      _showToast('Local storage cannot be verified. No files were cleared.',
+          color: InsightTheme.amberInk);
+      return;
+    }
     if (_clearableBytes == 0) {
       _showToast('Nothing to clear right now.', color: InsightTheme.ink2);
       return;
@@ -383,12 +406,29 @@ class _UpdatesScreenState extends State<UpdatesScreen>
 
   Future<void> _handleSyncNow() async {
     if (_syncingNow) return;
+    if (!_queueReadable) {
+      _showToast('Cannot read the local queue. Nothing was confirmed sent.',
+          color: InsightTheme.amberInk);
+      return;
+    }
     HapticFeedback.lightImpact();
     setState(() => _syncingNow = true);
-    await SyncOutboxService.drain(trigger: 'manual');
+    var drainFailed = false;
+    try {
+      await SyncOutboxService.drain(trigger: 'manual');
+    } catch (e) {
+      debugPrint('[SYNC] manual drain failed: $e');
+      drainFailed = true;
+    }
     await _refresh();
     unawaited(_loadCacheStats());
     if (!mounted) return;
+    setState(() => _syncingNow = false);
+    if (drainFailed || !_queueReadable) {
+      _showToast('Sync could not be verified. Review the storage warning.',
+          color: InsightTheme.amberInk);
+      return; // Never log success using stale / unknown queue counts.
+    }
     final stillPending = _pendingRows.length;
     final pausedCount = _pendingRows
         .where((r) => r['status'] == 'paused')
@@ -398,15 +438,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         .length;
     _showToast(
       stillPending == 0
-          ? 'All caught up — nothing left to sync.'
+          ? 'No queued changes remain on this device. Check office receipt separately.'
           : pausedCount > 0
           ? '$pausedCount item(s) paused — saved on device. Review the reason below.'
           : conflictCount > 0
           ? '$conflictCount item(s) need conflict review.'
-          // Only claim a connection problem when the device really has
-          // no link. A queued row can also fail on the server or on
-          // task state, and blaming the connection for that sent
-          // inspectors chasing a signal that was already fine.
           : _isOnline
           ? '$stillPending item(s) could not sync — see the reason below.'
           : '$stillPending item(s) still waiting (check connection).',
@@ -415,9 +451,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     unawaited(
       SupabaseService.logActivity(
         eventType: 'sync_manual',
-        title: 'Manual sync completed',
+        title: 'Manual sync checked',
         subtitle: stillPending == 0
-            ? 'All pending data synchronized'
+            ? 'No queued changes on device; office receipt not verified'
             : '$stillPending item(s) still pending',
       ),
     );
@@ -433,6 +469,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   /// visibly disabled instead of tapping into a no-op).
   Future<void> _handleSyncThisInspection(String jobId) async {
     if (_syncingNow || _syncingJobId != null) return;
+    if (!_queueReadable) {
+      _showToast('Cannot read the local queue. Nothing was confirmed sent.',
+          color: InsightTheme.amberInk);
+      return;
+    }
     if (!_isOnline) {
       _showToast(
         'No internet connection. This will sync automatically once you\'re back online.',
@@ -442,10 +483,21 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     }
     HapticFeedback.lightImpact();
     setState(() => _syncingJobId = jobId);
-    await SyncOutboxService.drain(trigger: 'manual', onlyJobId: jobId);
+    var drainFailed = false;
+    try {
+      await SyncOutboxService.drain(trigger: 'manual', onlyJobId: jobId);
+    } catch (e) {
+      debugPrint('[SYNC] inspection drain failed: $e');
+      drainFailed = true;
+    }
     await _refresh();
     if (!mounted) return;
     setState(() => _syncingJobId = null);
+    if (drainFailed || !_queueReadable) {
+      _showToast('Inspection sync could not be verified. Review the storage warning.',
+          color: InsightTheme.amberInk);
+      return;
+    }
 
     final stillPendingForJob = _pendingRows
         .where((r) => r['job_id'] == jobId)
@@ -754,7 +806,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                               ),
                             ),
                           ),
-                          onPressed: (_syncingNow || _syncingJobId != null)
+                          onPressed: (_syncingNow || _syncingJobId != null || !_queueReadable)
                               ? null
                               : () => _handleSyncThisInspection(jobId),
                           icon: isSyncingThisJob
@@ -1100,6 +1152,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
       .toList();
 
   String _syncHistorySummary() {
+    if (!_queueReadable) return 'History unavailable — local records not verified';
     // `_syncedRows` is the recent window (limit 20); label it as such rather
     // than claiming an exact "today" total the loaded window cannot prove.
     final receipts = _syncedRows.length;
@@ -1124,6 +1177,40 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   /// One status card: headline count, composition bar, legend and action.
   /// Built only from the live queue counts already computed in `_refresh()`.
   Widget _buildSyncStatusCard() {
+    if (!_queueReadable) {
+      return Semantics(
+        liveRegion: true,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: InsightTheme.amberTint,
+            borderRadius: InsightTheme.roundedMd,
+            border: Border.all(color: InsightTheme.amberInk),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  size: 22, color: InsightTheme.amberInk),
+              const SizedBox(width: 10),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Local queue unavailable',
+                      style: InsightTheme.inter(14,
+                          w: FontWeight.w700, c: InsightTheme.ink)),
+                  const SizedBox(height: 6),
+                  Text(_storageUnreadable
+                      ? 'Saved work on this device cannot be read because local encrypted storage is unavailable. No queued updates were deleted or verified as sent. Do not clear app data; contact your system administrator.'
+                      : 'Unable to verify locally saved updates. An empty queue or successful synchronization cannot be confirmed. Try refreshing or contact your system administrator.',
+                      style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                ],
+              )),
+            ],
+          ),
+        ),
+      );
+    }
     final queued = _pendingRows.length;
     final detail = <String>[
       if (_pendingBytes > 0) _formatBytes(_pendingBytes),
@@ -1419,6 +1506,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
 
   /// Queue section header + the existing per-task queue cards.
   Widget _buildQueueSection() {
+    if (!_queueReadable) return const SizedBox.shrink();
     return Column(
       key: _queueSectionKey,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1541,7 +1629,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                           ),
                                           Flexible(
                                             child: Text(
-                                              'Last sync: ${_relativeTime(_lastSync)}',
+                                              '${_queueReadable ? 'Last sync' : 'Last known sync'}: ${_relativeTime(_lastSync)}',
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: InsightTheme.inter(
@@ -1795,6 +1883,8 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                                   child: TextButton(
                                                     onPressed:
                                                         (_clearingCache ||
+                                                            !_queueReadable ||
+                                                            !_cacheStatsReadable ||
                                                             _clearableBytes == 0)
                                                         ? null
                                                         : _handleClearCache,
