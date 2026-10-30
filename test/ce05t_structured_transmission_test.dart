@@ -281,6 +281,162 @@ void main() {
     expect(unanswered.every((entry) => !entry.containsKey('answer')), isTrue);
   });
 
+  test('remote label rows decode only the seven allowed structured questions', () {
+    final decoded = StructuredChecklist.decodeRemoteChecklist(
+      remoteStructuredAnswers(),
+      inspectorId: offlineInspector,
+      inspectionRoundNumber: 1,
+    );
+    expect(decoded, {
+      StructuredChecklist.existingDevelopment: StructuredChecklist.yes,
+      StructuredChecklist.existingUse: 'Fictional clinic',
+      StructuredChecklist.extensionOfExisting:
+          StructuredChecklist.notApplicable,
+      StructuredChecklist.proposalStage: StructuredChecklist.yes,
+      StructuredChecklist.treesPresent: StructuredChecklist.no,
+      StructuredChecklist.canalWaterway: StructuredChecklist.unable,
+      StructuredChecklist.mojonObserved: StructuredChecklist.no,
+    });
+  });
+
+  test('malformed duplicate contradictory and wrong-owner rows stay uncertain', () {
+    final rows = [
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.existingDevelopment],
+        'answer': 'Yes',
+      },
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.existingDevelopment],
+        'answer': 'Yes',
+      },
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.extensionOfExisting],
+        'answer': 'Maybe',
+      },
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.proposalStage],
+        'answer': 'No',
+      },
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.treesPresent],
+        'answer': 'Yes',
+      },
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.mojonObserved],
+        'answer': 'Yes',
+        'checked': false,
+      },
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.canalWaterway],
+        'answer': 'Unable to Verify',
+      },
+      {
+        'item': StructuredChecklist.questionLabels[
+            StructuredChecklist.existingUse],
+        'answer': 'Wrong-owner value',
+        'inspector_id': otherOfflineInspector,
+      },
+    ];
+
+    final decoded = StructuredChecklist.decodeRemoteChecklist(
+      rows,
+      inspectorId: offlineInspector,
+      inspectionRoundNumber: 1,
+    );
+    // Proposal "No" makes the canal question inactive, so it is not accepted.
+    expect(decoded, {
+      StructuredChecklist.proposalStage: StructuredChecklist.no,
+    });
+    expect(
+      StructuredChecklist.decodeRemoteChecklist(
+        remoteStructuredAnswers(round: 1),
+        inspectorId: offlineInspector,
+        inspectionRoundNumber: 2,
+      ),
+      isEmpty,
+    );
+  });
+
+  test('remote answers restore without a local draft for the selected round', () async {
+    final task = taskWithRemoteChecklist(
+      id: offlineRound2,
+      round: 2,
+      checklistData: remoteStructuredAnswers(round: 2),
+    );
+    expect(await DBHelper.getLocalInspection(offlineRound2), isNull);
+
+    await fixture.provider.startInspection(task);
+
+    expect(fixture.provider.structuredAnswers, {
+      StructuredChecklist.existingDevelopment: StructuredChecklist.yes,
+      StructuredChecklist.existingUse: 'Fictional clinic',
+      StructuredChecklist.extensionOfExisting:
+          StructuredChecklist.notApplicable,
+      StructuredChecklist.proposalStage: StructuredChecklist.yes,
+      StructuredChecklist.treesPresent: StructuredChecklist.no,
+      StructuredChecklist.canalWaterway: StructuredChecklist.unable,
+      StructuredChecklist.mojonObserved: StructuredChecklist.no,
+    });
+  });
+
+  test('owned local answers and in-session edits take precedence over remote data', () async {
+    fixture.provider
+      ..setStructuredAnswer(
+        StructuredChecklist.existingDevelopment,
+        StructuredChecklist.no,
+      )
+      ..setStructuredAnswer(
+        StructuredChecklist.mojonObserved,
+        StructuredChecklist.yes,
+      );
+    expect(await fixture.provider.saveStepChecklist(), isTrue);
+
+    final task = taskWithRemoteChecklist(
+      checklistData: remoteStructuredAnswers(),
+    );
+    await fixture.provider.startInspection(task);
+    expect(
+      fixture.provider.structuredAnswers[
+          StructuredChecklist.existingDevelopment],
+      StructuredChecklist.no,
+    );
+    expect(
+      fixture.provider.structuredAnswers[StructuredChecklist.mojonObserved],
+      StructuredChecklist.yes,
+    );
+    expect(
+      fixture.provider.structuredAnswers[StructuredChecklist.existingUse],
+      isNull,
+      reason: 'A remote child answer cannot override a local No parent.',
+    );
+
+    fixture.provider
+      ..setStructuredAnswer(
+        StructuredChecklist.existingDevelopment,
+        StructuredChecklist.yes,
+      )
+      ..setStructuredAnswer(
+        StructuredChecklist.existingUse,
+        'In-session declared use',
+      );
+    await fixture.provider.restoreStructuredChecklist();
+    expect(
+      fixture.provider.structuredAnswers[StructuredChecklist.existingUse],
+      'In-session declared use',
+    );
+    expect(
+      fixture.provider.structuredAnswers[StructuredChecklist.mojonObserved],
+      StructuredChecklist.yes,
+    );
+  });
+
   test(
     'remote label rows decode only the seven allowed structured questions',
     () {

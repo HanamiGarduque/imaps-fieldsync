@@ -197,17 +197,36 @@ void main() {
   group('A3. authentication and security behaviour is untouched', () {
     late String lock;
     late String splash;
+    late String app;
 
     setUpAll(() {
       lock = File('lib/modules/auth_startup/screens/app_resume_lock_screen.dart')
           .readAsStringSync();
       splash = File('lib/modules/auth_startup/screens/splash_screen.dart')
           .readAsStringSync();
+      app = File('lib/main.dart').readAsStringSync();
     });
 
-    test('the lock screen still wraps itself in SensitiveScreen', () {
-      // FLAG_SECURE behaviour lives here; it must not be bypassed.
-      expect(lock, contains('SensitiveScreen'));
+    test('the lock route keeps its privacy and navigation contracts', () {
+      // These source contracts do not prove frame-level Android security.
+      expect(lock, matches(RegExp(r'invalidateDocumentation\s*\(\s*\)')));
+      expect(lock, matches(RegExp(r'PopScope\s*\(\s*canPop:\s*false')));
+      expect(
+        lock,
+        matches(
+          RegExp(
+            r'backgroundColor:\s*widget\.brandReveal\s*==\s*null\s*\?\s*InsightTheme\.blue2\s*:\s*Colors\.transparent',
+          ),
+        ),
+      );
+      expect(
+        app,
+        matches(
+          RegExp(
+            r'builder:\s*\(context,\s*child\)\s*=>\s*AutoLockActivityHost\s*\(\s*child:\s*ScreenProtectionHost\s*\(',
+          ),
+        ),
+      );
     });
 
     test('the lock screen keeps both unlock paths', () {

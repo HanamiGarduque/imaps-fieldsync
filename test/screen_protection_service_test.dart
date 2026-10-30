@@ -87,12 +87,35 @@ void main() {
     expect(protection.appliedProtection, isFalse);
   });
 
+  testWidgets('A verified active demo session survives inactive and resumed', (
+    tester,
+  ) async {
+    await enter(tester);
+    expect(await beginDocumentation(), isTrue);
+    await tester.pump();
+    final generation = protection.documentationGeneration;
+    expect(protection.isDocumentationActive, isTrue);
+    expect(protection.appliedProtection, isFalse);
+
+    protection.didChangeAppLifecycleState(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(protection.isDocumentationActive, isTrue);
+    expect(protection.appliedProtection, isFalse);
+    expect(protection.mustObscure, isFalse);
+
+    protection.didChangeAppLifecycleState(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(protection.isDocumentationActive, isTrue);
+    expect(protection.documentationGeneration, generation);
+    expect(protection.appliedProtection, isFalse);
+    expect(protection.mustObscure, isFalse);
+  });
+
   testWidgets(
-    'Inactive and background states revoke permission, resume does not reauthorize',
+    'Hidden and paused revoke active capture and resume does not reauthorize',
     (tester) async {
       await enter(tester);
       for (final state in [
-        AppLifecycleState.inactive,
         AppLifecycleState.hidden,
         AppLifecycleState.paused,
       ]) {
@@ -105,11 +128,28 @@ void main() {
         expect(protection.mustObscure, isTrue);
         protection.didChangeAppLifecycleState(AppLifecycleState.resumed);
         await tester.pump();
+        expect(protection.isDocumentationActive, isFalse);
         expect(protection.appliedProtection, isTrue);
         expect(protection.mustObscure, isFalse);
       }
     },
   );
+
+  testWidgets('Inactive before activation never grants or resumes capture', (
+    tester,
+  ) async {
+    await enter(tester);
+    protection.didChangeAppLifecycleState(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(await beginDocumentation(), isFalse);
+    expect(protection.isDocumentationActive, isFalse);
+    expect(protection.appliedProtection, isTrue);
+
+    protection.didChangeAppLifecycleState(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(protection.isDocumentationActive, isFalse);
+    expect(protection.appliedProtection, isTrue);
+  });
 
   testWidgets('Ordinary visible-scope changes retain the manual debug setting', (
     tester,
