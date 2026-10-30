@@ -315,6 +315,7 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
         return AlertDialog(
           backgroundColor: InsightTheme.surface,
           surfaceTintColor: Colors.transparent,
+          scrollable: true,
           insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
           title: Row(
@@ -335,7 +336,8 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
             ],
           ),
           contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-          content: SizedBox(width: 360, child: SingleChildScrollView(
+          content: SizedBox(
+            width: 360,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -362,7 +364,7 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
                 ],
               ],
             ),
-          )),
+          ),
           actions: [TextButton(
             style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
             onPressed: () => Navigator.pop(dialogContext),
