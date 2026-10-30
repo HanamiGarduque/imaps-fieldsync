@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/insight_theme.dart';
+import '../../../core/widgets/field_form_widgets.dart';
 import '../models/task_lifecycle.dart';
 
 // Display priority only; the canonical presentation owns notice membership.
@@ -14,16 +15,24 @@ List<MyTaskNotice> _orderedNotices(MyTaskPresentation p) => [
     if (p.notices.contains(notice)) notice,
 ];
 
-String _noticeLabel(MyTaskPresentation p, MyTaskNotice notice) => switch (notice) {
-  MyTaskNotice.deadlinePassed => 'Overdue',
-  MyTaskNotice.scheduleConflict => 'Visit after PO Deadline',
-  MyTaskNotice.deadlineToday => 'PO Deadline today',
-  MyTaskNotice.visitMissed => 'Missed visit · Reschedule available',
-  MyTaskNotice.visitToday => 'Visit today',
-  MyTaskNotice.visitTomorrow => 'Visit tomorrow',
-  MyTaskNotice.deadlineInDays =>
-    'PO Deadline in ${p.deadlineDaysUntil} ${p.deadlineDaysUntil == 1 ? 'day' : 'days'}',
-  MyTaskNotice.visitInDays => 'Visit in ${p.visitDaysUntil} days',
+String _noticeLabel(MyTaskPresentation p, MyTaskNotice notice,
+    {bool isTagalog = false}) => switch (notice) {
+  MyTaskNotice.deadlinePassed =>
+    isTagalog ? 'Lampas sa deadline' : 'Overdue',
+  MyTaskNotice.scheduleConflict =>
+    isTagalog ? 'Visit lampas sa PO Deadline' : 'Visit after PO Deadline',
+  MyTaskNotice.deadlineToday =>
+    isTagalog ? 'PO Deadline ngayong araw' : 'PO Deadline today',
+  MyTaskNotice.visitMissed => isTagalog
+      ? 'Hindi natuloy ang Visit · Maaari pang magtakda muli'
+      : 'Missed visit · Reschedule available',
+  MyTaskNotice.visitToday => isTagalog ? 'Visit ngayong araw' : 'Visit today',
+  MyTaskNotice.visitTomorrow => isTagalog ? 'Visit bukas' : 'Visit tomorrow',
+  MyTaskNotice.deadlineInDays => isTagalog
+      ? 'PO Deadline sa ${p.deadlineDaysUntil} ${p.deadlineDaysUntil == 1 ? 'araw' : 'araw'}'
+      : 'PO Deadline in ${p.deadlineDaysUntil} ${p.deadlineDaysUntil == 1 ? 'day' : 'days'}',
+  MyTaskNotice.visitInDays =>
+    isTagalog ? 'Visit sa ${p.visitDaysUntil} araw' : 'Visit in ${p.visitDaysUntil} days',
 };
 
 bool hasCriticalTaskNotice(MyTaskPresentation p) => p.notices.any(
@@ -36,11 +45,150 @@ bool hasCriticalTaskNotice(MyTaskPresentation p) => p.notices.any(
   },
 );
 
-String formatTaskNoticeDate(DateTime? day) {
-  if (day == null) return 'Not verified';
+String formatTaskNoticeDate(DateTime? day, {bool isTagalog = false}) {
+  if (day == null) return isTagalog ? 'Hindi pa nakukumpirma' : 'Not verified';
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return '${months[day.month - 1]} ${day.day}, ${day.year}';
+  if (!isTagalog) return '${months[day.month - 1]} ${day.day}, ${day.year}';
+  const monthsTl = ['Ene', 'Peb', 'Mar', 'Abr', 'May', 'Hun',
+    'Hul', 'Ago', 'Set', 'Okt', 'Nob', 'Dis'];
+  return '${day.day} ${monthsTl[day.month - 1]} ${day.year}';
+}
+
+class TaskLanguageSelector extends StatelessWidget {
+  const TaskLanguageSelector({
+    super.key,
+    required this.isTagalog,
+    required this.onChanged,
+  });
+
+  final bool isTagalog;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => FieldSegmentedControl<bool>(
+    labels: const {false: 'English', true: 'Tagalog'},
+    value: isTagalog,
+    onChanged: onChanged,
+    compact: true,
+  );
+}
+
+String _currentTaskStatus(MyTaskPresentation p, bool isTagalog) {
+  if (!isTagalog) {
+    return switch (p.lifecycle) {
+      MyTaskLifecycle.scheduled => p.showInProgress
+          ? 'Scheduled · In Progress. Your chosen Visit date stays in place while the inspection is underway.'
+          : 'Scheduled. You have chosen a Visit date for this inspection.',
+      MyTaskLifecycle.availableAnytime =>
+        'Available Anytime. No Visit date has been chosen. You may inspect before the PO Deadline.',
+      MyTaskLifecycle.ongoing =>
+        'Ongoing. Inspection work has started without a fixed Visit date.',
+      MyTaskLifecycle.completed =>
+        'Completed. This task is no longer available for visit scheduling.',
+      MyTaskLifecycle.unknown =>
+        'Status unavailable. The recorded task state could not be recognized.',
+    };
+  }
+  return switch (p.lifecycle) {
+    MyTaskLifecycle.scheduled => p.showInProgress
+        ? 'Naka-iskedyul · Sinimulan na. Mananatili ang pinili mong petsa ng Visit habang isinasagawa ang inspeksiyon.'
+        : 'Naka-iskedyul. Pumili ka ng petsa ng Visit para sa inspeksiyong ito.',
+    MyTaskLifecycle.availableAnytime =>
+      'Available Anytime. Wala pang napiling petsa ng Visit. Maaari kang mag-inspeksiyon bago ang PO Deadline.',
+    MyTaskLifecycle.ongoing =>
+      'Kasalukuyang isinasagawa. Nagsimula na ang inspeksiyon ngunit wala itong takdang petsa ng Visit.',
+    MyTaskLifecycle.completed =>
+      'Kumpleto na. Hindi na maaaring magtakda ng Visit para sa gawaing ito.',
+    MyTaskLifecycle.unknown =>
+      'Hindi matukoy ang status. Hindi makilala ang naitalang kalagayan ng task.',
+  };
+}
+
+String _scheduleBlockReason(MyTaskPresentation p, bool isTagalog) {
+  if (!isTagalog) {
+    return p.scheduleBlockReason ??
+        'No current Visit or PO Deadline warning requires additional action.';
+  }
+  if (p.lifecycle == MyTaskLifecycle.completed) {
+    return 'Kumpleto na ang inspeksiyong ito.';
+  }
+  if (p.lifecycle == MyTaskLifecycle.unknown) {
+    return 'Hindi maiskedyul ang task na ito dahil hindi makilala ang status nito.';
+  }
+  if (p.deadlineState == MyTaskDeadlineState.none ||
+      p.deadlineState == MyTaskDeadlineState.unknown) {
+    return 'Hindi makumpirma ang PO Deadline, kaya hindi magagamit ang pag-iskedyul. Ipagpatuloy ang inspeksiyon o humingi ng kumpirmasyon sa Planning Office.';
+  }
+  if (p.deadlineState == MyTaskDeadlineState.today ||
+      p.deadlineState == MyTaskDeadlineState.passed) {
+    return 'Ngayong araw na o lumampas na ang PO Deadline. Hindi maaaring magtakda ng panibagong Visit.';
+  }
+  return 'Walang kasalukuyang babala sa Visit o PO Deadline na nangangailangan ng karagdagang hakbang.';
+}
+
+String _taskDetailsNextAction(MyTaskPresentation p, bool isTagalog) {
+  if (p.lifecycle == MyTaskLifecycle.completed) {
+    return isTagalog
+        ? 'Suriin ang natapos na inspeksiyon at tingnan sa Sync Center kung naihatid ito. Hindi katumbas ng resibo mula sa opisina ang lokal na pag-save.'
+        : 'Review the completed inspection and check Sync Center for delivery confirmation. A local save is not an office receipt.';
+  }
+  if (p.lifecycle == MyTaskLifecycle.unknown) {
+    return isTagalog
+        ? 'I-refresh ang iyong mga assignment o makipag-ugnayan sa Planning Office. Huwag magtakda ng Visit hangga’t hindi nakukumpirma ang status.'
+        : 'Refresh your assignments or contact the Planning Office. Do not schedule a Visit until the task status is verified.';
+  }
+  if (p.deadlineState == MyTaskDeadlineState.passed) {
+    return isTagalog
+        ? 'Ipagpatuloy lamang ang inspeksiyon kung awtorisado ka pa, o makipag-ugnayan sa Planning Officer. Hindi mabubura ang ebidensiyang lokal nang na-save.'
+        : 'Continue the inspection only if you are still authorized, or coordinate with the Planning Officer. Existing locally saved evidence is not deleted.';
+  }
+  if (p.deadlineState == MyTaskDeadlineState.today) {
+    return isTagalog
+        ? 'Ipagpatuloy lamang ang inspeksiyon kung awtorisado ka pa, o makipag-ugnayan sa Planning Officer tungkol sa deadline. Hindi pa overdue ang task ngayong araw.'
+        : 'Continue the inspection only if you are still authorized, or contact the Planning Officer about the deadline. The task is not overdue today.';
+  }
+  if (p.deadlineState == MyTaskDeadlineState.none ||
+      p.deadlineState == MyTaskDeadlineState.unknown) {
+    return isTagalog
+        ? 'I-refresh ang iyong mga assignment o ipakumpirma sa Planning Office ang PO Deadline. Ipagpatuloy lamang ang kasalukuyang inspeksiyon habang awtorisado.'
+        : 'Refresh your assignments or ask the Planning Office to confirm the PO Deadline. Continue existing inspection work only while authorized.';
+  }
+  if (p.lifecycle == MyTaskLifecycle.scheduled) {
+    return isTagalog
+        ? 'Ipagpatuloy ang inspeksiyon bago ang PO Deadline. Para magtakda muli ng Visit, pumili ng petsa mula bukas hanggang sa nakumpirmang PO Deadline.'
+        : 'Continue the inspection before the PO Deadline. To reschedule your Visit, choose a date from tomorrow through the verified PO Deadline.';
+  }
+  if (p.lifecycle == MyTaskLifecycle.availableAnytime) {
+    return isTagalog
+        ? 'Ipagpatuloy ang inspeksiyon kapag handa ka na. Para magtakda ng Visit, pumili ng petsa mula bukas hanggang sa nakumpirmang PO Deadline.'
+        : 'Continue the inspection when ready. To set a Visit, choose a date from tomorrow through the verified PO Deadline.';
+  }
+  return isTagalog
+      ? 'Ipagpatuloy ang inspeksiyon at isumite ang mga natuklasan bago ang PO Deadline.'
+      : 'Continue the inspection and submit your findings before the PO Deadline.';
+}
+
+String _taskNoticeText(MyTaskPresentation p, MyTaskNotice notice,
+    bool isTagalog) {
+  if (!isTagalog) return p.noticeText(notice);
+  return switch (notice) {
+    MyTaskNotice.visitInDays =>
+      'Nakatakda ang Visit sa loob ng ${p.visitDaysUntil} araw — ihanda ang inspeksiyon sa lugar.',
+    MyTaskNotice.visitTomorrow => 'Nakatakda ang Visit bukas.',
+    MyTaskNotice.visitToday =>
+      'Nakatakda ang Visit ngayong araw — maaari nang simulan ang inspeksiyon.',
+    MyTaskNotice.visitMissed =>
+      'Lumampas na ang napiling petsa ng Visit. Magtakda muli bago ang PO Deadline o ipagpatuloy ang inspeksiyon.',
+    MyTaskNotice.deadlineInDays =>
+      'PO Deadline sa ${p.deadlineDaysUntil} araw.',
+    MyTaskNotice.deadlineToday =>
+      'Ngayong araw ang PO Deadline. Hindi maaaring magtakda muli; tapusin ang inspeksiyon. Hindi pa ito overdue.',
+    MyTaskNotice.deadlinePassed =>
+      'Overdue — lumampas na ang PO Deadline.',
+    MyTaskNotice.scheduleConflict =>
+      'Lampas sa PO Deadline ang petsa ng Visit. Makipag-ugnayan sa Planning Officer; pumili lamang ng petsang pinapayagan kapag bukas ang pag-iskedyul.',
+  };
 }
 
 /// One summary, with the same disclosure available from either task surface.
@@ -123,59 +271,99 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
   required String referenceNumber,
   String? roundLabel,
   String? borderExplanation,
+  String? borderExplanationTagalog,
 }) {
   final p = presentation;
   final scheduled = p.lifecycle == MyTaskLifecycle.scheduled;
-  final entries = <(String, String)>[
-    if (scheduled) ('Visit date', formatTaskNoticeDate(p.visitDay)),
-    ('PO Deadline', formatTaskNoticeDate(p.deadlineDay)),
-    for (final notice in _orderedNotices(p))
-      (_noticeLabel(p, notice), p.noticeText(notice)),
-    ('Next action', p.scheduleBlockReason ??
-        'Continue your inspection before the PO Deadline. To ${scheduled ? 'reschedule' : 'schedule'} a Visit, choose a date from tomorrow through the verified PO Deadline.'),
-    if (scheduled)
-      ('Scheduled', 'You have chosen a visit date for this task. The task stays Scheduled until the inspection is completed and submitted. You can reschedule the visit when needed, as long as the new date is still allowed by the deadline.'),
-    if (p.showInProgress)
-      ('In Progress', 'You have already started this scheduled inspection. Continue working through the remaining steps until it is completed.'),
-    if (p.lifecycle == MyTaskLifecycle.ongoing)
-      ('Ongoing', 'This task is already being worked on, but no fixed visit date was set. You can continue the inspection without scheduling a visit.'),
-    if (p.lifecycle == MyTaskLifecycle.availableAnytime)
-      ('Available Anytime', 'This task does not have a fixed visit date yet. You can inspect it anytime before the admin-set deadline. If you want a specific visit date, you can schedule one.'),
-    if (borderExplanation != null) ('Border color', borderExplanation),
-  ];
+  final orderedNotices = _orderedNotices(p);
+  var isTagalog = false;
   return showDialog<void>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      backgroundColor: InsightTheme.surface,
-      surfaceTintColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
-      title: Text('Task details', style: InsightTheme.urbanist(22)),
-      contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-      content: SizedBox(width: 360, child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(applicantName, style: InsightTheme.inter(15, w: FontWeight.w700, c: InsightTheme.ink)),
-            const SizedBox(height: 4),
-            Text([referenceNumber, ?roundLabel].join(' · '),
-                style: InsightTheme.inter(12, c: InsightTheme.ink3)),
-            const SizedBox(height: 16),
-            for (final (title, body) in entries) ...[
-              Text(title, style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.ink)),
-              const SizedBox(height: 4),
-              Text(body, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
-              const SizedBox(height: 16),
-            ],
-          ],
-        ),
-      )),
-      actions: [TextButton(
-        style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
-        onPressed: () => Navigator.pop(dialogContext),
-        child: Text('Close', style: InsightTheme.inter(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
-      )],
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        final currentStatus = _currentTaskStatus(p, isTagalog);
+        final reason = _scheduleBlockReason(p, isTagalog);
+        final nextAction = _taskDetailsNextAction(p, isTagalog);
+        final visitDateTitle = isTagalog ? 'Petsa ng Visit' : 'Visit date';
+        final reasonTitle = isTagalog ? 'Dahilan' : 'Reason';
+        final entries = <(String, String)>[
+          (isTagalog ? 'Kasalukuyang status' : 'Current Status', currentStatus),
+          if (scheduled)
+            (visitDateTitle,
+                formatTaskNoticeDate(p.visitDay, isTagalog: isTagalog)),
+          ('PO Deadline',
+              formatTaskNoticeDate(p.deadlineDay, isTagalog: isTagalog)),
+          if (orderedNotices.isEmpty) (reasonTitle, reason),
+          for (final notice in orderedNotices)
+            (
+              _noticeLabel(p, notice, isTagalog: isTagalog),
+              _taskNoticeText(p, notice, isTagalog),
+            ),
+          (isTagalog ? 'Susunod na hakbang' : 'Next action', nextAction),
+          if (borderExplanation != null)
+            (
+              isTagalog ? 'Kulay ng border' : 'Border color',
+              isTagalog
+                  ? borderExplanationTagalog ?? borderExplanation
+                  : borderExplanation,
+            ),
+        ];
+        final firstDateTitle = scheduled ? visitDateTitle : 'PO Deadline';
+        final firstNoticeTitle = orderedNotices.isEmpty
+            ? null
+            : _noticeLabel(p, orderedNotices.first, isTagalog: isTagalog);
+        return AlertDialog(
+          backgroundColor: InsightTheme.surface,
+          surfaceTintColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
+          title: Text(isTagalog ? 'Mga detalye ng task' : 'Task details',
+              style: InsightTheme.urbanist(22)),
+          contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+          content: SizedBox(width: 360, child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TaskLanguageSelector(
+                    isTagalog: isTagalog,
+                    onChanged: (value) =>
+                        setDialogState(() => isTagalog = value),
+                  ),
+                ),
+                Text(applicantName, style: InsightTheme.inter(15, w: FontWeight.w700, c: InsightTheme.ink)),
+                const SizedBox(height: 4),
+                Text([referenceNumber, ?roundLabel].join(' · '),
+                    style: InsightTheme.inter(12, c: InsightTheme.ink3)),
+                const SizedBox(height: 16),
+                for (final (title, body) in entries) ...[
+                  if (title == firstDateTitle) ...[
+                    Text(isTagalog ? 'Mahahalagang petsa' : 'Important Dates',
+                        style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
+                    const SizedBox(height: 12),
+                  ],
+                  if (firstNoticeTitle != null && title == firstNoticeTitle) ...[
+                    Text(reasonTitle, style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
+                    const SizedBox(height: 12),
+                  ],
+                  Text(title, style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.ink)),
+                  const SizedBox(height: 4),
+                  Text(body, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                  const SizedBox(height: 16),
+                ],
+              ],
+            ),
+          )),
+          actions: [TextButton(
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(isTagalog ? 'Isara' : 'Close',
+                style: InsightTheme.inter(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
+          )],
+        );
+      },
     ),
   );
 }

@@ -67,13 +67,11 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   Position? _capturedPosition;
   DateTime? _capturedAt;
   String? _pendingPhotoId;
-  Map<String, dynamic>? _pendingReference;
-  Future<void>? _referenceFuture;
+
   bool _isCapturing = false;
   bool _isSaving = false;
   bool _isSavingPhoto = false;
-  bool _referenceEnsuring = false;
-  String? _referenceError;
+
 
   @override
   void initState() {
@@ -83,9 +81,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     _initCamera();
     _fetchLocation();
     unawaited(_cleanAbandonedCaptures());
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _referenceFuture = _ensureLocationReference();
-    });
+
   }
 
   /// Bounded to this owner/job/round; never touches accepted, queued, other
@@ -550,117 +546,6 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     ).create(recursive: true);
   }
 
-  Future<void> _ensureLocationReference() async {
-    if (_referenceEnsuring || !_sameInspection) return;
-    if (await DemoFixtures.instance.hardwareMode(jobId: widget.task.id) ==
-        DemoHardwareMode.denied) {
-      return;
-    }
-    if (!_sameInspection) return;
-    Map<String, dynamic>? existing;
-    for (final photo in _capturedPhotos) {
-      if (isLocationReferencePhoto(photo)) {
-        existing = photo;
-        break;
-      }
-    }
-    if (existing != null) {
-      final existingPath = existing['photoPath'] as String?;
-      if (existingPath == null ||
-          PhotoSourceResolver.classify(existingPath) !=
-              PhotoSourceKind.localFile ||
-          _provider.isReworkMode ||
-          File(existingPath).existsSync()) {
-        return;
-      }
-      // The row survived but the image did not: regenerate the same stable
-      // file and re-save the same deterministic identity below.
-    }
-
-    setState(() {
-      _referenceEnsuring = true;
-      _referenceError = null;
-    });
-    try {
-      if (_pendingReference == null) {
-        final snapshot = _provider.gpsVerification;
-        if (snapshot == null) {
-          throw StateError(
-            'Step 2 GPS verification is unavailable on this device.',
-          );
-        }
-        final cached = await DBHelper.getCachedJob(widget.task.id);
-        if (!_sameInspection) return;
-        final parcelLat = (cached?['parcel_lat'] as num?)?.toDouble();
-        final parcelLng = (cached?['parcel_lng'] as num?)?.toDouble();
-        if (parcelLat == null || parcelLng == null) {
-          throw StateError(
-            'The recorded parcel reference point is unavailable on this device.',
-          );
-        }
-        final generatedAt =
-            DateTime.tryParse(existing?['capturedAt'] as String? ?? '') ??
-            DateTime.now();
-        final bytes = await SiteLocationReferenceService.render(
-          jobId: widget.task.id,
-          round: widget.task.inspectionRoundNumber,
-          applicant: widget.task.name,
-          address: widget.task.locationAddress,
-          verifiedLatitude: snapshot.latitude,
-          verifiedLongitude: snapshot.longitude,
-          verifiedAt: snapshot.verifiedAt,
-          verifiedAccuracyMeters: snapshot.accuracyMeters,
-          parcelLatitude: parcelLat,
-          parcelLongitude: parcelLng,
-          generatedAt: generatedAt,
-        );
-        if (!_sameInspection) return;
-        final directory = await _evidenceDirectory();
-        if (!_sameInspection) return;
-        final file = File(
-          existing?['photoPath'] as String? ??
-              '${directory.path}/${SiteLocationReferenceService.fileName(widget.task.id, widget.task.inspectionRoundNumber)}',
-        );
-        await file.writeAsBytes(bytes, flush: true);
-        if (!_sameInspection) return;
-        _pendingReference =
-            existing ??
-            {
-              'id': SiteLocationReferenceService.photoId(
-                widget.task.id,
-                widget.task.inspectionRoundNumber,
-              ),
-              'photoPath': file.path,
-              'notes': kSiteLocationReferenceNotes,
-              'latitude': snapshot.latitude,
-              'longitude': snapshot.longitude,
-              'capturedAt': GeotagService.storageTimestamp(generatedAt),
-              'isLocationReference': true,
-            };
-      }
-      if (!_sameInspection) return;
-      if (!await _provider.persistPhoto(
-        _pendingReference!,
-        task: widget.task,
-        inspectorId: _inspectorId!,
-      )) {
-        throw StateError(
-          'The location reference could not be saved on this device.',
-        );
-      }
-      _pendingReference = null;
-    } catch (e) {
-      if (!_sameInspection) return;
-      setState(() {
-        _referenceError =
-            '${e is StateError ? e.message : 'The location reference could not be prepared on this device.'} '
-            'Real site photos are still accepted.';
-      });
-    } finally {
-      if (mounted) setState(() => _referenceEnsuring = false);
-    }
-  }
-
   Future<void> _finishAndContinue() async {
     if (_isSaving || _isSavingPhoto || !_sameInspection) return;
     final realCount = _capturedPhotos
@@ -680,7 +565,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     }
     setState(() => _isSaving = true);
     try {
-      await _referenceFuture;
+
       if (!_sameInspection) return;
       await _provider.persistCapturedPhotos();
       if (!mounted || !_sameInspection) return;
@@ -731,9 +616,13 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 
   Widget _buildGridMode() {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    final realPhotoCount = _capturedPhotos
-        .where((p) => !isLocationReferencePhoto(p))
-        .length;
+    // Preserve legacy references in the underlying evidence record, but do
+    // not show generated references as tiles in the active Step 3 workflow.
+    final sitePhotoIndices = <int>[
+      for (var i = 0; i < _capturedPhotos.length; i++)
+        if (!isLocationReferencePhoto(_capturedPhotos[i])) i,
+    ];
+    final realPhotoCount = sitePhotoIndices.length;
     return PopScope(
       canPop:
           !context.read<InspectionProvider>().isReworkMode &&
@@ -816,11 +705,8 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
             FieldSectionHeading(
               title: 'Site photos',
               hint: _demoEvidence
-                  ? 'DEMO · SYNTHETIC DATA. Generated model evidence only; physical camera and gallery are disabled. '
-                        'The location reference is separate and is not counted as a site photo.'
-                  : 'Attach at least one photo to continue. Add as many site '
-                        'photos as this device can store; the generated location '
-                        'reference is not counted as a site photo.',
+                  ? 'DEMO · SYNTHETIC DATA. Generated model evidence only; physical camera and gallery are disabled.'
+                  : 'Attach at least one genuine site photo to continue. Add as many site photos as this device can store.',
               trailing: Text(
                 '$realPhotoCount ${realPhotoCount == 1 ? 'site photo' : 'site photos'}',
                 style: InsightTheme.inter(
@@ -830,16 +716,6 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                 ),
               ),
             ),
-            if (_referenceEnsuring)
-              const _ReferenceNotice(
-                text: 'Preparing the Site Location Reference…',
-                busy: true,
-              )
-            else if (_referenceError != null)
-              _ReferenceNotice(
-                text: _referenceError!,
-                onRetry: () => _referenceFuture = _ensureLocationReference(),
-              ),
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -850,11 +726,13 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                 mainAxisSpacing: 12,
                 childAspectRatio: 1,
               ),
-              // Always one trailing Add cell: there is no fixed photo cap.
-              itemCount: _capturedPhotos.length + 1,
+              // Original provider indices remain stable for remove operations.
+              // The viewer receives only the real site-photo subset.
+              itemCount: sitePhotoIndices.length + 1,
               itemBuilder: (context, index) {
-                if (index < _capturedPhotos.length) {
-                  final paths = inspectionDisplayPaths(
+                if (index < sitePhotoIndices.length) {
+                  final originalIndex = sitePhotoIndices[index];
+                  final originalPaths = inspectionDisplayPaths(
                     _capturedPhotos
                         .map((p) => p['photoPath'] as String)
                         .toList(),
@@ -862,36 +740,30 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                     widget.task.photoDetails,
                     widget.task.photoPaths,
                   );
-                  final photo = _capturedPhotos[index];
-                  final isReference = isLocationReferencePhoto(photo);
-                  final realIndex =
-                      _capturedPhotos
-                          .take(index)
-                          .where((p) => !isLocationReferencePhoto(p))
-                          .length +
-                      1;
+                  final sitePaths = [
+                    for (final photoIndex in sitePhotoIndices)
+                      originalPaths[photoIndex],
+                  ];
+                  final siteDetails = [
+                    for (final photoIndex in sitePhotoIndices)
+                      _capturedPhotos[photoIndex],
+                  ];
+                  final label = _demoEvidence
+                      ? 'Demo evidence ${index + 1}'
+                      : 'Photo ${index + 1}';
                   return _PhotoCell(
-                    photoPath: paths[index],
-                    allPhotoPaths: paths,
-                    photoDetails: _capturedPhotos,
+                    photoPath: sitePaths[index],
+                    allPhotoPaths: sitePaths,
+                    photoDetails: siteDetails,
                     index: index,
-                    isLocationReference: isReference,
-                    label: isReference
-                        ? (_demoEvidence
-                              ? 'Demo location reference'
-                              : 'Location reference')
-                        : (_demoEvidence
-                              ? 'Demo evidence $realIndex'
-                              : 'Photo $realIndex'),
-                    onRemove: isReference
-                        ? null
-                        : () => _confirmRemovePhoto(index),
+                    isLocationReference: false,
+                    label: label,
+                    onRemove: () => _confirmRemovePhoto(originalIndex),
                   );
                 }
                 return _AddPhotoCell(onTap: _enterCamera);
               },
-            ),
-          ],
+            ),          ],
         ),
       ),
     );
@@ -1420,52 +1292,6 @@ class _PhotoCell extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ReferenceNotice extends StatelessWidget {
-  final String text;
-  final bool busy;
-  final VoidCallback? onRetry;
-  const _ReferenceNotice({required this.text, this.busy = false, this.onRetry});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: InsightTheme.roundedMd,
-        border: Border.all(color: InsightTheme.line),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (busy)
-            const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            const Icon(
-              Icons.info_outline_rounded,
-              size: 18,
-              color: InsightTheme.blueInk,
-            ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: InsightTheme.inter(13, c: InsightTheme.ink2, h: 1.35),
-            ),
-          ),
-          if (onRetry != null)
-            TextButton(onPressed: onRetry, child: const Text('Retry')),
-        ],
       ),
     );
   }

@@ -13,8 +13,6 @@ import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/theme/insight_theme.dart';
 import '../widgets/inspection_step_header.dart';
-import '../structured_checklist.dart';
-import '../widgets/structured_checklist_summary.dart';
 import '../services/photo_evidence_presentation.dart';
 
 class FieldFindingsScreen extends StatefulWidget {
@@ -212,16 +210,14 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final provider = context.watch<InspectionProvider>();
-    final structured = provider.structuredAnswers;
+
     final evidence = PhotoEvidencePresentation(
       provider.activeTask?.id == widget.task.id
           ? provider.capturedPhotos
           : widget.capturedPhotos,
       requireMetadata: provider.isReworkMode,
     );
-    final hasStructured = StructuredChecklist.activeAnswers(
-      structured,
-    ).isNotEmpty;
+
     return SensitiveScreen(
       child: PopScope(
         canPop:
@@ -324,18 +320,8 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
                   hintText: 'Describe what you observed on-site…',
                 ),
               ),
-              if (evidence.totalCount > 0 ||
-                  widget.checklistTotal > 0 ||
-                  hasStructured) ...[
+              if (evidence.totalCount > 0 || widget.checklistTotal > 0) ...[
                 const SizedBox(height: 16),
-                if (hasStructured)
-                  StructuredChecklistSummary(
-                    heading: 'Site conditions & project status',
-                    answers: structured,
-                  ),
-                if (hasStructured &&
-                    (evidence.totalCount > 0 || widget.checklistTotal > 0))
-                  const SizedBox(height: 16),
                 Wrap(
                   spacing: 16,
                   runSpacing: 8,

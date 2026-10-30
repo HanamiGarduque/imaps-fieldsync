@@ -16,6 +16,7 @@ import '../../../core/widgets/motion/updating_tile.dart';
 import '../../../core/widgets/motion/linked_list_motion.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/app_feedback.dart';
+import '../../../core/widgets/task_sync_indicator.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/layout/responsive_layout.dart';
 import '../../profile_settings/screens/notifications_screen.dart';
@@ -57,6 +58,11 @@ class _UpdatesScreenState extends State<UpdatesScreen>
   int _photosWaiting = 0;
   double _pendingBytes = 0;
   DateTime? _lastSync;
+
+  // Same cloud status control Home and My Tasks use, driven by this screen's
+  // real refresh instead of a second, divergent indicator.
+  TaskRefreshPhase _refreshPhase = TaskRefreshPhase.checking;
+  DateTime? _lastRefreshAt;
 
   // --- Phase 7: Storage Management state ---
   int _cachedJobsCount = 0;
@@ -151,73 +157,93 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     super.dispose();
   }
 
-  Future<void> _refresh({bool replay = false}) async {
-    final connectivity = await Connectivity().checkConnectivity();
-    final online = connectivity.any((r) => r != ConnectivityResult.none);
-    final pending = await DBHelper.getSyncCenterQueueActions();
-    final synced = await DBHelper.getRecentSyncedActions(limit: 20);
-    final cachedJobs = await DBHelper.getCachedJobs();
-    // Only this inspector's own durable receipts can prove a successful send.
-    // The old global preference survived sign-out and could name another
-    // account's (or a future) success.
-    DateTime? lastReceipt;
-    for (final row in synced) {
-      final at = DateTime.tryParse(row['updated_at'] as String? ?? '');
-      if (at != null && (lastReceipt == null || at.isAfter(lastReceipt))) {
-        lastReceipt = at;
-      }
+  Future<void> _refresh({bool replay = false, bool userInitiated = false}) async {
+    // Only a user-visible refresh (first load, pull-to-refresh, Retry) spins
+    // the cloud; the 4-second background poll stays silent so it never looks
+    // like a manual refresh.
+    if (userInitiated && mounted) {
+      setState(() => _refreshPhase = TaskRefreshPhase.checking);
     }
-
-    int gps = 0, checklist = 0, photos = 0;
-    double bytes = 0;
-    for (final row in pending) {
-      final type = row['type'] as String;
-      Map payload;
-      try {
-        payload = jsonDecode(row['payload'] as String) as Map;
-      } catch (_) {
-        payload = const {};
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+      final online = connectivity.any((r) => r != ConnectivityResult.none);
+      final pending = await DBHelper.getSyncCenterQueueActions();
+      final synced = await DBHelper.getRecentSyncedActions(limit: 20);
+      final cachedJobs = await DBHelper.getCachedJobs();
+      // Only this inspector's own durable receipts can prove a successful send.
+      // The old global preference survived sign-out and could name another
+      // account's (or a future) success.
+      DateTime? lastReceipt;
+      for (final row in synced) {
+        final at = DateTime.tryParse(row['updated_at'] as String? ?? '');
+        if (at != null && (lastReceipt == null || at.isAfter(lastReceipt))) {
+          lastReceipt = at;
+        }
       }
-      if (type == 'gps_confirm') gps++;
-      if (type == 'checklist_update') checklist++;
-      if (type == 'submit_inspection') {
-        final photosData =
-            (payload['photosData'] as List?)
-                ?.map((e) => Map<String, dynamic>.from(e as Map))
-                .toList() ??
-            const <Map<String, dynamic>>[];
-        final paths = photosData
-            .map((e) => e['photoPath']?.toString())
-            .whereType<String>()
-            .toList();
-        photos += paths.length;
-        for (final p in paths) {
-          try {
-            final f = File(p);
-            if (await f.exists()) bytes += await f.length();
-          } catch (_) {
-            // File gone / inaccessible — just doesn't count toward size.
+
+      int gps = 0, checklist = 0, photos = 0;
+      double bytes = 0;
+      for (final row in pending) {
+        final type = row['type'] as String;
+        Map payload;
+        try {
+          payload = jsonDecode(row['payload'] as String) as Map;
+        } catch (_) {
+          payload = const {};
+        }
+        if (type == 'gps_confirm') gps++;
+        if (type == 'checklist_update') checklist++;
+        if (type == 'submit_inspection') {
+          final photosData =
+              (payload['photosData'] as List?)
+                  ?.map((e) => Map<String, dynamic>.from(e as Map))
+                  .toList() ??
+              const <Map<String, dynamic>>[];
+          final paths = photosData
+              .map((e) => e['photoPath']?.toString())
+              .whereType<String>()
+              .toList();
+          photos += paths.length;
+          for (final p in paths) {
+            try {
+              final f = File(p);
+              if (await f.exists()) bytes += await f.length();
+            } catch (_) {
+              // File gone / inaccessible — just doesn't count toward size.
+            }
           }
         }
       }
+
+      if (!mounted) return;
+      if (replay) resetSprings();
+      setState(() {
+        _isOnline = online;
+        _pendingRows = pending;
+
+        _syncedRows = synced;
+        _jobLookup = {for (final j in cachedJobs) (j['id'] as String): j};
+        _gpsWaiting = gps;
+        _checklistWaiting = checklist;
+        _photosWaiting = photos;
+        _pendingBytes = bytes;
+        _lastSync = lastReceipt;
+        _loading = false;
+        _syncingNow = SyncOutboxService.isDraining;
+        _refreshPhase = online
+            ? TaskRefreshPhase.fresh
+            : TaskRefreshPhase.offline;
+        if (online) _lastRefreshAt = DateTime.now();
+      });
+    } catch (e) {
+      // Keep whatever was last read on screen; only the status chip changes.
+      debugPrint('[SYNC] refresh failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _refreshPhase = TaskRefreshPhase.failed;
+      });
     }
-
-    if (!mounted) return;
-    if (replay) resetSprings();
-    setState(() {
-      _isOnline = online;
-      _pendingRows = pending;
-
-      _syncedRows = synced;
-      _jobLookup = {for (final j in cachedJobs) (j['id'] as String): j};
-      _gpsWaiting = gps;
-      _checklistWaiting = checklist;
-      _photosWaiting = photos;
-      _pendingBytes = bytes;
-      _lastSync = lastReceipt;
-      _loading = false;
-      _syncingNow = SyncOutboxService.isDraining;
-    });
   }
 
   /// Phase 7 — separate from the main `_refresh()` poll loop on purpose:
@@ -1126,9 +1152,15 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: InsightTheme.surface,
+        color: queued == 0
+            ? Color.lerp(InsightTheme.surface, InsightTheme.blue1, 0.07)
+            : InsightTheme.surface,
         borderRadius: InsightTheme.roundedMd,
-        border: Border.all(color: InsightTheme.line),
+        border: Border.all(
+          color: queued == 0
+              ? InsightTheme.blue1.withValues(alpha: 0.14)
+              : InsightTheme.line,
+        ),
         boxShadow: InsightTheme.cardShadow,
       ),
       child: Column(
@@ -1441,14 +1473,7 @@ class _UpdatesScreenState extends State<UpdatesScreen>
           children: [
             SafeArea(
               bottom: false,
-              child: _loading
-                  ? const Center(
-                      child: ImapsLoadingIndicator(
-                        size: 60,
-                        label: "Syncing data...",
-                      ),
-                    )
-                  : Column(
+              child: Column(
                       children: [
                         // 1. HEADER CARD — same card language as Home, Tasks
                         // and Profile instead of a full-bleed app bar.
@@ -1531,6 +1556,18 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                     ],
                                   ),
                                 ),
+                                TaskSyncIndicator(
+                                  key: const ValueKey(
+                                    'sync-center-sync-indicator',
+                                  ),
+                                  phase: _refreshPhase,
+                                  hasSavedTasks:
+                                      _pendingRows.isNotEmpty ||
+                                      _syncedRows.isNotEmpty,
+                                  lastChecked: _lastRefreshAt,
+                                  onRetry: () =>
+                                      _refresh(userInitiated: true),
+                                ),
                                 _sectionHelpButton(
                                   title: 'Sync Center',
                                   message:
@@ -1542,8 +1579,16 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                         ),
 
                         Expanded(
-                          child: RefreshIndicator(
-                            onRefresh: () => _refresh(replay: true),
+                          child: _loading
+                              ? const Center(
+                                  child: ImapsLoadingIndicator(
+                                    size: 60,
+                                    label: "Syncing data...",
+                                  ),
+                                )
+                              : RefreshIndicator(
+                            onRefresh: () =>
+                                _refresh(replay: true, userInitiated: true),
                             child: ConstrainedContent.wide(
                               child: ListView(
                                 key: const ValueKey('sync_body'),

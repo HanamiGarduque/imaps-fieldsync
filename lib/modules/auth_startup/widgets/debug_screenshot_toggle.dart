@@ -48,9 +48,9 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
               const Text(
                 'DEBUG ONLY. Use fictional/demo or redacted information. '
                 'Screenshots and screen recording stay enabled until you switch '
-                'them off, lock/sign out, restart, or leave the foreground. '
-                'Start your recorder first, return here, then confirm. '
-                'Recorder prompts can revoke capture; confirm again after returning.',
+                'them off, lock/sign out, restart, or enter the background. '
+                'Brief screenshot or recorder overlays do not require '
+                'a new confirmation. Use fictional records only.',
               ),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
@@ -100,9 +100,12 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
 
   @override
   Widget build(BuildContext context) {
-    if (!kDebugMode) return const SizedBox.shrink();
+    // DEMO-SETTINGS-01: show an OFF/disabled row while the verified
+    // fictional-demo readiness gate is pending. Never show on normal apps.
+    if (!kDebugMode || DemoCaptureScope.maybeOf(context) == null) {
+      return const SizedBox.shrink();
+    }
     final protection = _protection!;
-    if (!protection.documentationEnabled) return const SizedBox.shrink();
     return ListenableBuilder(
       listenable: protection,
       builder: (context, _) {
@@ -112,8 +115,8 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
           title: Text('Demo screenshots',
               style: InsightTheme.inter(14, w: FontWeight.w600)),
           subtitle: Text(active
-              ? 'On — screenshots and recording allowed in the foreground. Switch off to restore protection.'
-              : 'Off — capture protection is on. Start recording first, then enable for fictional data.',
+              ? 'On — fictional demo capture enabled. Switch off to restore protection.'
+              : 'Off — capture protection is on. Enable only for fictional demo data.',
               style: InsightTheme.inter(12.5, c: InsightTheme.ink2)),
           value: active,
           activeTrackColor: InsightTheme.blue1,

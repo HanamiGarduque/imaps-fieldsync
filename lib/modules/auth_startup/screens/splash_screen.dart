@@ -137,7 +137,12 @@ class _SplashScreenState extends State<SplashScreen>
   ScreenProtectionService? _protection;
   bool _waitingForProtection = false;
 
+  // Login and the opaque App Locked landing are public documentation surfaces.
+  // Do not hold the launch cinematic waiting for FLAG_SECURE when there is no
+  // visible protected route. The existing gate still applies when protected
+  // content is actually visible (for example, a nested policy route).
   bool get _protectionReady => _protection == null ||
+      !_protection!.requiresProtection ||
       (_protection!.foreground && _protection!.appliedProtection == true);
 
   /// The resolved Login or App Lock subtree, built once; presentation never
@@ -1439,8 +1444,10 @@ class _LoginScreenState extends State<LoginScreen> {
       SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     }
 
-    return SensitiveScreen(
-      child: Scaffold(
+    // Login contains no retained task/inspection content. Its policy links
+    // open separately protected PolicyDocumentScreen routes. A protected
+    // outgoing route remains guarded by the navigator until it is obscured.
+    return Scaffold(
         // The cinematic host paints the background below its journey layer;
         // this screen's cards, fields, status and text stay above that layer.
         backgroundColor: widget.brandReveal == null
@@ -1602,7 +1609,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
-    ),
   );
   }
 

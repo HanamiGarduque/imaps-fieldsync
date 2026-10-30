@@ -5,6 +5,7 @@ import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/widgets/fieldsync_brand.dart';
+import '../../../core/widgets/sensitive_screen.dart';
 import 'policy_documents.dart';
 
 /// Shared page scaffold for the three separate policy documents.
@@ -20,7 +21,12 @@ class PolicyDocumentScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    return Scaffold(
+    // The owner-approved normal-app privacy matrix protects each policy
+    // route, including when opened from an otherwise public Login screen.
+    // The existing host secures the Android window before sensitive content
+    // may paint; the original document layout and content are unchanged.
+    return SensitiveScreen(
+      child: Scaffold(
       backgroundColor: InsightTheme.bg,
       body: SafeArea(
         child: Padding(
@@ -70,11 +76,12 @@ class PolicyDocumentScreen extends StatelessWidget {
           ),
         ),
       ),
+      ),
     );
   }
 }
 
-/// Renders the constrained markdown subset used by the bundled policy drafts:
+/// Renders the constrained markdown subset used by the bundled policies:
 /// `#`/`##` headings, `**bold**` runs, `> ` notices and `---` rules.
 ///
 /// Bodies stay left-aligned on purpose: full justification leaves large

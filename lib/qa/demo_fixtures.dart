@@ -13,7 +13,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/models/user_profile.dart';
 import '../core/services/db_helper.dart';
 import '../modules/auth_startup/services/screen_protection_service.dart';
-import '../modules/inspection/services/site_location_reference_service.dart';
 import '../modules/inspection/services/spatial_offline_service.dart';
 import '../modules/inspection/structured_checklist.dart';
 
@@ -438,20 +437,11 @@ class DemoFixtures {
     'Surrounding developments noted': true,
     'Signage / commercial activity present': false,
   };
-  static const _answers = {
-    StructuredChecklist.existingDevelopment: StructuredChecklist.yes,
-    StructuredChecklist.existingUse: 'Synthetic residential model',
-    StructuredChecklist.extensionOfExisting: StructuredChecklist.notApplicable,
-    StructuredChecklist.proposalStage: StructuredChecklist.yes,
-    StructuredChecklist.treesPresent: StructuredChecklist.no,
-    StructuredChecklist.canalWaterway: StructuredChecklist.no,
-    StructuredChecklist.mojonObserved: StructuredChecklist.unable,
-  };
   static const _notes =
       'DEMO ONLY: generated model facade and access observed. '
       'No physical visit, applicant contact or cadastral verification occurred.';
   static const _observations =
-      'DEMO: synthetic residential model, generated reference points only.';
+      'DEMO: synthetic residential model and fictional location coordinates only.';
   static const _recommendations =
       'DEMO ONLY: review the fictional model record; not a planning decision.';
 
@@ -467,7 +457,7 @@ class DemoFixtures {
         notes: _notes,
         isCompliant: true,
         inspectionResult: 'Compliant',
-        checklist: {..._legacyChecklist, StructuredChecklist.jsonKey: _answers},
+        checklist: _legacyChecklist,
         boundaryStatus: 'DEMO: not surveyed',
         currentStep: n == 8 ? 5 : 6,
         findings: {
@@ -501,21 +491,15 @@ class DemoFixtures {
         verifiedAt: DateTime.parse(times['2']!),
       );
     }
-    for (var index = 0; index <= 3; index++) {
-      final reference = index == 0;
-      final photoId = reference
-          ? SiteLocationReferenceService.photoId(id, 1)
-          : '55555555-5555-4555-8555-${_suffix(n * 100 + index)}';
+    // Fresh fictional fixtures contain three clearly marked synthetic photos.
+    // Previously seeded evidence is never deleted or reseeded.
+    for (var index = 1; index <= 3; index++) {
+      final photoId = '55555555-5555-4555-8555-${_suffix(n * 100 + index)}';
       if (await DBHelper.getLocalPhoto(photoId) != null) continue;
-      final file = File(
-        '${directory.path}/${id}_${reference ? 'reference' : 'site_$index'}.jpg',
-      );
+      final file = File('${directory.path}/${id}_site_$index.jpg');
       if (!await file.exists()) {
         await file.writeAsBytes(
-          _imageBytes(
-            reference: reference,
-            label: 'DEMO-$n / ${reference ? 'REFERENCE' : 'EVIDENCE $index'}',
-          ),
+          _imageBytes(reference: false, label: 'DEMO-$n / EVIDENCE $index'),
           flush: true,
         );
       }
@@ -523,10 +507,7 @@ class DemoFixtures {
         photoId: photoId,
         jobId: id,
         photoPath: file.path,
-        notes: reference
-            ? '$kSiteLocationReferenceNotes DEMO · SYNTHETIC DATA. '
-                  'Generated from simulated coordinates, not a physical GPS fix.'
-            : 'DEMO · SYNTHETIC DATA — generated evidence $index; NOT a camera photograph.',
+        notes: 'DEMO · SYNTHETIC DATA — generated evidence $index; NOT a camera photograph.',
         latitude: latitude,
         longitude: longitude,
         capturedAt: anchor
@@ -535,7 +516,6 @@ class DemoFixtures {
       );
     }
   }
-
   static Uint8List _imageBytes({
     required bool reference,
     required String label,
@@ -677,7 +657,7 @@ class DemoFixtures {
     final photos9 = await _photos(jobId(9));
     final checklist = StructuredChecklist.remoteChecklist(
       legacy: _legacyChecklist,
-      answers: _answers,
+      answers: const {},
     );
     final scenarios = [
       (

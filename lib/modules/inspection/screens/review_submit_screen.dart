@@ -17,7 +17,6 @@ import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/theme/insight_theme.dart';
 import '../widgets/inspection_step_header.dart';
-import '../widgets/structured_checklist_summary.dart';
 import '../widgets/photo_viewer.dart';
 import '../services/photo_source_resolver.dart';
 import '../services/photo_evidence_presentation.dart';
@@ -640,11 +639,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   ],
                 ),
               ],
-              const SizedBox(height: 16),
-              StructuredChecklistSummary(
-                heading: 'Project status & zoning observations',
-                answers: provider.structuredAnswers,
-              ),
+
               const SizedBox(height: 16),
               const FieldSectionHeading(
                 title: 'Field findings',

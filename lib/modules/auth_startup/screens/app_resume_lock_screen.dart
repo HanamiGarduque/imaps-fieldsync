@@ -253,8 +253,11 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen>
     );
     return PopScope(
       canPop: false,
-      child: SensitiveScreen(
-        child: Scaffold(
+      // Normal resume lock is an opaque blue surface. During cinematic
+      // startup, the underlying full-screen Splash is also public/opaque.
+      // The outgoing protected route remains guarded by the Navigator until
+      // this opaque route has completed its transition.
+      child: Scaffold(
           // The cinematic host owns the background; the opaque workspace and
           // header content paint in front of its journey, not underneath it.
           backgroundColor: widget.brandReveal == null
@@ -277,7 +280,6 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen>
             }),
           ),
         ),
-      ),
     );
   }
 }

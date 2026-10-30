@@ -148,10 +148,24 @@ class ScreenProtectionService extends ChangeNotifier
       !hasPopup &&
       _phase == DocumentationPhase.off &&
       _applied == true;
+  // A screenshot/recorder overlay may temporarily make the *verified*
+  // fictional-demo window inactive. Only an already-acknowledged manual ON
+  // survives it; an incomplete activation, real background or normal app
+  // must still keep private content obscured.
+  bool get _verifiedDemoActiveWhileInactive =>
+      _lifecycle == AppLifecycleState.inactive &&
+      _phase == DocumentationPhase.active &&
+      _documentationRequested &&
+      _identityVerified &&
+      _qaScreenshotsAllowed &&
+      _applied == false &&
+      !_failed;
+
   bool get mustObscure =>
       requiresProtection &&
-      ((!foreground && !(_lifecycle == AppLifecycleState.inactive &&
-          _biometricPrompts > 0 && _applied == true)) ||
+      ((!foreground && !_verifiedDemoActiveWhileInactive &&
+          !(_lifecycle == AppLifecycleState.inactive &&
+              _biometricPrompts > 0 && _applied == true)) ||
           (!isDocumentationActive && _applied != true));
   bool get _desired => requiresProtection && !_documentationRequested;
 
@@ -393,9 +407,24 @@ class ScreenProtectionService extends ChangeNotifier
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Preserve an already-active manual demo grant across a brief OS overlay.
+    // This does NOT change foreground eligibility for a new grant or change
+    // how normal inspector screens are obscured while inactive.
+    final wasVerifiedActive = _phase == DocumentationPhase.active &&
+        _documentationRequested && _identityVerified &&
+        _qaScreenshotsAllowed && _applied == false && !_failed;
     _lifecycle = state;
-    // Also revoke for inactive: this affects capture permission only, NOT the
-    // separate biometric/resume-lock algorithm's paused/hidden policy.
+    if (state == AppLifecycleState.inactive && wasVerifiedActive) {
+      _changed();
+      return;
+    }
+    if (state == AppLifecycleState.resumed) {
+      // Return from the same transient inactive without silently re-granting.
+      _changed();
+      return;
+    }
+    // No ON yet, or genuine hidden/paused/detached: fail closed and require
+    // a fresh identity-verified manual action after return.
     invalidateDocumentation();
   }
 

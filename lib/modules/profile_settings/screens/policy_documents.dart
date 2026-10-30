@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 
 /// A single, independently navigable policy page.
 ///
-/// The document body lives in a bundled markdown asset so the supplied draft
-/// wording (DRAFT v0.9, prepared October 18, 2026) remains the source of
-/// truth and can be replaced as a document instead of as code.
+/// Each policy body is a bundled markdown asset shared in substance with
+/// the iMAPS login notices. MPDO institutional status is recorded in the asset.
 class PolicyDocument {
   const PolicyDocument({
     required this.menuLabel,

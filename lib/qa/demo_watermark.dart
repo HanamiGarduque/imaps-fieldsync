@@ -152,7 +152,14 @@ class _DemoWatermarkState extends State<DemoWatermark>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _foreground = state == AppLifecycleState.resumed;
+    // Only the already-verified, active fictional demo survives a transient
+    // screenshot/recorder overlay. All other inactive states and any actual
+    // hidden/paused/detached transition revoke the source grant.
+    final temporaryOverlay = state == AppLifecycleState.inactive &&
+        _bound != null && _granted &&
+        _protection.isDocumentationActive &&
+        _sameSession && _watermarkVisible;
+    _foreground = state == AppLifecycleState.resumed || temporaryOverlay;
     if (!_foreground) _revoke();
     _scheduleReadiness();
   }
@@ -340,7 +347,7 @@ class _DemoWatermarkState extends State<DemoWatermark>
     }
     if (_granted &&
         (_allowedGeneration != _protection.documentationGeneration ||
-            !_protection.foreground ||
+            !_foreground ||
             _protection.nativeFailure)) {
       _revoke();
     }

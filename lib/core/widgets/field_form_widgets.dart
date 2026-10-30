@@ -75,10 +75,11 @@ class FieldPageHeader extends StatelessWidget {
 /// Restyles existing two-way selectors; values and callbacks stay screen-owned.
 class FieldSegmentedControl<T extends Object> extends StatelessWidget {
   const FieldSegmentedControl({super.key, required this.labels,
-    required this.value, required this.onChanged});
+    required this.value, required this.onChanged, this.compact = false});
   final Map<T, String> labels;
   final T value;
   final ValueChanged<T> onChanged;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => CupertinoSlidingSegmentedControl<T>(
@@ -89,11 +90,12 @@ class FieldSegmentedControl<T extends Object> extends StatelessWidget {
     children: {
       for (final entry in labels.entries)
         entry.key: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
+          constraints: BoxConstraints(minHeight: compact ? 40 : 48),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            padding: EdgeInsets.symmetric(
+                horizontal: compact ? 4 : 12, vertical: compact ? 8 : 12),
             child: Text(entry.value, textAlign: TextAlign.center,
-                style: InsightTheme.inter(13, w: FontWeight.w600,
+                style: InsightTheme.inter(compact ? 12 : 13, w: FontWeight.w600,
                     c: entry.key == value ? InsightTheme.blueInk : InsightTheme.ink2)),
           ),
         ),

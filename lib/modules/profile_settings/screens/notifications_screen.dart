@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/db_helper.dart';
+import '../../tasks/screens/tasks_screen.dart';
+import '../../../core/navigation/parcel_detail_screen.dart';
+import '../../inspection/screens/completed_inspection_detail_screen.dart';
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/sensitive_screen.dart';
@@ -51,7 +54,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   // different table, different meaning, never merged into one list) ---
   List<Map<String, dynamic>> _syncLogs = [];
   bool _isLoadingSyncLogs = true;
+  bool _loadingMoreSyncLogs = false;
   bool _syncLogHasMore = true;
+  // Invalidate older responses after a refresh or confirmed clear. This is a
+  // screen-only request token, not a persistent change to the sync log.
+  int _syncLogRequestId = 0;
   static const int _syncLogPageSize = 20;
 
   @override
@@ -94,28 +101,41 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   /// load); otherwise appends the next page ("Load more" tap) so opening
   /// a long-lived install's history never pulls the whole table at once.
   Future<void> _loadSyncLogs({bool reset = false}) async {
-    if (reset) {
-      setState(() {
+    // Only one append can be in flight. A reset supersedes any older read,
+    // including an append that was already waiting on SQLite.
+    if (!reset &&
+        (_isLoadingSyncLogs || _loadingMoreSyncLogs || !_syncLogHasMore)) {
+      return;
+    }
+    final requestId = ++_syncLogRequestId;
+    final offset = reset ? 0 : _syncLogs.length;
+    setState(() {
+      if (reset) {
         _isLoadingSyncLogs = true;
         _syncLogs = [];
         _syncLogHasMore = true;
-      });
-    }
+        _loadingMoreSyncLogs = false;
+      } else {
+        _loadingMoreSyncLogs = true;
+      }
+    });
     try {
       final page = await DBHelper.getSyncLogEntries(
         limit: _syncLogPageSize,
-        offset: reset ? 0 : _syncLogs.length,
+        offset: offset,
       );
-      if (!mounted) return;
+      if (!mounted || requestId != _syncLogRequestId) return;
       setState(() {
         _syncLogs = reset ? page : [..._syncLogs, ...page];
         _syncLogHasMore = page.length == _syncLogPageSize;
         _isLoadingSyncLogs = false;
+        _loadingMoreSyncLogs = false;
       });
-    } catch (e) {
-      if (!mounted) return;
+    } catch (_) {
+      if (!mounted || requestId != _syncLogRequestId) return;
       setState(() {
         _isLoadingSyncLogs = false;
+        _loadingMoreSyncLogs = false;
       });
     }
   }
@@ -205,6 +225,27 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     });
   }
 
+  /// Only an authenticated, currently assigned server row may back a task
+  /// deep-link. Activity text and a cached job are never authority.
+  /// Failing closed also avoids opening a reassigned task while offline.
+  Future<Map<String, dynamic>?> _resolveLinkedTask(String jobId) async {
+    final owner = DBHelper.currentInspectorId;
+    if (owner == null || owner.isEmpty ||
+        SupabaseService.client.auth.currentUser?.id != owner) {
+      return null;
+    }
+    final row = await SupabaseService.fetchJobDetail(jobId);
+    if (!mounted || DBHelper.currentInspectorId != owner ||
+        SupabaseService.client.auth.currentUser?.id != owner) {
+      return null;
+    }
+    if (row == null || row['id']?.toString() != jobId ||
+        row['assigned_inspector_id']?.toString() != owner) {
+      return null;
+    }
+    return row;
+  }
+  
   Future<void> _openNotificationDetail(Map<String, dynamic> item) async {
     await _markOneRead(item);
     if (!mounted) return;
@@ -217,87 +258,165 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       '_',
       ' ',
     );
+    final linkedJobId = item['field_job_id']?.toString().trim();
+    var openingTask = false;
+    String? navigationError;
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        return Container(
-          margin: const EdgeInsets.only(top: 40),
-          decoration: const BoxDecoration(
-            color: InsightTheme.surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-              // `subtitle` comes from activity_log at runtime and is unbounded,
-              // so this sheet scrolls: mainAxisSize.min alone let a long body
-              // push the Close button past the bottom edge with no way to reach
-              // it. min still hugs the content whenever the body is short.
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 48,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: InsightTheme.line,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      title,
-                      style: InsightTheme.poppins(18, w: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      eventType,
-                      style: InsightTheme.inter(
-                        12,
-                        w: FontWeight.w600,
-                        c: InsightTheme.blueInk,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      subtitle,
-                      style: InsightTheme.inter(
-                        14,
-                        c: InsightTheme.ink,
-                        h: 1.5,
-                      ),
-                    ),
-                    if (occurredAt != null && occurredAt.isNotEmpty) ...[
-                      const SizedBox(height: 18),
-                      Text(
-                        'Received: ${_timeAgo(occurredAt)}',
-                        style: InsightTheme.inter(12, c: InsightTheme.ink2),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(sheetContext),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: InsightTheme.blue1,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) => Container(
+            margin: const EdgeInsets.only(top: 40),
+            decoration: const BoxDecoration(
+              color: InsightTheme.surface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                // `subtitle` comes from activity_log at runtime and is unbounded,
+                // so this sheet scrolls: mainAxisSize.min alone let a long body
+                // push the Close button past the bottom edge with no way to reach
+                // it. min still hugs the content whenever the body is short.
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 48,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: InsightTheme.line,
+                            borderRadius: BorderRadius.circular(99),
                           ),
                         ),
-                        child: const Text('Close'),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 18),
+                      Text(
+                        title,
+                        style: InsightTheme.poppins(18, w: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        eventType,
+                        style: InsightTheme.inter(
+                          12,
+                          w: FontWeight.w600,
+                          c: InsightTheme.blueInk,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        subtitle,
+                        style: InsightTheme.inter(
+                          14,
+                          c: InsightTheme.ink,
+                          h: 1.5,
+                        ),
+                      ),
+                      if (occurredAt != null && occurredAt.isNotEmpty) ...[
+                        const SizedBox(height: 18),
+                        Text(
+                          'Received: ${_timeAgo(occurredAt)}',
+                          style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                        ),
+                      ],
+                      if (linkedJobId != null && linkedJobId.isNotEmpty) ...[
+                        const SizedBox(height: 20),
+                        if (navigationError != null) ...[
+                          Text(
+                            navigationError!,
+                            key: const ValueKey('notification_task_link_error'),
+                            style: InsightTheme.inter(13, c: InsightTheme.redInk),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton(
+                            key: const ValueKey('notification_view_task'),
+                            onPressed: openingTask ? null : () async {
+                              setSheetState(() {
+                                openingTask = true;
+                                navigationError = null;
+                              });
+                              Map<String, dynamic>? row;
+                              try {
+                                row = await _resolveLinkedTask(linkedJobId);
+                              } catch (_) {
+                                row = null;
+                              }
+                              if (!mounted || !sheetContext.mounted) return;
+                              TaskItem? task;
+                              if (row != null) {
+                                try {
+                                  task = TaskItem.fromJob(row);
+                                } catch (_) {
+                                  task = null;
+                                }
+                              }
+                              if (task == null ||
+                                  task.lifecycleCategory == TaskLifecycleCategory.unknown) {
+                                setSheetState(() {
+                                  openingTask = false;
+                                  navigationError =
+                                      'This task could not be verified for your account. '
+                                      'Reconnect and check My Tasks for its current assignment.';
+                                });
+                                return;
+                              }
+                              final verifiedTask = task;
+                              Navigator.of(sheetContext).pop();
+                              if (!mounted) return;
+                              if (verifiedTask.lifecycleCategory == TaskLifecycleCategory.completed) {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => CompletedInspectionDetailScreen(
+                                      task: verifiedTask,
+                                      historicalReadOnly:
+                                          verifiedTask.planningReview?.decision ==
+                                          'Requires Reinspection',
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ParcelDetailScreen(
+                                      task: verifiedTask,
+                                      fetchedJob: row,
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            child: Text(openingTask ? 'Verifying assignment…' : 'View task'),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: InsightTheme.blue1,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text('Close'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -401,9 +520,14 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         }
       }
     } else {
+      // A pending load must not repopulate the screen after the user confirms
+      // clearing local sync history.
+      _syncLogRequestId++;
       setState(() {
         _syncLogs = [];
         _syncLogHasMore = false;
+        _isLoadingSyncLogs = false;
+        _loadingMoreSyncLogs = false;
       });
       try {
         await DBHelper.clearSyncLogEntries();
@@ -705,31 +829,38 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               return SpringSlide(
                 animation: springForKey(item['id'] ?? i, 2 + (i % 6)),
                 beginOffset: const Offset(40, 0),
-                child: Dismissible(
-                  key: ValueKey(item['id'] ?? i),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: 24),
-                    color: InsightTheme.redInk.withValues(alpha: 0.1),
-                    child: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: InsightTheme.redInk,
-                      size: 24,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Dismissible(
+                      key: ValueKey(item['id'] ?? i),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 24),
+                        color: InsightTheme.redInk.withValues(alpha: 0.1),
+                        child: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: InsightTheme.redInk,
+                          size: 24,
+                        ),
+                      ),
+                      confirmDismiss: (direction) async => true,
+                      onDismissed: (_) => _deleteOne(item),
+                      child: _NotificationRow(
+                        icon: theme['icon'] as IconData,
+                        iconBgColor: theme['bg'] as Color,
+                        iconColor: theme['fg'] as Color,
+                        title: item['title'] as String? ?? 'Update',
+                        subtitle: item['subtitle'] as String? ?? '',
+                        time: _timeAgo(item['occurred_at'] as String?),
+                        isUnread: item['is_read'] != true,
+                        onTap: () => _openNotificationDetail(item),
+                      ),
                     ),
-                  ),
-                  confirmDismiss: (direction) async => true,
-                  onDismissed: (_) => _deleteOne(item),
-                  child: _NotificationRow(
-                    icon: theme['icon'] as IconData,
-                    iconBgColor: theme['bg'] as Color,
-                    iconColor: theme['fg'] as Color,
-                    title: item['title'] as String? ?? 'Update',
-                    subtitle: item['subtitle'] as String? ?? '',
-                    time: _timeAgo(item['occurred_at'] as String?),
-                    isUnread: item['is_read'] != true,
-                    onTap: () => _openNotificationDetail(item),
-                  ),
+                    if (i < rows.length - 1)
+                      const Divider(height: 1, color: InsightTheme.line),
+                  ],
                 ),
               );
             },
@@ -811,133 +942,125 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             (entry['technical_details'] as String?)?.isNotEmpty == true;
         final isEntryUnread = entry['is_read'] != true;
         rowWidgets.add(
-          Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            decoration: BoxDecoration(
-              color: isEntryUnread
-                  ? InsightTheme.blueTint.withValues(alpha: 0.32)
-                  : InsightTheme.surface,
-              border: Border.all(
-                color: isEntryUnread
-                    ? InsightTheme.blue1.withValues(alpha: 0.28)
-                    : InsightTheme.line,
-              ),
-              borderRadius: InsightTheme.roundedMd,
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Theme(
-              data: Theme.of(context).copyWith(
-                dividerColor: Colors.transparent,
-                listTileTheme: Theme.of(context).listTileTheme.copyWith(
-                  titleAlignment: ListTileTitleAlignment.top,
-                  horizontalTitleGap: 16,
-                  minLeadingWidth: 40,
-                ),
-              ),
-              child: ExpansionTile(
-                enabled: hasDetails,
-                tilePadding: const EdgeInsets.all(16),
-                childrenPadding: const EdgeInsets.fromLTRB(72, 0, 16, 16),
-                shape: const Border(),
-                collapsedShape: const Border(),
-                onExpansionChanged: (expanded) {
-                  if (expanded && isEntryUnread) {
-                    _markSyncEntryRead(entry);
-                  }
-                },
-                leading: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: theme['bg'] as Color,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    theme['icon'] as IconData,
-                    size: 18,
-                    color: theme['fg'] as Color,
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Theme(
+                data: Theme.of(context).copyWith(
+                  dividerColor: Colors.transparent,
+                  listTileTheme: Theme.of(context).listTileTheme.copyWith(
+                    titleAlignment: ListTileTitleAlignment.top,
+                    horizontalTitleGap: 12,
+                    minLeadingWidth: 32,
                   ),
                 ),
-                title: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry['message'] as String? ?? '',
-                      style: InsightTheme.inter(
-                        13.5,
-                        w: isEntryUnread ? FontWeight.w700 : FontWeight.w600,
-                        c: InsightTheme.ink,
-                      ),
+                child: ExpansionTile(
+                  enabled: hasDetails,
+                  tilePadding: const EdgeInsets.symmetric(vertical: 8),
+                  childrenPadding: const EdgeInsets.fromLTRB(60, 0, 8, 12),
+                  shape: const Border(),
+                  collapsedShape: const Border(),
+                  onExpansionChanged: (expanded) {
+                    if (expanded && isEntryUnread) {
+                      _markSyncEntryRead(entry);
+                    }
+                  },
+                  leading: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: theme['bg'] as Color,
+                      borderRadius: BorderRadius.circular(9),
                     ),
-                    const SizedBox(height: 7),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme['bg'] as Color,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        theme['label'] as String,
+                    child: Icon(
+                      theme['icon'] as IconData,
+                      size: 18,
+                      color: theme['fg'] as Color,
+                    ),
+                  ),
+                  title: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry['message'] as String? ?? '',
                         style: InsightTheme.inter(
-                          10,
-                          w: FontWeight.w700,
-                          c: theme['fg'] as Color,
+                          13.5,
+                          w: isEntryUnread ? FontWeight.w700 : FontWeight.w600,
+                          c: InsightTheme.ink,
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    _timeAgo(entry['created_at'] as String?),
-                    style: InsightTheme.inter(12, c: InsightTheme.ink3),
-                  ),
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isEntryUnread)
+                      const SizedBox(height: 5),
                       Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: InsightTheme.blue1,
-                          shape: BoxShape.circle,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
                         ),
-                      ),
-                    if (hasDetails) const SizedBox(width: 8),
-                    hasDetails
-                        ? const Icon(
-                            Icons.expand_more_rounded,
-                            size: 18,
-                            color: InsightTheme.ink3,
-                          )
-                        : const SizedBox.shrink(),
-                  ],
-                ),
-                children: hasDetails
-                    ? [
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            _formatTechnicalDetails(
-                              entry['technical_details'] as String?,
-                            ),
-                            style: InsightTheme.inter(
-                              11,
-                              c: InsightTheme.ink3,
-                              h: 1.5,
-                            ),
+                        decoration: BoxDecoration(
+                          color: theme['bg'] as Color,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          theme['label'] as String,
+                          style: InsightTheme.inter(
+                            10,
+                            w: FontWeight.w700,
+                            c: theme['fg'] as Color,
                           ),
                         ),
-                      ]
-                    : const [],
+                      ),
+                    ],
+                  ),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      _timeAgo(entry['created_at'] as String?),
+                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                    ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isEntryUnread)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: InsightTheme.blue1,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      if (hasDetails) const SizedBox(width: 8),
+                      hasDetails
+                          ? const Icon(
+                              Icons.expand_more_rounded,
+                              size: 18,
+                              color: InsightTheme.ink3,
+                            )
+                          : const SizedBox.shrink(),
+                    ],
+                  ),
+                  children: hasDetails
+                      ? [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _formatTechnicalDetails(
+                                entry['technical_details'] as String?,
+                              ),
+                              style: InsightTheme.inter(
+                                11,
+                                c: InsightTheme.ink3,
+                                h: 1.5,
+                              ),
+                            ),
+                          ),
+                        ]
+                      : const [],
+                ),
               ),
-            ),
+              if (i < rows.length - 1)
+                const Divider(height: 1, color: InsightTheme.line),
+            ],
           ),
         );
       }
@@ -952,7 +1075,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           child: SizedBox(
             width: double.infinity,
             child: OutlinedButton(
-              onPressed: () => _loadSyncLogs(),
+              onPressed: _loadingMoreSyncLogs ? null : () => _loadSyncLogs(),
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size(48, 48),
                 side: const BorderSide(color: InsightTheme.lineStrong),
@@ -961,7 +1084,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 ),
               ),
               child: Text(
-                'Load more',
+                _loadingMoreSyncLogs ? 'Loading…' : 'Load more',
                 style: InsightTheme.inter(
                   12.5,
                   w: FontWeight.w700,
@@ -1014,87 +1137,72 @@ class _NotificationRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: isUnread
-            ? InsightTheme.blueTint.withValues(alpha: 0.32)
-            : InsightTheme.surface,
-        border: Border.all(
-          color: isUnread
-              ? InsightTheme.blue1.withValues(alpha: 0.28)
-              : InsightTheme.line,
-        ),
-        borderRadius: InsightTheme.roundedMd,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          onTap();
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: iconBgColor,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, size: 18, color: iconColor),
+    return InkWell(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTap();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: iconBgColor,
+                borderRadius: BorderRadius.circular(9),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: InsightTheme.inter(
-                        13.5,
-                        w: isUnread ? FontWeight.w800 : FontWeight.w600,
-                        c: InsightTheme.ink,
-                      ),
+              child: Icon(icon, size: 18, color: iconColor),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: InsightTheme.inter(
+                      13.5,
+                      w: isUnread ? FontWeight.w800 : FontWeight.w600,
+                      c: InsightTheme.ink,
                     ),
-                    if (subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        subtitle,
-                        style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
-                      ),
-                    ],
-                    if (time.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        time,
-                        style: InsightTheme.inter(12, c: InsightTheme.ink3),
-                      ),
-                    ],
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
+                    ),
                   ],
-                ),
+                  if (time.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      time,
+                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                    ),
+                  ],
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.only(left: 8, top: 6),
-                child: isUnread
-                    ? Semantics(
-                        label: 'Unread',
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: InsightTheme.blue1,
-                            shape: BoxShape.circle,
-                          ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 8, top: 6),
+              child: isUnread
+                  ? Semantics(
+                      label: 'Unread',
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: InsightTheme.blue1,
+                          shape: BoxShape.circle,
                         ),
-                      )
-                    : const SizedBox.square(dimension: 8),
-              ),
-            ],
-          ),
+                      ),
+                    )
+                  : const SizedBox.square(dimension: 8),
+            ),
+          ],
         ),
       ),
     );

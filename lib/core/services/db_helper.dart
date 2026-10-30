@@ -177,9 +177,23 @@ class DBHelper {
   /// Deliberately NOT derived from anything predictable (e.g. a timestamp)
   /// — that exact mistake was found and flagged elsewhere in this app's
   /// pattern-lock salt generation; not repeating it here.
-  static Future<String> _getOrCreateDbKey() async {
+  static Future<String> _getOrCreateDbKey(String databasePath) async {
     final existing = await SecurePrefsService.getDbEncryptionKey();
     if (existing != null && existing.isNotEmpty) return existing;
+    // DATA PRESERVATION: absence of the Keystore-backed key is not permission
+    // to replace it while any local database or migration evidence exists.
+    // A new random key cannot decrypt the old database. Fail closed without
+    // writing a replacement key or changing the existing database files.
+    if (await File(databasePath).exists() ||
+        await File('$databasePath-wal').exists() ||
+        await File('$databasePath-shm').exists() ||
+        await File('$databasePath.pre_encryption_backup').exists() ||
+        await File('$databasePath.encrypting_tmp').exists()) {
+      throw StateError(
+        'Existing local database or migration files found but the encryption key is missing. '
+        'Data preserved. Manual recovery investigation required.',
+      );
+    }
 
     final random = Random.secure();
     final bytes = List<int>.generate(32, (_) => random.nextInt(256));
@@ -252,7 +266,7 @@ class DBHelper {
   static Future<Database> _initDB() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'imaps_fieldsync.db');
-    final password = await _getOrCreateDbKey();
+    final password = await _getOrCreateDbKey(path);
 
     if (await File(path).exists()) {
       final alreadyEncrypted = await _opensWithKey(path, password);

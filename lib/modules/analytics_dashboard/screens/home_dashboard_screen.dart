@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show max, sqrt;
+import 'dart:math' show max;
 import 'package:flutter/material.dart';
 import '../../../core/widgets/sensitive_screen.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -99,7 +99,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   List<TaskItem> _upcomingTasks = [];
   // Full, unfiltered task list — separate from _upcomingTasks (which is
   // capped at 6 and excludes Completed for the assignments carousel).
-  // Task Completion Flow and the calendar's task-dots both need the
+  // Task Status Overview and the calendar's task-dots both need the
   // complete picture, so this is loaded alongside it in the same fetch
   // rather than issuing a second network/service call.
   List<TaskItem> _allTasks = [];
@@ -1573,80 +1573,54 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   const SizedBox(height: 16),
 
                   // ----------------------------------------------------
-                  // 3. TASK COMPLETION FLOW
+                  // 3. TASK STATUS OVERVIEW
                   // ----------------------------------------------------
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: SpringSlide(
                       animation: springFor(3),
-                      beginOffset: const Offset(0, 20),
-                      child: _SectionLabel(
-                        title: "Task Completion Flow",
-                        trailing: _SectionActionButton(
-                          label: 'More details',
-                          onTap: _goToTasksTab,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: SpringSlide(
-                      animation: springFor(4),
                       beginOffset: const Offset(0, 24),
-                      child: _isLoadingTasks
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Center(
-                                child: ImapsLoadingIndicator(size: 40),
-                              ),
-                            )
-                          : _allTasks.isEmpty
-                          ? Text(
-                              'No tasks yet.',
-                              style: InsightTheme.inter(
-                                12,
-                                c: InsightTheme.ink2,
-                              ),
-                            )
-                          : Builder(
-                              builder: (context) {
-                                final counts = _completionCounts;
-                                final total = counts.values.fold<int>(
-                                  0,
-                                  (a, b) => a + b,
-                                );
-                                const labels = [
-                                  'Scheduled',
-                                  'Pending',
-                                  'Ongoing',
-                                  'Completed',
-                                ];
-                                const colors = [
-                                  InsightTheme.orange,
-                                  Color(0xFF60A5FA),
-                                  InsightTheme.blue1,
-                                  InsightTheme.green,
-                                ];
-                                final overdueCount = _allTasks.where((task) {
-                                  if (task.category == 'Completed' ||
-                                      _deviceCompletedIds.contains(task.id))
-                                    return false;
-                                  return task.scheduleUrgency == 'Overdue';
-                                }).length;
-                                return _TaskCompletionBubbleChart(
-                                  total: total,
-                                  labels: labels,
-                                  colors: colors,
-                                  counts: List.generate(
-                                    labels.length,
-                                    (i) => counts[labels[i]] ?? 0,
-                                  ),
-                                  overdueCount: overdueCount,
-                                );
-                              },
+                      child: Builder(
+                        builder: (context) {
+                          final counts = _completionCounts;
+                          final total = counts.values.fold<int>(
+                            0,
+                            (a, b) => a + b,
+                          );
+                          const labels = [
+                            'Scheduled',
+                            'Pending',
+                            'Ongoing',
+                            'Completed',
+                          ];
+                          const colors = [
+                            InsightTheme.orange,
+                            InsightTheme.blue1,
+                            InsightTheme.lightBlue,
+                            InsightTheme.green,
+                          ];
+                          final overdueCount = _allTasks.where((task) {
+                            if (task.category == 'Completed' ||
+                                _deviceCompletedIds.contains(task.id)) {
+                              return false;
+                            }
+                            return task.scheduleUrgency == 'Overdue';
+                          }).length;
+                          return _TaskCompletionBubbleChart(
+                            total: total,
+                            labels: labels,
+                            colors: colors,
+                            counts: List.generate(
+                              labels.length,
+                              (i) => counts[labels[i]] ?? 0,
                             ),
+                            overdueCount: overdueCount,
+                            isLoading: _isLoadingTasks,
+                            hasTasks: _allTasks.isNotEmpty,
+                            onMoreDetails: _goToTasksTab,
+                          );
+                        },
+                      ),
                     ),
                   ),
                   if (_deviceCompletedIds.isNotEmpty)
@@ -2593,6 +2567,9 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
   final List<Color> colors;
   final List<int> counts;
   final int overdueCount;
+  final bool isLoading;
+  final bool hasTasks;
+  final VoidCallback onMoreDetails;
 
   const _TaskCompletionBubbleChart({
     required this.total,
@@ -2600,57 +2577,73 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
     required this.colors,
     required this.counts,
     required this.overdueCount,
+    required this.isLoading,
+    required this.hasTasks,
+    required this.onMoreDetails,
   });
 
-  Color _statusColor(int index) =>
-      Color.lerp(colors[index], Colors.black, 0.35)!;
+  Color _countColor(Color background) {
+    final luminance = background.computeLuminance();
+    final darkContrast =
+        (luminance + 0.05) / (InsightTheme.ink.computeLuminance() + 0.05);
+    final lightContrast = 1.05 / (luminance + 0.05);
+    return lightContrast > darkContrast ? Colors.white : InsightTheme.ink;
+  }
 
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
     final statuses = <({String label, int count, Color color})>[
       for (var i = 0; i < labels.length; i++)
-        (label: labels[i], count: counts[i], color: _statusColor(i)),
-      (label: 'Overdue', count: overdueCount, color: InsightTheme.redInk),
+        (label: labels[i], count: counts[i], color: colors[i]),
+      (label: 'Overdue', count: overdueCount, color: InsightTheme.red),
     ];
-    final maxCount = counts.fold<int>(1, max);
     final bubbles = SizedBox(
       key: const ValueKey('completion_bubble_chart'),
-      width: 144,
-      height: 140,
+      width: 138,
+      height: 102,
       child: Stack(
         key: const ValueKey('completion_bubbles'),
         clipBehavior: Clip.none,
         children: [
-          for (var i = 0; i < labels.length; i++)
+          for (var i = 0; i < statuses.length; i++)
             Builder(
               builder: (context) {
-                const positions = [
-                  Offset(0, 0),
-                  Offset(66, 4),
-                  Offset(25, 55),
-                  Offset(69, 60),
+                const centers = [
+                  Offset(31.5, 31.5),
+                  Offset(67.5, 31.5),
+                  Offset(103.5, 31.5),
+                  Offset(49.5, 70.5),
+                  Offset(85.5, 70.5),
                 ];
-                final diameter = 52 + 20 * sqrt(counts[i] / maxCount);
-                final color = _statusColor(i);
+                final status = statuses[i];
+                final cappedCount = status.count.clamp(0, 7);
+                final diameter = 42.0 + 3.0 * cappedCount;
+                final color = status.color;
                 return Positioned(
-                  left: positions[i].dx,
-                  top: positions[i].dy,
+                  left: centers[i].dx - diameter / 2,
+                  top: centers[i].dy - diameter / 2,
                   width: diameter,
                   height: diameter,
                   child: Semantics(
-                    label: '${labels[i]}: ${counts[i]} of $total tasks',
+                    label: status.label == 'Overdue'
+                        ? '${status.count} overdue tasks'
+                        : '${status.label}: ${status.count} tasks',
                     child: Container(
-                      key: ValueKey('completion_bubble_${labels[i]}'),
+                      key: ValueKey('completion_bubble_${status.label}'),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: color,
                         shape: BoxShape.circle,
+                        border: Border.all(
+                          color: InsightTheme.surface,
+                          width: 2,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: color.withValues(alpha: 0.22),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
+                            color: color.withValues(alpha: 0.12),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
                           ),
                         ],
                       ),
@@ -2659,11 +2652,11 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
                         child: Padding(
                           padding: const EdgeInsets.all(8),
                           child: Text(
-                            '${counts[i]}',
+                            '${status.count}',
                             style: InsightTheme.urbanist(
                               13,
                               w: FontWeight.w800,
-                              c: Colors.white,
+                              c: _countColor(color),
                             ),
                           ),
                         ),
@@ -2681,11 +2674,12 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         for (final status in statuses)
-          SizedBox(
-            height: 26,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
             child: Container(
               key: ValueKey('completion_${status.label}'),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
                     key: ValueKey('completion_icon_${status.label}'),
@@ -2700,8 +2694,6 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
                   Expanded(
                     child: Text(
                       status.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: InsightTheme.inter(
                         11,
                         w: FontWeight.w500,
@@ -2732,8 +2724,6 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
     return LayoutBuilder(
       key: const ValueKey('completion_chart'),
       builder: (context, constraints) {
-        final verticalLayout =
-            constraints.maxWidth < 275 || scaler.scale(12) >= 18;
         return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -2751,13 +2741,25 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Current task distribution',
-                style: InsightTheme.inter(
-                  13,
-                  w: FontWeight.w700,
-                  c: InsightTheme.ink,
-                ),
+              LayoutBuilder(
+                builder: (context, headerConstraints) {
+                  final stackHeader =
+                      headerConstraints.maxWidth < 320 || scaler.scale(16) > 24;
+                  final title = Semantics(
+                    header: true,
+                    child: Text(
+                      'Task Status Overview',
+                      maxLines: stackHeader ? 2 : 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: InsightTheme.urbanist(
+                        16,
+                        w: FontWeight.w700,
+                        c: InsightTheme.ink,
+                      ),
+                    ),
+                  );
+                  return title;
+                },
               ),
               const SizedBox(height: 3),
               Text(
@@ -2769,24 +2771,40 @@ class _TaskCompletionBubbleChart extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              if (verticalLayout)
-                Column(
-                  children: [
-                    bubbles,
-                    const SizedBox(height: 8),
-                    SizedBox(width: double.infinity, child: legend()),
-                  ],
+              if (isLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Center(child: ImapsLoadingIndicator(size: 40)),
+                )
+              else if (!hasTasks)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Center(
+                    child: Text(
+                      'No tasks yet.',
+                      style: InsightTheme.inter(12, c: InsightTheme.ink2),
+                    ),
+                  ),
                 )
               else
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const Spacer(flex: 1),
                     bubbles,
-                    const Spacer(flex: 1),
-                    Expanded(flex: 5, child: legend()),
+                    const SizedBox(width: 8),
+                    Expanded(child: legend()),
                   ],
                 ),
+              if (!isLoading && hasTasks) ...[
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: _SectionActionButton(
+                    label: 'More details',
+                    onTap: onMoreDetails,
+                  ),
+                ),
+              ],
             ],
           ),
         );

@@ -1970,7 +1970,38 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
 
   /// Explains the border using the same conditions as [_getStatusColor], so
   /// the dialog describes the color that is actually displayed.
-  String _borderExplanation(MyTaskPresentation p) {
+  String _borderExplanation(MyTaskPresentation p, {bool isTagalog = false}) {
+    if (isTagalog) {
+      if (_awaitingAcceptance) {
+        return 'Kahel — naka-save sa device na ito ang huling pagpapasa, ngunit hindi pa ito kinukumpirma ng server. Katayuan ng sync ang ipinapakita ng kulay na ito, hindi petsa.';
+      }
+      if (_displayCategory == 'Completed') {
+        return widget.submission == null
+            ? 'Berde — kumpleto na ang inspeksiyong ito. Walang resibo ng huling pagpapasa sa device na ito, kaya hindi pa nakukumpirma ang pagtanggap ng server.'
+            : 'Berde — kumpleto na ang inspeksiyong ito at kinumpirma na ito ng server.';
+      }
+      if (p.border == MyTaskBorder.fullRed) {
+        return 'Pula — lumampas na ang PO Deadline. Overdue na ang task na ito.';
+      }
+      if (p.border == MyTaskBorder.red) {
+        final days = p.visitDaysUntil;
+        if (days != null && days < 0) {
+          return 'Pula — lumampas na ang nakatakdang Visit, ngunit hindi pa lumilipas ang PO Deadline. Magtakda muli ng Visit o ipagpatuloy ang inspeksiyon.';
+        }
+        if (days == 1) {
+          return 'Pula — bukas ang nakatakdang Visit. Paalala ito tungkol sa petsa ng Visit, hindi sa lumipas na PO Deadline.';
+        }
+        if (days == 0) {
+          return 'Pula — ngayong araw ang nakatakdang Visit. Paalala ito tungkol sa petsa ng Visit, hindi sa lumipas na PO Deadline.';
+        }
+        return 'Pula — kailangan ng agarang pansin ang Visit. Tungkol ito sa petsa ng Visit, hindi sa lumipas na PO Deadline.';
+      }
+      if (p.border == MyTaskBorder.orange) {
+        final days = p.visitDaysUntil;
+        return 'Kahel — ${days ?? 'ilang'} araw na lang bago ang nakatakdang Visit, pasok sa tatlong-araw na paalala. Tungkol ito sa Visit, hindi sa lumipas na PO Deadline.';
+      }
+      return 'Asul — walang agarang Visit o lumipas na PO Deadline na nakaaapekto sa task na ito. Karaniwang kalagayan ito.';
+    }
     if (_awaitingAcceptance) {
       return 'Orange — your final submission is saved on this device, but the '
           'server has not confirmed it yet. This color reflects sync status, '
@@ -2013,11 +2044,147 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         'this card. This is the normal state.';
   }
 
+  /// Scheduling-specific explanation for the EXISTING Why? control.
+  /// This is read-only presentation: the eligibility rule, owner checks,
+  /// deadline and local evidence remain owned by the existing services.
+  Future<void> _showSchedulingUnavailableReason() async {
+    final p = widget.task.presentation;
+    final String reason;
+    final String nextAction;
+    var isTagalog = false;
+
+    if (_displayCategory == 'Completed' || _awaitingAcceptance) {
+      reason = 'This inspection is completed or its final submission is '
+          'saved on this device. A new Visit cannot be scheduled.';
+      nextAction = 'Review the inspection and check Sync Center for '
+          'delivery confirmation. A local save is not an office receipt.';
+    } else if (p.lifecycle == MyTaskLifecycle.unknown) {
+      reason = 'This task status cannot be verified, so a new Visit '
+          'cannot be scheduled.';
+      nextAction = 'Refresh your assignments or contact the Planning '
+          'Office. Do not schedule this task until its status is verified.';
+    } else if (p.deadlineState == MyTaskDeadlineState.passed) {
+      reason = 'The PO Deadline has passed. This task is overdue, '
+          'so another Visit cannot be scheduled.';
+      nextAction = 'Continue the inspection only if you are still '
+          'authorized, or coordinate with the Planning Officer. '
+          'Existing locally saved evidence is not deleted by this notice.';
+    } else if (p.deadlineState == MyTaskDeadlineState.today) {
+      reason = 'Today is the PO Deadline. A new Visit must be after '
+          'today, so scheduling is unavailable. This task is not overdue yet.';
+      nextAction = 'Continue the inspection only if you are still '
+          'authorized, or contact the Planning Officer about the deadline.';
+    } else if (p.deadlineState == MyTaskDeadlineState.none ||
+        p.deadlineState == MyTaskDeadlineState.unknown) {
+      reason = 'The PO Deadline cannot be verified, so the allowed '
+          'Visit dates are unknown and scheduling is unavailable.';
+      nextAction = 'Refresh your assignments or ask the Planning '
+          'Office to confirm the PO Deadline. You may continue existing '
+          'inspection work only while authorized.';
+    } else {
+      // The button is shown only when canSchedule is false. If task facts
+      // change while this callback is queued, never claim a new permission.
+      reason = 'A new Visit is not available for the current task state.';
+      nextAction = 'Refresh your assignments and review the current '
+          'PO Deadline before trying again.';
+    }
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final displayReason = !isTagalog
+              ? reason
+              : _displayCategory == 'Completed' || _awaitingAcceptance
+                  ? 'Kumpleto na ang inspeksiyong ito o naka-save na sa device ang huling pagpapasa. Hindi maaaring magtakda ng bagong Visit.'
+                  : p.lifecycle == MyTaskLifecycle.unknown
+                      ? 'Hindi makumpirma ang status ng task na ito, kaya hindi maaaring magtakda ng bagong Visit.'
+                      : p.deadlineState == MyTaskDeadlineState.passed
+                          ? 'Lumampas na ang PO Deadline. Overdue na ang task na ito kaya hindi maaaring magtakda ng panibagong Visit.'
+                          : p.deadlineState == MyTaskDeadlineState.today
+                              ? 'Ngayong araw ang PO Deadline. Kailangang lampas sa araw na ito ang bagong Visit kaya hindi magagamit ang pag-iskedyul. Hindi pa overdue ang task.'
+                              : p.deadlineState == MyTaskDeadlineState.none ||
+                                      p.deadlineState == MyTaskDeadlineState.unknown
+                                  ? 'Hindi makumpirma ang PO Deadline, kaya hindi alam ang mga pinapayagang petsa ng Visit at hindi magagamit ang pag-iskedyul.'
+                                  : 'Hindi maaaring magtakda ng bagong Visit sa kasalukuyang kalagayan ng task.';
+          final displayNextAction = !isTagalog
+              ? nextAction
+              : _displayCategory == 'Completed' || _awaitingAcceptance
+                  ? 'Suriin ang inspeksiyon at tingnan sa Sync Center kung naihatid ito. Hindi katumbas ng resibo mula sa opisina ang lokal na pag-save.'
+                  : p.lifecycle == MyTaskLifecycle.unknown
+                      ? 'I-refresh ang iyong mga assignment o makipag-ugnayan sa Planning Office. Huwag magtakda ng Visit hangga’t hindi nakukumpirma ang status.'
+                      : p.deadlineState == MyTaskDeadlineState.passed
+                          ? 'Ipagpatuloy lamang ang inspeksiyon kung awtorisado ka pa, o makipag-ugnayan sa Planning Officer. Hindi mabubura ang ebidensiyang lokal nang na-save.'
+                          : p.deadlineState == MyTaskDeadlineState.today
+                              ? 'Ipagpatuloy lamang ang inspeksiyon kung awtorisado ka pa, o makipag-ugnayan sa Planning Officer tungkol sa deadline.'
+                              : p.deadlineState == MyTaskDeadlineState.none ||
+                                      p.deadlineState == MyTaskDeadlineState.unknown
+                                  ? 'I-refresh ang iyong mga assignment o hilingin sa Planning Office na kumpirmahin ang PO Deadline. Ipagpatuloy lamang ang kasalukuyang inspeksiyon habang awtorisado.'
+                                  : 'I-refresh ang iyong mga assignment at suriin ang PO Deadline bago muling subukan.';
+          return AlertDialog(
+            title: Text(isTagalog
+                ? 'Bakit hindi magagamit ang pag-iskedyul?'
+                : 'Why is scheduling unavailable?'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TaskLanguageSelector(
+                      isTagalog: isTagalog,
+                      onChanged: (value) =>
+                          setDialogState(() => isTagalog = value),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(isTagalog ? 'Dahilan' : 'Reason',
+                      style: InsightTheme.inter(12,
+                          w: FontWeight.w700, c: InsightTheme.ink)),
+                  const SizedBox(height: 4),
+                  Text(displayReason,
+                      style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                  if (p.deadlineDay != null) ...[
+                    const SizedBox(height: 14),
+                    Text('PO Deadline',
+                        style: InsightTheme.inter(12,
+                            w: FontWeight.w700, c: InsightTheme.ink)),
+                    const SizedBox(height: 4),
+                    Text(formatTaskNoticeDate(
+                      p.deadlineDay,
+                      isTagalog: isTagalog,
+                    ), style: InsightTheme.inter(13,
+                        w: FontWeight.w600, c: InsightTheme.ink)),
+                  ],
+                  const SizedBox(height: 14),
+                  Text(isTagalog ? 'Susunod na hakbang' : 'Next action',
+                      style: InsightTheme.inter(12,
+                          w: FontWeight.w700, c: InsightTheme.ink)),
+                  const SizedBox(height: 4),
+                  Text(displayNextAction,
+                      style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(isTagalog ? 'Isara' : 'Close')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _showContextualInfo() async {
     final task = widget.task;
     final p = task.presentation;
     final statusColor = _getStatusColor(p);
     final borderExplanation = _borderExplanation(p);
+    final borderExplanationTagalog =
+        _borderExplanation(p, isTagalog: true);
     if (_displayCategory != 'Completed') {
       return showTaskNoticeDetails(context,
         presentation: p,
@@ -2025,6 +2192,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
         referenceNumber: task.inspectionNo,
         roundLabel: task.roundLabel,
         borderExplanation: borderExplanation,
+        borderExplanationTagalog: borderExplanationTagalog,
       );
     }
 
@@ -2048,52 +2216,93 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     }
 
     if (!mounted) return;
+    var isTagalog = false;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Task details'),
-        content: SingleChildScrollView(
-          // At enlarged text the indicator list is taller than the dialog, so
-          // it scrolls instead of overflowing and cutting the last lines off.
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          String labelFor(String english) => !isTagalog
+              ? english
+              : switch (english) {
+                  TaskSubmission.syncUnverifiedBadge =>
+                    'Kumpleto — hindi pa kumpirmado ang sync',
+                  'Completed on Device' => 'Kumpleto sa device',
+                  'Completed — Synced' => 'Kumpleto — natanggap ng server',
+                  'Modified' => 'May binago',
+                  _ => english,
+                };
+          String textFor(String englishLabel, String englishText) =>
+              !isTagalog
+                  ? englishText
+                  : switch (englishLabel) {
+                      TaskSubmission.syncUnverifiedBadge =>
+                        'Kumpleto na ang task na ito, ngunit walang naka-save na resibo ng huling pagpapasa sa device na ito. Hindi pa kumpirmado ang pagtanggap ng server. Tingnan ang Sync Center para sa status o mga hakbang sa pagsusuri.',
+                      'Completed on Device' =>
+                        'Naka-save sa device na ito ang huling pagpapasa. Hindi pa kumpirmado ang pagtanggap ng server. Tingnan ang Sync Center para sa status o mga hakbang sa pagsusuri.',
+                      'Completed — Synced' =>
+                        'Kinumpirma ng server na natanggap ang inspeksiyong ito.',
+                      'Modified' =>
+                        'Binago ang natapos nang inspeksiyong ito matapos itong isumite. Ipinapaalam ng markang May binago na na-edit ang orihinal na isinumiteng impormasyon.',
+                      _ => englishText,
+                    };
+          return AlertDialog(
+            title: Text(isTagalog ? 'Mga detalye ng task' : 'Task details'),
+            content: SingleChildScrollView(
+              // At enlarged text the indicator list is taller than the dialog, so
+              // it scrolls instead of overflowing and cutting the last lines off.
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 3),
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Border color', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
-                        const SizedBox(height: 2),
-                        Text(borderExplanation, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
-                      ],
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TaskLanguageSelector(
+                      isTagalog: isTagalog,
+                      onChanged: (value) =>
+                          setDialogState(() => isTagalog = value),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.only(top: 3),
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(isTagalog ? 'Kulay ng border' : 'Border color',
+                                style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
+                            const SizedBox(height: 2),
+                            Text(isTagalog ? borderExplanationTagalog : borderExplanation,
+                                style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  for (final indicator in indicators) ...[
+                    Text(labelFor(indicator.key), style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
+                    const SizedBox(height: 2),
+                    Text(textFor(indicator.key, indicator.value), style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+                    const SizedBox(height: 10),
+                  ],
                 ],
               ),
-              const SizedBox(height: 10),
-              for (final indicator in indicators) ...[
-                Text(indicator.key, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink)),
-                const SizedBox(height: 2),
-                Text(indicator.value, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
-                const SizedBox(height: 10),
-              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(isTagalog ? 'Isara' : 'Close')),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
-        ],
+          );
+        },
       ),
     );
   }
@@ -2652,7 +2861,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             const SizedBox(width: 8),
                             Expanded(child: Text('Scheduling unavailable',
                                 style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink3))),
-                            TextButton(onPressed: _showContextualInfo,
+                            TextButton(onPressed: _showSchedulingUnavailableReason,
                               style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
                               child: Text('Why?', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
                             ),

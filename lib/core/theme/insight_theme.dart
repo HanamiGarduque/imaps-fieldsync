@@ -29,6 +29,7 @@ class InsightTheme {
   // Primary Brand Blues
   static const Color blue1 = Color(0xFF2563EB); // Vibrant Primary Blue
   static const Color blue2 = Color(0xFF1D4ED8); // Deep Brand Blue
+  static const Color lightBlue = Color(0xFF60A5FA);
   static const Color blueTint = Color(0xFFEFF6FF); // Light Blue Pill Tint
   static const Color blueInk = Color(
     0xFF1E40AF,

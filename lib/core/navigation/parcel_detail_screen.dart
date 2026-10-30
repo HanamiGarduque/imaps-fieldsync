@@ -21,6 +21,8 @@ import '../../modules/inspection/widgets/inspection_round_widgets.dart';
 import '../theme/insight_theme.dart';
 import '../widgets/field_form_widgets.dart';
 import '../services/inspection_start_service.dart';
+import '../services/db_helper.dart';
+import '../services/sync_outbox_service.dart';
 
 class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
@@ -214,6 +216,27 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
             SnackBar(content: Text(result.message)),
           );
           return;
+        }
+        // Task Overview stays passive. A verified, real step entry is the
+        // deliberate start boundary. The existing outbox write atomically
+        // persists local_jobs.status=in_progress and the owner-scoped
+        // mark_ongoing delivery intent; no server receipt is claimed here.
+        // Do not duplicate a start when returning to an ongoing inspection.
+        final inspectorId = DBHelper.requireInspector();
+        final cached = await (await DBHelper.database).query(
+          'local_jobs',
+          columns: ['status'],
+          where: 'id = ? AND inspector_id = ?',
+          whereArgs: [task.id, inspectorId],
+          limit: 1,
+        );
+        DBHelper.requireSameInspector(inspectorId);
+        if (cached.length != 1) {
+          throw StateError('This inspection is unavailable on this device.');
+        }
+        if (const ['assigned', 'Pending', 'pending']
+            .contains(cached.single['status'])) {
+          await SyncOutboxService.enqueueMarkOngoing(jobId: task.id);
         }
         await (_draftLoad ??= _loadDraft());
       }
