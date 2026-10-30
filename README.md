@@ -37,7 +37,7 @@ Inspectors are presented with a clean and concise dashboard displaying upcoming 
 ## Inspection Workflow
 1. **Step 1 - Site Verification**: Navigate to the targeted inspection site.
 2. **Step 2 - GPS Verification**: Verify that you are within 30 meters of the site using GPS.
-3. **Step 3 - Photos**: Capture geotagged photos with a limit of 10.
+3. **Step 3 - Photos**: Capture geotagged inspection photos without a fixed 10-photo cap in the app workflow.
 4. **Step 4 - Checklist**: Complete zoning compliance checklist.
 5. **Step 5 - Findings**: Document observations and discrepancies.
 6. **Step 6 - Review & Submit**: Finalize and submit inspection findings.
