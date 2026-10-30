@@ -207,6 +207,8 @@ void main() {
       matching: find.byWidgetPredicate((w) => w is Container &&
           w.decoration is BoxDecoration &&
           (w.decoration! as BoxDecoration).color == InsightTheme.surface2)).first;
+  Finder categoryLabel(String label) =>
+      find.descendant(of: segmentTrack(), matching: find.text(label));
 
   testWidgets('Header counts only unfinished tasks due today', (tester) async {
     final today = DateTime.now().toIso8601String().split('T').first;
@@ -217,7 +219,7 @@ void main() {
     await mount(tester, width: 390);
     expect(find.text('2 assigned · 1 due today'), findsOneWidget);
     for (final label in ['Pending', 'Ongoing', 'Completed']) {
-      expect(tester.getRect(find.text(label)).right, lessThanOrEqualTo(370),
+      expect(tester.getRect(categoryLabel(label)).right, lessThanOrEqualTo(370),
         reason: 'All three task tabs fit the normal 390px header without scrolling.');
     }
     expect(tester.takeException(), isNull);
@@ -242,10 +244,10 @@ void main() {
         final cells = <Rect>[];
         expect(find.descendant(of: segmentTrack(), matching: find.byType(Scrollable)), findsNothing);
         for (final (label, count) in [('Pending', '23'), ('Ongoing', '12'), ('Completed', '34')]) {
-          final tab = find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+          final tab = find.ancestor(of: categoryLabel(label), matching: find.byType(InkWell)).first;
           final pill = tester.getRect(tab);
           cells.add(pill);
-          final labelRect = tester.getRect(find.text(label));
+          final labelRect = tester.getRect(categoryLabel(label));
           final badge = tester.getRect(
               find.descendant(of: tab, matching: find.byType(AnimatedContainer)).last);
           expect(pill.left, greaterThanOrEqualTo(track.left));
@@ -259,13 +261,13 @@ void main() {
           expect(badge.top, greaterThanOrEqualTo(labelRect.bottom + 3.9),
               reason: 'The exact count belongs below its full category label.');
           expect(within(tab, count), findsOneWidget);
-          final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
+          final paragraph = tester.renderObject<RenderParagraph>(categoryLabel(label));
           expect(paragraph.didExceedMaxLines, isFalse);
-          expect(tester.widget<Text>(find.text(label)).style!.fontSize, 12);
+          expect(tester.widget<Text>(categoryLabel(label)).style!.fontSize, 12);
           expect(find.descendant(of: tab, matching: find.byType(FittedBox)), findsNothing);
           expect(pill.height, greaterThanOrEqualTo(48),
               reason: 'the tap target stays 48dp');
-          expect(find.text(label).hitTestable(), findsOneWidget);
+          expect(categoryLabel(label).hitTestable(), findsOneWidget);
         }
         expect(cells[0].width, closeTo(cells[1].width, 0.01));
         expect(cells[1].width, closeTo(cells[2].width, 0.01));
@@ -277,7 +279,7 @@ void main() {
           'cells': cells.map((rect) => rect.toString()).toList(),
           'counts': [23, 12, 34],
         });
-        await tester.tap(find.text('Completed'));
+        await tester.tap(categoryLabel('Completed'));
         await tester.pumpAndSettle();
         expect(card('tab-completed-0'), findsOneWidget);
         expect(tester.takeException(), isNull);
@@ -305,19 +307,19 @@ void main() {
     expect(bar.height, inInclusiveRange(64, 80), reason: 'Default label/count cells stay compact.');
 
     for (final (label, count) in [('Pending', '3'), ('Ongoing', '0'), ('Completed', '5')]) {
-      await tester.tap(find.text(label));
+      await tester.tap(categoryLabel(label));
       await tester.pumpAndSettle();
       final tab =
-          find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+          find.ancestor(of: categoryLabel(label), matching: find.byType(InkWell)).first;
       final pill = tester.getRect(tab);
-      final labelRect = tester.getRect(find.text(label));
+      final labelRect = tester.getRect(categoryLabel(label));
       // Label and count are independently centered in each equal-width cell.
       final badge = tester.getRect(
           find.descendant(of: tab, matching: find.byType(AnimatedContainer)).last);
       // The white indicator is the selected tab's own surface.
       final chip = tester.widget<AnimatedContainer>(
         find
-            .ancestor(of: find.text(label), matching: find.byType(AnimatedContainer))
+            .ancestor(of: categoryLabel(label), matching: find.byType(AnimatedContainer))
             .first,
       );
       expect((chip.decoration! as BoxDecoration).color, InsightTheme.surface,
@@ -341,14 +343,14 @@ void main() {
   });
 
   Finder segment(String label) =>
-      find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+      find.ancestor(of: categoryLabel(label), matching: find.byType(InkWell)).first;
   Finder indicator(String label) => find.descendant(
-      of: find.ancestor(of: find.text(label), matching: find.byType(AnimatedContainer)).first,
+      of: find.ancestor(of: categoryLabel(label), matching: find.byType(AnimatedContainer)).first,
       matching: find.byType(DecoratedBox)).first;
   void expectSelectedEdges(WidgetTester tester, String label) {
     final track = tester.getRect(segmentTrack());
     final pill = tester.getRect(indicator(label));
-    final labelRect = tester.getRect(find.text(label));
+    final labelRect = tester.getRect(categoryLabel(label));
     final badge = tester.getRect(find.descendant(
         of: segment(label), matching: find.byType(AnimatedContainer)).last);
     debugPrint('SELECTOR $label track=$track pill=$pill label=$labelRect badge=$badge');
@@ -363,7 +365,7 @@ void main() {
     expect(badge.center.dx, closeTo(pill.center.dx, 0.1));
     expect(badge.top - labelRect.bottom, closeTo(4, 0.1));
     expect(tester.getSize(segment(label)).height, greaterThanOrEqualTo(48));
-    expect(tester.renderObject<RenderParagraph>(find.text(label)).didExceedMaxLines, isFalse);
+    expect(tester.renderObject<RenderParagraph>(categoryLabel(label)).didExceedMaxLines, isFalse);
     expect((tester.widget<DecoratedBox>(indicator(label)).decoration as BoxDecoration).color,
         InsightTheme.surface);
     expect(track.height, greaterThanOrEqualTo(64));
@@ -445,13 +447,13 @@ void main() {
       expect(horizontal, findsNothing);
       final before = [for (final label in ['Pending', 'Ongoing', 'Completed']) tester.getRect(segment(label))];
       for (final label in ['Pending', 'Ongoing', 'Completed']) {
-        expect(find.text(label).hitTestable(), findsOneWidget);
+        expect(categoryLabel(label).hitTestable(), findsOneWidget);
       }
       await tester.drag(segmentTrack(), const Offset(-100, 0));
       await tester.pumpAndSettle();
       expect(tester.getRect(segmentTrack()), track);
       expect([for (final label in ['Pending', 'Ongoing', 'Completed']) tester.getRect(segment(label))], before);
-      await tester.tap(find.text('Completed'));
+      await tester.tap(categoryLabel('Completed'));
       await tester.pumpAndSettle();
       expectSelectedEdges(tester, 'Completed');
       expect(within(segment('Completed'), '12'), findsOneWidget);
@@ -533,7 +535,7 @@ void main() {
       'scheduled_date': visit, 'deadline_date': deadline}];
     await mount(tester, width: 320, height: 568, scale: 2);
     for (final label in ['Pending', 'Ongoing', 'Completed']) {
-      expect(find.text(label).hitTestable(), findsOneWidget);
+      expect(categoryLabel(label).hitTestable(), findsOneWidget);
     }
     final page = find.byWidgetPredicate((widget) => widget is Scrollable &&
         widget.axisDirection == AxisDirection.down).first;
@@ -599,31 +601,30 @@ void main() {
             await tester.ensureVisible(within(active, name));
             await tester.pumpAndSettle();
             final title = within(active, name);
-            final reference = within(active, 'APP-ISSUE-D');
+            final referenceText = within(active, 'APP-ISSUE-D');
             final info = find.descendant(of: active, matching: find.byType(FieldInfoButton));
             final chevron = find.descendant(of: active, matching: find.byIcon(Icons.keyboard_arrow_down_rounded));
             final avatar = find.descendant(of: active, matching: find.byWidgetPredicate((widget) =>
               widget is Container && widget.constraints?.maxWidth == 44 && widget.constraints?.maxHeight == 44));
-            final chip = find.ancestor(of: reference, matching: find.byType(Container)).first;
             final titleRect = tester.getRect(title);
-            final chipRect = tester.getRect(chip);
+            final referenceRect = tester.getRect(referenceText);
             final infoRect = tester.getRect(info);
             final chevronRect = tester.getRect(chevron);
             final paragraph = tester.renderObject<RenderParagraph>(title);
             final lines = paragraph.getBoxesForSelection(TextSelection(baseOffset: 0, extentOffset: name.length))
               .map((box) => box.top).toSet().length;
-            final gap = chipRect.top - titleRect.bottom;
+            final gap = referenceRect.top - titleRect.bottom;
             await capture(tester, 'header-${name.startsWith('Ana') ? 'short' : 'long'}-$width-$scale', {
               'name': name, 'width': width, 'scale': scale, 'title': titleRect.toString(),
-              'referenceChip': chipRect.toString(), 'infoTarget': infoRect.toString(),
+              'reference': referenceRect.toString(), 'infoTarget': infoRect.toString(),
               'chevron': chevronRect.toString(), 'gap': gap, 'visibleLines': lines,
               'avatar': tester.getRect(avatar).toString(), 'card': tester.getRect(active).toString(),
               'truncated': paragraph.didExceedMaxLines,
               'font': 'deterministic SDK test font (runtime fetching disabled)',
             });
             debugPrint('HEADER name=$name width=$width scale=$scale gap=$gap lines=$lines '
-              'title=$titleRect chip=$chipRect info=$infoRect chevron=$chevronRect');
-            expect(gap, inInclusiveRange(4.5, 5.5), reason: 'The name-to-reference gap must be content-sized, not the 48dp control row.');
+              'title=$titleRect reference=$referenceRect info=$infoRect chevron=$chevronRect');
+            expect(gap, inInclusiveRange(3.9, 4.1), reason: 'The name-to-reference gap must be content-sized, not the 48dp control row.');
             expect(lines, inInclusiveRange(1, 2));
             expect(tester.widget<Text>(title).maxLines, 2);
             if (name == 'Ana Li') {
@@ -635,7 +636,7 @@ void main() {
             expect(infoRect.right, lessThanOrEqualTo(chevronRect.left));
             expect(infoRect.center.dy, closeTo(chevronRect.center.dy, 0.5));
             final bounds = tester.getRect(active);
-            for (final rect in [titleRect, chipRect, infoRect, chevronRect, tester.getRect(avatar)]) {
+            for (final rect in [titleRect, referenceRect, infoRect, chevronRect, tester.getRect(avatar)]) {
               expect(bounds.contains(rect.topLeft), isTrue);
               expect(bounds.contains(rect.bottomRight), isTrue);
             }

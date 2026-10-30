@@ -494,9 +494,18 @@ void main() {
           final page = tester.state<ScrollableState>(find.byWidgetPredicate(
               (widget) => widget is Scrollable && widget.axisDirection == AxisDirection.down).first).position;
           final pageOffset = page.pixels;
+          final categoryTrack = find.ancestor(
+            of: find.text('Pending'),
+            matching: find.byWidgetPredicate((widget) =>
+                widget is Container &&
+                widget.decoration is BoxDecoration &&
+                (widget.decoration! as BoxDecoration).color == InsightTheme.surface2),
+          ).first;
+          Finder categoryLabel(String label) =>
+              find.descendant(of: categoryTrack, matching: find.text(label));
           final cells = <Rect>[];
           for (final label in ['Pending', 'Ongoing', 'Completed']) {
-            final word = find.text(label);
+            final word = categoryLabel(label);
             final tab = find.ancestor(of: word, matching: find.byType(InkWell)).first;
             final cell = tester.getRect(tab);
             cells.add(cell);
@@ -529,7 +538,7 @@ void main() {
           }
           expect(cells[0].width, closeTo(cells[1].width, 0.01));
           expect(cells[1].width, closeTo(cells[2].width, 0.01));
-          await tester.tap(find.text('Completed'));
+          await tester.tap(categoryLabel('Completed'));
           await tester.pumpAndSettle();
           expect(page.pixels, pageOffset);
           expect(find.text('completed applicant'), findsOneWidget);
