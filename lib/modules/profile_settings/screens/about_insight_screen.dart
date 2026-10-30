@@ -66,6 +66,28 @@ class AboutInsightScreen extends StatelessWidget {
                           h: 1.7,
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      // Display the dependency notices Flutter actually registers.
+                      // Team credits, map-data attribution and institutional
+                      // approval are separate release checks, not implied here.
+                      OutlinedButton.icon(
+                        onPressed: () => showLicensePage(
+                          context: context,
+                          applicationName: 'iMAPS:FieldSync',
+                          applicationVersion: AppInfoService.fullVersionString,
+                        ),
+                        icon: const Icon(Icons.description_outlined, size: 18),
+                        label: const Text('Open-source licenses'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(48, 48),
+                          alignment: Alignment.centerLeft,
+                          foregroundColor: InsightTheme.blueInk,
+                          side: const BorderSide(color: InsightTheme.line),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       Text(
                         'Municipal Planning and Development Office (MPDO)',
