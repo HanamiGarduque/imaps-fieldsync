@@ -405,10 +405,23 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1000, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       if (retained) {
-        await tester.runAsync(() => DBHelper.retainInspectionJob(jobX));
+        // Establish retained authorization while A still owns the remote task.
+        expect(
+          await tester.runAsync(
+            () => InspectionStartService.prepareJob(jobX),
+          ),
+          InspectionStartResult.authorized,
+        );
+        expect(
+          (await tester.runAsync(
+            () => db.query('inspection_job_retention'),
+          )).single['inspector_id'],
+          inspectorA,
+        );
         lookupError = const SocketException('offline');
         remote['assigned_inspector_id'] = inspectorB;
       }
+      final requestsBeforeEntry = requests.length;
       final provider = InspectionProvider();
       await tester.pumpWidget(ChangeNotifierProvider.value(value: provider,
         child: MaterialApp(home: ParcelDetailScreen(task: TaskItem.fromJob(remote)))));
@@ -419,11 +432,24 @@ void main() {
       expect(find.byType(SiteMapScreen), findsOneWidget);
       await tester.runAsync(() async {
         expect((await db.query('inspection_job_retention')).single['job_id'], jobX);
+        expect(
+          (await db.query('inspection_job_retention')).single['inspector_id'],
+          inspectorA,
+        );
         expect(await db.query('local_inspections'), isEmpty);
-        expect(await db.query('pending_actions'), isEmpty);
+        final actions = await DBHelper.getActionableActions();
+        expect(actions, hasLength(1));
+        expect(actions.single['id'], 'mark_ongoing_$jobX');
+        expect(actions.single['type'], 'mark_ongoing');
+        expect(actions.single['job_id'], jobX);
+        expect(actions.single['inspector_id'], inspectorA);
+        expect(
+          (await DBHelper.getCachedJobs()).single['status'],
+          'in_progress',
+        );
       });
+      expect(requests.length, requestsBeforeEntry + (retained ? 0 : 1));
       expect(requests.where((r) => r.method != 'GET'), isEmpty);
-      if (retained) expect(requests, isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
       provider.dispose();

@@ -9,6 +9,7 @@ import 'package:imaps_fieldsync/core/navigation/main_shell_screen.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/core/services/supabase_service.dart';
+import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/providers/inspection_provider.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/review_submit_screen.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/inspection_progress.dart';
@@ -181,8 +182,9 @@ void main() {
         await tester.pump(const Duration(milliseconds: 200));
         await fixture.flush(tester);
       }
-      expect(find.text('Fixture Inspector').hitTestable(), findsOneWidget);
-      expect(find.text('Active Assignments').hitTestable(), findsNothing);
+      final tasks = tester.widget<TasksScreen>(find.byType(TasksScreen));
+      expect(tasks.profile.id, offlineInspector);
+      expect(find.text('My Tasks').hitTestable(), findsOneWidget);
       await fixture.capture(tester, 'local-submit-my-tasks');
       expect(tester.takeException(), isNull);
     },

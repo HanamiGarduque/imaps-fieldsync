@@ -243,7 +243,7 @@ void main() {
         await tester.runAsync(() async {
           final row = (await DBHelper.getCachedJobs()).single;
           expect(row['id'], jobA);
-          expect(row['status'], 'assigned');
+          expect(row['status'], 'in_progress');
           expect(row['applicant_name'], 'Isolated applicant');
           expect(row['parcel_lat'], 14.5);
           expect(row['local_inspection_id'], 123);
@@ -251,13 +251,33 @@ void main() {
             (await db.query('inspection_job_retention')).single['job_id'],
             jobA,
           );
+          final startActions = await DBHelper.getActionableActions();
+          expect(startActions, hasLength(1));
+          expect(startActions.single['id'], 'mark_ongoing_$jobA');
+          expect(startActions.single['type'], 'mark_ongoing');
+          expect(startActions.single['job_id'], jobA);
+          expect(startActions.single['inspector_id'], inspectorA);
+
           await submitFixture(jobA);
           // Queued submission is preserved intent, not proven completion.
-          expect((await DBHelper.getCachedJobs()).single['status'], 'assigned');
-          expect(await db.query('inspection_job_retention'), hasLength(1));
           expect(
-            (await DBHelper.getActionableActions()).single['job_id'],
-            jobA,
+            (await DBHelper.getCachedJobs()).single['status'],
+            'in_progress',
+          );
+          expect(await db.query('inspection_job_retention'), hasLength(1));
+          final actions = await DBHelper.getActionableActions();
+          expect(actions, hasLength(2));
+          expect(
+            actions.map((action) => action['type']).toSet(),
+            {'mark_ongoing', 'submit_inspection'},
+          );
+          expect(
+            actions.every(
+              (action) =>
+                  action['job_id'] == jobA &&
+                  action['inspector_id'] == inspectorA,
+            ),
+            isTrue,
           );
         });
         await tester.pumpWidget(const SizedBox.shrink());
