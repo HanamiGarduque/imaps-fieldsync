@@ -317,22 +317,29 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
           surfaceTintColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
-          title: Text(isTagalog ? 'Mga detalye ng task' : 'Task details',
-              style: InsightTheme.urbanist(22)),
+          title: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  isTagalog ? 'Mga detalye ng task' : 'Task details',
+                  style: InsightTheme.urbanist(22),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TaskLanguageSelector(
+                isTagalog: isTagalog,
+                onChanged: (value) =>
+                    setDialogState(() => isTagalog = value),
+              ),
+            ],
+          ),
           contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
           content: SizedBox(width: 360, child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TaskLanguageSelector(
-                    isTagalog: isTagalog,
-                    onChanged: (value) =>
-                        setDialogState(() => isTagalog = value),
-                  ),
-                ),
                 Text(applicantName, style: InsightTheme.inter(15, w: FontWeight.w700, c: InsightTheme.ink)),
                 const SizedBox(height: 4),
                 Text([referenceNumber, ?roundLabel].join(' · '),

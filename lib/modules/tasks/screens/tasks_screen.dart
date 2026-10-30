@@ -2123,23 +2123,29 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   ? 'I-refresh ang iyong mga assignment o hilingin sa Planning Office na kumpirmahin ang PO Deadline. Ipagpatuloy lamang ang kasalukuyang inspeksiyon habang awtorisado.'
                                   : 'I-refresh ang iyong mga assignment at suriin ang PO Deadline bago muling subukan.';
           return AlertDialog(
-            title: Text(isTagalog
-                ? 'Bakit hindi magagamit ang pag-iskedyul?'
-                : 'Why is scheduling unavailable?'),
+            title: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(isTagalog
+                    ? 'Bakit hindi magagamit ang pag-iskedyul?'
+                    : 'Why is scheduling unavailable?'),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TaskLanguageSelector(
+                    isTagalog: isTagalog,
+                    onChanged: (value) =>
+                        setDialogState(() => isTagalog = value),
+                  ),
+                ),
+              ],
+            ),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TaskLanguageSelector(
-                      isTagalog: isTagalog,
-                      onChanged: (value) =>
-                          setDialogState(() => isTagalog = value),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
                   Text(isTagalog ? 'Dahilan' : 'Reason',
                       style: InsightTheme.inter(12,
                           w: FontWeight.w700, c: InsightTheme.ink)),
@@ -2246,7 +2252,22 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                       _ => englishText,
                     };
           return AlertDialog(
-            title: Text(isTagalog ? 'Mga detalye ng task' : 'Task details'),
+            title: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Text(
+                    isTagalog ? 'Mga detalye ng task' : 'Task details',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TaskLanguageSelector(
+                  isTagalog: isTagalog,
+                  onChanged: (value) =>
+                      setDialogState(() => isTagalog = value),
+                ),
+              ],
+            ),
             content: SingleChildScrollView(
               // At enlarged text the indicator list is taller than the dialog, so
               // it scrolls instead of overflowing and cutting the last lines off.
@@ -2254,15 +2275,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TaskLanguageSelector(
-                      isTagalog: isTagalog,
-                      onChanged: (value) =>
-                          setDialogState(() => isTagalog = value),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
