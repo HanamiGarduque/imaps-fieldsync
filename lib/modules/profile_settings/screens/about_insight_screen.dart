@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -86,6 +87,84 @@ class AboutInsightScreen extends StatelessWidget {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const Divider(height: 1, color: InsightTheme.line),
+                      const SizedBox(height: 16),
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          'Map data and attribution',
+                          style: InsightTheme.urbanist(18),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Map tiles and street data: © OpenStreetMap contributors. '
+                        'OpenStreetMap data is available under the Open Database '
+                        'License (ODbL).',
+                        style: InsightTheme.inter(
+                          13,
+                          c: InsightTheme.ink2,
+                          h: 1.5,
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            try {
+                              final opened = await launchUrl(
+                                Uri.parse('https://www.openstreetmap.org/copyright'),
+                                mode: LaunchMode.externalApplication,
+                              );
+                              if (!opened && context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Could not open OpenStreetMap licensing information.'),
+                                  ),
+                                );
+                              }
+                            } catch (_) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Could not open OpenStreetMap licensing information.'),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                          label: const Text('OpenStreetMap licenses'),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(48, 48),
+                            alignment: Alignment.centerLeft,
+                            foregroundColor: InsightTheme.blueInk,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Road-route guidance uses the community-hosted OSRM '
+                        'demonstration service. It is intended for development '
+                        'and testing, with no availability guarantee.',
+                        style: InsightTheme.inter(
+                          13,
+                          c: InsightTheme.ink2,
+                          h: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Rosario municipal boundary reference: MPDO Rosario '
+                        'via iMAPS. The overlay does not authorize or complete '
+                        'an inspection.',
+                        style: InsightTheme.inter(
+                          13,
+                          c: InsightTheme.ink2,
+                          h: 1.5,
                         ),
                       ),
                       const SizedBox(height: 20),
