@@ -150,17 +150,36 @@ class _DemoWatermarkState extends State<DemoWatermark>
     _revoke();
   }
 
+  // The native policy already permits an acknowledged manual demo ON through
+  // brief Android `inactive` recorder/permission overlays. The root must not
+  // revoke that same grant on its independent timer or service notification.
+  // This is NOT a foreground authorization for new capture; on resume the
+  // next watchdog pass re-attests fixture/session/watermark readiness.
+  bool get _verifiedRecorderOverlay =>
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.inactive &&
+      _granted &&
+      !_closed &&
+      _bound != null &&
+      _attached &&
+      _visible &&
+      _protection.isDocumentationActive &&
+      _protection.documentationEnabled &&
+      _protection.appliedProtection == false &&
+      !_protection.nativeFailure &&
+      _sameSession;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Only the already-verified, active fictional demo survives a transient
-    // screenshot/recorder overlay. All other inactive states and any actual
-    // hidden/paused/detached transition revoke the source grant.
-    final temporaryOverlay = state == AppLifecycleState.inactive &&
-        _bound != null && _granted &&
-        _protection.isDocumentationActive &&
-        _sameSession && _watermarkVisible;
-    _foreground = state == AppLifecycleState.resumed || temporaryOverlay;
-    if (!_foreground) _revoke();
+    // Only an *already active*, verified fictional-demo session with native
+    // OFF acknowledgment may ride a brief recorder/OS overlay. Require the
+    // watermark to be on-screen at the instant inactive begins. A real
+    // background/lock/detach still revokes immediately, without auto-resume.
+    final temporaryOverlay =
+        state == AppLifecycleState.inactive &&
+        _verifiedRecorderOverlay &&
+        _watermarkVisible;
+    _foreground = state == AppLifecycleState.resumed;
+    if (!_foreground && !temporaryOverlay) _revoke();
     _scheduleReadiness();
   }
 
@@ -227,6 +246,10 @@ class _DemoWatermarkState extends State<DemoWatermark>
 
   Future<void> _watchSource() async {
     if (_closed || !mounted || !_attached) return;
+    // OS recorder overlays can temporarily suspend painting/fixture async
+    // checks. Preserve only an already native-acknowledged manual demo grant;
+    // real background and account loss are handled by separate event gates.
+    if (_verifiedRecorderOverlay) return;
     if (!_granted) {
       final laidOut = _watermarkVisible;
       if (laidOut && !_lastLaidOut) _lastAttempt = null;
@@ -242,9 +265,13 @@ class _DemoWatermarkState extends State<DemoWatermark>
     _checking = true;
     final lease = _lease;
     try {
-      if (!await _sourceValid() && lease == _lease) _loseTrust();
+      final valid = await _sourceValid();
+      // An async verification launched while resumed may complete during the
+      // verified transient OS overlay. Never permanently close that session
+      // merely because foreground temporarily changed mid-await.
+      if (!valid && lease == _lease && !_verifiedRecorderOverlay) _loseTrust();
     } catch (_) {
-      if (lease == _lease) _loseTrust();
+      if (lease == _lease && !_verifiedRecorderOverlay) _loseTrust();
     } finally {
       _checking = false;
     }
@@ -347,7 +374,7 @@ class _DemoWatermarkState extends State<DemoWatermark>
     }
     if (_granted &&
         (_allowedGeneration != _protection.documentationGeneration ||
-            !_foreground ||
+            (!_foreground && !_verifiedRecorderOverlay) ||
             _protection.nativeFailure)) {
       _revoke();
     }
