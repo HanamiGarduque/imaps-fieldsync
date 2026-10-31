@@ -69,13 +69,28 @@ class _MyAppState extends State<MyApp> {
     super.initState();
     // Bootstrap now runs beside the first frames. Subscribe only once its
     // auth foundation exists; cancellation also prevents a late attachment.
-    _authPrivacySubscription = (widget.authEvents ??
-        Stream<void>.fromFuture(AppBootstrap.ready).asyncExpand((_) =>
-            SupabaseService.hasClient
-                ? SupabaseService.client.auth.onAuthStateChange
-                : const Stream<AuthState>.empty())).listen(
-      (_) => _protection.invalidateDocumentation(),
-    );
+    _authPrivacySubscription =
+        (widget.authEvents ??
+                Stream<void>.fromFuture(AppBootstrap.ready).asyncExpand(
+                  (_) => SupabaseService.hasClient
+                      ? SupabaseService.client.auth.onAuthStateChange
+                      : const Stream<AuthState>.empty(),
+                ))
+            .listen((_) {
+              _protection.invalidateDocumentation();
+              unawaited(_authorizeDocumentation());
+            });
+    unawaited(_authorizeDocumentation());
+  }
+
+  Future<void> _authorizeDocumentation() async {
+    await AppBootstrap.ready;
+    if (!mounted ||
+        !SupabaseService.hasClient ||
+        SupabaseService.client.auth.currentSession == null) {
+      return;
+    }
+    await _protection.authorizeDebugDocumentation();
   }
 
   @override
@@ -110,9 +125,7 @@ class _MyAppState extends State<MyApp> {
       ),
       home: const SplashScreen(),
       builder: (context, child) => AutoLockActivityHost(
-        child: ScreenProtectionHost(
-          child: child ?? const SizedBox.shrink(),
-        ),
+        child: ScreenProtectionHost(child: child ?? const SizedBox.shrink()),
       ),
     );
   }

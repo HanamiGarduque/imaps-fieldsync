@@ -32,7 +32,7 @@ class ScreenProtectionService extends ChangeNotifier
     bool documentationEnabled = true,
     Future<bool> Function()? verifyIdentity,
   }) : _apply = applyProtection ?? _applyNative,
-       _verifyIdentity = verifyIdentity ?? isVerifiedDemoContext,
+       _verifyIdentity = verifyIdentity ?? isVerifiedDocumentationContext,
        _documentationEnabled = kDebugMode && documentationEnabled;
 
   static final instance = ScreenProtectionService();
@@ -43,11 +43,11 @@ class ScreenProtectionService extends ChangeNotifier
 
   /// The isolated demo application id (`android/app/build.gradle.kts`).
   static const demoPackageName = 'com.example.imaps_fieldsync.demo';
+  static const normalPackageName = 'com.example.imaps_fieldsync';
 
-  /// Capture permission, granted only through a fully verified demo identity
-  /// ([grantQaDocumentation]) and withdrawn again by [revokeQaDocumentation].
-  /// No production entry point grants it, so a normal build always applies
-  /// native protection. Static because [_applyNative] is a static tear-off.
+  /// Capture permission, granted only through a verified debug documentation
+  /// identity and withdrawn again by [revokeQaDocumentation]. Static because
+  /// [_applyNative] is a static tear-off.
   // ponytail: static capture flags leak across instances; every test tearDown
   // must revokeQaDocumentation. Split per-instance if lifecycle scoping lands.
   static bool _qaScreenshotsAllowed = false;
@@ -99,6 +99,10 @@ class ScreenProtectionService extends ChangeNotifier
 
   bool get documentationEnabled => _documentationEnabled && _identityVerified;
   bool get foreground => _lifecycle == AppLifecycleState.resumed;
+  bool get backgrounded =>
+      _lifecycle == AppLifecycleState.paused ||
+      _lifecycle == AppLifecycleState.detached ||
+      _lifecycle == AppLifecycleState.hidden;
   DocumentationPhase get documentationPhase => _phase;
   bool get isDocumentationActive => _phase == DocumentationPhase.active;
   bool? get appliedProtection => _applied;
@@ -149,9 +153,9 @@ class ScreenProtectionService extends ChangeNotifier
       _phase == DocumentationPhase.off &&
       _applied == true;
   // A screenshot/recorder overlay may temporarily make the *verified*
-  // fictional-demo window inactive. Only an already-acknowledged manual ON
-  // survives it; an incomplete activation, real background or normal app
-  // must still keep private content obscured.
+  // documentation window inactive. Only an already-acknowledged manual ON
+  // survives it; an incomplete activation or real background must still keep
+  // private content obscured.
   bool get _verifiedDemoActiveWhileInactive =>
       _lifecycle == AppLifecycleState.inactive &&
       _phase == DocumentationPhase.active &&
@@ -163,9 +167,11 @@ class ScreenProtectionService extends ChangeNotifier
 
   bool get mustObscure =>
       requiresProtection &&
-      ((!foreground && !_verifiedDemoActiveWhileInactive &&
-          !(_lifecycle == AppLifecycleState.inactive &&
-              _biometricPrompts > 0 && _applied == true)) ||
+      ((!foreground &&
+              !_verifiedDemoActiveWhileInactive &&
+              !(_lifecycle == AppLifecycleState.inactive &&
+                  _biometricPrompts > 0 &&
+                  _applied == true)) ||
           (!isDocumentationActive && _applied != true));
   bool get _desired => requiresProtection && !_documentationRequested;
 
@@ -192,6 +198,7 @@ class ScreenProtectionService extends ChangeNotifier
       void revokeIfCurrent() {
         if (revision == _readinessRevision) revokeDemoReadiness();
       }
+
       _demoAuthSubscription = auth.onAuthStateChange.listen(
         (state) {
           if (!identical(state.session, session)) revokeIfCurrent();
@@ -263,9 +270,15 @@ class ScreenProtectionService extends ChangeNotifier
       return identical(this, instance) &&
           !_disposed &&
           _documentationEnabled &&
-          _hosts > 0 && foreground && requiresProtection &&
-          !transitioning && !hasPopup && !_failed && _applied == true &&
-          !_documentationRequested && _phase == DocumentationPhase.off &&
+          _hosts > 0 &&
+          foreground &&
+          requiresProtection &&
+          !transitioning &&
+          !hasPopup &&
+          !_failed &&
+          _applied == true &&
+          !_documentationRequested &&
+          _phase == DocumentationPhase.off &&
           !_qaScreenshotsAllowed &&
           revision == _readinessRevision &&
           registration.generation == _generation &&
@@ -309,19 +322,25 @@ class ScreenProtectionService extends ChangeNotifier
       }
       element.visitChildElements(findMark);
     }
+
     context.visitChildElements(findMark);
     final paragraph = mark;
-    if (paragraph == null || !paragraph.attached ||
-        !paragraph.hasSize || paragraph.size.isEmpty) {
+    if (paragraph == null ||
+        !paragraph.attached ||
+        !paragraph.hasSize ||
+        paragraph.size.isEmpty) {
       return null;
     }
     final local = Offset.zero & paragraph.size;
     final bounds = MatrixUtils.transformRect(
-      paragraph.getTransformTo(null), local,
+      paragraph.getTransformTo(null),
+      local,
     );
     final view = View.of(context);
     final screen = Offset.zero & (view.physicalSize / view.devicePixelRatio);
-    if (!bounds.isFinite || bounds.isEmpty || screen.intersect(bounds) != bounds) {
+    if (!bounds.isFinite ||
+        bounds.isEmpty ||
+        screen.intersect(bounds) != bounds) {
       return null;
     }
     RenderObject child = paragraph;
@@ -333,7 +352,8 @@ class ScreenProtectionService extends ChangeNotifier
       }
       final clip = parent.describeApproximatePaintClip(child);
       final rect = MatrixUtils.transformRect(
-        paragraph.getTransformTo(parent), local,
+        paragraph.getTransformTo(parent),
+        local,
       );
       if (clip != null && clip.intersect(rect) != rect) return null;
       child = parent;
@@ -410,9 +430,13 @@ class ScreenProtectionService extends ChangeNotifier
     // Preserve an already-active manual demo grant across a brief OS overlay.
     // This does NOT change foreground eligibility for a new grant or change
     // how normal inspector screens are obscured while inactive.
-    final wasVerifiedActive = _phase == DocumentationPhase.active &&
-        _documentationRequested && _identityVerified &&
-        _qaScreenshotsAllowed && _applied == false && !_failed;
+    final wasVerifiedActive =
+        _phase == DocumentationPhase.active &&
+        _documentationRequested &&
+        _identityVerified &&
+        _qaScreenshotsAllowed &&
+        _applied == false &&
+        !_failed;
     _lifecycle = state;
     if (state == AppLifecycleState.inactive && wasVerifiedActive) {
       _changed();
@@ -433,13 +457,16 @@ class ScreenProtectionService extends ChangeNotifier
     final generation = _generation;
     final epoch = _securityEpoch;
     final authorization = _authorizationRevision;
-    // Re-attest the demo identity at activation time, not only at grant
-    // time; a stale grant cannot open a capture session.
+    // Re-attest the debug documentation identity at activation time, not only
+    // at grant time; a stale grant cannot open a capture session.
     if (!await _verifyIdentity()) {
       revokeDemoReadiness();
       return false;
     }
-    if (!showControl || generation != _generation || epoch != _securityEpoch ||
+
+    if (!showControl ||
+        generation != _generation ||
+        epoch != _securityEpoch ||
         authorization != _authorizationRevision) {
       return false;
     }
@@ -449,10 +476,25 @@ class ScreenProtectionService extends ChangeNotifier
     return true;
   }
 
+  Future<bool> authorizeDebugDocumentation() async {
+    if (_disposed || !await isVerifiedDocumentationContext()) return false;
+    final generation = _generation;
+    final authorization = _authorizationRevision;
+    if (_disposed ||
+        generation != _generation ||
+        authorization != _authorizationRevision) {
+      return false;
+    }
+    _authorizationRevision++;
+    _identityVerified = true;
+    _qaScreenshotsAllowed = true;
+    _changed();
+    return true;
+  }
+
   /// Attaches the capture permission to a fully verified demo identity
-  /// ([isVerifiedDemoContext]). Tests pass the explicit matrix; the real
-  /// demo flow (B3) will use the live attestation. Regular builds never
-  /// pass, and no production entry point calls this.
+  /// ([isVerifiedDemoContext]). Tests pass the explicit matrix; the normal
+  /// debug flow uses [authorizeDebugDocumentation].
   @visibleForTesting
   Future<bool> grantQaDocumentation({
     bool? debugMode,
@@ -478,7 +520,8 @@ class ScreenProtectionService extends ChangeNotifier
       revokeDemoReadiness();
       return false;
     }
-    if (_disposed || generation != _generation ||
+    if (_disposed ||
+        generation != _generation ||
         authorization != _authorizationRevision) {
       return false;
     }
@@ -528,10 +571,9 @@ class ScreenProtectionService extends ChangeNotifier
         'demo') {
       return false;
     }
-    final info =
-        packageName == null || buildSignature == null
-            ? await PackageInfo.fromPlatform()
-            : null;
+    final info = packageName == null || buildSignature == null
+        ? await PackageInfo.fromPlatform()
+        : null;
     if ((packageName ?? info!.packageName) != demoPackageName) return false;
     final approvedPin =
         pin ?? const String.fromEnvironment('FIELDSYNC_DEMO_SIGNER_SHA256');
@@ -541,6 +583,40 @@ class ScreenProtectionService extends ChangeNotifier
       return false;
     }
     return true;
+  }
+
+  @visibleForTesting
+  static Future<bool> isVerifiedDocumentationContext({
+    bool? debugMode,
+    bool? onAndroid,
+    bool? qaPreview,
+    String? flavor,
+    String? packageName,
+    String? buildSignature,
+  }) async {
+    if (!(debugMode ?? kDebugMode)) return false;
+    if (!(onAndroid ?? (kIsWeb ? false : Platform.isAndroid))) return false;
+    final effectiveQaPreview =
+        qaPreview ?? const bool.fromEnvironment('QA_PREVIEW');
+    final effectiveFlavor =
+        flavor ?? const String.fromEnvironment('FLUTTER_APP_FLAVOR');
+    if (effectiveQaPreview || effectiveFlavor == 'demo') {
+      return isVerifiedDemoContext(
+        debugMode: debugMode,
+        onAndroid: onAndroid,
+        qaPreview: qaPreview,
+        flavor: flavor,
+        packageName: packageName,
+        buildSignature: buildSignature,
+      );
+    }
+    final info = packageName == null || buildSignature == null
+        ? await PackageInfo.fromPlatform()
+        : null;
+    // The normal application id is the stable production identity. Flutter
+    // does not guarantee that the flavor name is available at runtime in
+    // every toolchain configuration, so package identity is the gate here.
+    return (packageName ?? info!.packageName) == normalPackageName;
   }
 
   void _revokeDocumentation() {
@@ -596,8 +672,11 @@ class ScreenProtectionService extends ChangeNotifier
         final generation = _generation;
         final epoch = _securityEpoch;
         final authorization = _authorizationRevision;
-        bool current() => !_disposed && target == _desired &&
-            generation == _generation && epoch == _securityEpoch &&
+        bool current() =>
+            !_disposed &&
+            target == _desired &&
+            generation == _generation &&
+            epoch == _securityEpoch &&
             authorization == _authorizationRevision;
         _applied = null;
         _notifyLater();

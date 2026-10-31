@@ -13,7 +13,6 @@ import '../../../core/layout/responsive_layout.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/widgets/app_feedback.dart';
 import '../widgets/debug_screenshot_toggle.dart';
-import '../../../qa/demo_watermark.dart';
 
 typedef _Colors = InsightTheme;
 
@@ -154,11 +153,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
                 // Section 1: Device Status Header Card
                 _buildStatusCard(),
 
-                // DEMO-SETTINGS-01: only the isolated fictional-demo root can
-                // expose this UI. Authorization remains in the existing
-                // ScreenProtectionService and native acknowledgement path.
-                if (kDebugMode &&
-                    DemoCaptureScope.maybeOf(context) != null) ...[
+                if (kDebugMode) ...[
                   const SizedBox(height: 20),
                   _sectionHeader('DEBUG DOCUMENTATION'),
                   const SizedBox(height: 8),

@@ -40,7 +40,8 @@ class _ScreenProtectionHostState extends State<ScreenProtectionHost> {
           // Sensitive subtrees cover pending foreground protection, but popup
           // routes paint above them. Hidden startup content needs no global cover.
           if (protection.mustObscure &&
-              (!protection.foreground || protection.nativeFailure ||
+              (protection.backgrounded ||
+                  protection.nativeFailure ||
                   protection.hasPopup))
             Positioned.fill(
               child: Material(
@@ -53,7 +54,7 @@ class _ScreenProtectionHostState extends State<ScreenProtectionHost> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.shield_outlined),
+                          const Icon(Icons.visibility_off_outlined, size: 40),
                           const SizedBox(height: 16),
                           Text(
                             protection.nativeFailure
