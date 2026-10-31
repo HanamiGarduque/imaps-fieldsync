@@ -112,11 +112,11 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
         final active = protection.isDocumentationActive;
         return SwitchListTile(
           key: const ValueKey('demo-screenshot-switch'),
-          title: Text('Demo screenshots',
+          title: Text('Demo Screenshots',
               style: InsightTheme.inter(14, w: FontWeight.w600)),
-          subtitle: Text(active
-              ? 'On — fictional demo capture enabled. Switch off to restore protection.'
-              : 'Off — capture protection is on. Enable only for fictional demo data.',
+          subtitle: Text(
+              'Allow screenshots and screen recording for authorized '
+              'documentation using fictional demo data only.',
               style: InsightTheme.inter(12.5, c: InsightTheme.ink2)),
           value: active,
           activeTrackColor: InsightTheme.blue1,
