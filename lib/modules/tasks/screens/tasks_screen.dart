@@ -1968,8 +1968,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
     };
   }
 
-  /// Explains the border using the same conditions as [_getStatusColor], so
-  /// the dialog describes the color that is actually displayed.
+  /// Explains the displayed border or full-card overdue treatment using the
+  /// same conditions as [_getStatusColor].
   String _borderExplanation(MyTaskPresentation p, {bool isTagalog = false}) {
     if (isTagalog) {
       if (_awaitingAcceptance) {
@@ -1981,7 +1981,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
             : 'Berde — kumpleto na ang inspeksiyong ito at kinumpirma na ito ng server.';
       }
       if (p.border == MyTaskBorder.fullRed) {
-        return 'Pula — lumampas na ang PO Deadline. Overdue na ang task na ito.';
+        return 'Pula ang buong card — lumampas na ang PO Deadline kaya overdue ang task. Pinapalitan nito ang kulay ng border batay sa Visit. Hindi ito simpleng paalala ng petsa ng Visit.';
       }
       if (p.border == MyTaskBorder.red) {
         final days = p.visitDaysUntil;
@@ -2015,7 +2015,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
               'confirmed it.';
     }
     if (p.border == MyTaskBorder.fullRed) {
-      return 'Red — the PO Deadline has passed. This task is overdue.';
+      return 'Red — the entire task card is red because the PO Deadline has '
+          'passed. This overdue treatment overrides Visit-date border colors; '
+          'it is not just a Visit reminder.';
     }
     if (p.border == MyTaskBorder.red) {
       final days = p.visitDaysUntil;

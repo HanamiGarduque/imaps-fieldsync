@@ -364,7 +364,9 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
           (isTagalog ? 'Susunod na hakbang' : 'Next action', nextAction),
           if (borderExplanation != null)
             (
-              isTagalog ? 'Kulay ng border' : 'Border color',
+              p.isOverdue
+                  ? (isTagalog ? 'Kulay ng buong card' : 'Container color')
+                  : (isTagalog ? 'Kulay ng border' : 'Border color'),
               isTagalog
                   ? borderExplanationTagalog ?? borderExplanation
                   : borderExplanation,
