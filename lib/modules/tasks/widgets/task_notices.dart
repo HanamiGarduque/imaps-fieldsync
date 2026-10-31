@@ -67,7 +67,7 @@ class TaskLanguageSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FieldSegmentedControl<bool>(
-    labels: const {false: 'English', true: 'Tagalog'},
+    labels: const {false: 'EN', true: 'TL'},
     value: isTagalog,
     onChanged: onChanged,
     compact: true,
@@ -194,12 +194,14 @@ String _taskNoticeText(MyTaskPresentation p, MyTaskNotice notice,
 /// One summary, with the same disclosure available from either task surface.
 class TaskNoticeSummary extends StatelessWidget {
   const TaskNoticeSummary({super.key, required this.presentation,
-    required this.applicantName, required this.onDetails, this.inset = false});
+    required this.applicantName, required this.onDetails, this.inset = false,
+    this.banner = false});
 
   final MyTaskPresentation presentation;
   final String applicantName;
   final VoidCallback onDetails;
   final bool inset;
+  final bool banner;
 
   @override
   Widget build(BuildContext context) {
@@ -212,20 +214,80 @@ class TaskNoticeSummary extends StatelessWidget {
       for (final notice in _orderedNotices(p)) _noticeLabel(p, notice),
     ];
     if (labels.isEmpty) return const SizedBox.shrink();
+    final compact = inset || banner;
     final critical = hasCriticalTaskNotice(p);
     final color = critical ? InsightTheme.redInk
         : p.notices.isEmpty ? InsightTheme.ink3 : InsightTheme.orangeInk;
     final extra = labels.length - 2;
+
+    if (banner) {
+      return Semantics(
+        label: 'Scheduling notices for ',
+        button: true,
+        child: Material(
+          color: critical
+              ? const Color(0xFFFDE8E8)
+              : (p.notices.isEmpty ? InsightTheme.surface2 : InsightTheme.orangeTint),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(14)),
+          ),
+          child: InkWell(
+            onTap: onDetails,
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: (critical ? InsightTheme.red : InsightTheme.orange)
+                        .withValues(alpha: 0.15),
+                    width: 1,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    critical ? Icons.error_rounded : Icons.warning_amber_rounded,
+                    size: 18,
+                    color: color,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      labels.take(2).join(' · '),
+                      style: InsightTheme.inter(12.5, w: FontWeight.w700, c: color),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (extra > 0) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      '+',
+                      style: InsightTheme.inter(11, w: FontWeight.w600, c: InsightTheme.ink3),
+                    ),
+                  ],
+                  const SizedBox(width: 6),
+                  Icon(Icons.chevron_right_rounded, size: 18, color: color),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
-      padding: inset ? const EdgeInsets.fromLTRB(36, 12, 36, 8)
+      padding: compact ? const EdgeInsets.fromLTRB(36, 12, 36, 8)
           : const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        if (!inset) const Divider(height: 1, color: InsightTheme.line),
+        if (!compact) const Divider(height: 1, color: InsightTheme.line),
         Semantics(
           label: 'Scheduling notices for $applicantName',
           button: true,
           child: Material(
-            color: !inset ? Colors.transparent : critical ? InsightTheme.redTint
+            color: !compact ? Colors.transparent : critical ? InsightTheme.redTint
                 : p.notices.isEmpty ? InsightTheme.surface2 : InsightTheme.orangeTint,
             borderRadius: InsightTheme.roundedSm,
             child: InkWell(
@@ -234,7 +296,7 @@ class TaskNoticeSummary extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 56),
                 child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: inset ? 12 : 0, vertical: 8),
+                  padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 0, vertical: 8),
                   child: Row(children: [
                     Icon(critical ? Icons.warning_amber_rounded : Icons.info_outline_rounded,
                         size: 20, color: color),
@@ -251,7 +313,7 @@ class TaskNoticeSummary extends StatelessWidget {
                       ],
                     )),
                     const SizedBox(width: 8),
-                    if (inset) Text('Details',
+                    if (compact) Text('Details',
                         style: InsightTheme.inter(12, w: FontWeight.w700, c: color)),
                     Icon(Icons.chevron_right_rounded, size: 18, color: color),
                   ]),
@@ -319,12 +381,19 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
           insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedMd),
           title: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  isTagalog ? 'Mga detalye ng task' : 'Task details',
-                  style: InsightTheme.urbanist(22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(applicantName,
+                        style: InsightTheme.urbanist(16, w: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Text([referenceNumber, ?roundLabel].join(' · '),
+                        style: InsightTheme.inter(12, w: FontWeight.w600,
+                            c: InsightTheme.ink3)),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
@@ -335,19 +404,34 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
               ),
             ],
           ),
-          contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
           content: SizedBox(
             width: 360,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(applicantName, style: InsightTheme.inter(15, w: FontWeight.w700, c: InsightTheme.ink)),
-                const SizedBox(height: 4),
-                Text([referenceNumber, ?roundLabel].join(' · '),
-                    style: InsightTheme.inter(12, c: InsightTheme.ink3)),
-                const SizedBox(height: 16),
-                for (final (title, body) in entries) ...[
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.bg,
+                    borderRadius: InsightTheme.roundedSm,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(entries.first.$1,
+                          style: InsightTheme.inter(12, w: FontWeight.w800,
+                              c: InsightTheme.ink)),
+                      const SizedBox(height: 4),
+                      Text(entries.first.$2,
+                          style: InsightTheme.inter(12, c: InsightTheme.ink2,
+                              h: 1.45)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final (title, body) in entries.skip(1)) ...[
                   if (title == firstDateTitle) ...[
                     Text(isTagalog ? 'Mahahalagang petsa' : 'Important Dates',
                         style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
@@ -357,19 +441,27 @@ Future<void> showTaskNoticeDetails(BuildContext context, {
                     Text(reasonTitle, style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.blueInk)),
                     const SizedBox(height: 12),
                   ],
-                  Text(title, style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.ink)),
+                  Text(title, style: InsightTheme.inter(12, w: FontWeight.w800, c: InsightTheme.ink)),
                   const SizedBox(height: 4),
-                  Text(body, style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                  Text(body, style: InsightTheme.inter(12, c: InsightTheme.ink2, h: 1.45)),
                   const SizedBox(height: 16),
                 ],
               ],
             ),
           ),
-          actions: [TextButton(
-            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(isTagalog ? 'Isara' : 'Close',
-                style: InsightTheme.inter(14, w: FontWeight.w700, c: InsightTheme.blueInk)),
+          actions: [SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+                backgroundColor: InsightTheme.bg,
+                foregroundColor: InsightTheme.ink,
+                shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
+              ),
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(isTagalog ? 'Isara' : 'Close',
+                  style: InsightTheme.inter(13, w: FontWeight.w800)),
+            ),
           )],
         );
       },

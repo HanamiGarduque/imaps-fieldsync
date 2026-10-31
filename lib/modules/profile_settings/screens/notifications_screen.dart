@@ -176,14 +176,33 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
-  /// Pretty-prints the technical_details JSON for the expandable section.
-  /// Deliberately simple key: value lines — this is a debugging aid, not
-  /// user-facing copy, so raw field names are fine here.
+  /// Presents sync details in language that makes sense to inspectors while
+  /// retaining every recorded count.
   String _formatTechnicalDetails(String? raw) {
     if (raw == null || raw.isEmpty) return 'No additional details.';
     try {
       final map = jsonDecode(raw) as Map;
-      return map.entries.map((e) => '${e.key}: ${e.value}').join('\n');
+      const labels = <String, String>{
+        'successCount': 'Updates sent successfully',
+        'failCount': 'Updates that need attention',
+        'pausedCount': 'Updates waiting for action',
+        'conflictCount': 'Updates needing review',
+      };
+      String labelFor(Object key) {
+        final value = key.toString();
+        final known = labels[value];
+        if (known != null) return known;
+        return value
+            .replaceAllMapped(
+              RegExp(r'([a-z])([A-Z])'),
+              (match) => '${match.group(1)} ${match.group(2)}',
+            )
+            .replaceFirst(value[0], value[0].toUpperCase());
+      }
+
+      return map.entries
+          .map((entry) => '${labelFor(entry.key)}: ${entry.value}')
+          .join('\n');
     } catch (_) {
       return raw;
     }
@@ -726,7 +745,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                             onChanged: (mode) => setState(() => _mode = mode),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 6),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: _UnreadFilterChip(
@@ -746,7 +765,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                       ],
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
 
                   // ── List — Activity feed or Sync log, per _mode ──
                   Expanded(
@@ -956,8 +975,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 ),
                 child: ExpansionTile(
                   enabled: hasDetails,
-                  tilePadding: const EdgeInsets.symmetric(vertical: 8),
-                  childrenPadding: const EdgeInsets.fromLTRB(60, 0, 8, 12),
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  childrenPadding: const EdgeInsets.fromLTRB(54, 0, 8, 8),
                   shape: const Border(),
                   collapsedShape: const Border(),
                   onExpansionChanged: (expanded) {
@@ -966,64 +985,69 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     }
                   },
                   leading: Container(
-                    width: 32,
-                    height: 32,
+                    width: 30,
+                    height: 30,
+                    alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: theme['bg'] as Color,
-                      borderRadius: BorderRadius.circular(9),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
                       theme['icon'] as IconData,
-                      size: 18,
+                      size: 16,
                       color: theme['fg'] as Color,
                     ),
                   ),
                   title: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         entry['message'] as String? ?? '',
                         style: InsightTheme.inter(
-                          13.5,
+                          13,
                           w: isEntryUnread ? FontWeight.w700 : FontWeight.w600,
                           c: InsightTheme.ink,
                         ),
                       ),
-                      const SizedBox(height: 5),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: theme['bg'] as Color,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          theme['label'] as String,
-                          style: InsightTheme.inter(
-                            10,
-                            w: FontWeight.w700,
-                            c: theme['fg'] as Color,
+                      const SizedBox(height: 3),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme['bg'] as Color,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              theme['label'] as String,
+                              style: InsightTheme.inter(
+                                10,
+                                w: FontWeight.w700,
+                                c: theme['fg'] as Color,
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _timeAgo(entry['created_at'] as String?),
+                            style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                  subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      _timeAgo(entry['created_at'] as String?),
-                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
-                    ),
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (isEntryUnread)
                         Container(
-                          width: 8,
-                          height: 8,
+                          width: 6,
+                          height: 6,
                           decoration: const BoxDecoration(
                             color: InsightTheme.blue1,
                             shape: BoxShape.circle,
@@ -1143,64 +1167,75 @@ class _NotificationRow extends StatelessWidget {
         onTap();
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: iconBgColor,
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(icon, size: 18, color: iconColor),
+              child: Icon(icon, size: 16, color: iconColor),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    title,
-                    style: InsightTheme.inter(
-                      13.5,
-                      w: isUnread ? FontWeight.w800 : FontWeight.w600,
-                      c: InsightTheme.ink,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: InsightTheme.inter(
+                            13,
+                            w: isUnread ? FontWeight.w800 : FontWeight.w600,
+                            c: InsightTheme.ink,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (time.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          time,
+                          style: InsightTheme.inter(11, c: InsightTheme.ink3),
+                        ),
+                      ],
+                      if (isUnread) ...[
+                        const SizedBox(width: 6),
+                        Semantics(
+                          label: 'Unread',
+                          child: Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: InsightTheme.blue1,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   if (subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       subtitle,
                       style: InsightTheme.inter(11.5, c: InsightTheme.ink2),
-                    ),
-                  ],
-                  if (time.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      time,
-                      style: InsightTheme.inter(12, c: InsightTheme.ink3),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ],
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(left: 8, top: 6),
-              child: isUnread
-                  ? Semantics(
-                      label: 'Unread',
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: InsightTheme.blue1,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    )
-                  : const SizedBox.square(dimension: 8),
             ),
           ],
         ),
@@ -1323,59 +1358,79 @@ class _UnreadFilterChip extends StatelessWidget {
       selected: isActive,
       child: Material(
         key: const ValueKey('unread-filter'),
-        color: isActive ? InsightTheme.blueTint : InsightTheme.surface,
-        shape: StadiumBorder(
-          side: BorderSide(
-            color: isActive
-                ? InsightTheme.blue1.withValues(alpha: 0.34)
-                : InsightTheme.lineStrong,
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
+        color: Colors.transparent,
         child: InkWell(
           onTap: () {
             HapticFeedback.selectionClick();
             onTap();
           },
+          borderRadius: BorderRadius.circular(999),
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 48),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Unread',
-                    style: InsightTheme.inter(
-                      11.5,
-                      w: isActive ? FontWeight.w700 : FontWeight.w600,
-                      c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
-                    ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
                   ),
-                  const SizedBox(width: 5),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
+                  decoration: BoxDecoration(
+                    color: isActive ? InsightTheme.blueTint : InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
                       color: isActive
-                          ? InsightTheme.blue1.withValues(alpha: 0.12)
-                          : InsightTheme.surface2,
-                      borderRadius: BorderRadius.circular(999),
+                          ? InsightTheme.blue1.withValues(alpha: 0.35)
+                          : InsightTheme.lineStrong,
+                      width: 1,
                     ),
-                    child: Text(
-                      '$count',
-                      key: const ValueKey('unread-count'),
-                      style: InsightTheme.inter(
-                        10,
-                        w: FontWeight.w700,
-                        c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
-                      ),
-                    ),
+                    boxShadow: isActive
+                        ? [
+                            BoxShadow(
+                              color: InsightTheme.blue1.withValues(alpha: 0.08),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ]
+                        : null,
                   ),
-                ],
-              ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Unread',
+                        style: InsightTheme.inter(
+                          11.5,
+                          w: isActive ? FontWeight.w700 : FontWeight.w600,
+                          c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isActive
+                              ? InsightTheme.blue1.withValues(alpha: 0.14)
+                              : InsightTheme.surface2,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '$count',
+                          key: const ValueKey('unread-count'),
+                          style: InsightTheme.inter(
+                            10,
+                            w: FontWeight.w700,
+                            c: isActive ? InsightTheme.blueInk : InsightTheme.ink2,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1400,7 +1455,7 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(4, isFirst ? 4 : 16, 4, 8),
+      padding: EdgeInsets.fromLTRB(4, isFirst ? 4 : 12, 4, 6),
       child: Row(
         children: [
           Expanded(

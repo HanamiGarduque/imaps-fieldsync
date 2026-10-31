@@ -3133,8 +3133,9 @@ class _InlineFullCalendarCard extends StatelessWidget {
               for (var day = 1; day <= daysInMonth; day++) {
                 final size = measure('$day', dayStyle);
                 if (size.width + 8 > plateWidth) plateWidth = size.width + 8;
-                if (size.height + 8 > plateHeight)
+                if (size.height + 8 > plateHeight) {
                   plateHeight = size.height + 8;
+                }
               }
               plateWidth = plateWidth.clamp(0.0, columnWidth).toDouble();
               // Number plate, 2dp separation, 4dp task track, 4dp breathing room.

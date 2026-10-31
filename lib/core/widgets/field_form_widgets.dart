@@ -55,6 +55,21 @@ class FieldInfoButton extends StatelessWidget {
   );
 }
 
+/// Compact language switch used by informational panels.
+class FieldLanguageToggle extends StatelessWidget {
+  const FieldLanguageToggle({super.key, required this.isTagalog, required this.onChanged});
+  final bool isTagalog;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => FieldSegmentedControl<bool>(
+    labels: const {false: 'EN', true: 'TL'},
+    value: isTagalog,
+    onChanged: onChanged,
+    compact: true,
+  );
+}
+
 /// Existing document/settings navigation, with a content-sized title.
 class FieldPageHeader extends StatelessWidget {
   const FieldPageHeader({super.key, required this.title, this.onBack});

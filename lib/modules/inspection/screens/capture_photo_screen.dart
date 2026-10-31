@@ -973,10 +973,10 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                               vertical: 10,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE7F3FF),
+                              color: InsightTheme.blueTint,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: const Color(0xFFB9D8FF),
+                                color: InsightTheme.blue1.withValues(alpha: 0.3),
                               ),
                             ),
                             child: Row(
@@ -984,7 +984,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                               children: [
                                 const Icon(
                                   Icons.info_outline_rounded,
-                                  color: Color(0xFF1F6FEB),
+                                  color: InsightTheme.blueInk,
                                   size: 18,
                                 ),
                                 const SizedBox(width: 8),
@@ -993,7 +993,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                                     'Save the photo evidence before leaving this screen or it will disappear.',
                                     style: InsightTheme.inter(
                                       12,
-                                      c: const Color(0xFF1D4ED8),
+                                      c: InsightTheme.blueInk,
                                       w: FontWeight.w600,
                                     ),
                                   ),
@@ -1306,17 +1306,21 @@ class _AddPhotoCell extends StatelessWidget {
       button: true,
       child: Material(
         color: InsightTheme.surface,
-        borderRadius: InsightTheme.roundedMd,
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
           onTap: () {
             HapticFeedback.lightImpact();
             onTap();
           },
+          borderRadius: BorderRadius.circular(16),
           child: Container(
             decoration: BoxDecoration(
-              color: InsightTheme.surface,
+              color: InsightTheme.blueTint.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: InsightTheme.lineStrong, width: 1.5),
+              border: Border.all(
+                color: InsightTheme.blue1.withValues(alpha: 0.35),
+                width: 1.5,
+              ),
             ),
             child: Center(
               child: Padding(
@@ -1324,18 +1328,30 @@ class _AddPhotoCell extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.add_a_photo_outlined,
-                      color: InsightTheme.blueInk,
-                      size: 28,
+                    Container(
+                      width: 44,
+                      height: 44,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: InsightTheme.blueTint,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: InsightTheme.blue1.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.add_a_photo_outlined,
+                        color: InsightTheme.blueInk,
+                        size: 22,
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     Text(
                       'Add site photo',
                       textAlign: TextAlign.center,
                       style: InsightTheme.inter(
-                        14,
-                        w: FontWeight.w600,
+                        13.5,
+                        w: FontWeight.w700,
                         c: InsightTheme.blueInk,
                       ),
                     ),

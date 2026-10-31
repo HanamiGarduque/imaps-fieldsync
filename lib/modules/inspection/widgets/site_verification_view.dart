@@ -741,10 +741,17 @@ class _MapControl extends StatelessWidget {
 /// details panel: boundary provenance, unverified-link truthfulness, route
 /// limitations and the GPS precision gates. Presentation only — the
 /// wording mirrors what the panel showed before.
-class _MapInfoSheet extends StatelessWidget {
+class _MapInfoSheet extends StatefulWidget {
   const _MapInfoSheet({required this.showLinks});
 
   final bool showLinks;
+
+  @override
+  State<_MapInfoSheet> createState() => _MapInfoSheetState();
+}
+
+class _MapInfoSheetState extends State<_MapInfoSheet> {
+  bool _isTagalog = false;
 
   @override
   Widget build(BuildContext context) {
@@ -783,12 +790,17 @@ class _MapInfoSheet extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Map information',
+                      _isTagalog ? 'Impormasyon ng mapa' : 'Map information',
                       style: InsightTheme.urbanist(16, w: FontWeight.w700),
                     ),
                   ),
+                  FieldLanguageToggle(
+                    isTagalog: _isTagalog,
+                    onChanged: (value) => setState(() => _isTagalog = value),
+                  ),
+                  const SizedBox(width: 4),
                   IconButton(
-                    tooltip: 'Close map information',
+                    tooltip: _isTagalog ? 'Isara ang impormasyon ng mapa' : 'Close map information',
                     onPressed: () => Navigator.of(context).pop(),
                     constraints: const BoxConstraints.tightFor(
                       width: 48,
@@ -809,28 +821,33 @@ class _MapInfoSheet extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const SizedBox(height: 4),
-                      _infoSection(Icons.polyline_rounded, 'Rosario boundary', [
-                        '– –  Rosario boundary · MPDO Rosario',
-                        'Dashed line marking the Rosario municipal boundary. Reference only — it does not complete or authorize an inspection step.',
+                      _infoSection(Icons.polyline_rounded,
+                        _isTagalog ? 'Hangganan ng Rosario' : 'Rosario boundary', [
+                        _isTagalog ? '– –  Hangganan ng Rosario · MPDO Rosario' : '– –  Rosario boundary · MPDO Rosario',
+                        _isTagalog
+                            ? 'Putol-putol na guhit na nagmamarka sa hangganan ng munisipyo. Gabay lamang ito at hindi kumukumpleto o nagbibigay ng pahintulot sa inspeksiyon.'
+                            : 'Dashed line marking the Rosario municipal boundary. Reference only — it does not complete or authorize an inspection step.',
                       ]),
                       _infoSection(
                           Icons.more_horiz_rounded,
-                          'Unverified links',
+                          _isTagalog ? 'Hindi beripikadong link' : 'Unverified links',
                           [
-                            if (showLinks) '··· Unverified links',
-                            'Dotted links are schematic straight lines, not verified roads or walkable access. Small gaps or GPS uncertainty may hide a link; zoom in to inspect short links.',
+                            if (widget.showLinks) _isTagalog ? '··· Hindi beripikadong link' : '··· Unverified links',
+                            _isTagalog
+                                ? 'Ang mga tuldok-tuldok na linya ay gabay lamang, hindi beripikadong kalsada o daanan. Maaaring matakpan ng maliit na pagitan o hindi tiyak na GPS ang link; mag-zoom para makita ang maiikling link.'
+                                : 'Dotted links are schematic straight lines, not verified roads or walkable access. Small gaps or GPS uncertainty may hide a link; zoom in to inspect short links.',
                           ],
                         ),
-                      _infoSection(Icons.route_rounded, 'Road route estimate', [
-                        'Estimates use mapped roads only — not traffic-aware; direct links excluded.',
-                        'Saved geometry is kept offline, but rerouting and street tiles may be missing, and a fresh estimate needs a connection.',
+                      _infoSection(Icons.route_rounded, _isTagalog ? 'Tantiya ng ruta sa kalsada' : 'Road route estimate', [
+                        _isTagalog ? 'Tantiya lamang ito batay sa mga naka-map na kalsada; hindi kasama ang trapiko at direktang link.' : 'Estimates use mapped roads only — not traffic-aware; direct links excluded.',
+                        _isTagalog ? 'Nananatiling available offline ang na-save na geometry, ngunit maaaring kailanganin ng koneksiyon para sa bagong ruta at street tiles.' : 'Saved geometry is kept offline, but rerouting and street tiles may be missing, and a fresh estimate needs a connection.',
                       ]),
-                      _infoSection(Icons.my_location_rounded, 'GPS precision', [
-                        'The GPS-to-road link and the ~100 m notice need a fix ≤15 s old with accuracy ≤25 m. Step 2 confirms within 30 m when safely stopped or on foot.',
-                        'Step 2 gives direct compass orientation when safely stopped/on foot. A bearing is not a verified access path.',
+                      _infoSection(Icons.my_location_rounded, _isTagalog ? 'Katumpakan ng GPS' : 'GPS precision', [
+                        _isTagalog ? 'Kailangan ng link ng GPS sa kalsada at babalang ~100 m ng fix na ≤15 segundo at accuracy na ≤25 m. Kinukumpirma ng Step 2 ang layo na hanggang 30 m kapag ligtas nang nakahinto o naglalakad.' : 'The GPS-to-road link and the ~100 m notice need a fix ≤15 s old with accuracy ≤25 m. Step 2 confirms within 30 m when safely stopped or on foot.',
+                        _isTagalog ? 'Nagbibigay ang Step 2 ng direktang direksiyon ng compass. Ang bearing ay hindi beripikadong daanan.' : 'Step 2 gives direct compass orientation when safely stopped/on foot. A bearing is not a verified access path.',
                       ]),
-                      _infoSection(Icons.layers_rounded, 'Map data', [
-                        'Map tiles and street data: © OpenStreetMap contributors.',
+                      _infoSection(Icons.layers_rounded, _isTagalog ? 'Data ng mapa' : 'Map data', [
+                        _isTagalog ? 'Mga tile at street data: © OpenStreetMap contributors.' : 'Map tiles and street data: © OpenStreetMap contributors.',
                       ]),
                     ],
                   ),

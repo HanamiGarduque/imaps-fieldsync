@@ -2123,14 +2123,19 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                                   ? 'I-refresh ang iyong mga assignment o hilingin sa Planning Office na kumpirmahin ang PO Deadline. Ipagpatuloy lamang ang kasalukuyang inspeksiyon habang awtorisado.'
                                   : 'I-refresh ang iyong mga assignment at suriin ang PO Deadline bago muling subukan.';
           return AlertDialog(
+            backgroundColor: InsightTheme.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(isTagalog
-                    ? 'Bakit hindi magagamit ang pag-iskedyul?'
-                    : 'Why is scheduling unavailable?'),
-                const SizedBox(height: 4),
+                Text(
+                  isTagalog
+                      ? 'Bakit hindi magagamit ang pag-iskedyul?'
+                      : 'Why is scheduling unavailable?',
+                  style: InsightTheme.urbanist(17, w: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TaskLanguageSelector(
@@ -2146,31 +2151,73 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(isTagalog ? 'Dahilan' : 'Reason',
-                      style: InsightTheme.inter(12,
-                          w: FontWeight.w700, c: InsightTheme.ink)),
-                  const SizedBox(height: 4),
-                  Text(displayReason,
-                      style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.surface2.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: InsightTheme.line.withValues(alpha: 0.6)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(isTagalog ? 'Dahilan' : 'Reason',
+                            style: InsightTheme.inter(12,
+                                w: FontWeight.w700, c: InsightTheme.ink)),
+                        const SizedBox(height: 4),
+                        Text(displayReason,
+                            style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                      ],
+                    ),
+                  ),
                   if (p.deadlineDay != null) ...[
-                    const SizedBox(height: 14),
-                    Text('PO Deadline',
-                        style: InsightTheme.inter(12,
-                            w: FontWeight.w700, c: InsightTheme.ink)),
-                    const SizedBox(height: 4),
-                    Text(formatTaskNoticeDate(
-                      p.deadlineDay,
-                      isTagalog: isTagalog,
-                    ), style: InsightTheme.inter(13,
-                        w: FontWeight.w600, c: InsightTheme.ink)),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: InsightTheme.surface2.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: InsightTheme.line.withValues(alpha: 0.6)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('PO Deadline',
+                              style: InsightTheme.inter(12,
+                                  w: FontWeight.w700, c: InsightTheme.ink)),
+                          const SizedBox(height: 4),
+                          Text(formatTaskNoticeDate(
+                            p.deadlineDay,
+                            isTagalog: isTagalog,
+                          ), style: InsightTheme.inter(13,
+                              w: FontWeight.w600, c: InsightTheme.ink)),
+                        ],
+                      ),
+                    ),
                   ],
-                  const SizedBox(height: 14),
-                  Text(isTagalog ? 'Susunod na hakbang' : 'Next action',
-                      style: InsightTheme.inter(12,
-                          w: FontWeight.w700, c: InsightTheme.ink)),
-                  const SizedBox(height: 4),
-                  Text(displayNextAction,
-                      style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: InsightTheme.blueTint.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: InsightTheme.blue1.withValues(alpha: 0.2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(isTagalog ? 'Susunod na hakbang' : 'Next action',
+                            style: InsightTheme.inter(12,
+                                w: FontWeight.w700, c: InsightTheme.blueInk)),
+                        const SizedBox(height: 4),
+                        Text(displayNextAction,
+                            style: InsightTheme.inter(13, c: InsightTheme.ink2)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2612,15 +2659,15 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       clipBehavior: Clip.none,
       children: [
         Container(
-          width: 44, height: 44,
+          width: 46, height: 46,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: statusColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: statusColor.withValues(alpha: 0.25)),
           ),
           child: Text(_getInitials(widget.task.name), textScaler: TextScaler.noScaling,
-              style: InsightTheme.urbanist(14, w: FontWeight.w800, c: statusColor)),
+              style: InsightTheme.urbanist(15, w: FontWeight.w800, c: statusColor)),
         ),
         if (taskCategory == 'Ongoing')
           Positioned(top: -2, right: -2, child: Container(
@@ -2631,11 +2678,11 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       ],
     ));
     final identity = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(widget.task.name, style: InsightTheme.urbanist(17, w: FontWeight.w800),
+      Text(widget.task.name, style: InsightTheme.urbanist(16.5, w: FontWeight.w800, c: InsightTheme.ink),
           maxLines: 2, overflow: TextOverflow.ellipsis),
-      const SizedBox(height: 4),
+      const SizedBox(height: 3),
       Text(widget.task.inspectionNo,
-          style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk)),
+          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3)),
     ]);
     final controls = Row(mainAxisSize: MainAxisSize.min, children: [
       FieldInfoButton(
@@ -2695,33 +2742,180 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                         avatar, const SizedBox(width: 12), Expanded(child: identity), controls,
                       ]);
                     }),
-                    Padding(padding: const EdgeInsets.only(right: 8, top: 8), child: Column(
+                    Padding(padding: const EdgeInsets.only(top: 8), child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Wrap(spacing: 12, runSpacing: 4, children: [
+                        // ── Round & Location Pills ──
+                        Wrap(spacing: 8, runSpacing: 6, children: [
                           if (widget.task.roundLabel != null)
-                            Text(widget.task.roundLabel!, style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk)),
-                          Row(mainAxisSize: MainAxisSize.min, children: [
-                            const Icon(Icons.location_on_outlined, size: 14, color: InsightTheme.blue1),
-                            const SizedBox(width: 4),
-                            Flexible(child: Text(widget.task.location, style: InsightTheme.inter(12, c: InsightTheme.ink2))),
-                          ]),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                              decoration: BoxDecoration(
+                                color: InsightTheme.surface2,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.autorenew_rounded, size: 14, color: InsightTheme.ink2),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    widget.task.roundLabel!,
+                                    style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.surface2,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.location_on_rounded, size: 14, color: InsightTheme.redInk),
+                                const SizedBox(width: 5),
+                                Flexible(
+                                  child: Text(
+                                    widget.task.location,
+                                    style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ]),
+                        // ── Dates Container ──
                         if (taskCategory != 'Completed') ...[
                           const SizedBox(height: 12),
                           LayoutBuilder(builder: (context, constraints) {
                             final visit = p.lifecycle == MyTaskLifecycle.scheduled
-                                ? _dateField('Visit date', p.visitDay, Icons.event_available_outlined, InsightTheme.blue1)
+                                ? p.visitDay
                                 : null;
-                            final deadline = _dateField('PO Deadline', p.deadlineDay, Icons.outlined_flag, InsightTheme.orangeInk);
-                            if (visit != null && constraints.maxWidth >= 280 && MediaQuery.textScalerOf(context).scale(12) < 18) {
-                              return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Expanded(child: visit), const SizedBox(width: 16), Expanded(child: deadline),
-                              ]);
-                            }
-                            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              if (visit != null) ...[visit, const SizedBox(height: 8)], deadline,
-                            ]);
+                            final deadline = p.deadlineDay;
+                            final showTwoColumns = visit != null &&
+                                constraints.maxWidth >= 240 &&
+                                MediaQuery.textScalerOf(context).scale(12) < 18;
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: InsightTheme.surface2.withValues(alpha: 0.45),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: InsightTheme.line.withValues(alpha: 0.5)),
+                              ),
+                              child: showTwoColumns
+                                  ? Row(
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  const Icon(Icons.calendar_today_outlined, size: 14, color: InsightTheme.ink3),
+                                                  const SizedBox(width: 5),
+                                                  Text('Visit date', style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink3)),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                formatTaskNoticeDate(visit),
+                                                style: InsightTheme.inter(13.5, w: FontWeight.w700, c: InsightTheme.ink),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Container(width: 1, height: 28, color: InsightTheme.line.withValues(alpha: 0.6)),
+                                        const SizedBox(width: 14),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.outlined_flag,
+                                                    size: 14,
+                                                    color: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  Text(
+                                                    'PO Deadline',
+                                                    style: InsightTheme.inter(
+                                                      11.5,
+                                                      w: FontWeight.w500,
+                                                      c: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                formatTaskNoticeDate(deadline),
+                                                style: InsightTheme.inter(
+                                                  13.5,
+                                                  w: FontWeight.w800,
+                                                  c: isOverdue ? InsightTheme.red : InsightTheme.ink,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (visit != null) ...[
+                                          Row(
+                                            children: [
+                                              const Icon(Icons.calendar_today_outlined, size: 14, color: InsightTheme.ink3),
+                                              const SizedBox(width: 5),
+                                              Text('Visit date', style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink3)),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            formatTaskNoticeDate(visit),
+                                            style: InsightTheme.inter(13.5, w: FontWeight.w700, c: InsightTheme.ink),
+                                          ),
+                                          const SizedBox(height: 8),
+                                        ],
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.outlined_flag,
+                                              size: 14,
+                                              color: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              'PO Deadline',
+                                              style: InsightTheme.inter(
+                                                11.5,
+                                                w: FontWeight.w500,
+                                                c: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          formatTaskNoticeDate(deadline),
+                                          style: InsightTheme.inter(
+                                            13.5,
+                                            w: FontWeight.w800,
+                                            c: isOverdue ? InsightTheme.red : InsightTheme.ink,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            );
                           }),
                         ],
                         // Completion dates still use submitted_at, never updated_at.
@@ -2729,48 +2923,67 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                             widget.task.submittedAt != null && widget.task.submittedAt!.isNotEmpty) ...[
                           const SizedBox(height: 8),
                           Row(children: [
-                            const Icon(Icons.check_circle_rounded, size: 13, color: InsightTheme.green),
-                            const SizedBox(width: 4),
+                            const Icon(Icons.check_circle_rounded, size: 14, color: InsightTheme.green),
+                            const SizedBox(width: 6),
                             Expanded(child: Text('Completed: ${_formatCompletionDate(widget.task.submittedAt!)}',
                                 style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink2))),
                           ]),
                         ],
                         const SizedBox(height: 12),
-                        Wrap(
-                          alignment: WrapAlignment.spaceBetween,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          spacing: 12, runSpacing: 8,
+                        // ── Status & Step Row ──
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             if (taskCategory == 'Completed')
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                                 child: Text(TaskSubmission.badgeOrUnverified(widget.submission, canonicalCompleted: widget.task.category == 'Completed'),
                                     style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor)),
-                              ),
-                            if (showInProgress || taskCategory == 'Ongoing')
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(color: InsightTheme.blue1.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
-                                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  const Icon(Icons.autorenew_rounded, size: 14, color: InsightTheme.blue1),
-                                  const SizedBox(width: 4),
-                                  Flexible(child: Text(showInProgress ? 'In Progress' : 'Ongoing',
-                                      style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk))),
-                                ]),
-                              ),
-                            if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(color: InsightTheme.orangeTint, borderRadius: BorderRadius.circular(999)),
-                                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  const Icon(Icons.schedule_rounded, size: 14, color: InsightTheme.orangeInk),
-                                  const SizedBox(width: 4),
-                                  Flexible(child: Text('Modified', style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.orangeInk))),
-                                ]),
-                              ),
+                              )
+                            else if (showInProgress || taskCategory == 'Ongoing')
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: statusColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    showInProgress ? 'In Progress' : 'Ongoing',
+                                    style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.ink),
+                                  ),
+                                ],
+                              )
+                            else if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: InsightTheme.orangeInk,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Modified',
+                                    style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.orangeInk),
+                                  ),
+                                ],
+                              )
+                            else
+                              const SizedBox.shrink(),
                             Text('STEP $stepValue/${InspectionProgress.totalSteps}',
-                                style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.ink3)),
+                                style: InsightTheme.inter(11.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.5)),
                           ],
                         ),
                         const SizedBox(height: 8),
@@ -2778,7 +2991,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           borderRadius: BorderRadius.circular(999),
                           child: LinearProgressIndicator(
                             value: InspectionProgress.totalSteps == 0 ? 0 : stepValue / InspectionProgress.totalSteps,
-                            minHeight: 5,
+                            minHeight: 4.5,
                             backgroundColor: InsightTheme.surface2,
                             valueColor: AlwaysStoppedAnimation(statusColor),
                           ),
@@ -2790,8 +3003,12 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
               )),
             ),
             if (taskCategory != 'Completed')
-              TaskNoticeSummary(presentation: p, applicantName: widget.task.name,
-                  onDetails: _showContextualInfo),
+              TaskNoticeSummary(
+                presentation: p,
+                applicantName: widget.task.name,
+                onDetails: _showContextualInfo,
+                banner: true,
+              ),
             AnimatedCrossFade(
               firstChild: const SizedBox(width: double.infinity, height: 0),
               secondChild: Column(
@@ -2868,16 +3085,44 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           )),
                         ] else if (taskCategory != 'Completed') ...[
                           const SizedBox(height: 8),
-                          Row(children: [
-                            const Icon(Icons.lock_outline_rounded, size: 16, color: InsightTheme.ink3),
-                            const SizedBox(width: 8),
-                            Expanded(child: Text('Scheduling unavailable',
-                                style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink3))),
-                            TextButton(onPressed: _showSchedulingUnavailableReason,
-                              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                              child: Text('Why?', style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.blueInk)),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: InsightTheme.surface2.withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: InsightTheme.line.withValues(alpha: 0.6)),
                             ),
-                          ]),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.lock_outline_rounded, size: 16, color: InsightTheme.ink3),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Scheduling unavailable',
+                                    style: InsightTheme.inter(12, w: FontWeight.w500, c: InsightTheme.ink3),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: _showSchedulingUnavailableReason,
+                                  style: TextButton.styleFrom(
+                                    minimumSize: const Size(48, 40),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Why?',
+                                        style: InsightTheme.inter(12, w: FontWeight.w700, c: InsightTheme.blueInk),
+                                      ),
+                                      const SizedBox(width: 3),
+                                      const Icon(Icons.help_outline_rounded, size: 14, color: InsightTheme.blueInk),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ],
                     ),

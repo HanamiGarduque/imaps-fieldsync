@@ -152,140 +152,290 @@ class _ApplicationSupportScreenState extends State<ApplicationSupportScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Report a concern about one of your tasks or applications. '
-                  'iMAPS handles routing to the current Planning Officer.',
-                  style: InsightTextStyles.bodySecondary(),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    const Expanded(
-                      child: ReportFieldLabel('Task / application'),
+                // ── Modern Intro Banner ──
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.blueTint.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: InsightTheme.blue1.withValues(alpha: 0.2),
                     ),
-                    IconButton(
-                      tooltip: 'Refresh tasks',
-                      onPressed: _refreshing || _submitting ? null : _load,
-                      icon: const Icon(
-                        Icons.refresh_rounded,
-                        color: InsightTheme.blue1,
-                      ),
-                    ),
-                  ],
-                ),
-                FormField<ReportableTask>(
-                  key: _taskKey,
-                  validator: (task) => task == null
-                      ? 'Choose the task this concerns.'
-                      : !task.identityComplete
-                      ? 'Refresh this task online before reporting an application concern.'
-                      : null,
-                  builder: (field) => Column(
+                  ),
+                  child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (_loading)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Text('Loading your tasks…'),
-                        )
-                      else if (_tasks.isEmpty)
-                        const ReportNotice(
-                          'No tasks available for reporting. Open My Tasks while online '
-                          'to refresh your assignments, then tap Refresh tasks here.',
-                        )
-                      else
-                        for (final task in _tasks) ...[
-                          _TaskTile(
-                            key: ValueKey('report-task-${task.fieldJobId}'),
-                            task: task,
-                            selected: _selected?.fieldJobId == task.fieldJobId,
-                            onTap: task.identityComplete && !_submitting
-                                ? () {
-                                    setState(() {
-                                      _selected = task;
-                                      _notice = null;
-                                    });
-                                    field.didChange(task);
-                                    if (field.hasError) field.validate();
-                                  }
-                                : null,
+                      const Icon(
+                        Icons.support_agent_rounded,
+                        size: 20,
+                        color: InsightTheme.blueInk,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Report a concern about one of your tasks or applications. '
+                          'iMAPS handles routing to the current Planning Officer.',
+                          style: InsightTheme.inter(13, c: InsightTheme.ink2, h: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // ── Section 1: Task Selection Card ──
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: InsightTheme.line),
+                    boxShadow: InsightTheme.cardShadow,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blueTint,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.assignment_outlined,
+                              size: 18,
+                              color: InsightTheme.blue1,
+                            ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: ReportFieldLabel('Task / application'),
+                          ),
+                          IconButton(
+                            tooltip: 'Refresh tasks',
+                            onPressed: _refreshing || _submitting ? null : _load,
+                            icon: const Icon(
+                              Icons.refresh_rounded,
+                              color: InsightTheme.blue1,
+                            ),
+                          ),
                         ],
-                      if (field.hasError) _FieldError(field.errorText!),
+                      ),
+                      const SizedBox(height: 12),
+                      FormField<ReportableTask>(
+                        key: _taskKey,
+                        validator: (task) => task == null
+                            ? 'Choose the task this concerns.'
+                            : !task.identityComplete
+                            ? 'Refresh this task online before reporting an application concern.'
+                            : null,
+                        builder: (field) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_loading)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Text('Loading your tasks…'),
+                              )
+                            else if (_tasks.isEmpty)
+                              const ReportNotice(
+                                'No tasks available for reporting. Open My Tasks while online '
+                                'to refresh your assignments, then tap Refresh tasks here.',
+                              )
+                            else
+                              for (final task in _tasks) ...[
+                                _TaskTile(
+                                  key: ValueKey('report-task-${task.fieldJobId}'),
+                                  task: task,
+                                  selected: _selected?.fieldJobId == task.fieldJobId,
+                                  onTap: task.identityComplete && !_submitting
+                                      ? () {
+                                          setState(() {
+                                            _selected = task;
+                                            _notice = null;
+                                          });
+                                          field.didChange(task);
+                                          if (field.hasError) field.validate();
+                                        }
+                                      : null,
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                            if (field.hasError) _FieldError(field.errorText!),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 if (_notice != null) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   ReportNotice(_notice!),
                 ],
-                const SizedBox(height: 20),
-                const ReportFieldLabel('Support category'),
-                FormField<String>(
-                  validator: ReportInput.categoryError,
-                  builder: (field) => Column(
+                const SizedBox(height: 16),
+
+                // ── Section 2: Support Category Card ──
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: InsightTheme.line),
+                    boxShadow: InsightTheme.cardShadow,
+                  ),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (final entry in SupportCategories.labels.entries) ...[
-                        _ChoiceTile(
-                          title: entry.value,
-                          selected: _category == entry.key,
-                          onTap: _submitting
-                              ? null
-                              : () {
-                                  setState(() => _category = entry.key);
-                                  field.didChange(entry.key);
-                                  if (field.hasError) field.validate();
-                                },
+                      Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blueTint,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.category_outlined,
+                              size: 18,
+                              color: InsightTheme.blue1,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          const ReportFieldLabel('Support category'),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      FormField<String>(
+                        validator: ReportInput.categoryError,
+                        builder: (field) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final entry in SupportCategories.labels.entries) ...[
+                              _ChoiceTile(
+                                title: entry.value,
+                                selected: _category == entry.key,
+                                onTap: _submitting
+                                    ? null
+                                    : () {
+                                        setState(() => _category = entry.key);
+                                        field.didChange(entry.key);
+                                        if (field.hasError) field.validate();
+                                      },
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            if (field.hasError) _FieldError(field.errorText!),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                      ],
-                      if (field.hasError) _FieldError(field.errorText!),
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
-                ReportTextField(
-                  label: 'Description',
-                  hint: 'What is wrong or unclear?',
-                  controller: _description,
-                  validator: ReportInput.descriptionError,
-                  minLines: 3,
-                  maxLines: 5,
-                  enabled: !_submitting,
-                ),
-                const SizedBox(height: 16),
-                ReportTextField(
-                  label: 'Affected information',
-                  hint: 'Which detail is affected?',
-                  controller: _affectedField,
-                  validator: ReportInput.optionalError,
-                  required: false,
-                  enabled: !_submitting,
-                ),
-                const SizedBox(height: 16),
-                ReportTextField(
-                  label: 'Requested correction or clarification',
-                  hint: 'What should it say instead?',
-                  controller: _requestedChange,
-                  validator: ReportInput.optionalError,
-                  required: false,
-                  enabled: !_submitting,
-                ),
-                const SizedBox(height: 16),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  activeTrackColor: InsightTheme.blue1,
-                  title: Text(
-                    'Does this block your inspection?',
-                    style: InsightTextStyles.formLabel(),
+
+                // ── Section 3: Concern Details Card ──
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: InsightTheme.line),
+                    boxShadow: InsightTheme.cardShadow,
                   ),
-                  value: _blocks,
-                  onChanged: _submitting
-                      ? null
-                      : (value) => setState(() => _blocks = value),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: InsightTheme.blueTint,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.edit_note_rounded,
+                              size: 18,
+                              color: InsightTheme.blue1,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Concern Details',
+                            style: InsightTheme.urbanist(
+                              16,
+                              w: FontWeight.w800,
+                              c: InsightTheme.ink,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      const Divider(height: 1, color: InsightTheme.line),
+                      const SizedBox(height: 16),
+                      ReportTextField(
+                        label: 'Description',
+                        hint: 'What is wrong or unclear?',
+                        controller: _description,
+                        validator: ReportInput.descriptionError,
+                        minLines: 3,
+                        maxLines: 5,
+                        enabled: !_submitting,
+                      ),
+                      const SizedBox(height: 16),
+                      ReportTextField(
+                        label: 'Affected information',
+                        hint: 'Which detail is affected?',
+                        controller: _affectedField,
+                        validator: ReportInput.optionalError,
+                        required: false,
+                        enabled: !_submitting,
+                      ),
+                      const SizedBox(height: 16),
+                      ReportTextField(
+                        label: 'Requested correction or clarification',
+                        hint: 'What should it say instead?',
+                        controller: _requestedChange,
+                        validator: ReportInput.optionalError,
+                        required: false,
+                        enabled: !_submitting,
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(height: 16),
+
+                // ── Section 4: Inspection Impact Card ──
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: InsightTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: InsightTheme.line),
+                    boxShadow: InsightTheme.cardShadow,
+                  ),
+                  child: SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    activeTrackColor: InsightTheme.blue1,
+                    title: Text(
+                      'Does this block your inspection?',
+                      style: InsightTextStyles.formLabel(),
+                    ),
+                    value: _blocks,
+                    onChanged: _submitting
+                        ? null
+                        : (value) => setState(() => _blocks = value),
+                  ),
+                ),
+
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   ReportNotice(_error!, error: true),
@@ -346,16 +496,19 @@ class _ChoiceTile extends StatelessWidget {
     inMutuallyExclusiveGroup: true,
     enabled: onTap != null,
     child: Material(
-      color: selected ? InsightTheme.blueTint : InsightTheme.surface,
+      color: selected
+          ? InsightTheme.blueTint.withValues(alpha: 0.8)
+          : InsightTheme.surface2.withValues(alpha: 0.4),
       shape: RoundedRectangleBorder(
-        borderRadius: InsightTheme.roundedSm,
+        borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: selected ? InsightTheme.blue1 : InsightTheme.lineStrong,
+          color: selected ? InsightTheme.blue1 : InsightTheme.line,
+          width: selected ? 1.5 : 1,
         ),
       ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: InsightTheme.roundedSm,
+        borderRadius: BorderRadius.circular(12),
         child: Container(
           constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -379,7 +532,7 @@ class _ChoiceTile extends StatelessWidget {
                       style: InsightTheme.inter(
                         14,
                         w: selected ? FontWeight.w700 : FontWeight.w500,
-                        c: InsightTheme.ink,
+                        c: selected ? InsightTheme.blue2 : InsightTheme.ink,
                       ),
                     ),
                     if (subtitle != null) ...[

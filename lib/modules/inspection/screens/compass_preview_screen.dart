@@ -7,6 +7,7 @@ import 'package:flutter_compass/flutter_compass.dart';
 
 import '../../../core/layout/responsive_layout.dart';
 import 'gps_verification_screen.dart' show fitCompassDiameter;
+import '../../tasks/widgets/task_notices.dart' show TaskLanguageSelector;
 
 import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/widgets/field_form_widgets.dart';
@@ -88,6 +89,84 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
         _accuracy = event.accuracy;
       });
     });
+  }
+
+  Future<void> _showOrientationInfo() async {
+    var isTagalog = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                isTagalog ? 'Detalye ng orientation' : 'Orientation details',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TaskLanguageSelector(
+                  isTagalog: isTagalog,
+                  onChanged: (value) =>
+                      setDialogState(() => isTagalog = value),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  isTagalog
+                      ? 'Ang mga value na ito ay galing sa compass sensor ng device at tumutulong makita kung saan nakaharap ang device.'
+                      : 'These values come from the device compass sensor and show which direction the device is facing.',
+                  style: InsightTheme.inter(13, c: InsightTheme.ink2),
+                ),
+                const SizedBox(height: 14),
+                _OrientationInfoRow(
+                  title: isTagalog ? 'Heading' : 'Heading',
+                  text: isTagalog
+                      ? 'Eksaktong direksyon ng device mula 0° hanggang 360°. Ang 0° ay North.'
+                      : 'The device direction from 0° to 360°. 0° means North.',
+                ),
+                const SizedBox(height: 12),
+                _OrientationInfoRow(
+                  title: isTagalog ? 'Cardinal' : 'Cardinal',
+                  text: isTagalog
+                      ? 'Mas madaling basahin na direksyon tulad ng N, NE, E, at iba pa.'
+                      : 'A readable compass direction such as N, NE, E, and the other 16 direction sectors.',
+                ),
+                const SizedBox(height: 12),
+                _OrientationInfoRow(
+                  title: isTagalog ? 'Heading accuracy' : 'Heading accuracy',
+                  text: isTagalog
+                      ? 'Tinatayang error ng compass heading, ipinapakita bilang ± degrees. Sa Android, maaaring approximate ang value ng sensor.'
+                      : 'The estimated compass heading deviation, shown as ± degrees. On Android, the sensor value may be approximate.',
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  isTagalog
+                      ? 'Hindi ito GPS accuracy at hindi nito sinusukat ang layo sa site.'
+                      : 'This is not GPS accuracy and does not measure distance to the site.',
+                  style: InsightTheme.inter(12, c: InsightTheme.blueInk),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(isTagalog ? 'Isara' : 'Close'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -292,6 +371,7 @@ class _StandaloneCompassScreenState extends State<StandaloneCompassScreen> {
                           heading: _heading,
                           headingCardinal: _headingCardinal,
                           accuracy: _accuracy,
+                          onInfo: _showOrientationInfo,
                         ),
                       ),
                 // Landscape reclaims the header's space for the dial and keeps
@@ -629,15 +709,19 @@ class _StandaloneOrientationCard extends StatelessWidget {
   final double? heading;
   final String headingCardinal;
   final double? accuracy;
+  final VoidCallback onInfo;
 
   const _StandaloneOrientationCard({
     required this.heading,
     required this.headingCardinal,
     required this.accuracy,
+    required this.onInfo,
   });
 
   @override
   Widget build(BuildContext context) {
+    final active = heading != null;
+    final accentInk = active ? InsightTheme.greenInk : InsightTheme.amberInk;
     return Container(
       key: const ValueKey('compass-details'),
       padding: const EdgeInsets.all(12),
@@ -651,39 +735,105 @@ class _StandaloneOrientationCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(children: [
-            Expanded(child: Semantics(header: true,
-              child: Text('Orientation details', style: InsightTheme.urbanist(14, w: FontWeight.w700)))),
-            const SizedBox(width: 8),
-            Flexible(child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: heading == null ? InsightTheme.surface2 : InsightTheme.greenTint,
-                borderRadius: BorderRadius.circular(10)),
-              child: Text(heading == null ? 'Waiting' : 'Active',
-                style: InsightTheme.inter(12, w: FontWeight.w600,
-                  c: heading == null ? InsightTheme.ink3 : InsightTheme.greenInk)))),
-          ]),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 24,
-            runSpacing: 12,
+          Row(
             children: [
-              _MetricTile(
-                label: 'Heading',
-                value: heading != null ? '${heading!.round()}°' : '--',
-                semanticsLabel: heading == null ? 'Heading unavailable' : 'Heading ${heading!.round()} degrees, $headingCardinal',
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: active
+                      ? InsightTheme.greenTint
+                      : InsightTheme.amberTint,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.explore_rounded,
+                  size: 16,
+                  color: accentInk,
+                ),
               ),
-              _MetricTile(label: 'Cardinal', value: headingCardinal),
-              _MetricTile(
-                label: 'Accuracy',
-                value: accuracy != null && accuracy! >= 0 ? '± ${accuracy!.round()}°' : 'Unavailable',
+              const SizedBox(width: 8),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    'Orientation details',
+                    style: InsightTheme.inter(
+                      12,
+                      w: FontWeight.w700,
+                      ls: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onInfo,
+                tooltip: 'About orientation details',
+                icon: const Icon(Icons.info_outline_rounded, size: 18),
+                color: InsightTheme.ink2,
+                constraints: const BoxConstraints(
+                  minWidth: 48,
+                  minHeight: 48,
+                ),
+                padding: EdgeInsets.zero,
               ),
             ],
           ),
-          const Divider(height: 24),
-          Text('Sensor · Live Device Magnetometer', style: InsightTheme.inter(12)),
-          const SizedBox(height: 12),
-          Text('Rotate your device to observe real-time bearing in the field.',
-            style: InsightTheme.inter(12, c: InsightTheme.blueInk)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: InsightTheme.bg,
+              borderRadius: InsightTheme.roundedSm,
+              border: Border.all(color: InsightTheme.line),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _MetricTile(
+                      label: 'Heading',
+                      value: heading != null ? '${heading!.round()}°' : '—',
+                      semanticsLabel: heading == null
+                          ? 'Heading unavailable'
+                          : 'Heading ${heading!.round()} degrees, $headingCardinal',
+                    ),
+                  ),
+                  const VerticalDivider(width: 16, color: InsightTheme.line),
+                  Expanded(
+                    child: _MetricTile(
+                      label: 'Cardinal',
+                      value: headingCardinal,
+                    ),
+                  ),
+                  const VerticalDivider(width: 16, color: InsightTheme.line),
+                  Expanded(
+                    child: Tooltip(
+                      message:
+                          'Estimated compass heading deviation. Android sensor values may be approximate.',
+                      child: _MetricTile(
+                        label: 'Heading accuracy',
+                        value: accuracy != null && accuracy! >= 0
+                            ? '± ${accuracy!.round()}°'
+                            : 'Unavailable',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Sensor · Live Device Magnetometer',
+            style: InsightTheme.inter(12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Rotate your device to observe real-time bearing in the field.',
+            style: InsightTheme.inter(12, c: InsightTheme.blueInk),
+          ),
         ],
       ),
     );
@@ -699,19 +849,53 @@ class _MetricTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: InsightTheme.inter(12),
-          ),
-          const SizedBox(height: 2),
-          Semantics(label: semanticsLabel, excludeSemantics: semanticsLabel != null, child: Text(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: InsightTheme.inter(12)),
+        const SizedBox(height: 2),
+        Semantics(
+          label: semanticsLabel,
+          excludeSemantics: semanticsLabel != null,
+          child: Text(
             value,
-            style: InsightTheme.inter(16, w: FontWeight.w700, c: InsightTheme.ink),
-          )),
-        ],
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: InsightTheme.inter(
+              16,
+              w: FontWeight.w700,
+              c: InsightTheme.ink,
+            ),
+          ),
+        ),
+      ],
     );
   }
+}
+
+class _OrientationInfoRow extends StatelessWidget {
+  final String title;
+  final String text;
+
+  const _OrientationInfoRow({
+    required this.title,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: InsightTheme.inter(
+              12,
+              w: FontWeight.w700,
+              c: InsightTheme.ink,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(text, style: InsightTheme.inter(12, c: InsightTheme.ink2)),
+        ],
+      );
 }

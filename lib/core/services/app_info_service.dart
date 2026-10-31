@@ -15,6 +15,11 @@ class AppInfoService {
     return 'Version $_version';
   }
 
+  static String get aboutVersionString {
+    if (_buildNumber.isEmpty) return fullVersionString;
+    return '$fullVersionString (build $_buildNumber)';
+  }
+
   static Future<void> initialize() async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();

@@ -44,7 +44,7 @@ class AboutInsightScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        AppInfoService.fullVersionString,
+                        AppInfoService.aboutVersionString,
                         style: InsightTheme.inter(14, c: InsightTheme.ink3),
                       ),
                       const SizedBox(height: 12),
@@ -75,7 +75,7 @@ class AboutInsightScreen extends StatelessWidget {
                         onPressed: () => showLicensePage(
                           context: context,
                           applicationName: 'iMAPS:FieldSync',
-                          applicationVersion: AppInfoService.fullVersionString,
+                          applicationVersion: AppInfoService.aboutVersionString,
                         ),
                         icon: const Icon(Icons.description_outlined, size: 18),
                         label: const Text('Open-source licenses'),
@@ -168,6 +168,27 @@ class AboutInsightScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 20),
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          'Development credits',
+                          style: InsightTheme.urbanist(18),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Developed by the iMAPS:FieldSync capstone project team. '
+                        'This academic project supports documentation and '
+                        'authorized field-workflow demonstrations. Official '
+                        'institutional adoption and policy approval require '
+                        'separate authorization.',
+                        style: InsightTheme.inter(
+                          13,
+                          c: InsightTheme.ink2,
+                          h: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
                       Text(
                         'Municipal Planning and Development Office (MPDO)',
                         style: InsightTheme.inter(
@@ -180,6 +201,31 @@ class AboutInsightScreen extends StatelessWidget {
                       Text(
                         'Rosario, Batangas',
                         style: InsightTheme.inter(14, c: InsightTheme.ink3),
+                      ),
+                      const SizedBox(height: 20),
+                      const Divider(height: 1, color: InsightTheme.line),
+                      const SizedBox(height: 16),
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          'Technologies & services',
+                          style: InsightTheme.urbanist(18),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Cloud services: Supabase supports authentication, cloud records, and synchronization.',
+                        style: InsightTheme.inter(13, c: InsightTheme.ink2, h: 1.5),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Push notifications: OneSignal is used for push messaging. Firebase Cloud Messaging (FCM) may provide Android notification delivery when configured.',
+                        style: InsightTheme.inter(13, c: InsightTheme.ink2, h: 1.5),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Offline storage: SQLite supports local database operations, with SQLCipher used for encrypted database storage.',
+                        style: InsightTheme.inter(13, c: InsightTheme.ink2, h: 1.5),
                       ),
                     ],
                   ),
