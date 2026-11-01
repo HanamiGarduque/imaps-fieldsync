@@ -100,24 +100,31 @@ class DemoFixtures {
         'assigned_inspector_id': owner,
         'status': n == 9
             ? 'completed'
-            : n == 8
+            : n == 6 || n == 8
             ? 'in_progress'
             : 'assigned',
-        'is_self_scheduled': n <= 5 || n == 9,
+        // Keep one deterministic fixture for each My Tasks section and border
+        // state so the isolated APK visibly exercises the complete task cycle.
+        'is_self_scheduled': n == 1 || n == 2 || n == 3 || n == 5 || n == 9,
         'scheduled_date': switch (n) {
-          1 => '2026-11-07',
-          2 => '2026-10-30',
-          3 => '2026-10-29',
-          4 => '2026-10-28',
-          5 => '2026-10-25',
+          1 => '2026-11-10', // blue: visit is more than three days away
+          2 => '2026-11-04', // orange: visit is within three days
+          3 => '2026-11-01', // red: visit is today
+          4 => null, // available anytime; deadline drives the border
+          5 => null, // available anytime; neutral blue
+          6 => null, // ongoing; overdue deadline is full red
+          7 => null,
+          8 => null,
           9 => '2026-10-22',
           _ => null,
         },
         'deadline_date': n <= 4
             ? '2026-11-17'
             : switch (n) {
-                5 => '2026-11-07',
-                6 => '2026-10-26',
+                5 => '2026-11-17',
+                6 => '2026-10-31', // full red: active task past deadline
+                7 => '2026-11-05',
+                8 => '2026-11-12',
                 9 => '2026-11-01',
                 _ => '2026-11-12',
               },
@@ -220,7 +227,9 @@ class DemoFixtures {
     }
     try {
       final session = Supabase.instance.client.auth.currentSession;
-      if (!await _verifyIdentity() || _closed || !_sameSession ||
+      if (!await _verifyIdentity() ||
+          _closed ||
+          !_sameSession ||
           !identical(session, Supabase.instance.client.auth.currentSession)) {
         _invalidateTrust();
         return false;
@@ -235,7 +244,9 @@ class DemoFixtures {
         where: 'owner = ? AND revision = ? AND state = ?',
         whereArgs: [owner, revision, 'ready'],
       );
-      if (rows.length == 1 && !_closed && _sameSession &&
+      if (rows.length == 1 &&
+          !_closed &&
+          _sameSession &&
           identical(session, Supabase.instance.client.auth.currentSession)) {
         return true;
       }
@@ -271,8 +282,7 @@ class DemoFixtures {
   /// and live B1 identity. This never grants native capture permission.
   Future<bool> get captureSourceReady async {
     final generation = _watermarkGeneration;
-    return await _trusted() && _watermark &&
-        generation == _watermarkGeneration;
+    return await _trusted() && _watermark && generation == _watermarkGeneration;
   }
 
   void watermarkMounted(bool mounted) {
@@ -352,12 +362,14 @@ class DemoFixtures {
   Future<void> _initialize(Directory? documents) async {
     final session = Supabase.instance.client.auth.currentSession;
     void finish() {
-      if (_closed || !_sameSession ||
+      if (_closed ||
+          !_sameSession ||
           !identical(session, Supabase.instance.client.auth.currentSession)) {
         throw StateError('Demo initialization session was invalidated.');
       }
       _initialized = true;
     }
+
     await _requireTrust(requireInitialized: false);
     final db = await DBHelper.database;
     await db.execute(
@@ -507,7 +519,8 @@ class DemoFixtures {
         photoId: photoId,
         jobId: id,
         photoPath: file.path,
-        notes: 'DEMO · SYNTHETIC DATA — generated evidence $index; NOT a camera photograph.',
+        notes:
+            'DEMO · SYNTHETIC DATA — generated evidence $index; NOT a camera photograph.',
         latitude: latitude,
         longitude: longitude,
         capturedAt: anchor
@@ -516,6 +529,7 @@ class DemoFixtures {
       );
     }
   }
+
   static Uint8List _imageBytes({
     required bool reference,
     required String label,
