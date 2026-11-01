@@ -71,6 +71,7 @@ class InspectionProvider extends ChangeNotifier {
   // CURRENT rework session — prevents writing it again on every
   // subsequent edit (only the first real edit needs to set it).
   bool _reworkModifiedMarked = false;
+  Future<String?>? _reworkMarkerFuture;
 
   // Last persistently-accepted findings text (the three fields the Field
   // Findings screen actually owns), separate from the in-memory draft.
@@ -118,10 +119,11 @@ class InspectionProvider extends ChangeNotifier {
   /// completed, derived from the stored per-step times. A draft saved before
   /// the steps became independent has no per-step times for them, and its
   /// highest reached step then stands for all of them.
-  Set<int> get completedFlexibleSteps => InspectionProgress.deriveCompletedSteps(
-    _currentStep,
-    _persistedStepTimestamps,
-  );
+  Set<int> get completedFlexibleSteps =>
+      InspectionProgress.deriveCompletedSteps(
+        _currentStep,
+        _persistedStepTimestamps,
+      );
 
   bool get hasLocationReference => capturedPhotos.any(isLocationReferencePhoto);
   String get actualLandUse => _visible ? _actualLandUse : '';
@@ -223,7 +225,9 @@ class InspectionProvider extends ChangeNotifier {
     _currentStep = storedStep < 1 ? 1 : storedStep;
     _persistedStepTimestamps
       ..clear()
-      ..addAll(InspectionProgress.decodeStepTimestamps(draft?['step_timestamps']));
+      ..addAll(
+        InspectionProgress.decodeStepTimestamps(draft?['step_timestamps']),
+      );
     // Bind the shared progress to this inspection. The Task Overview does the
     // same with the task's own (possibly fresher) data when it opens; this
     // keeps a step screen that was opened directly from recording its
@@ -284,16 +288,41 @@ class InspectionProvider extends ChangeNotifier {
   void _markReworkModifiedIfNeeded() {
     if (!_isReworkMode || _reworkModifiedMarked || _activeTask == null) return;
     _reworkModifiedMarked = true;
-    SupabaseService.markReworkModified(
+    final markerFuture = SupabaseService.markReworkModified(
       jobId: _activeTask!.id,
       locationLabel: _activeTask!.location,
-    ).then<void>((_) {}).catchError((e) {
-      // Best-effort: if this particular write fails the marker may be seen as
-      // unset again on a later attempt, but the edit itself is unaffected and
-      // still saved through its own offline-safe path.
-      _reworkModifiedMarked = false;
-      debugPrint('markReworkModified failed (non-critical): $e');
-    });
+    );
+    _reworkMarkerFuture = markerFuture;
+    markerFuture
+        .then<void>((revision) {
+          if (revision != null) {
+            SyncOutboxService.recordAcceptedRevision(_activeTask!.id, revision);
+          }
+        })
+        .catchError((e) {
+          // Best-effort: if this particular write fails the marker may be seen as
+          // unset again on a later attempt, but the edit itself is unaffected and
+          // still saved through its own offline-safe path.
+          _reworkModifiedMarked = false;
+          debugPrint('markReworkModified failed (non-critical): $e');
+        });
+  }
+
+  /// Final submission must not race the lazy rework marker. A successful
+  /// marker also records its accepted server revision so the final action
+  /// cannot compare against the pre-edit cache timestamp.
+  Future<void> waitForReworkMarker() async {
+    final marker = _reworkMarkerFuture;
+    if (marker == null) return;
+    try {
+      final revision = await marker;
+      if (_activeTask != null && revision != null) {
+        SyncOutboxService.recordAcceptedRevision(_activeTask!.id, revision);
+      }
+    } catch (_) {
+      // The marker is best-effort; the final submission remains durable and
+      // its normal authority/conflict checks still decide delivery.
+    }
   }
 
   void setSiteCondition(String key, bool value) {

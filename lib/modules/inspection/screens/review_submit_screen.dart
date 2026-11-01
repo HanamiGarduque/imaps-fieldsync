@@ -240,6 +240,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       if (!await provider.saveAllInspectionState(syncOnline: false)) {
         throw StateError('Inspection draft could not be saved');
       }
+      await provider.waitForReworkMarker();
       DBHelper.requireSameInspector(uid);
     } catch (e) {
       _localSaveFailure(e);
@@ -328,17 +329,19 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       _localSaveFailure(StateError('Submission receipt could not be read'));
       return;
     }
-    final queuedOffline = receipt['status'] != 'synced';
-    final requiresReview = receipt['status'] == 'conflict';
-    if (receipt['status'] == 'paused') {
-      setState(() => _submitting = false);
-      _showValidation(
-        'Saved on this device, but not accepted by the server. '
-        'Delivery is paused. Review your assessment and assignment in Sync Center, '
-        'sign in again if needed, or contact the Planning Office before retrying.',
-      );
+    final status = receipt['status'] as String?;
+    final accepted = status == 'synced';
+    final requiresReview = status == 'conflict' || status == 'paused';
+    final pendingDelivery = const {
+      'pending',
+      'syncing',
+      'failed',
+    }.contains(status);
+    if (!accepted && !requiresReview && !pendingDelivery) {
+      _localSaveFailure(StateError('Submission receipt has an unknown status'));
       return;
     }
+    final queuedOffline = !accepted;
 
     if (!queuedOffline) InspectionProgress.instance.markStepComplete(6);
     if (!mounted) return;
@@ -349,6 +352,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
           finalStatus: _selectedStatus,
           queuedOffline: queuedOffline,
           requiresReview: requiresReview,
+          isRework: provider.isReworkMode,
           inspectorId: uid,
         ),
       ),
@@ -897,6 +901,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
   final String finalStatus;
   final bool queuedOffline;
   final bool requiresReview;
+  final bool isRework;
   final String? inspectorId;
   const SubmissionSuccessScreen({
     super.key,
@@ -904,6 +909,7 @@ class SubmissionSuccessScreen extends StatelessWidget {
     required this.finalStatus,
     this.queuedOffline = false,
     this.requiresReview = false,
+    this.isRework = false,
     this.inspectorId,
   });
   @override
@@ -963,34 +969,44 @@ class SubmissionSuccessScreen extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 32,
-                    backgroundColor: queuedOffline
-                        ? InsightTheme.blueTint
-                        : InsightTheme.greenTint,
+                    backgroundColor: !queuedOffline
+                        ? InsightTheme.greenTint
+                        : requiresReview
+                        ? InsightTheme.orangeTint
+                        : InsightTheme.blueTint,
                     child: Icon(
-                      queuedOffline
-                          ? Icons.cloud_off_rounded
-                          : Icons.check_rounded,
-                      color: queuedOffline
-                          ? InsightTheme.blueInk
-                          : InsightTheme.greenInk,
+                      !queuedOffline
+                          ? Icons.check_rounded
+                          : requiresReview
+                          ? Icons.warning_amber_rounded
+                          : Icons.cloud_queue_rounded,
+                      color: !queuedOffline
+                          ? InsightTheme.greenInk
+                          : requiresReview
+                          ? InsightTheme.orangeInk
+                          : InsightTheme.blueInk,
                       size: 32,
                     ),
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    queuedOffline
-                        ? (requiresReview ? 'Saved Locally' : 'Saved Offline')
-                        : 'Inspection Submitted',
+                    !queuedOffline
+                        ? (isRework
+                              ? 'Rework Submitted'
+                              : 'Inspection Submitted')
+                        : (requiresReview
+                              ? 'Saved on Device — Review Required'
+                              : 'Saved on Device — Pending Sync'),
                     textAlign: TextAlign.center,
                     style: InsightTheme.urbanist(24, w: FontWeight.w800),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    queuedOffline
-                        ? (requiresReview
-                              ? 'Saved on this device. Delivery needs review in Sync Center; remote completion is not confirmed.'
-                              : 'Saved on this device. Pending Sync — remote completion is not confirmed. FieldSync will attempt delivery when connected; check Sync Center for updates.')
-                        : 'Received by FieldSync / Supabase. Planning Officer-side iMAPS import is not yet confirmed.',
+                    !queuedOffline
+                        ? 'Your inspection has been received by FieldSync\'s server. The report will become available in iMAPS after synchronization with the Planning Office system.'
+                        : (requiresReview
+                              ? 'Your changes are saved, but the server could not accept the update. Check Sync Center for the reason and next action.'
+                              : 'Your inspection is saved on this device, but delivery has not yet been confirmed. FieldSync will retry when possible.'),
                     textAlign: TextAlign.center,
                     style: InsightTheme.inter(14, c: InsightTheme.ink2),
                   ),

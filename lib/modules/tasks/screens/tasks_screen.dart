@@ -2933,18 +2933,45 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                         ],
                         const SizedBox(height: 12),
                         // ── Status & Step Row ──
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            if (taskCategory == 'Completed')
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                                child: Text(TaskSubmission.badgeOrUnverified(widget.submission, canonicalCompleted: widget.task.category == 'Completed'),
-                                    style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor)),
-                              )
-                            else if (showInProgress || taskCategory == 'Ongoing')
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final stepLabel = Text(
+                              'STEP $stepValue/${InspectionProgress.totalSteps}',
+                              textAlign: TextAlign.end,
+                              style: InsightTheme.inter(11.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.5),
+                            );
+                            if (taskCategory == 'Completed') {
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: statusColor.withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        TaskSubmission.badgeOrUnverified(
+                                          widget.submission,
+                                          canonicalCompleted: widget.task.category == 'Completed',
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  stepLabel,
+                                ],
+                              );
+                            }
+                            return Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                            if (showInProgress || taskCategory == 'Ongoing')
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -2984,9 +3011,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                               )
                             else
                               const SizedBox.shrink(),
-                            Text('STEP $stepValue/${InspectionProgress.totalSteps}',
-                                style: InsightTheme.inter(11.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.5)),
-                          ],
+                            stepLabel,
+                              ],
+                            );
+                          },
                         ),
                         const SizedBox(height: 8),
                         ClipRRect(

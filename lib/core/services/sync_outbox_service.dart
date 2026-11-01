@@ -90,6 +90,7 @@ class SyncOutboxService {
   SyncOutboxService._();
 
   static bool _draining = false;
+  static Future<void>? _drainFuture;
 
   @visibleForTesting
   static Future<Map<String, dynamic>?> Function(String)? recoveryReadForTesting;
@@ -164,6 +165,16 @@ class SyncOutboxService {
   static final ValueNotifier<int> drainCompleted = ValueNotifier<int>(0);
 
   static bool get isDraining => _draining;
+
+  /// Records a server revision accepted by this device outside the outbox
+  /// drain (for example, the lazy rework marker). Later queued actions for
+  /// the same job must compare against this revision, not an older cache
+  /// snapshot.
+  static void recordAcceptedRevision(String jobId, String updatedAt) {
+    if (updatedAt.isNotEmpty) {
+      _knownGoodUpdatedAt[jobId] = updatedAt;
+    }
+  }
 
   static Future<DateTime?> getLastSuccessfulSync() async {
     final prefs = await SharedPreferences.getInstance();
@@ -522,8 +533,24 @@ class SyncOutboxService {
   /// paths — everything else in the queue is left completely untouched
   /// (not read, not marked syncing/failed, still `pending` in its
   /// original position) so a later full drain picks it up normally.
-  static Future<void> drain({
-    String trigger = 'automatic',
+  static Future<void> drain({String trigger = 'automatic', String? onlyJobId}) {
+    final running = _drainFuture;
+    if (running != null) {
+      return running.then<void>((_) async {
+        if (onlyJobId != null) {
+          await drain(trigger: trigger, onlyJobId: onlyJobId);
+        }
+      });
+    }
+    final future = _drain(trigger: trigger, onlyJobId: onlyJobId);
+    _drainFuture = future;
+    return future.whenComplete(() {
+      if (identical(_drainFuture, future)) _drainFuture = null;
+    });
+  }
+
+  static Future<void> _drain({
+    required String trigger,
     String? onlyJobId,
   }) async {
     if (_draining) return;

@@ -68,12 +68,10 @@ class _DebugScreenshotToggleState extends State<DebugScreenshotToggle> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: demoOnly
-                  ? () {
-                      authorizationEpoch = protection.securityEpoch;
-                      Navigator.pop(context, true);
-                    }
-                  : null,
+              onPressed: () {
+                authorizationEpoch = protection.securityEpoch;
+                Navigator.pop(context, true);
+              },
               child: const Text('Enable demo screenshots'),
             ),
           ],
