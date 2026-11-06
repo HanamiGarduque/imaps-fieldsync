@@ -12,6 +12,7 @@ import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/supabase_service.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
 import 'package:imaps_fieldsync/modules/inspection/screens/completed_inspection_detail_screen.dart';
+import 'package:imaps_fieldsync/modules/interactive_guide/guide_targets.dart';
 import 'package:imaps_fieldsync/modules/offline_sync/screens/updates_screen.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/help_faq_screen.dart';
 import 'package:imaps_fieldsync/modules/tasks/screens/tasks_screen.dart';
@@ -191,12 +192,17 @@ void main() {
     await Supabase.instance.dispose();
   });
 
-  Future<void> open(WidgetTester tester, Widget screen) async {
+  Future<void> open(
+    WidgetTester tester,
+    Widget screen, {
+    Widget Function(Widget child)? wrap,
+  }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(360, 800);
     addTearDown(tester.view.reset);
     addTearDown(() async => tester.pumpWidget(const SizedBox.shrink()));
-    await tester.pumpWidget(MaterialApp(home: screen));
+    final app = MaterialApp(home: screen);
+    await tester.pumpWidget(wrap == null ? app : wrap(app));
     for (var frame = 0; frame < 30; frame++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 10)),
@@ -374,15 +380,8 @@ void main() {
       await reconnect(tester);
       expect((await db.query('pending_actions')).single['status'], 'synced');
       expect(patches, 1);
-      await showSyncText(
-        tester,
-        find.text('No queued updates'),
-        delta: -200,
-      );
-      expect(
-        find.text('No queued updates'),
-        findsOneWidget,
-      );
+      await showSyncText(tester, find.text('No queued updates'), delta: -200);
+      expect(find.text('No queued updates'), findsOneWidget);
       await showSyncText(
         tester,
         find.textContaining('FieldSync-Supabase received'),
@@ -581,6 +580,67 @@ void main() {
         reason: 'Confirmation only queues the overwrite for the next drain.',
       );
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'overwrite all needs confirmation and clears attention without duplicate guide anchors',
+    (tester) async {
+      await insertAction(
+        id: 'conflict-a',
+        status: 'conflict',
+        error: privateText,
+      );
+      await insertAction(
+        id: 'conflict-b',
+        status: 'conflict',
+        error: privateText,
+      );
+      final registry = GuideTargetRegistry();
+      addTearDown(registry.dispose);
+      await open(
+        tester,
+        syncScreen(),
+        wrap: (child) => GuideTargetScope(registry: registry, child: child),
+      );
+
+      await showSyncText(tester, find.text('Overwrite all (2)'));
+      await tester.tap(find.text('Overwrite all (2)'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.textContaining('2 saved updates on 1 task'), findsOneWidget);
+      expect(find.textContaining('cannot be recovered'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(
+        await db.query('pending_actions', where: "status = 'conflict'"),
+        hasLength(2),
+      );
+
+      await showSyncText(tester, find.text('Overwrite all (2)'));
+      await tester.tap(find.text('Overwrite all (2)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm overwrite all'));
+      for (var frame = 0; frame < 20; frame++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump(const Duration(milliseconds: 30));
+      }
+
+      final rows = await db.query('pending_actions', orderBy: 'id');
+      expect(rows.map((row) => row['status']), everyElement('pending'));
+      for (final row in rows) {
+        expect(jsonDecode(row['payload'] as String)['forceSyncAnyway'], isTrue);
+      }
+      expect(find.textContaining('need attention'), findsNothing);
+      expect(
+        tester.takeException(),
+        isNull,
+        reason:
+            'Clearing the attention section must not shift the guide anchors '
+            'below it and remount the same target twice.',
+      );
     },
   );
 

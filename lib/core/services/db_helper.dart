@@ -1155,6 +1155,26 @@ class DBHelper {
     return value?.toString();
   }
 
+  /// A write this device just completed moved the server revision. Keep the
+  /// snapshot used by later offline actions in step with it, so this device's
+  /// own accepted write is never mistaken for an external edit.
+  static Future<void> recordAcceptedJobRevision(
+    String jobId,
+    Object? updatedAt, {
+    String? inspectorId,
+  }) async {
+    if (updatedAt is! String || updatedAt.trim().isEmpty) return;
+    final uid = inspectorId ?? currentInspectorId;
+    if (uid == null) return;
+    final db = await database;
+    await db.update(
+      'local_jobs',
+      {'cached_updated_at': updatedAt.trim()},
+      where: 'id = ? AND inspector_id = ?',
+      whereArgs: [jobId, uid],
+    );
+  }
+
   // --- LOCAL INSPECTIONS ---
 
   static Future<void> saveInspectionLocally({
@@ -2161,6 +2181,48 @@ class DBHelper {
       where: 'id = ? AND inspector_id = ?',
       whereArgs: [id, currentInspectorId],
     );
+  }
+
+  /// Marks every conflicted action owned by this inspector for one explicit
+  /// overwrite. Rows with unreadable payloads are left in conflict for
+  /// individual review; nothing is deleted. Returns the number of updates
+  /// actually marked.
+  static Future<int> markAllConflictsForceSync() async {
+    final uid = currentInspectorId;
+    if (uid == null) return 0;
+    final db = await database;
+    var marked = 0;
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'pending_actions',
+        columns: ['id', 'payload'],
+        where: "status = 'conflict' AND inspector_id = ?",
+        whereArgs: [uid],
+      );
+      for (final row in rows) {
+        final Map<String, dynamic> payload;
+        try {
+          payload = Map<String, dynamic>.from(
+            jsonDecode(row['payload'] as String) as Map,
+          );
+        } catch (_) {
+          continue; // Preserve unreadable evidence for individual review.
+        }
+        payload['forceSyncAnyway'] = true;
+        marked += await txn.update(
+          'pending_actions',
+          {
+            'payload': jsonEncode(payload),
+            'status': 'pending',
+            'last_error': null,
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ? AND inspector_id = ? AND status = ?',
+          whereArgs: [row['id'], uid, 'conflict'],
+        );
+      }
+    });
+    return marked;
   }
 
   // ─────────────────────────────────────────────────────────────────────

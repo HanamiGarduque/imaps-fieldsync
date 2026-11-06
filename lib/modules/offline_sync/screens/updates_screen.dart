@@ -1226,6 +1226,75 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     );
   }
 
+  Future<void> _handleForceSyncAll() async {
+    if (widget.walkthrough != null) return;
+    final conflicts = _pendingRows
+        .where((row) => row['status'] == 'conflict')
+        .toList();
+    if (conflicts.isEmpty) return;
+    final jobs = conflicts.map((row) => row['job_id']).toSet();
+    final labels = jobs.map((id) => _jobLabel(id as String)).toList();
+    final shown = labels.take(3).join(', ');
+    final more = labels.length > 3 ? ' and ${labels.length - 3} more' : '';
+    final types = conflicts.map(_shortTypeTag).toSet().toList()..sort();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Overwrite all conflicts?'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${conflicts.length} saved ${conflicts.length == 1 ? 'update' : 'updates'} '
+                'on ${jobs.length} ${jobs.length == 1 ? 'task' : 'tasks'} could not '
+                'sync because the task record changed on the server after this '
+                'work was saved.',
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Overwrite all will send this device\'s saved copies for all '
+                '${conflicts.length} updates. Newer server values for those same '
+                'inspection fields will be replaced and cannot be recovered.',
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Task assignment and sign-in checks still apply. An update that '
+                'cannot prove it belongs to this inspector will stop for review '
+                'instead of being overwritten.',
+              ),
+              const SizedBox(height: 12),
+              Text('Affected: $shown$more'),
+              const SizedBox(height: 4),
+              Text('Updates: ${types.join(', ')}'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm overwrite all'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final count = await DBHelper.markAllConflictsForceSync();
+    await _refresh();
+    if (!mounted) return;
+    _showToast(
+      count == 0
+          ? 'No conflicted updates could be marked. Review each item individually.'
+          : '$count conflict(s) marked for overwrite. Tap Sync now to send.',
+      color: InsightTheme.amberInk,
+    );
+  }
+
   String _relativeTime(DateTime? dt) {
     if (dt == null) return 'Never';
     final diff = DateTime.now().difference(dt);
@@ -1535,6 +1604,9 @@ class _UpdatesScreenState extends State<UpdatesScreen>
     if (needsAttention.isEmpty) return const SizedBox.shrink();
     final first = needsAttention.first;
     final jobs = needsAttention.map((row) => row['job_id']).toSet().length;
+    final conflictCount = needsAttention
+        .where((row) => row['status'] == 'conflict')
+        .length;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
       decoration: BoxDecoration(
@@ -1542,66 +1614,103 @@ class _UpdatesScreenState extends State<UpdatesScreen>
         borderRadius: InsightTheme.roundedMd,
         border: Border.all(color: InsightTheme.amber.withValues(alpha: 0.26)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(
-            Icons.warning_amber_rounded,
-            size: 20,
-            color: InsightTheme.amberInk,
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${needsAttention.length} ${needsAttention.length == 1 ? 'update needs' : 'updates need'} attention',
-                  style: InsightTheme.inter(
-                    12.5,
-                    w: FontWeight.w700,
-                    c: InsightTheme.amberInk,
+          Row(
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                size: 20,
+                color: InsightTheme.amberInk,
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${needsAttention.length} ${needsAttention.length == 1 ? 'update needs' : 'updates need'} attention',
+                      style: InsightTheme.inter(
+                        12.5,
+                        w: FontWeight.w700,
+                        c: InsightTheme.amberInk,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      '$jobs ${jobs == 1 ? 'task' : 'tasks'} · ${_statusTextFor(first)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: InsightTheme.inter(11, c: InsightTheme.amberInk),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _reviewAttention,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(48, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 11),
+                  backgroundColor: InsightTheme.surface,
+                  foregroundColor: InsightTheme.amberInk,
+                  side: BorderSide(
+                    color: InsightTheme.amber.withValues(alpha: 0.30),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
                   ),
                 ),
-                const SizedBox(height: 1),
-                Text(
-                  '$jobs ${jobs == 1 ? 'task' : 'tasks'} · ${_statusTextFor(first)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: InsightTheme.inter(11, c: InsightTheme.amberInk),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Review',
+                      style: InsightTheme.inter(
+                        11.5,
+                        w: FontWeight.w700,
+                        c: InsightTheme.amberInk,
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded, size: 16),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          TextButton(
-            onPressed: _reviewAttention,
-            style: TextButton.styleFrom(
-              minimumSize: const Size(48, 44),
-              padding: const EdgeInsets.symmetric(horizontal: 11),
-              backgroundColor: InsightTheme.surface,
-              foregroundColor: InsightTheme.amberInk,
-              side: BorderSide(
-                color: InsightTheme.amber.withValues(alpha: 0.30),
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(9),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Review',
+          if (conflictCount > 0) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: _handleForceSyncAll,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(48, 44),
+                  backgroundColor: InsightTheme.surface,
+                  foregroundColor: InsightTheme.amberInk,
+                  side: BorderSide(
+                    color: InsightTheme.amber.withValues(alpha: 0.30),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                ),
+                icon: const Icon(
+                  Icons.published_with_changes_rounded,
+                  size: 16,
+                ),
+                label: Text(
+                  'Overwrite all ($conflictCount)',
                   style: InsightTheme.inter(
                     11.5,
                     w: FontWeight.w700,
                     c: InsightTheme.amberInk,
                   ),
                 ),
-                const Icon(Icons.chevron_right_rounded, size: 16),
-              ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -1895,15 +2004,19 @@ class _UpdatesScreenState extends State<UpdatesScreen>
                                   ),
                                 ),
 
-                                if (_attentionRows.isNotEmpty) ...[
-                                  const SizedBox(height: 10),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                    ),
-                                    child: _buildAttentionCard(),
+                                // Always keep this slot, even when empty: an
+                                // index shift here re-parents the guide
+                                // anchors below it and can briefly mount two
+                                // targets with the same id.
+                                Padding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    20,
+                                    _attentionRows.isEmpty ? 0 : 10,
+                                    20,
+                                    0,
                                   ),
-                                ],
+                                  child: _buildAttentionCard(),
+                                ),
 
                                 // 3. QUEUE FIRST — waiting items sit directly
                                 // under the status card, before history and

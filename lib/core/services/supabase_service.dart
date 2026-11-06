@@ -6,6 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'db_helper.dart';
 import 'inspection_authority.dart';
+import 'job_revision_tracker.dart';
 import 'supabase_endpoint.dart';
 import '../utils/calendar_date.dart';
 export 'inspection_authority.dart';
@@ -51,6 +52,7 @@ enum StepTimestampWriteOutcome {
   /// The remote record already held every requested time; nothing to write.
   alreadyPresent,
 }
+
 class SupabaseService {
   /// Live session identity, or null when no client session exists. Reading it
   /// never throws, so a caller can demand a session only at the point it
@@ -138,9 +140,13 @@ class SupabaseService {
       if (rows.length == 1 &&
           rows.single['id'] == jobId &&
           rows.single['assigned_inspector_id'] == uid) {
-        return satisfied == null || satisfied(rows.single)
+        final result = satisfied == null || satisfied(rows.single)
             ? InspectionAuthorityResult.authorized
             : InspectionAuthorityResult.offlineOrUnverifiable;
+        if (result == InspectionAuthorityResult.authorized) {
+          await _rememberAcceptedRevision(jobId, uid, rows.single);
+        }
+        return result;
       }
       if (rows.isNotEmpty) {
         return InspectionAuthorityResult.offlineOrUnverifiable;
@@ -162,11 +168,35 @@ class SupabaseService {
       if (row['id'] != jobId || row['assigned_inspector_id'] != uid) {
         return InspectionAuthorityResult.offlineOrUnverifiable;
       }
-      return satisfied != null && satisfied(row)
-          ? InspectionAuthorityResult.authorized
-          : InspectionAuthorityResult.offlineOrUnverifiable;
+      if (satisfied != null && satisfied(row)) {
+        // Satisfied by an existing row, not a write this device just made. Do
+        // not adopt its revision as this device's base: it may be an external
+        // change, which queued actions must still conflict on.
+        return InspectionAuthorityResult.authorized;
+      }
+      return InspectionAuthorityResult.offlineOrUnverifiable;
     } catch (e) {
       return _authorityFailure(e);
+    }
+  }
+
+  /// Keeps the next queued action's enqueue-time base in step with a write this
+  /// device just made. Local persistence is best-effort: it must never turn an
+  /// accepted remote write into a reported failure.
+  static Future<void> _rememberAcceptedRevision(
+    String jobId,
+    String uid,
+    Map<String, dynamic> row,
+  ) async {
+    JobRevisionTracker.record(jobId, row['updated_at']);
+    try {
+      await DBHelper.recordAcceptedJobRevision(
+        jobId,
+        row['updated_at'],
+        inspectorId: uid,
+      );
+    } catch (e) {
+      debugPrint('Could not persist accepted job revision: $e');
     }
   }
 
@@ -844,7 +874,8 @@ class SupabaseService {
       return InspectionAuthorityResult.offlineOrUnverifiable;
     }
     if (_sessionUid != uid) return InspectionAuthorityResult.authRequired;
-    if (current == null) return InspectionAuthorityResult.notAssignedOrUnavailable;
+    if (current == null)
+      return InspectionAuthorityResult.notAssignedOrUnavailable;
 
     final status = current['status'];
     if (!kSchedulableTaskStatuses.contains(status)) {
@@ -855,9 +886,12 @@ class SupabaseService {
     // A slow read may cross midnight. Validate the dispatch day's window, not
     // the day on which the inspector opened or confirmed the picker.
     final today = _localDay(clock?.call() ?? now ?? DateTime.now());
-    if (!deadline.isAfter(today)) return InspectionAuthorityResult.deadlinePassed;
-    if (!visit.isAfter(today)) return InspectionAuthorityResult.visitDateNotAllowed;
-    if (visit.isAfter(deadline)) return InspectionAuthorityResult.visitDateNotAllowed;
+    if (!deadline.isAfter(today))
+      return InspectionAuthorityResult.deadlinePassed;
+    if (!visit.isAfter(today))
+      return InspectionAuthorityResult.visitDateNotAllowed;
+    if (visit.isAfter(deadline))
+      return InspectionAuthorityResult.visitDateNotAllowed;
 
     final payload = <String, dynamic>{
       // Do not downgrade started rows or race a concurrent start/completion.
@@ -885,12 +919,14 @@ class SupabaseService {
         return row['scheduled_date'] == dateStr &&
             row['is_self_scheduled'] == true &&
             kSchedulableTaskStatuses.contains(row['status']) &&
-            actualDeadline != null && actualDeadline.isAfter(today) &&
+            actualDeadline != null &&
+            actualDeadline.isAfter(today) &&
             !visit.isAfter(actualDeadline);
       },
     );
     if (_sessionUid != uid) return InspectionAuthorityResult.authRequired;
-    if (result != InspectionAuthorityResult.offlineOrUnverifiable) return result;
+    if (result != InspectionAuthorityResult.offlineOrUnverifiable)
+      return result;
 
     // A zero-row write is never success: name the real reason instead of
     // blaming the network.
@@ -904,8 +940,9 @@ class SupabaseService {
   ) async {
     final row = await client
         .from('field_jobs')
-          .select(
-            'id,status,deadline_date,scheduled_date,is_self_scheduled,assigned_inspector_id')
+        .select(
+          'id,status,deadline_date,scheduled_date,is_self_scheduled,assigned_inspector_id',
+        )
         .eq('id', jobId)
         .eq('assigned_inspector_id', uid)
         .maybeSingle()
@@ -938,7 +975,8 @@ class SupabaseService {
     }
     final deadline = parseLocalCalendarDate(row['deadline_date']);
     if (deadline == null) return InspectionAuthorityResult.deadlineUnavailable;
-    if (!deadline.isAfter(today)) return InspectionAuthorityResult.deadlinePassed;
+    if (!deadline.isAfter(today))
+      return InspectionAuthorityResult.deadlinePassed;
     if (!visit.isAfter(today) || visit.isAfter(deadline)) {
       return InspectionAuthorityResult.visitDateNotAllowed;
     }
@@ -1264,15 +1302,17 @@ class SupabaseService {
               .maybeSingle();
           if (existing == null || existing['photo_url'] is! String) {
             _requireSession(uid);
-            await client.from('field_job_photos').upsert(
-              inspectionPhotoMetadataRow(
-                rowId: rowId,
-                jobId: jobId,
-                photoUrl: objectPath,
-                photo: photo,
-              ),
-              onConflict: 'id',
-            );
+            await client
+                .from('field_job_photos')
+                .upsert(
+                  inspectionPhotoMetadataRow(
+                    rowId: rowId,
+                    jobId: jobId,
+                    photoUrl: objectPath,
+                    photo: photo,
+                  ),
+                  onConflict: 'id',
+                );
             uploadedUrls.add(objectPath);
           } else {
             uploadedUrls.add(existing['photo_url'] as String);
@@ -1324,15 +1364,17 @@ class SupabaseService {
           //    the same deterministic id derived from the photo's storage
           //    path. A retry updates this one row in place — it never adds
           //    a second row for a photo that already synced.
-          await client.from('field_job_photos').upsert(
-            inspectionPhotoMetadataRow(
-              rowId: rowId,
-              jobId: jobId,
-              photoUrl: storagePath,
-              photo: photo,
-            ),
-            onConflict: 'id',
-          );
+          await client
+              .from('field_job_photos')
+              .upsert(
+                inspectionPhotoMetadataRow(
+                  rowId: rowId,
+                  jobId: jobId,
+                  photoUrl: storagePath,
+                  photo: photo,
+                ),
+                onConflict: 'id',
+              );
         }
       } catch (e) {
         debugPrint('Error uploading photo $path: $e');
@@ -1788,12 +1830,9 @@ class SupabaseService {
       // the loop re-reads and re-merges instead of overwriting that change.
       Map<String, dynamic>? updated;
       try {
-        updated = await conditionalOutboxUpdate(
-          jobId,
-          version,
-          status,
-          {'step_timestamps': merged},
-        );
+        updated = await conditionalOutboxUpdate(jobId, version, status, {
+          'step_timestamps': merged,
+        });
       } on PostgrestException catch (error) {
         // Some PostgREST versions answer an object request that matched no
         // row with PGRST116/406 instead of a null body. Both mean the same
@@ -1806,6 +1845,7 @@ class SupabaseService {
       if (updated == null) {
         continue;
       }
+      await _rememberAcceptedRevision(jobId, uid, updated);
       return StepTimestampWriteOutcome.written;
     }
     throw StateError(

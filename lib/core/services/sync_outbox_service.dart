@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'db_helper.dart';
+import 'job_revision_tracker.dart';
 import 'supabase_service.dart';
 
 /// Phase 5 — Sync Progress Indicator.
@@ -106,7 +107,7 @@ class SyncOutboxService {
   @visibleForTesting
   static void resetRecoverySessionForTesting() {
     if (_draining) throw StateError('Cannot reset a live drain');
-    _knownGoodUpdatedAt.clear();
+    JobRevisionTracker.clear();
     recoveryReadForTesting = null;
     recoveryWriteForTesting = null;
     _debounce?.cancel();
@@ -132,18 +133,13 @@ class SyncOutboxService {
   // compares its OWN stale, enqueue-time snapshot against the NOW-CURRENT
   // server value — which action #1 (this same device, this same drain
   // pass) just changed — and incorrectly reports "conflict detected,"
-  // even though nothing external touched the row. This map tracks, per
-  // job, the most recent updated_at THIS DEVICE is actually responsible
-  // for producing, so a later action in the same (or a later) drain pass
-  // is checked against the truth this device itself just wrote, not a
-  // stale value from before its own prior sibling action ran. Never
-  // explicitly cleared — it only ever advances, and a stale entry can
-  // only ever make a conflict check MORE lenient toward this device's own
-  // recent writes, never toward a genuinely different actor's change
-  // (that case is still caught below, since an external change advances
-  // the server past what's in this map too).
-  static final Map<String, String> _knownGoodUpdatedAt = {};
-
+  // even though nothing external touched the row. [JobRevisionTracker]
+  // records, per job, the most recent updated_at THIS DEVICE is actually
+  // responsible for producing (from outbox replays and direct writes), so
+  // a later action is checked against the truth this device itself just
+  // wrote, not a stale value from before its own prior write. A genuinely
+  // external change still advances the server past that recorded revision
+  // and is still detected.
   static const Set<String> _conflictSensitiveTypes = {
     'gps_confirm',
     'submit_inspection',
@@ -171,9 +167,7 @@ class SyncOutboxService {
   /// the same job must compare against this revision, not an older cache
   /// snapshot.
   static void recordAcceptedRevision(String jobId, String updatedAt) {
-    if (updatedAt.isNotEmpty) {
-      _knownGoodUpdatedAt[jobId] = updatedAt;
-    }
+    JobRevisionTracker.record(jobId, updatedAt);
   }
 
   static Future<DateTime?> getLastSuccessfulSync() async {
@@ -845,6 +839,23 @@ class SyncOutboxService {
     );
   }
 
+  /// Remembers a revision this drain just produced, in memory and in the local
+  /// job cache. A failure to persist is non-fatal and never invalidates the
+  /// accepted remote write.
+  static Future<void> _rememberAcceptedRevision(
+    String jobId,
+    Object? updatedAt,
+  ) async {
+    JobRevisionTracker.record(jobId, updatedAt);
+    try {
+      await DBHelper.recordAcceptedJobRevision(jobId, updatedAt);
+    } catch (e) {
+      debugPrint(
+        'SyncOutboxService: could not persist accepted revision for $jobId — $e',
+      );
+    }
+  }
+
   static String _friendlyErrorMessage(Object error) {
     final text = error.toString();
     if (text.contains('SocketException') ||
@@ -1097,28 +1108,29 @@ class SyncOutboxService {
         debugPrint('SyncOutboxService: unknown action type "$type", skipping');
     }
 
-    // See _knownGoodUpdatedAt: after this write succeeds, remember the
+    // See JobRevisionTracker: after this write succeeds, remember the
     // job's new server-side updated_at so a later conflict-sensitive
     // action for the same job — queued in the same offline batch and
     // still holding its own stale enqueue-time snapshot — is checked
     // against what this device actually just wrote, not against a
-    // timestamp from before this write happened.
-    if (_conflictSensitiveTypes.contains(type)) {
-      try {
-        final freshUpdatedAt = await SupabaseService.fetchJobUpdatedAt(jobId);
-        if (freshUpdatedAt != null && freshUpdatedAt.isNotEmpty) {
-          _knownGoodUpdatedAt[jobId] = freshUpdatedAt;
-        }
-      } catch (e) {
-        // Non-fatal: worst case, the next sibling action falls back to
-        // its own enqueue-time snapshot and may re-trip the same
-        // (already rare) false-conflict case this fix targets — it does
-        // NOT cause a real conflict to go undetected, since a genuine
-        // external change would still be caught by the fallback path.
-        debugPrint(
-          'SyncOutboxService: could not refresh known-good updated_at for $jobId — $e',
-        );
+    // timestamp from before this write happened. Every action type is
+    // refreshed, including non-conflict-sensitive starts: `mark_ongoing`
+    // still advances the row revision that its queued GPS/submission
+    // siblings were snapshotted against.
+    try {
+      final freshUpdatedAt = await SupabaseService.fetchJobUpdatedAt(jobId);
+      if (freshUpdatedAt != null && freshUpdatedAt.isNotEmpty) {
+        await _rememberAcceptedRevision(jobId, freshUpdatedAt);
       }
+    } catch (e) {
+      // Non-fatal: worst case, the next sibling action falls back to
+      // its own enqueue-time snapshot and may re-trip the same
+      // (already rare) false-conflict case this fix targets — it does
+      // NOT cause a real conflict to go undetected, since a genuine
+      // external change would still be caught by the fallback path.
+      debugPrint(
+        'SyncOutboxService: could not refresh known-good updated_at for $jobId — $e',
+      );
     }
   }
 
@@ -1188,7 +1200,7 @@ class SyncOutboxService {
           );
         }
         final base =
-            _knownGoodUpdatedAt[jobId] ??
+            JobRevisionTracker.revisionFor(jobId) ??
             payload[_conflictSnapshotKey] as String?;
         if (payload[_forceSyncAnywayKey] != true &&
             base != null &&
@@ -1258,7 +1270,7 @@ class SyncOutboxService {
     final jobId = action['job_id'] as String;
     // Capture the accepted revision before any marker/activity side effect.
     if (acceptedUpdatedAt != null) {
-      _knownGoodUpdatedAt[jobId] = acceptedUpdatedAt;
+      await _rememberAcceptedRevision(jobId, acceptedUpdatedAt);
     }
     final updated = await DBHelper.recordFindingsAcceptance(
       actionId: action['id'] as String,
@@ -1508,6 +1520,7 @@ class SyncOutboxService {
       if (type == 'findings_update') {
         await _recordFindingsActivity(jobId, payload, owner);
       }
+      await _rememberAcceptedRevision(jobId, remote['updated_at']);
       await _recoveryDiagnostic(
         action,
         'Business evidence satisfied; no remote replay',
@@ -1558,6 +1571,7 @@ class SyncOutboxService {
         'Conditional submission receipt does not prove accepted evidence',
       );
     }
+    await _rememberAcceptedRevision(jobId, result['updated_at']);
     if (type == 'findings_update') {
       await _recordFindingsActivity(jobId, payload, owner);
     }
@@ -1582,7 +1596,12 @@ class SyncOutboxService {
     required String jobId,
     required Map<String, dynamic> payload,
   }) async {
-    final snapshot = await DBHelper.getCachedJobUpdatedAt(jobId);
+    // Prefer the revision this device itself just accepted. Falling back to
+    // the cache keeps behavior after a restart, when the in-memory tracker
+    // starts empty, identical to the original enqueue snapshot.
+    final snapshot =
+        JobRevisionTracker.revisionFor(jobId) ??
+        await DBHelper.getCachedJobUpdatedAt(jobId);
     return {...payload, _conflictSnapshotKey: snapshot};
   }
 
@@ -1594,14 +1613,13 @@ class SyncOutboxService {
     if (!_conflictSensitiveTypes.contains(type)) return;
     if (payload[_forceSyncAnywayKey] == true) return;
 
-    // Prefer the known-good value this device itself last wrote for this
-    // job (set below, after any earlier successful conflict-sensitive
-    // action in this or a prior drain pass) over the snapshot baked into
-    // this specific action's payload at enqueue time — see
-    // _knownGoodUpdatedAt for why the enqueue-time snapshot alone causes
-    // a false conflict on the 2nd+ queued action for the same job.
+    // Prefer the revision this device itself last wrote or accepted for this
+    // job (set by direct authoritative writes and by earlier successful
+    // actions in this or a prior drain pass) over the snapshot baked into
+    // this specific action's payload at enqueue time.
     final cachedUpdatedAt =
-        _knownGoodUpdatedAt[jobId] ?? payload[_conflictSnapshotKey] as String?;
+        JobRevisionTracker.revisionFor(jobId) ??
+        payload[_conflictSnapshotKey] as String?;
     if (cachedUpdatedAt == null || cachedUpdatedAt.isEmpty) return;
 
     final serverUpdatedAt = await SupabaseService.fetchJobUpdatedAt(jobId);

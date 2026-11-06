@@ -725,4 +725,92 @@ void main() {
       },
     );
   }
+
+  test(
+    'new offline start, GPS and submission batch syncs without a false conflict',
+    () async {
+      remote['status'] = 'assigned';
+      remote.remove('started_at');
+      SyncOutboxService.hasConnectionOverride = () async => false;
+      await SyncOutboxService.enqueueGpsConfirm(
+        jobId: job,
+        latitude: 1,
+        longitude: 2,
+        accuracyMeters: 3,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      await SyncOutboxService.enqueueMarkOngoing(jobId: job);
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      await finalIntent();
+      SyncOutboxService.hasConnectionOverride = () async => true;
+      await SyncOutboxService.drain(trigger: 'manual');
+
+      final rows = await db.query('pending_actions');
+      expect(rows, hasLength(3));
+      expect(
+        rows.map((row) => row['status']),
+        everyElement('synced'),
+        reason:
+            'This device\'s own accepted start/GPS writes must not be treated '
+            'as external edits by the queued submission.',
+      );
+      expect(remote['status'], 'completed');
+      expect(remote['submitted_at'], isNotNull);
+    },
+  );
+
+  test(
+    'accepted direct start advances the base for a later queued action',
+    () async {
+      remote['status'] = 'assigned';
+      remote.remove('started_at');
+      expect(
+        await SupabaseService.markJobOngoing(job),
+        InspectionAuthorityResult.authorized,
+      );
+      SyncOutboxService.hasConnectionOverride = () async => false;
+      await SyncOutboxService.enqueueFindingsUpdate(
+        jobId: job,
+        observations: 'Offline after direct start',
+        discrepancies: null,
+        recommendations: null,
+        inspectorNotes: 'Offline after direct start',
+      );
+      SyncOutboxService.hasConnectionOverride = () async => true;
+      await SyncOutboxService.drain(trigger: 'manual');
+
+      expect((await action('findings_update_$job'))['status'], 'synced');
+      expect(remote['observations'], 'Offline after direct start');
+    },
+  );
+
+  test('bulk overwrite only marks this inspector\'s conflict rows', () async {
+    Future<void> insert(String id, String status, String inspector) =>
+        db.insert('pending_actions', {
+          'id': id,
+          'inspector_id': inspector,
+          'job_id': job,
+          'type': 'findings_update',
+          'status': status,
+          'retry_count': 0,
+          'last_error': 'Conflict detected',
+          'payload': jsonEncode({'observations': 'Saved on device'}),
+          'created_at': base,
+          'updated_at': base,
+        });
+    await insert('owned-conflict', 'conflict', owner);
+    await insert('owned-paused', 'paused', owner);
+    await insert('other-conflict', 'conflict', 'another-owner');
+
+    expect(await DBHelper.markAllConflictsForceSync(), 1);
+    expect((await action('owned-conflict'))['status'], 'pending');
+    expect(
+      jsonDecode(
+        (await action('owned-conflict'))['payload'] as String,
+      )['forceSyncAnyway'],
+      isTrue,
+    );
+    expect((await action('owned-paused'))['status'], 'paused');
+    expect((await action('other-conflict'))['status'], 'conflict');
+  });
 }
