@@ -149,7 +149,7 @@ class _AppResumeLockScreenState extends State<AppResumeLockScreen>
           MaterialPageRoute(builder: widget.nextScreenBuilder!),
         );
       } else {
-        Navigator.of(context).pop();
+        Navigator.of(context).pop<bool>(true);
       }
     } else {
       setState(() {

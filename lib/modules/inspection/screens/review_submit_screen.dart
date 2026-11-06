@@ -20,9 +20,14 @@ import '../widgets/inspection_step_header.dart';
 import '../widgets/photo_viewer.dart';
 import '../services/photo_source_resolver.dart';
 import '../services/photo_evidence_presentation.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_targets.dart';
+import '../../interactive_guide/guide_examples.dart';
+import '../inspection_constants.dart';
 
 class ReviewSubmitScreen extends StatefulWidget {
   final TaskItem task;
+  final GuideReadOnlyData? walkthrough;
   final List<Map<String, dynamic>> capturedPhotos;
   final int checklistDone;
   final int checklistTotal;
@@ -30,6 +35,7 @@ class ReviewSubmitScreen extends StatefulWidget {
   const ReviewSubmitScreen({
     super.key,
     required this.task,
+    this.walkthrough,
     this.capturedPhotos = const [],
     this.checklistDone = 0,
     this.checklistTotal = 0,
@@ -73,9 +79,9 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedStatus = context.read<InspectionProvider>().inspectionResult;
+    _selectedStatus = widget.walkthrough?.savedFindings['inspectionResult'] ?? context.read<InspectionProvider>().inspectionResult;
     _explanationController = TextEditingController(
-      text: context.read<InspectionProvider>().discrepancies,
+      text: widget.walkthrough?.savedFindings['discrepancies'] ?? context.read<InspectionProvider>().discrepancies,
     );
   }
 
@@ -86,6 +92,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   }
 
   Future<bool> _saveReviewDraft() async {
+    if (widget.walkthrough != null) return false;
     try {
       return await context.read<InspectionProvider>().saveAllInspectionState(
         syncOnline: false,
@@ -168,6 +175,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   }
 
   Future<void> _handleSubmit() async {
+    if (widget.walkthrough != null) return;
     if (_submitting) return;
     final provider = context.read<InspectionProvider>();
     // A generated location reference must never stand in for the required
@@ -363,22 +371,27 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     final provider = context.watch<InspectionProvider>();
-    final photos = provider.capturedPhotos.isNotEmpty
+    final saved = widget.walkthrough;
+    final unknownInspection = saved?.inspectionUnavailable == true;
+    final unavailableLabel = saved?.inspectionUnavailableLabel ?? '';
+    final findings = saved?.savedFindings;
+    final notes = findings?['notes'] ?? provider.notes;
+    final discrepancies = findings?['discrepancies'] ?? provider.discrepancies;
+    final recommendations = findings?['recommendations'] ?? provider.recommendations;
+    final answers = saved == null ? {...provider.siteCondition, ...provider.zoningObservations}
+        : {...defaultSiteCondition, ...defaultZoningObservations, ...saved.savedChecklist};
+    final photos = saved?.photos ?? (provider.capturedPhotos.isNotEmpty
         ? provider.capturedPhotos
-        : widget.capturedPhotos;
+        : widget.capturedPhotos);
+    final unknownPhotos = unknownInspection && photos.isEmpty;
+    final unknownChecklist = unknownInspection && saved!.savedChecklist.isEmpty;
     final evidence = PhotoEvidencePresentation(
       photos,
-      requireMetadata: provider.isReworkMode,
+      requireMetadata: saved == null && provider.isReworkMode,
     );
-    final checklistTotal =
-        provider.siteCondition.length + provider.zoningObservations.length;
-    final checklistDone =
-        provider.siteCondition.values.where((v) => v).length +
-        provider.zoningObservations.values.where((v) => v).length;
-    final checklistAnswers = {
-      ...provider.siteCondition,
-      ...provider.zoningObservations,
-    }.entries.toList(growable: false);
+    final checklistTotal = answers.length;
+    final checklistDone = answers.values.where((v) => v).length;
+    final checklistAnswers = answers.entries.toList(growable: false);
     final effectiveTotal = checklistTotal > 0
         ? checklistTotal
         : widget.checklistTotal;
@@ -390,6 +403,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {
+          if (widget.walkthrough != null) return;
           if (didPop) return;
           // Findings/checklist/photos are already persisted by their own
           // steps by the time an inspector reaches Review — nothing new to
@@ -407,7 +421,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               subtitle: widget.task.location,
               stepNumber: 6,
               stepSubtitle: 'FINALIZE REPORT',
-              onBack: () => _submitting
+              onBack: () => _submitting || widget.walkthrough != null
                   ? null
                   : handleInspectionExit(
                       context,
@@ -421,6 +435,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               onPressed: _submitting ? null : _handleSubmit,
             ),
             children: [
+              if (unknownInspection) Text(unavailableLabel),
               if (_localSaveError != null)
                 Semantics(
                   liveRegion: true,
@@ -437,7 +452,8 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                 hint:
                     'Review the evidence before submitting ${widget.task.inspectionNo}.',
               ),
-              FieldReadOnlyCard(
+              Builder(builder: (context) {
+                final record = GuideTarget(id: 'step_6', child: FieldReadOnlyCard(
                 children: [
                   _SummaryRow(label: 'Applicant', value: widget.task.name),
                   _SummaryRow(
@@ -446,13 +462,13 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   ),
                   _SummaryRow(
                     label: 'Checklist',
-                    value: effectiveTotal > 0
+                    value: unknownChecklist ? unavailableLabel : effectiveTotal > 0
                         ? '$effectiveDone of $effectiveTotal checked'
                         : 'None',
                   ),
                   _SummaryRow(
                     label: 'Site photos',
-                    value: '${evidence.sitePhotoCount}',
+                    value: unknownPhotos ? unavailableLabel : '${evidence.sitePhotoCount}',
                   ),
                   if (evidence.referenceCount > 0)
                     _SummaryRow(
@@ -461,18 +477,21 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                     ),
                   _SummaryRow(
                     label: 'Total evidence attachments',
-                    value: '${evidence.totalCount}',
+                    value: unknownPhotos ? unavailableLabel : '${evidence.totalCount}',
                   ),
                   _SummaryRow(
                     label: 'Assessment',
-                    value: _selectedStatus.isEmpty
+                    value: unknownInspection && _selectedStatus.isEmpty ? unavailableLabel : _selectedStatus.isEmpty
                         ? 'Not selected'
                         : _selectedStatus,
                     isLast: true,
                   ),
                 ],
-              ),
-              if (provider.capturedPhotos.isNotEmpty) ...[
+                ));
+                return saved?.canShowTaskExample == true
+                    ? GuideSample(language: saved!.language, child: record) : record;
+              }),
+              if (photos.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 FieldSectionHeading(
                   title: 'Evidence attachments',
@@ -497,14 +516,14 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                         children: [
                           for (
                             var i = 0;
-                            i < provider.capturedPhotos.length;
+                            i < photos.length;
                             i++
                           ) ...[
                             if (i > 0) const SizedBox(width: 12),
                             Builder(
                               builder: (context) {
                                 final paths = inspectionDisplayPaths(
-                                  provider.capturedPhotos
+                                  photos
                                       .map(
                                         (p) => p['photoPath'] as String? ?? '',
                                       )
@@ -525,11 +544,11 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                       color: Colors.transparent,
                                       child: InkWell(
                                         borderRadius: InsightTheme.roundedSm,
-                                        onTap: () => openFullscreenPhotoViewer(
+                                        onTap: widget.walkthrough != null ? null : () => openFullscreenPhotoViewer(
                                           context,
                                           paths,
                                           i,
-                                          photoDetails: provider.capturedPhotos,
+                                          photoDetails: photos,
                                           jobId: widget.task.id,
                                         ),
                                         child: Column(
@@ -543,6 +562,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                                                 height: 100,
                                                 width: tileWidth,
                                                 child: AdaptivePhotoImage(
+                                                  allowNetwork: widget.walkthrough == null,
                                                   path: paths[i],
                                                 ),
                                               ),
@@ -616,7 +636,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   ],
                 ),
               ],
-              if (checklistTotal > 0) ...[
+              if (checklistTotal > 0 && !unknownChecklist) ...[
                 const SizedBox(height: 16),
                 FieldSectionHeading(
                   title: 'Checklist answers',
@@ -653,23 +673,23 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                 children: [
                   _SummaryRow(
                     label: 'Observations',
-                    value: provider.notes.isEmpty
+                    value: unknownInspection && notes.isEmpty ? unavailableLabel : notes.isEmpty
                         ? 'No observations recorded'
-                        : provider.notes,
+                        : notes,
                     compact: true,
                   ),
                   _SummaryRow(
                     label: 'Discrepancies / assessment explanation',
-                    value: provider.discrepancies.isEmpty
+                    value: unknownInspection && discrepancies.isEmpty ? unavailableLabel : discrepancies.isEmpty
                         ? 'No discrepancies recorded'
-                        : provider.discrepancies,
+                        : discrepancies,
                     compact: true,
                   ),
                   _SummaryRow(
                     label: 'Recommendations',
-                    value: provider.recommendations.isEmpty
+                    value: unknownInspection && recommendations.isEmpty ? unavailableLabel : recommendations.isEmpty
                         ? 'No recommendations recorded'
-                        : provider.recommendations,
+                        : recommendations,
                     compact: true,
                     isLast: true,
                   ),
@@ -687,6 +707,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   subtitle: o.subtitle,
                   isSelected: _selectedStatus == o.title,
                   onTap: () {
+                    if (widget.walkthrough != null) return;
                     if (_submitting) return;
                     HapticFeedback.selectionClick();
                     setState(() => _selectedStatus = o.title);
@@ -705,7 +726,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
               TextField(
                 key: const ValueKey('assessment-explanation'),
                 controller: _explanationController,
-                readOnly: _submitting,
+                readOnly: _submitting || widget.walkthrough != null,
                 minLines: 3,
                 maxLines: 6,
                 decoration: InsightTheme.compactFormInput.copyWith(
@@ -713,6 +734,7 @@ class _ReviewSubmitScreenState extends State<ReviewSubmitScreen> {
                   alignLabelWithHint: true,
                 ),
                 onChanged: (value) {
+                  if (widget.walkthrough != null) return;
                   provider.updateFindings(
                     actualLandUse: provider.actualLandUse,
                     notes: provider.notes,

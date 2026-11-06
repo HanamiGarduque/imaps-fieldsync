@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/insight_theme.dart';
 import 'fieldsync_brand.dart';
+import '../../modules/interactive_guide/guide_targets.dart';
 
 /// ==================================================================
 /// SHARED BOTTOM NAV — used by Home, Tasks, Updates, Profile.
@@ -50,6 +51,9 @@ import 'fieldsync_brand.dart';
 /// a small buffer). Used by scrollable tab screens as
 /// `padding: EdgeInsets.only(bottom: kInsightBottomNavReserve)`.
 const double kInsightBottomNavReserve = 180.0;
+
+/// The opaque rail only; content may remain visible beside its floating trigger.
+const double kInsightBottomNavRailReserve = _railAndTriggerSize + 10;
 
 /// Bottom clearance a floating panel needs to clear the quick-actions trigger.
 ///
@@ -332,7 +336,7 @@ class _InsightBottomNavState extends State<InsightBottomNav> {
                     // The moving highlight — morphs from a 48px circle into
                     // the wider active pill, filled with the app's blue.
                     AnimatedPositioned(
-                      duration: _transitionDuration,
+                      duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _transitionDuration,
                       curve: _transitionCurve,
                       left: lefts[currentIndex],
                       width: widths[currentIndex],
@@ -344,7 +348,7 @@ class _InsightBottomNavState extends State<InsightBottomNav> {
                         scale: _pressedIndex == currentIndex
                             ? _pressedScale
                             : 1,
-                        duration: _pressDuration,
+                        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _pressDuration,
                         curve: Curves.easeOut,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
@@ -360,7 +364,7 @@ class _InsightBottomNavState extends State<InsightBottomNav> {
                     ),
                     for (int i = 0; i < items.length; i++)
                       AnimatedPositioned(
-                        duration: _transitionDuration,
+                        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _transitionDuration,
                         curve: _transitionCurve,
                         left: lefts[i],
                         width: widths[i],
@@ -410,17 +414,17 @@ class _InsightBottomNavState extends State<InsightBottomNav> {
               // viewport is wider than the capped pill.
               Positioned(
                 left: 0, right: 0, bottom: 0,
-                child: Center(child: rail),
+                child: Center(child: GuideTarget(id: 'guide_navigation', child: rail)),
               ),
               // Trigger stays fully visible and interactive above the rail.
               if (widget.onQuickActionsTap != null)
                 Positioned(
                   right: 0,
                   bottom: _railAndTriggerSize + _triggerGap,
-                  child: _QuickActionsTrigger(
+                  child: GuideTarget(id: 'guide_fingerprint', child: _QuickActionsTrigger(
                     isOpen: widget.isQuickActionsOpen,
                     onTap: widget.onQuickActionsTap!,
-                  ),
+                  )),
                 ),
             ],
             ),
@@ -464,16 +468,16 @@ class _QuickActionsTriggerState extends State<_QuickActionsTrigger> {
         button: true,
         child: AnimatedScale(
           scale: _pressed ? 0.94 : 1,
-          duration: const Duration(milliseconds: 120),
+            duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           child: SizedBox(
             width: size,
             height: size,
             child: Center(
               child: AnimatedSwitcher(
-                duration: _transitionDuration,
+                duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _transitionDuration,
                 switchInCurve: _transitionCurve,
-                transitionBuilder: (child, animation) => RotationTransition(
+                transitionBuilder: (child, animation) => MediaQuery.disableAnimationsOf(context) ? child : RotationTransition(
                   turns: Tween<double>(begin: -0.12, end: 0).animate(animation),
                   child: FadeTransition(opacity: animation, child: child),
                 ),
@@ -532,10 +536,10 @@ class _NavPillItem extends StatelessWidget {
       // held tab is visibly pressed instead of showing nothing until release.
       child: AnimatedScale(
         scale: isPressed ? _pressedScale : 1,
-        duration: _pressDuration,
+        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _pressDuration,
         curve: Curves.easeOut,
         child: AnimatedContainer(
-          duration: _transitionDuration,
+          duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _transitionDuration,
           curve: _transitionCurve,
           decoration: BoxDecoration(
           // Inactive tabs get their own visible chip (reference:
@@ -585,7 +589,7 @@ class _NavPillItem extends StatelessWidget {
               // matter where mid-animation this frame lands.
               ClipRect(
                 child: AnimatedAlign(
-                  duration: _transitionDuration,
+                  duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : _transitionDuration,
                   curve: _transitionCurve,
                   alignment: Alignment.centerLeft,
                   widthFactor: isActive ? 1.0 : 0.0,

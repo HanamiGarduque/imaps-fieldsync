@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import '../../interactive_guide/guide_targets.dart';
 
 import '../../../core/layout/responsive_layout.dart';
 import '../../../core/theme/insight_theme.dart';
@@ -34,6 +35,7 @@ class SiteVerificationView extends StatefulWidget {
     this.gpsReliable = false,
     this.hasDirectLinks = false,
     this.routeEstimateStale = false,
+    this.readOnly = false,
   });
 
   final Widget Function(EdgeInsets padding) mapBuilder;
@@ -52,6 +54,7 @@ class SiteVerificationView extends StatefulWidget {
   final bool gpsReliable;
   final bool hasDirectLinks;
   final bool routeEstimateStale;
+  final bool readOnly;
   final VoidCallback onBack;
   final VoidCallback onRetryLocation;
   final VoidCallback onFit;
@@ -63,7 +66,7 @@ class SiteVerificationView extends StatefulWidget {
 
 class _SiteVerificationViewState extends State<SiteVerificationView> {
   bool _fullscreen = false;
-  bool _collapsed = false;
+  late bool _collapsed = widget.readOnly;
   bool _initialFitApplied = false;
   final _headerKey = GlobalKey();
   final _panelKey = GlobalKey();
@@ -264,7 +267,9 @@ class _SiteVerificationViewState extends State<SiteVerificationView> {
           children: [
             // The same element/controller survives disclosure, fullscreen and
             // rotation. The map also fills unused space beneath the side pane.
-            Positioned.fill(child: widget.mapBuilder(fitPadding)),
+            Positioned.fill(child: widget.ready
+              ? GuideTarget(id: 'step_1', child: widget.mapBuilder(fitPadding))
+              : widget.mapBuilder(fitPadding)),
             if (!_fullscreen && !landscape)
               Positioned(
                 top: safe.top,

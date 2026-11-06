@@ -13,6 +13,7 @@ import '../structured_checklist.dart';
 import '../../../core/services/sync_outbox_service.dart';
 import '../../tasks/screens/tasks_screen.dart'; // To access TaskItem class
 import '../screens/inspection_progress.dart';
+import '../inspection_constants.dart';
 
 class InspectionProvider extends ChangeNotifier {
   TaskItem? _activeTask;
@@ -31,15 +32,8 @@ class InspectionProvider extends ChangeNotifier {
   final Map<int, String> _persistedStepTimestamps = {};
 
   // Checklist State
-  final Map<String, bool> _siteCondition = {
-    'Structure matches declared use': false,
-    'Setback distances compliant': false,
-  };
-  final Map<String, bool> _zoningObservations = {
-    'Accessibility & road frontage': false,
-    'Surrounding developments noted': false,
-    'Signage / commercial activity present': false,
-  };
+  final Map<String, bool> _siteCondition = Map.of(defaultSiteCondition);
+  final Map<String, bool> _zoningObservations = Map.of(defaultZoningObservations);
 
   // CE-05 structured answers. Transmission stays hard-disabled until the
   // corrected iMAPS reader is released; a missing key means "not recorded",

@@ -26,6 +26,9 @@ import '../providers/inspection_provider.dart';
 import '../widgets/site_verification_view.dart';
 import '../widgets/rosario_boundary_overlay.dart';
 import '../widgets/map_connectivity_recovery.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_examples.dart';
+import '../../interactive_guide/guide_targets.dart';
 
 /// Fit both pins after flutter_map knows its viewport, before loading tiles for
 /// the final camera. Manual first-frame moves can race its initial size event.
@@ -49,7 +52,8 @@ MapOptions siteMapOptions({
 /// Step 2 independently owns its inclusive 30m confirmation rule.
 class SiteMapScreen extends StatefulWidget {
   final TaskItem task;
-  const SiteMapScreen({super.key, required this.task});
+  final GuideReadOnlyData? walkthrough;
+  const SiteMapScreen({super.key, required this.task, this.walkthrough});
 
   @override
   State<SiteMapScreen> createState() => _SiteMapScreenState();
@@ -108,6 +112,29 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   @override
   void initState() {
     super.initState();
+    final walkthrough = widget.walkthrough;
+    if (walkthrough != null) {
+      final lat = (walkthrough.selectedJob?['parcel_lat'] as num?)?.toDouble();
+      final lng = (walkthrough.selectedJob?['parcel_lng'] as num?)?.toDouble();
+      if (lat != null && lng != null && validSiteMapPoint(ll.LatLng(lat, lng))) {
+        _parcelLatLng = ll.LatLng(lat, lng);
+      } else if (!walkthrough.hasRealTask && walkthrough.canShowTaskExample) {
+        _parcelLatLng = const ll.LatLng(13.84, 121.20);
+      } else {
+        _error = 'No saved site coordinates are available.';
+      }
+      final row = walkthrough.routeRow;
+      if (row != null) {
+        final cached = CachedRoute.fromRow(Map<String, Object?>.from(row));
+        _routePoints = cached.points;
+        _routeFromCache = true;
+        _routeDistanceMeters = cached.distanceMeters;
+        _routeDurationSeconds = cached.durationSeconds;
+        _routeFetchedAt = cached.fetchedAt;
+      }
+      _loading = false;
+      return;
+    }
     WidgetsBinding.instance.addObserver(this);
     unawaited(_startRecovery());
     // Restore any previously cached real route first, so opening this task
@@ -119,6 +146,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   /// Seeds the watcher with the connectivity state this screen actually opened
   /// in, so only a genuine later transition counts as a recovery.
   Future<void> _startRecovery() async {
+    if (widget.walkthrough != null) return;
     final online = await _checkOnline();
     if (!mounted) return;
     await _recovery.start(
@@ -131,6 +159,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   /// road route once for the current device position + target. A failed retry
   /// leaves existing real-road geometry untouched.
   Future<void> _onConnectivityRecovered() async {
+    if (widget.walkthrough != null) return;
     if (!mounted) return;
     _recovery.resetTiles();
     await _fetchRouteAndUpdate(online: true);
@@ -150,6 +179,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (widget.walkthrough != null) return;
     // Bug fix: previously the only way to pick up a location-service
     // change (inspector turns Location back on, or grants the permission,
     // from the system Settings screen) was to leave this screen entirely
@@ -173,6 +203,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   /// app-resume hook above and by the tappable "Location unavailable"
   /// badge at the bottom of the map.
   Future<void> _retryDeviceLocation() async {
+    if (widget.walkthrough != null) return;
     if (_retryingDeviceLocation || _parcelLatLng == null) return;
     setState(() => _retryingDeviceLocation = true);
     try {
@@ -196,6 +227,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   }
 
   Future<void> _loadMapData() async {
+    if (widget.walkthrough != null) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -289,6 +321,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   /// filter). Idempotent: safe to call from load completion and on every
   /// app-resume.
   void _startLiveTracking() {
+    if (widget.walkthrough != null) return;
     if (_trackingActive) return;
     _trackingActive = true;
     _positionSub = LocationService.getPositionStream().listen(
@@ -563,6 +596,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
         backgroundColor: InsightTheme.bg,
         extendBodyBehindAppBar: true,
         body: SiteVerificationView(
+          readOnly: widget.walkthrough != null,
           location: widget.task.location,
           ready: !_loading && _error == null,
           hasDeviceLocation: _deviceLatLng != null,
@@ -577,8 +611,8 @@ class _SiteMapScreenState extends State<SiteMapScreen>
           approachNotice: _approachEpisode && _gpsReliable,
           gpsReliable: _gpsReliable,
           hasDirectLinks: _directLinks.isNotEmpty,
-          rework: context.watch<InspectionProvider>().isReworkMode,
-          onBack: () => Navigator.pop(context),
+          rework: widget.walkthrough == null && context.watch<InspectionProvider>().isReworkMode,
+          onBack: () { if (widget.walkthrough == null) Navigator.pop(context); },
           onRetryLocation: _retryDeviceLocation,
           onFit: _fitBounds,
           onProceed: _proceed,
@@ -590,7 +624,12 @@ class _SiteMapScreenState extends State<SiteMapScreen>
             if (_error != null) {
               return _ErrorState(message: _error!, onRetry: _loadMapData);
             }
-            return _buildMap();
+            final map = _buildMap();
+            return widget.walkthrough != null && !widget.walkthrough!.hasRealTask
+              ? Stack(children: [Positioned.fill(child: map), Align(alignment: Alignment.center,
+                  child: SingleChildScrollView(child: GuideSample(language: widget.walkthrough!.language,
+                    child: const Text('Illustrative site — no live location or basemap'))))])
+              : map;
           },
         ),
       ),
@@ -598,6 +637,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
   }
 
   void _proceed() {
+    if (widget.walkthrough != null) return;
     HapticFeedback.selectionClick();
     if (context.read<InspectionProvider>().isReworkMode) {
       Navigator.pop(context);
@@ -625,7 +665,7 @@ class _SiteMapScreenState extends State<SiteMapScreen>
                 options: siteMapOptions(parcel: _parcelLatLng!, device: _deviceLatLng,
                   route: _routePoints ?? const [], padding: _mapPadding),
                 children: [
-                  TileLayer(
+                  if (widget.walkthrough == null) TileLayer(
                     urlTemplate:
                         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                     userAgentPackageName: 'com.imaps.fieldsync',
@@ -740,12 +780,12 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GuideTarget(id: 'step_1', child: Container(
       color: InsightTheme.bg,
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Column(
+          child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
@@ -765,9 +805,9 @@ class _ErrorState extends StatelessWidget {
                 child: const Text('Try again'),
               ),
             ],
-          ),
+          )),
         ),
       ),
-    );
+    ));
   }
 }

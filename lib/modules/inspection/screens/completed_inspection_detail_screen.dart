@@ -27,6 +27,8 @@ import '../../../core/widgets/sensitive_screen.dart';
 import '../widgets/photo_viewer.dart';
 import '../services/photo_evidence_presentation.dart';
 import '../services/photo_source_resolver.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_targets.dart';
 
 /// Test-only seam for the Completed summary's remote detail fetch.
 ///
@@ -39,11 +41,13 @@ CompletedDetailFetcher? completedDetailFetcherOverride;
 
 class CompletedInspectionDetailScreen extends StatefulWidget {
   final TaskItem task;
+  final GuideReadOnlyData? walkthrough;
   final bool historicalReadOnly;
   final TaskSubmission? submission;
   const CompletedInspectionDetailScreen({
     super.key,
     required this.task,
+    this.walkthrough,
     this.historicalReadOnly = false,
     this.submission,
   });
@@ -70,6 +74,7 @@ class _CompletedInspectionDetailScreenState
   bool get _awaitingAcceptance =>
       _submission?.isSynced == false || _fullTask?.category != 'Completed';
   bool get _readOnly =>
+      widget.walkthrough != null ||
       _savedSubmissionMode ||
       widget.historicalReadOnly ||
       widget.task.planningReview?.decision == 'Requires Reinspection' ||
@@ -89,7 +94,7 @@ class _CompletedInspectionDetailScreenState
   @override
   void initState() {
     super.initState();
-    if (_savedSubmissionMode) {
+    if (_savedSubmissionMode && widget.walkthrough == null) {
       _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen(
         (_) => _retireIfOwnerChanged(),
         onError: (Object _) => _retireIfOwnerChanged(),
@@ -175,6 +180,17 @@ class _CompletedInspectionDetailScreenState
   }
 
   Future<void> _loadFullDetail() async {
+    if (widget.walkthrough != null) {
+      final data = widget.walkthrough!;
+      _fullTask = data.selectedJob == null ? widget.task : TaskItem.fromCachedJob({
+        ...data.selectedJob!,
+        ...?widget.submission?.evidenceFields,
+        ...data.savedInspectionFields,
+      });
+      _submission = widget.submission;
+      _isLoading = false;
+      return;
+    }
     if (_savedSubmissionMode) return _loadSavedSubmission();
     Map<String, dynamic>? job;
     Object? failure;
@@ -471,13 +487,13 @@ class _CompletedInspectionDetailScreenState
           ),
         ] else if (_readOnly) ...[
           Text(
-            'Historical inspection — Read only',
+            widget.walkthrough != null ? 'Walkthrough — Read only' : 'Historical inspection — Read only',
             style: InsightTheme.inter(13, w: FontWeight.w700),
           ),
           const SizedBox(height: 12),
         ],
         if (_isCachedFallback) _buildSavedDataNotice(),
-        _buildHeaderCard(task),
+        GuideTarget(id: 'overview_header', child: _buildHeaderCard(task)),
         const SizedBox(height: 24),
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 12),
@@ -605,6 +621,7 @@ class _CompletedInspectionDetailScreenState
             ),
           ),
         ],
+        GuideTarget(id: 'inspection_protocol', child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _CollapsibleStepCard(
           step: 1,
           title: 'Site Verification',
@@ -693,6 +710,7 @@ class _CompletedInspectionDetailScreenState
               'Submitted at': task.submittedAt ?? '—',
           }),
         ),
+        ])),
         // Loop 8 — read-only Planning Review metadata for THIS exact round.
         // Rendered only when an explicit review row exists; a Completed task
         // with no review simply shows nothing. No buttons, no editing, and no
@@ -984,6 +1002,7 @@ class _CompletedInspectionDetailScreenState
   /// actually persisted. The task-level Modified badge is what tells the
   /// inspector this text is not on file yet.
   Map<String, String> _draftFindings(TaskItem task) {
+    if (widget.walkthrough != null) return const {};
     if (_savedSubmissionMode) return const {};
     // Read defensively: this screen is also rendered in read-only/historical
     // contexts, where no live InspectionProvider exists and there is no draft
@@ -1113,13 +1132,13 @@ class _CompletedInspectionDetailScreenState
             ? (task.photoDetails[i]['notes'] as String?)
             : null;
         final hasNote = note != null && note.trim().isNotEmpty;
-        void openEvidence() => openFullscreenPhotoViewer(
+        void openEvidence() { if (widget.walkthrough != null) return; openFullscreenPhotoViewer(
           context,
           urls,
           i,
           photoDetails: hasDetails ? task.photoDetails : null,
           jobId: task.id,
-        );
+        ); }
         return Padding(
           padding: EdgeInsets.only(bottom: i == count - 1 ? 0 : 10),
           child: Semantics(
@@ -1144,6 +1163,7 @@ class _CompletedInspectionDetailScreenState
                         width: 80,
                         height: 80,
                         child: AdaptivePhotoImage(
+                          allowNetwork: widget.walkthrough == null,
                           path: url,
                           fit: BoxFit.cover,
                           errorBuilder: (context) => Container(
@@ -1242,7 +1262,8 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final heading = Text(widget.title, style: InsightTheme.inter(14, w: FontWeight.w600, c: InsightTheme.ink));
+    final card = Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: InsightTheme.surface,
@@ -1295,14 +1316,7 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        widget.title,
-                        style: InsightTheme.inter(
-                          14,
-                          w: FontWeight.w600,
-                          c: InsightTheme.ink,
-                        ),
-                      ),
+                      child: heading,
                     ),
                     // Enhancement (Inspection Summary, 2026-07): per-step
                     // status indicator. Deliberately just "Saved" (not a
@@ -1408,5 +1422,6 @@ class _CollapsibleStepCardState extends State<_CollapsibleStepCard> {
         ),
       ),
     );
+    return widget.step == 3 ? GuideTarget(id: 'evidence_details', child: card) : card;
   }
 }

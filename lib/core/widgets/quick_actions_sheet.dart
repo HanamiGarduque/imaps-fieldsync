@@ -1,9 +1,11 @@
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/insight_theme.dart';
 import '../layout/responsive_layout.dart';
+import '../../modules/interactive_guide/guide_targets.dart';
 import 'insight_bottom_nav.dart'
     show kInsightBottomNavTriggerClearance;
 
@@ -25,7 +27,8 @@ class QuickAction {
   final String title;
   final String? subtitle; // optional — shown under the title, per the reference row layout
   final VoidCallback onTap;
-  const QuickAction({required this.icon, required this.title, this.subtitle, required this.onTap});
+  final String? guideTargetId;
+  const QuickAction({required this.icon, required this.title, this.subtitle, required this.onTap, this.guideTargetId});
 }
 
 /// A map-first detail panel: a compact side pane where a split is worthwhile,
@@ -162,11 +165,13 @@ class QuickActionsOverlay extends StatelessWidget {
     return Positioned(
       left: 16 + (wide ? insets.left : 0),
       right: wide ? insets.right + 14 + 64 + 12 : 16,
-      top: wide ? insets.top + 16 : null,
+       top: insets.top + 16,
       // The 64px rail plus its 1px border on each side, with a 12px gap.
       bottom: wide ? insets.bottom + 10 + 66 + 12
           : kInsightBottomNavTriggerClearance,
-      child: child,
+       // This Positioned already reserves safe areas and navigation clearance;
+       // Scaffold's synthetic bottom padding must not be subtracted twice.
+       child: MediaQuery.removePadding(context: context, removeTop: true, removeBottom: true, child: child),
     );
   }
 }
@@ -209,7 +214,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
           maxHeight: fill ? constraints.maxHeight : _maxHostHeight(context),
           maxWidth: fill ? InsightBreakpoints.contentMaxWidthWide : kPanelMaxWidth,
         ),
-        child: Container(
+        child: GuideTarget(id: 'quick_actions', child: Container(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -251,7 +256,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
           ))),
           ],
         ),
-        ),
+        )),
       ),
     );
     });
@@ -293,8 +298,7 @@ class _QuickActionsSheetState extends State<QuickActionsSheet> {
   Widget _buildActions(double availableWidth) {
     final actions = widget.actions;
 
-    Widget entry(int i, Widget child) =>
-        _StaggeredEntry(index: i, child: child);
+    Widget entry(int i, Widget child) => _StaggeredEntry(index: i, child: child);
 
     // Use the panel's actual width and chosen text size, rather than assuming
     // a wide screen also means wide columns inside this inset overlay.
@@ -357,17 +361,27 @@ class _StaggeredEntryState extends State<_StaggeredEntry> with SingleTickerProvi
     duration: const Duration(milliseconds: 380),
   );
   late final Animation<double> _curve = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+  Timer? _delay;
+  bool _started = false;
 
   @override
-  void initState() {
-    super.initState();
-    Future.delayed(Duration(milliseconds: 45 * widget.index), () {
-      if (mounted) _controller.forward();
-    });
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context) || MediaQuery.accessibleNavigationOf(context)) {
+      _delay?.cancel();
+      _controller.value = 1;
+      _started = true;
+    } else if (!_started) {
+      _started = true;
+      _delay = Timer(Duration(milliseconds: 45 * widget.index), () {
+        if (mounted) _controller.forward();
+      });
+    }
   }
 
   @override
   void dispose() {
+    _delay?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -413,8 +427,10 @@ class _QuickActionRowState extends State<_QuickActionRow> {
   @override
   Widget build(BuildContext context) {
     final subtitle = widget.action.subtitle;
+    final heading = Text(widget.action.title,
+      style: InsightTheme.inter(15.5, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.2));
     final iconSize = widget.compact ? 44.0 : 48.0;
-    return InkWell(
+    final row = InkWell(
       onTap: () {
         HapticFeedback.selectionClick();
         widget.onClose();
@@ -425,7 +441,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
       onTapCancel: () => setState(() => _pressed = false),
       borderRadius: BorderRadius.circular(16),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
+        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 120),
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.compact ? 8 : 12),
         decoration: BoxDecoration(
           // Matches the reference: no per-row card/border — a flat list,
@@ -441,7 +457,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
         child: Row(
           children: [
             AnimatedScale(
-              duration: const Duration(milliseconds: 120),
+              duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 120),
               scale: _pressed ? 0.95 : 1.0,
               child: Container(
                 width: iconSize,
@@ -461,10 +477,7 @@ class _QuickActionRowState extends State<_QuickActionRow> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    widget.action.title,
-                    style: InsightTheme.inter(15.5, w: FontWeight.w700, c: QuickActionsSheet.ink, ls: -0.2),
-                  ),
+                  heading,
                   if (subtitle != null && subtitle.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(
@@ -483,5 +496,6 @@ class _QuickActionRowState extends State<_QuickActionRow> {
         ),
       ),
     );
+    return widget.action.guideTargetId == null ? row : GuideTarget(id: widget.action.guideTargetId!, child: row);
   }
 }

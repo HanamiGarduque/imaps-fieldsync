@@ -14,9 +14,13 @@ import '../../../core/widgets/sensitive_screen.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../widgets/inspection_step_header.dart';
 import '../services/photo_evidence_presentation.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_targets.dart';
+import '../../interactive_guide/guide_examples.dart';
 
 class FieldFindingsScreen extends StatefulWidget {
   final TaskItem task;
+  final GuideReadOnlyData? walkthrough;
   final List<Map<String, dynamic>> capturedPhotos;
   final int checklistDone;
   final int checklistTotal;
@@ -24,6 +28,7 @@ class FieldFindingsScreen extends StatefulWidget {
   const FieldFindingsScreen({
     super.key,
     required this.task,
+    this.walkthrough,
     this.capturedPhotos = const [],
     this.checklistDone = 0,
     this.checklistTotal = 0,
@@ -49,7 +54,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    if (widget.walkthrough == null) WidgetsBinding.instance.addObserver(this);
     // BUG FIX #4A — Global Data Persistence.
     // Controllers used to always start empty, even when InspectionProvider
     // already had real hydrated data (rework mode, or a resumed Ongoing
@@ -60,13 +65,14 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
     // seeded via hydrateForRework() / startInspection()'s local draft load.
     final provider = context.read<InspectionProvider>();
     _provider = provider;
-    _notesController = TextEditingController(text: provider.notes);
+    final saved = widget.walkthrough?.savedFindings;
+    _notesController = TextEditingController(text: saved?['notes'] ?? provider.notes);
     _discrepancyTitleController = TextEditingController();
     _discrepancyDetailController = TextEditingController(
-      text: provider.discrepancies,
+      text: saved?['discrepancies'] ?? provider.discrepancies,
     );
     _recommendationsController = TextEditingController(
-      text: provider.recommendations,
+      text: saved?['recommendations'] ?? provider.recommendations,
     );
   }
 
@@ -93,6 +99,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   }
 
   void _scheduleAutosave() {
+    if (widget.walkthrough != null) return;
     if (_isSaving || _provider.isReworkMode) return;
     _autosavePending = true;
     _autosaveTimer?.cancel();
@@ -100,6 +107,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   }
 
   void _flushAutosave() {
+    if (widget.walkthrough != null) return;
     _autosaveTimer?.cancel();
     _autosaveTimer = null;
     if (!_autosavePending || _isSaving) return;
@@ -120,6 +128,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   }
 
   Future<void> _handleContinue() async {
+    if (widget.walkthrough != null) return;
     if (_isSaving) return;
     HapticFeedback.selectionClick();
     setState(() => _isSaving = true);
@@ -157,6 +166,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   /// Moves the controller text into provider state. Memory only — this is what
   /// an in-session draft is, and the input every persist path below reads.
   void _collectControllersIntoProvider() {
+    if (widget.walkthrough != null) return;
     final discrepancyTitle = _discrepancyTitleController.text.trim();
     final discrepancyDetail = _discrepancyDetailController.text.trim();
     // Don't save a bare " — " when the inspector legitimately found nothing.
@@ -180,6 +190,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   }
 
   Future<bool> _syncControllersAndSave() async {
+    if (widget.walkthrough != null) return false;
     _collectControllersIntoProvider();
     return context.read<InspectionProvider>().saveStepFindings();
   }
@@ -187,6 +198,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   /// The Field Findings Save button — the only path allowed to report a
   /// "Field Findings updated" activity.
   Future<bool> _syncControllersAndSaveExplicitly() async {
+    if (widget.walkthrough != null) return false;
     _collectControllersIntoProvider();
     return context.read<InspectionProvider>().saveStepFindings(
       isExplicitSave: true,
@@ -199,6 +211,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
   /// never made. An unfinished inspection is a different contract — Back there
   /// means "my progress is saved", so it keeps autosaving.
   Future<bool> _onExit() async {
+    if (widget.walkthrough != null) return true;
     if (context.read<InspectionProvider>().isReworkMode) {
       _collectControllersIntoProvider();
       return true;
@@ -212,10 +225,10 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
     final provider = context.watch<InspectionProvider>();
 
     final evidence = PhotoEvidencePresentation(
-      provider.activeTask?.id == widget.task.id
+      widget.walkthrough != null ? widget.walkthrough!.photos : provider.activeTask?.id == widget.task.id
           ? provider.capturedPhotos
           : widget.capturedPhotos,
-      requireMetadata: provider.isReworkMode,
+      requireMetadata: widget.walkthrough == null && provider.isReworkMode,
     );
 
     return SensitiveScreen(
@@ -225,6 +238,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
             !context.read<InspectionProvider>().isReworkMode &&
             InspectionProgress.instance.currentStep > 1,
         onPopInvokedWithResult: (didPop, _) {
+          if (widget.walkthrough != null) return;
           if (_isSaving) return;
           if (didPop) {
             _onExit();
@@ -245,7 +259,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
               subtitle: widget.task.location,
               stepNumber: 5,
               stepSubtitle: 'LOG OBSERVATIONS',
-              onBack: () => _isSaving
+              onBack: () => _isSaving || widget.walkthrough != null
                   ? null
                   : handleInspectionExit(
                       context,
@@ -257,7 +271,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
             ),
             action: Row(
               children: [
-                if (context.watch<InspectionProvider>().isReworkMode) ...[
+                if (widget.walkthrough == null && context.watch<InspectionProvider>().isReworkMode) ...[
                   Expanded(
                     child: FieldPrimaryButton(
                       label: 'Save',
@@ -300,6 +314,14 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
               ],
             ),
             children: [
+              if (widget.walkthrough?.inspectionUnavailable == true)
+                Text(widget.walkthrough!.inspectionUnavailableLabel)
+              else if (widget.walkthrough != null && widget.walkthrough!.draft == null &&
+                  widget.walkthrough!.findingsIntent == null &&
+                  !widget.walkthrough!.unavailable.contains(GuideDataSection.inspection))
+                GuideSample(language: widget.walkthrough!.language,
+                  child: const Text('Example: record only what you observed at the site.')),
+              GuideTarget(id: 'step_5', child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               const FieldSectionHeading(
                 title: 'Observations',
                 hint:
@@ -309,7 +331,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
               ),
               TextField(
                 controller: _notesController,
-                readOnly: _isSaving,
+                readOnly: _isSaving || widget.walkthrough != null,
                 onChanged: (_) => _scheduleAutosave(),
                 maxLines: 4,
                 minLines: 3,
@@ -320,6 +342,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
                   hintText: 'Describe what you observed on-site…',
                 ),
               ),
+              ])),
               if (evidence.totalCount > 0 || widget.checklistTotal > 0) ...[
                 const SizedBox(height: 16),
                 Wrap(
@@ -359,7 +382,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
               ),
               TextField(
                 controller: _discrepancyTitleController,
-                readOnly: _isSaving,
+                readOnly: _isSaving || widget.walkthrough != null,
                 onChanged: (_) => _scheduleAutosave(),
                 maxLines: 2,
                 minLines: 1,
@@ -372,7 +395,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
               const SizedBox(height: 12),
               TextField(
                 controller: _discrepancyDetailController,
-                readOnly: _isSaving,
+                readOnly: _isSaving || widget.walkthrough != null,
                 onChanged: (_) => _scheduleAutosave(),
                 minLines: 2,
                 maxLines: 5,
@@ -394,7 +417,7 @@ class _FieldFindingsScreenState extends State<FieldFindingsScreen>
               ),
               TextField(
                 controller: _recommendationsController,
-                readOnly: _isSaving,
+                readOnly: _isSaving || widget.walkthrough != null,
                 onChanged: (_) => _scheduleAutosave(),
                 maxLines: 3,
                 minLines: 2,

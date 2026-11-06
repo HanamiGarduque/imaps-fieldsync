@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 import '../models/user_profile.dart';
 import '../services/auth_service.dart';
 import '../services/auth_failure.dart';
+import '../services/app_bootstrap.dart';
 import '../services/supabase_service.dart';
 import '../theme/insight_theme.dart';
 import '../../modules/auth_startup/services/auto_lock_controller.dart';
@@ -28,6 +29,11 @@ import '../../modules/profile_settings/screens/profile_edit_screen.dart';
 import '../../modules/profile_settings/screens/notifications_screen.dart';
 import '../../modules/inspection/screens/site_map_preview_screen.dart';
 import '../../modules/inspection/screens/compass_preview_screen.dart';
+import '../../modules/auth_startup/services/screen_protection_service.dart';
+import '../../modules/interactive_guide/guide_coordinator.dart';
+import '../../modules/interactive_guide/guide_host.dart';
+import '../../modules/interactive_guide/guide_preferences.dart';
+import '../../modules/inspection/screens/inspection_progress.dart';
 
 /// Single shell for the 4 primary tabs with fluid tab transitions
 /// and per-visit spring entrance animations.
@@ -48,9 +54,116 @@ class MainShellScreen extends StatefulWidget {
   State<MainShellScreen> createState() => _MainShellScreenState();
 }
 
-class _MainShellScreenState extends State<MainShellScreen> {
+class _MainShellScreenState extends State<MainShellScreen> with WidgetsBindingObserver {
   late int _currentIndex;
   late UserProfile _currentProfile;
+  late final GuideCoordinator _guide;
+  ModalRoute<dynamic>? _route;
+  ScreenProtectionService? _protection;
+  bool _homeReady = false, _startupReady = false, _lockPolicyReady = false;
+  bool _guideCheckScheduled = false;
+  bool _replayingGuide = false;
+  GuideReplayRequest? _pendingReplay;
+  Completer<void>? _replayDone;
+  bool _lockScreenOutstanding = false, _guideUnlockConfirmed = true;
+
+  bool get _guideEligible => mounted && !_sessionRedirecting &&
+    _currentProfile.isInspector && AuthService.isLoggedIn &&
+    SupabaseService.client.auth.currentUser?.id == _guide.inspectorId &&
+    DBHelper.currentInspectorId == _guide.inspectorId &&
+    AuthService.profileRefusedOwner.value != _guide.inspectorId &&
+    _startupReady && _lockPolicyReady && (_replayingGuide || (_homeReady && _currentIndex == 0)) &&
+    !_quickActionsOpen && !_lockScreenOutstanding && _guideUnlockConfirmed &&
+    !AutoLockController.instance.isLocked &&
+    (WidgetsBinding.instance.lifecycleState == null ||
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) &&
+    _route?.isCurrent == true &&
+    (_route?.animation == null || _route!.animation!.status == AnimationStatus.completed) &&
+    (_route?.secondaryAnimation == null || _route!.secondaryAnimation!.status == AnimationStatus.dismissed) &&
+    _protection?.foreground != false &&
+    _protection?.mustObscure != true && _protection?.nativeFailure != true &&
+    _protection?.transitioning != true && _protection?.hasPopup != true;
+
+  void _scheduleGuideCheck() {
+    if (!mounted || _guideCheckScheduled) return;
+    _guideCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _guideCheckScheduled = false;
+      if (!mounted) return;
+      if (!_guideEligible) {
+        _guide.suspend();
+      } else {
+        _guide.resumeIfEligible();
+        final replay = _pendingReplay;
+        if (replay != null) {
+          _pendingReplay = null;
+          unawaited(_guide.start(replay.language, replay: true).then((_) => _onGuideChanged()));
+        } else if (_replayingGuide && _guide.phase == GuidePhase.idle) {
+          // Restore Help after the retained shell has painted and its existing
+          // route/protection gates are ready again, not inside Done/Skip.
+          final done = _replayDone;
+          _replayDone = null;
+          setState(() => _replayingGuide = false);
+          done?.complete();
+        } else if (!_replayingGuide) {
+          unawaited(_guide.offerIfEligible());
+        }
+      }
+    });
+    // A readiness notification may arrive after the last rendered frame.
+    // Request this one check, never a retry/watch loop.
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _onRouteStatus(AnimationStatus _) => _scheduleGuideCheck();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _guide.suspend();
+    _scheduleGuideCheck();
+  }
+
+  Future<void> _replayGuide(GuideReplayRequest request) {
+    if (!mounted || _sessionRedirecting || _replayDone != null || _guide.phase != GuidePhase.idle) {
+      return Future<void>.value();
+    }
+    final done = _replayDone = Completer<void>();
+    _pendingReplay = request;
+    setState(() => _replayingGuide = true);
+    _scheduleGuideCheck();
+    return done.future;
+  }
+
+  void _onGuideChanged() {
+    if (!mounted || !_replayingGuide || _pendingReplay != null || _guide.phase != GuidePhase.idle) return;
+    _scheduleGuideCheck();
+  }
+
+  void _onHomeReady(bool ready) {
+    if (!mounted) return;
+    _homeReady = ready;
+    _scheduleGuideCheck();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (_route != route) {
+      _route?.animation?.removeStatusListener(_onRouteStatus);
+      _route?.secondaryAnimation?.removeStatusListener(_onRouteStatus);
+      _route = route;
+      route?.animation?.addStatusListener(_onRouteStatus);
+      route?.secondaryAnimation?.addStatusListener(_onRouteStatus);
+    }
+    final protection = ScreenProtectionScope.maybeOf(context) ?? ScreenProtectionService.instance;
+    if (_protection != protection) {
+      _protection?.removeListener(_scheduleGuideCheck);
+      _protection = protection;
+      protection.addListener(_scheduleGuideCheck);
+    }
+    _scheduleGuideCheck();
+  }
 
   // ── Network connectivity state ──────────────────────────────────────────
   late bool _isOnline;
@@ -66,6 +179,8 @@ class _MainShellScreenState extends State<MainShellScreen> {
       return;
     }
     _sessionRedirecting = true;
+    _pendingReplay = null;
+    _guide.invalidate();
     AutoLockController.instance.stop();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => LoginScreen(initialFailure: refused
@@ -173,8 +288,17 @@ class _MainShellScreenState extends State<MainShellScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentIndex = widget.initialIndex;
     _currentProfile = widget.profile;
+    _guide = GuideCoordinator(inspectorId: widget.profile.id,
+      preferences: GuidePreferences(), canPresent: () => _guideEligible);
+    _guide.addListener(_onGuideChanged);
+    AppBootstrap.ready.then((_) {
+      if (!mounted) return;
+      _startupReady = AppBootstrap.error == null;
+      _scheduleGuideCheck();
+    });
     _authSubscription = SupabaseService.client.auth.onAuthStateChange
         .listen((_) => _checkSessionAccess(), onError: (Object _) => _checkSessionAccess());
     AuthService.profileRefusedOwner.addListener(_checkSessionAccess);
@@ -223,6 +347,12 @@ class _MainShellScreenState extends State<MainShellScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _replayDone?.complete();
+    _guide.dispose();
+    _protection?.removeListener(_scheduleGuideCheck);
+    _route?.animation?.removeStatusListener(_onRouteStatus);
+    _route?.secondaryAnimation?.removeStatusListener(_onRouteStatus);
     _connectivitySubscription?.cancel();
     _authSubscription?.cancel();
     AuthService.profileRefusedOwner.removeListener(_checkSessionAccess);
@@ -240,31 +370,45 @@ class _MainShellScreenState extends State<MainShellScreen> {
       backgrounded: lifecycle == AppLifecycleState.paused ||
           lifecycle == AppLifecycleState.hidden,
     );
+    _lockPolicyReady = true;
+    _scheduleGuideCheck();
   }
 
   Future<void> _presentAutoLock() async {
-    if (!mounted) return;
+    if (!mounted || _sessionRedirecting || _lockScreenOutstanding) return;
+    _lockScreenOutstanding = true;
+    _guideUnlockConfirmed = false;
+    _guide.suspend();
     // Let the current lifecycle callback/frame finish before pushing.
     await Future<void>.delayed(Duration.zero);
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const AppResumeLockScreen(),
-        fullscreenDialog: true,
-      ),
-    );
+    if (!mounted || _sessionRedirecting) return;
+    try {
+      final unlocked = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(builder: (_) => const AppResumeLockScreen(), fullscreenDialog: true));
+      if (!mounted) return;
+      _guideUnlockConfirmed = unlocked == true;
+    } finally {
+      _lockScreenOutstanding = false;
+      // The controller clears its own lock after this callback completes.
+      // The next frame must recheck owner, route, lifecycle and protection too.
+      _scheduleGuideCheck();
+    }
   }
 
   void _toggleQuickActions() {
     setState(() => _quickActionsOpen = !_quickActionsOpen);
+    _scheduleGuideCheck();
   }
 
   void _closeQuickActions() {
     if (_quickActionsOpen) setState(() => _quickActionsOpen = false);
+    _scheduleGuideCheck();
   }
 
   void _openTab(int index) {
+    if (index != _currentIndex) _homeReady = false;
     setState(() => _currentIndex = index);
+    _scheduleGuideCheck();
     // Tasks/Home repopulate `local_jobs` on refresh, so re-read the badge
     // inputs whenever the inspector moves through the tab that owns that data.
     if (index == 1) {
@@ -341,6 +485,7 @@ class _MainShellScreenState extends State<MainShellScreen> {
           key: ValueKey('home_tab_$index'),
           profile: _currentProfile,
           onNavigateToTab: _openTab,
+          onGuideReadyChanged: _onHomeReady,
           onProfileUpdated: (profile) => setState(() => _currentProfile = profile),
         );
       case 1:
@@ -357,6 +502,7 @@ class _MainShellScreenState extends State<MainShellScreen> {
         return ProfileScreen(
           key: ValueKey('profile_tab_$index'),
           profile: _currentProfile,
+          onReplayGuide: _replayGuide,
           initialAnalyticsOpen: _profileAnalyticsRequested,
           onAnalyticsHandled: () => setState(() => _profileAnalyticsRequested = false),
           onProfileUpdated: (profile) => setState(() => _currentProfile = profile),
@@ -366,6 +512,7 @@ class _MainShellScreenState extends State<MainShellScreen> {
           key: ValueKey('home_tab_$index'),
           profile: _currentProfile,
           onNavigateToTab: _openTab,
+          onGuideReadyChanged: _onHomeReady,
           onProfileUpdated: (profile) => setState(() => _currentProfile = profile),
         );
     }
@@ -373,7 +520,8 @@ class _MainShellScreenState extends State<MainShellScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return GuideHost(coordinator: _guide, profile: _currentProfile,
+      preferredTaskId: InspectionProgress.instance.activeTaskId, child: Scaffold(
         extendBody: true,
         body: Stack(
         children: [
@@ -544,6 +692,6 @@ class _MainShellScreenState extends State<MainShellScreen> {
           );
         },
         ),
-    );
+    ));
   }
 }

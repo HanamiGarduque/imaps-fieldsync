@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollDirection;
+import 'package:flutter/rendering.dart' show ScrollDirection, ScrollCacheExtent;
 import '../../../core/widgets/sensitive_screen.dart';
 import 'package:flutter/services.dart';
 
@@ -9,8 +9,15 @@ import '../../../core/models/user_profile.dart';
 import '../models/dashboard_stats.dart';
 import '../models/analytics_activity_range.dart';
 import '../../../core/services/auth_service.dart';
+import '../../../core/services/db_helper.dart';
+import '../../interactive_guide/guide_host.dart';
+import '../../interactive_guide/guide_preferences.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_targets.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../auth_startup/screens/splash_screen.dart' show LoginScreen;
+import '../../auth_startup/services/auto_lock_controller.dart';
+import '../../auth_startup/services/screen_protection_service.dart';
 import '../../tasks/screens/tasks_screen.dart' show TaskItem;
 import 'profile_edit_screen.dart';
 import 'about_insight_screen.dart';
@@ -20,6 +27,8 @@ import 'policy_documents.dart';
 import 'reports_support_screen.dart';
 import 'help_faq_screen.dart';
 import '../widgets/dashboard_widgets.dart';
+import '../widgets/profile_action_sections.dart';
+export '../widgets/profile_action_sections.dart' show ProfileIdentityCard;
 import '../../../core/widgets/motion/spring_entrance.dart';
 import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/insight_bottom_nav.dart'
@@ -34,16 +43,20 @@ import '../../../core/layout/responsive_layout.dart';
 /// ==================================================================
 class ProfileScreen extends StatefulWidget {
   final UserProfile profile;
+  final GuideReadOnlyData? walkthrough;
   final bool initialAnalyticsOpen;
   final VoidCallback? onAnalyticsHandled;
   final ValueChanged<UserProfile>? onProfileUpdated;
+  final Future<void> Function(GuideReplayRequest)? onReplayGuide;
 
   const ProfileScreen({
     super.key,
     required this.profile,
+    this.walkthrough,
     this.initialAnalyticsOpen = false,
     this.onAnalyticsHandled,
     this.onProfileUpdated,
+    this.onReplayGuide,
   });
 
   @override
@@ -66,6 +79,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _analyticsIsWeek = true;
   final GlobalKey _analyticsSectionKey = GlobalKey();
   bool _identityCompact = false;
+  bool _helpOpening = false;
 
   @override
   void initState() {
@@ -101,6 +115,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   /// the row that's actually in Supabase right now so the header never
   /// shows outdated name/role/avatar without needing an app reload.
   Future<void> _refreshProfileFromServer() async {
+    if (widget.walkthrough != null) return;
     final fresh = await SupabaseService.fetchMyProfile();
     if (fresh != null && mounted) {
       final refreshedProfile = UserProfile.fromMap(fresh);
@@ -110,6 +125,13 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _loadStats() async {
+    final walkthrough = widget.walkthrough;
+    if (walkthrough != null) {
+      _stats = InspectorDashboardStats.fromTasks(walkthrough.jobs.map(TaskItem.fromCachedJob).toList());
+      _isLoadingStats = false;
+      _hasStatsError = walkthrough.unavailable.contains(GuideDataSection.tasks);
+      return;
+    }
     setState(() {
       _isLoadingStats = true;
       _hasStatsError = false;
@@ -136,6 +158,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _openEditScreen() async {
+    if (widget.walkthrough != null) return;
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -151,10 +174,55 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  Future<void> _openHelp() async {
+    if (widget.walkthrough != null) return;
+    if (_helpOpening) return;
+    _helpOpening = true;
+    final owner = _currentProfile.id;
+    final route = ModalRoute.of(context);
+    final protection = ScreenProtectionScope.maybeOf(context) ?? ScreenProtectionService.instance;
+    bool sameOwner() => mounted && _currentProfile.id == owner &&
+      AuthService.isLoggedIn && DBHelper.currentInspectorId == owner &&
+      SupabaseService.client.auth.currentUser?.id == owner &&
+      AuthService.profileRefusedOwner.value != owner;
+    bool canOpen() => sameOwner() && route?.isCurrent == true &&
+      !AutoLockController.instance.isLocked && protection.foreground &&
+      !protection.mustObscure && !protection.nativeFailure &&
+      (WidgetsBinding.instance.lifecycleState == null || WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed);
+    try {
+      GuideRecord? record;
+      try {
+        record = await GuidePreferences().read(owner);
+      } catch (_) {
+        // Unreadable guide metadata still permits manual replay.
+      }
+      HelpFaqSnapshot? origin;
+      var reopenGuide = false;
+      var language = record?.language ?? GuideLanguage.english;
+      while (canOpen() && !protection.transitioning && !protection.hasPopup) {
+        if (!mounted) return;
+        final request = await Navigator.of(context).push<HelpGuideReplay>(MaterialPageRoute(
+          builder: (_) => HelpFaqScreen(origin: origin, reopenGuide: reopenGuide,
+            initialGuideLanguage: language, hasPreviousOffer: record != null || reopenGuide)));
+        // A popped Help route can return before native protection acknowledges
+        // the shell. Its readiness queue must retain the first Start/Replay.
+        if (!sameOwner() || route?.isCurrent != true || request == null || widget.onReplayGuide == null) return;
+        await widget.onReplayGuide!(request);
+        if (!canOpen()) return;
+        origin = request.origin;
+        language = request.language;
+        reopenGuide = true;
+      }
+    } finally {
+      _helpOpening = false;
+    }
+  }
+
   /// Shows the "Log out" confirmation modal. Required per the destructive-
   /// action rule (specific-labeled buttons, no bare Yes/No) — sign out
   /// previously fired with zero confirmation.
   Future<void> _confirmSignOut(BuildContext context) async {
+    if (widget.walkthrough != null) return;
     await showDialog(
       context: context,
       barrierDismissible: true,
@@ -285,6 +353,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   /// untouched from the original _handleSignOut — only the trigger point
   /// (confirmation + loading UI) changed.
   Future<void> _performSignOut(BuildContext dialogContext) async {
+    if (widget.walkthrough != null) return;
     HapticFeedback.mediumImpact();
 
     // Audit log must fire BEFORE signOut() — log_security_event is a
@@ -372,15 +441,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                   constraints.maxHeight,
                   math.max(96.0, (usableHeight - gutter * 2) / 2),
                 );
-                final identity = ProfileIdentityCard(
+                final identity = GuideTarget(id: 'profile_identity', child: ProfileIdentityCard(
                   compact: _identityCompact,
-                  avatarUrl: _currentProfile.avatarUrl,
+                  avatarUrl: widget.walkthrough == null ? _currentProfile.avatarUrl : null,
                   initials: initials,
                   displayName: displayName,
                   positionLabel: positionLabel,
                   userEmail: userEmail,
                   onEditTap: _openEditScreen,
-                );
+                ));
                 return RefreshIndicator(
                   color: InsightTheme.blue1,
                   onRefresh: () async {
@@ -402,6 +471,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                       return false;
                     },
                     child: CustomScrollView(
+                      // ponytail: bounded cache for this short passive document;
+                      // explicit section navigation if it grows past 12k dp.
+                      scrollCacheExtent: widget.walkthrough == null ? null : const ScrollCacheExtent.pixels(12000),
                       physics: const AlwaysScrollableScrollPhysics(
                         parent: BouncingScrollPhysics(),
                       ),
@@ -447,7 +519,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                               // 1. QUICK STATS ROW (Tasks Today/Pending, Completed Inspections)
                               // IntrinsicHeight guarantees both cards match the
                               // taller one's height regardless of label wrapping.
-                              IntrinsicHeight(
+                              GuideTarget(id: 'profile_summary', child: IntrinsicHeight(
                                 child: Row(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
@@ -485,7 +557,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                     ),
                                   ],
                                 ),
-                              ),
+                              )),
 
                               const SizedBox(height: 16),
 
@@ -519,142 +591,22 @@ class _ProfileScreenState extends State<ProfileScreen>
                               SpringSlide(
                                 animation: springFor(5),
                                 beginOffset: const Offset(0, 30),
-                                child: Column(
-                                  children: [
-                                    _actionGroupCard([
-                                      _ActionTile(
-                                        icon: Icons.fingerprint_rounded,
-                                        title: 'Security & Protection',
-                                        subtitle:
-                                            'Biometric login, auto-lock & protection',
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  SecuritySettingsScreen(
-                                                    profile: _currentProfile,
-                                                  ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                      _ActionTile(
-                                        icon: Icons.help_outline_rounded,
-                                        title: 'Help & FAQ',
-                                        subtitle:
-                                            'Guide, color codes & field rules',
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  const HelpFaqScreen(),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                      _ActionTile(
-                                        icon: Icons.flag_outlined,
-                                        title: 'Support Desk',
-                                        subtitle:
-                                            'Report a problem or an application concern',
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  const ReportsSupportScreen(),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ]),
-                                    const SizedBox(height: 12),
-                                    _actionGroupCard([
-                                      _ActionTile(
-                                        icon:
-                                            termsAndConditionsDocument.icon,
-                                        title: termsAndConditionsDocument
-                                            .menuLabel,
-                                        subtitle:
-                                            'Responsible use of iMAPS and FieldSync',
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  const PolicyDocumentScreen(
-                                                    document:
-                                                        termsAndConditionsDocument,
-                                                  ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                      _ActionTile(
-                                        icon: privacyNoticeDocument.icon,
-                                        title: privacyNoticeDocument.menuLabel,
-                                        subtitle:
-                                            'How personal data is handled (Privacy Notice)',
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  const PolicyDocumentScreen(
-                                                    document:
-                                                        privacyNoticeDocument,
-                                                  ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                      _ActionTile(
-                                        icon: cookieStoragePolicyDocument.icon,
-                                        title:
-                                            cookieStoragePolicyDocument.menuLabel,
-                                        subtitle:
-                                            'Cookies, sessions & device storage',
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  const PolicyDocumentScreen(
-                                                    document:
-                                                        cookieStoragePolicyDocument,
-                                                  ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                      _ActionTile(
-                                        icon: Icons.info_outline_rounded,
-                                        title: 'About iMAPS',
-                                        subtitle:
-                                            AppInfoService.fullVersionString,
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  const AboutInsightScreen(),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ]),
-                                    const SizedBox(height: 12),
-                                    _actionGroupCard([
-                                      _ActionTile(
-                                        icon: Icons.logout_rounded,
-                                        title: 'Log Out',
-                                        isDestructive: true,
-                                        onTap: () => _confirmSignOut(context),
-                                      ),
-                                    ]),
-                                  ],
+                                child: ProfileActionSections(
+                                  appVersion: AppInfoService.fullVersionString,
+                                  onSecurity: widget.walkthrough != null ? null : () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => SecuritySettingsScreen(profile: _currentProfile))),
+                                  onHelp: _openHelp,
+                                  onSupport: widget.walkthrough != null ? null : () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => const ReportsSupportScreen())),
+                                  onTerms: widget.walkthrough != null ? null : () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => const PolicyDocumentScreen(document: termsAndConditionsDocument))),
+                                  onPrivacy: widget.walkthrough != null ? null : () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => const PolicyDocumentScreen(document: privacyNoticeDocument))),
+                                  onStorage: widget.walkthrough != null ? null : () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => const PolicyDocumentScreen(document: cookieStoragePolicyDocument))),
+                                  onAbout: widget.walkthrough != null ? null : () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => const AboutInsightScreen())),
+                                  onLogout: () => _confirmSignOut(context),
                                 ),
                               ),
                             ]),
@@ -705,7 +657,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     // Bounded on wide viewports so a chart card does not stretch to ~1240px.
     // Phone portrait (390) is under the cap and lays out exactly as before.
     return ConstrainedContent.wide(
-      child: Container(
+      child: GuideTarget(id: 'profile_analytics', child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
@@ -718,11 +670,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             // ── Header row ──────────────────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
+            LayoutBuilder(builder: (context, constraints) {
+              final heading = Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -740,10 +689,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                         style: InsightTheme.inter(12, c: InsightTheme.ink2),
                       ),
                     ],
-                  ),
-                ),
+                  );
                 // Week / Month toggle pills
-                Container(
+                final timeframe = Container(
                   padding: const EdgeInsets.all(3),
                   decoration: BoxDecoration(
                     color: InsightTheme.surface2,
@@ -764,9 +712,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
+                );
+              return MediaQuery.textScalerOf(context).scale(15) > 22 && constraints.maxWidth < 600
+                ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [heading, const SizedBox(height: 8), timeframe])
+                : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: heading), timeframe]);
+            }),
 
             const SizedBox(height: 14),
 
@@ -847,12 +797,13 @@ class _ProfileScreenState extends State<ProfileScreen>
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeOutCubic,
-              height: _analyticsTabIndex == 1 ? null : 250.0,
+              height: _analyticsTabIndex == 1 ? null : 250.0 *
+                (widget.walkthrough == null ? 1 : math.max(1, MediaQuery.textScalerOf(context).scale(12) / 12)),
               child: chartBody,
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 
@@ -943,34 +894,6 @@ class _ProfileScreenState extends State<ProfileScreen>
           ],
         );
     }
-  }
-
-  // WIDGET: wraps a set of _ActionTiles as one grouped card, dividers only
-  // between tiles sharing that card — never between separate cards (see
-  // "visually separate elements with whitespace").
-  Widget _actionGroupCard(List<_ActionTile> tiles) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: InsightTheme.roundedMd,
-        boxShadow: kCardShadow,
-      ),
-      child: Column(
-        children: [
-          for (int i = 0; i < tiles.length; i++) ...[
-            tiles[i],
-            if (i != tiles.length - 1)
-              const Divider(
-                height: 1,
-                color: InsightTheme.line,
-                indent: 50,
-                endIndent: 16,
-              ),
-          ],
-        ],
-      ),
-    );
   }
 
   // WIDGET: Dashboard card shell (consistent padding/border/shadow around
@@ -1086,348 +1009,6 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Identity avatar — gradient fill + initials fallback.
-class _Avatar extends StatelessWidget {
-  final String? avatarUrl;
-  final String initials;
-  final double size;
-  final double fontSize;
-
-  const _Avatar({
-    required this.avatarUrl,
-    required this.initials,
-    this.size = 56,
-    this.fontSize = 18,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Border radius: rounded-2xl at full size (≈ size * 0.286 ≈ 16px for 56px),
-    // scales with size so it stays proportional in the compact bar.
-    final radius = (size * 0.286).clamp(10.0, 18.0);
-    final borderWidth = size > 44 ? 2.5 : 2.0;
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(radius),
-        gradient: const LinearGradient(
-          colors: [InsightTheme.blue1, InsightTheme.blue2],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: InsightTheme.blue1.withValues(alpha: 0.30),
-            blurRadius: 14,
-            offset: const Offset(0, 5),
-          ),
-        ],
-        border: Border.all(color: Colors.white, width: borderWidth),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(
-          radius > borderWidth ? radius - borderWidth : radius,
-        ),
-        child: (avatarUrl != null && avatarUrl!.isNotEmpty)
-            ? Image.network(
-                avatarUrl!,
-                fit: BoxFit.cover,
-                width: size,
-                height: size,
-                errorBuilder: (context, error, stackTrace) => Center(
-                  child: Text(
-                    initials,
-                    style: InsightTheme.urbanist(
-                      fontSize,
-                      w: FontWeight.w800,
-                      c: Colors.white,
-                    ),
-                  ),
-                ),
-              )
-            : Center(
-                child: Text(
-                  initials,
-                  style: InsightTheme.urbanist(
-                    fontSize,
-                    w: FontWeight.w800,
-                    c: Colors.white,
-                  ),
-                ),
-              ),
-      ),
-    );
-  }
-}
-
-/// Content-sized expanded/compact identity; full fields wrap at any text scale.
-class ProfileIdentityCard extends StatelessWidget {
-  final String? avatarUrl;
-  final String initials;
-  final String displayName;
-  final String positionLabel;
-  final String userEmail;
-  final VoidCallback onEditTap;
-  final bool compact;
-
-  const ProfileIdentityCard({
-    super.key,
-    required this.avatarUrl,
-    required this.initials,
-    required this.displayName,
-    required this.positionLabel,
-    required this.userEmail,
-    required this.onEditTap,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final avatar = _Avatar(
-      avatarUrl: avatarUrl,
-      initials: initials,
-      size: compact ? 44 : 48,
-      fontSize: compact ? 16 : 18,
-    );
-    final edit = Semantics(
-      button: true,
-      label: 'Edit profile',
-      child: TextButton(
-        key: const Key('profile-edit-button'),
-        onPressed: onEditTap,
-        style: TextButton.styleFrom(
-          minimumSize: const Size(48, 48),
-          padding: EdgeInsets.symmetric(
-            horizontal: compact ? 8 : 12,
-            vertical: 8,
-          ),
-          backgroundColor: compact ? null : InsightTheme.blueTint,
-          foregroundColor: InsightTheme.blueInk,
-          shape: RoundedRectangleBorder(borderRadius: InsightTheme.roundedSm),
-        ),
-        child: Flex(
-          direction: compact ? Axis.vertical : Axis.horizontal,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.person_outline_rounded, size: 16),
-            SizedBox(width: compact ? 0 : 4, height: compact ? 2 : 0),
-            Text(
-              'Edit',
-              style: InsightTheme.inter(
-                compact ? 12 : 13,
-                w: FontWeight.w600,
-                c: InsightTheme.blueInk,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    final email = Text(
-      userEmail,
-      style: InsightTheme.inter(compact ? 12 : 13, c: InsightTheme.ink2),
-    );
-    final details = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          displayName,
-          key: const Key('profile-visible-name'),
-          style: InsightTheme.urbanist(compact ? 14 : 16, w: FontWeight.w700),
-        ),
-        SizedBox(height: compact ? 2 : 4),
-        if (compact)
-          Text(
-            positionLabel,
-            style: InsightTheme.inter(12, c: InsightTheme.blueInk),
-          )
-        else
-          Container(
-            key: const Key('profile-role-badge'),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: InsightTheme.blueTint,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: InsightTheme.blue1.withValues(alpha: 0.18),
-              ),
-            ),
-            child: Text(
-              positionLabel.toUpperCase(),
-              style: InsightTheme.mono(
-                12,
-                w: FontWeight.w700,
-                c: InsightTheme.blueInk,
-                ls: 0.5,
-              ),
-            ),
-          ),
-        if (compact) ...[const SizedBox(height: 2), email],
-      ],
-    );
-    return Container(
-      padding: EdgeInsets.all(compact ? 12 : 16),
-      decoration: BoxDecoration(
-        color: InsightTheme.surface,
-        borderRadius: InsightTheme.roundedMd,
-        boxShadow: kCardShadow,
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final inline =
-              (compact &&
-                  constraints.maxWidth >=
-                      MediaQuery.textScalerOf(context).scale(240)) ||
-              (constraints.maxWidth >= 280 &&
-                  MediaQuery.textScalerOf(context).scale(16) <= 20);
-          if (compact) {
-            final scrollableDetails = SingleChildScrollView(
-              primary: false,
-              child: details,
-            );
-            if (inline) {
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  avatar,
-                  const SizedBox(width: 12),
-                  Expanded(child: scrollableDetails),
-                  const SizedBox(width: 8),
-                  edit,
-                ],
-              );
-            }
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [avatar, const Spacer(), edit]),
-                const SizedBox(height: 8),
-                Flexible(child: scrollableDetails),
-              ],
-            );
-          }
-          return SingleChildScrollView(
-            primary: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    avatar,
-                    const SizedBox(width: 12),
-                    if (inline) Expanded(child: details) else const Spacer(),
-                    if (!inline) ...[const SizedBox(width: 8), edit],
-                  ],
-                ),
-                if (!inline) ...[const SizedBox(height: 8), details],
-                const SizedBox(height: 8),
-                const Divider(height: 1, color: InsightTheme.line),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.mail_outline_rounded,
-                      size: 15,
-                      color: InsightTheme.ink2,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(child: email),
-                    if (inline) ...[const SizedBox(width: 8), edit],
-                  ],
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// WIDGET: Unified Action Tile
-class _ActionTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final bool isDestructive;
-  final VoidCallback onTap;
-
-  const _ActionTile({
-    required this.icon,
-    required this.title,
-    this.subtitle,
-    this.isDestructive = false,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Destructive actions (Sign out) use the theme RED — per design
-    // feedback the softer coral read as a normal accent, not a warning.
-    final fgColor = isDestructive ? InsightTheme.red : InsightTheme.ink;
-    final iconColor = isDestructive ? InsightTheme.red : InsightTheme.blueInk;
-
-    return InkWell(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      borderRadius: InsightTheme.roundedMd,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 48),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: subtitle == null ? 8 : 12,
-          ),
-          child: Row(
-            children: [
-              // Bare icon — the old rounded tinted chip behind each icon was
-              // removed per design feedback (icons now sit directly on the
-              // card, like the rest of the system's list rows).
-              Icon(icon, size: 22, color: iconColor),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: InsightTheme.urbanist(
-                        15,
-                        w: FontWeight.w600,
-                        c: fgColor,
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        style: InsightTheme.inter(12, c: InsightTheme.ink2),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: InsightTheme.ink3,
-                size: 20,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

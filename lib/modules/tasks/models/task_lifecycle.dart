@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
 import '../../../core/utils/calendar_date.dart';
 
+enum TaskLifecycleCategory { pending, ongoing, completed, unknown }
+enum PendingTaskSection { availableAnytime, scheduled }
+
 /// Canonical My Tasks presentation model.
 ///
 /// One place decides, for every assignment:

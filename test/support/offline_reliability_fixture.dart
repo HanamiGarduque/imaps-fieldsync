@@ -16,6 +16,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:imaps_fieldsync/core/services/auth_service.dart';
+import 'package:imaps_fieldsync/modules/auth_startup/services/screen_protection_service.dart';
 import 'package:imaps_fieldsync/core/services/db_helper.dart';
 import 'package:imaps_fieldsync/core/services/report_queue_schema.dart';
 import 'package:imaps_fieldsync/core/services/sync_outbox_service.dart';
@@ -395,6 +396,49 @@ class OfflineReliabilityFixture {
     }
   }
 
+  Future<String> guideSafetySnapshot() async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    );
+    final prefs = await SharedPreferences.getInstance();
+    final progress = InspectionProgress.instance;
+    return jsonEncode({
+      'tables': {
+        for (final table in tables)
+          table['name'] as String: await db.query(table['name'] as String),
+      },
+      'secure': secure,
+      'settings': {
+        for (final key in prefs.getKeys().where(
+          (key) => !key.startsWith('fieldsync.guide.'),
+        ))
+          key: prefs.get(key),
+      },
+      'progress': [
+        progress.activeTaskId,
+        progress.currentStep,
+        progress.highestCompleted,
+        {
+          for (final entry in progress.stepCompletedAt.entries)
+            '${entry.key}': entry.value,
+        },
+      ],
+      'provider': [
+        provider.activeTask?.id,
+        provider.currentStep,
+        provider.siteCondition,
+        provider.zoningObservations,
+        provider.capturedPhotos,
+        provider.notes,
+        provider.discrepancies,
+        provider.recommendations,
+        provider.inspectionResult,
+      ],
+      'session': client.auth.currentSession?.toJson(),
+      'documentation': ScreenProtectionService.instance.documentationPhase.name,
+    });
+  }
+
   Future<void> flush(WidgetTester tester) async {
     for (var i = 0; i < 8; i++) {
       await tester.runAsync(
@@ -426,6 +470,7 @@ class OfflineReliabilityFixture {
     Widget screen, {
     Size size = const Size(390, 844),
     double textScale = 1,
+    bool showDebugBanner = true,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -442,7 +487,10 @@ class OfflineReliabilityFixture {
         key: captureKey,
         child: ChangeNotifierProvider.value(
           value: provider,
-          child: MaterialApp(home: screen),
+          child: MaterialApp(
+            debugShowCheckedModeBanner: showDebugBanner,
+            home: screen,
+          ),
         ),
       ),
     );

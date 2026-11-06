@@ -30,7 +30,12 @@ import '../../../core/widgets/field_form_widgets.dart';
 
 import '../../../core/theme/insight_theme.dart';
 import '../models/task_lifecycle.dart';
+export '../models/task_lifecycle.dart' show TaskLifecycleCategory, PendingTaskSection;
 import '../widgets/task_notices.dart';
+import '../widgets/task_card_content.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_examples.dart';
+import '../../interactive_guide/guide_targets.dart';
 
 /// ==================================================================
 /// CONSTANTS
@@ -55,10 +60,6 @@ const List<String> rosarioBarangays = [
 /// ==================================================================
 /// MODEL
 /// ==================================================================
-enum TaskLifecycleCategory { pending, ongoing, completed, unknown }
-
-enum PendingTaskSection { availableAnytime, scheduled }
-
 /// Transitional read compatibility for field_jobs.status.
 ///
 /// Matching is deliberately exact and case-sensitive. Do not trim, lowercase,
@@ -394,6 +395,7 @@ class TaskItem {
 /// ==================================================================
 class TasksScreen extends StatefulWidget {
   final UserProfile profile;
+  final GuideReadOnlyData? walkthrough;
 
   /// Which segment tab to land on when this screen mounts.
   /// Use the `TasksScreen.tab*` constants instead of raw ints so
@@ -415,6 +417,7 @@ class TasksScreen extends StatefulWidget {
   const TasksScreen({
     super.key,
     required this.profile,
+    this.walkthrough,
     this.initialTabIndex = tabOngoing,
     this.scrollToScheduled = false,
   });
@@ -486,8 +489,10 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
     _authSubscription = SupabaseService.client.auth.onAuthStateChange
         .listen((_) => _retireIfOwnerChanged(),
             onError: (Object _) => _retireIfOwnerChanged());
-    SyncOutboxService.drainCompleted.addListener(_refreshSubmissionState);
-    SyncOutboxService.progress.addListener(_refreshSubmissionState);
+    if (widget.walkthrough == null) {
+      SyncOutboxService.drainCompleted.addListener(_refreshSubmissionState);
+      SyncOutboxService.progress.addListener(_refreshSubmissionState);
+    }
     _loadTasks();
     _searchController.addListener(() {
       setState(() {
@@ -579,6 +584,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   /// Sync notifications refresh SQLite presentation only, never start another
   /// HTTP refresh or infer success from an in-memory progress notification.
   Future<void> _refreshSubmissionState() async {
+    if (widget.walkthrough != null) return;
     final owner = _tasksOwner;
     final requestId = _loadRequestId;
     if (owner == null || owner != DBHelper.currentInspectorId) return;
@@ -639,6 +645,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
             key: ValueKey(task.id),
             task: task,
             submission: _submissions[task.id],
+            readOnly: widget.walkthrough != null,
+            guideSelected: widget.walkthrough != null && task.id == widget.walkthrough!.selectedJob?['id'],
             onTapDetail: () => _openTask(context, task),
             onScheduled: _loadTasks,
           ),
@@ -681,6 +689,33 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   ///    damaged or unavailable store reaches a recoverable screen state instead
   ///    of an unhandled future or a stuck spinner, and never deletes the row.
   Future<void> _loadTasks() async {
+    final walkthrough = widget.walkthrough;
+    if (walkthrough != null) {
+      try {
+        final snapshot = (jobs: walkthrough.jobs, submissions: walkthrough.submissions);
+        _tasksOwner = walkthrough.ownerId;
+        _allTasks = _snapshotTasks(snapshot);
+        _submissions = _parseSubmissions(snapshot);
+        _taskRefreshPhase = TaskRefreshPhase.saved;
+        if (walkthrough.unavailable.contains(GuideDataSection.tasks)) {
+          _errorMessage = SavedDataNotice.cacheReadFailed;
+          _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+        }
+        final selected = _allTasks.where((task) => task.id == walkthrough.selectedJob?['id']);
+        if (selected.isNotEmpty) {
+          _currentTabIndex = _tabOrder.indexOf(_displayCategory(selected.first));
+          if (_currentTabIndex < 0) _currentTabIndex = TasksScreen.tabPending;
+        }
+      } catch (_) {
+        _allTasks = [];
+        _submissions = {};
+        _errorMessage = SavedDataNotice.cacheReadFailed;
+        _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+      } finally {
+        _isLoading = false;
+      }
+      return;
+    }
     final requestId = ++_loadRequestId;
     final owner = DBHelper.currentInspectorId;
     setState(() => _taskRefreshPhase = TaskRefreshPhase.checking);
@@ -846,6 +881,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   }
 
   void _openTask(BuildContext context, TaskItem task) async {
+    if (widget.walkthrough != null) return;
     // A callback bound before an account change must not open another
     // inspector's task from this page.
     final current = DBHelper.currentInspectorId;
@@ -870,6 +906,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
   }
   
   void _showFilterBottomSheet() {
+    if (widget.walkthrough != null) return;
     HapticFeedback.lightImpact();
     String? tempDatePreset = _datePreset;
     DateTime? tempStartDate = _customStartDate;
@@ -1322,7 +1359,7 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          GuideTarget(id: 'tasks_header', child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
@@ -1365,9 +1402,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 onRetry: _retryTaskRefresh,
               ),
             ],
-          ),
+          )),
           const SizedBox(height: 14),
-          Row(
+          GuideTarget(id: 'task_search_filters', child: Row(
             children: [
               Expanded(
                 child: Semantics(label: 'Search tasks', child: Container(
@@ -1490,9 +1527,9 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                 ),
               ),
             ],
-          ),
+          )),
           const SizedBox(height: 12),
-          _buildCategoryBar(pendingCount, ongoingCount, completedCount),
+          GuideTarget(id: 'task_categories', child: _buildCategoryBar(pendingCount, ongoingCount, completedCount)),
         ],
       ),
     );
@@ -1651,6 +1688,19 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                               ),
                             ),
                           )
+                        else if (widget.walkthrough?.canShowTaskExample == true)
+                          SliverToBoxAdapter(child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 140),
+                            child: GuideSample(language: widget.walkthrough!.language,
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                                const GuideTarget(id: 'task_subsections', child: _PendingSectionHeader(title: 'Scheduled', count: 0)),
+                                _CompactTaskCard(task: TaskItem(id: '',
+                                name: guideExample.applicant, location: guideExample.location,
+                                parcels: '', status: 'assigned', inspectionNo: guideExample.reference,
+                                isSelfScheduled: true, scheduledDate: '2026-11-04', deadlineDate: '2026-11-10'),
+                                readOnly: true, guideSelected: true, onTapDetail: () {}),
+                              ])),
+                          ))
                         else if (selectedTasks.isEmpty)
                           SliverToBoxAdapter(
                             child: Padding(
@@ -1686,8 +1736,8 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                         else
                           SliverPadding(
                             padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 140),
-                            sliver: SliverList(
-                              delegate: SliverChildBuilderDelegate(
+                            sliver: Builder(builder: (context) {
+                              final rows = SliverChildBuilderDelegate(
                                 (context, index) {
                                   // Phase 3: within the Pending tab only, insert
                                   // "Scheduled" / "Available Anytime" section
@@ -1700,11 +1750,11 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                     var cursor = index;
                                     if (hasScheduledHeader) {
                                       if (cursor == 0) {
-                                        return _PendingSectionHeader(
+                                        return GuideTarget(id: 'task_subsections', child: _PendingSectionHeader(
                                           key: _scheduledSectionKey,
                                           title: 'Scheduled',
                                           count: scheduled.length,
-                                        );
+                                        ));
                                       }
                                       cursor -= 1;
                                       if (cursor < scheduled.length) {
@@ -1714,10 +1764,10 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                     }
                                     if (hasAvailableHeader) {
                                       if (cursor == 0) {
-                                        return _PendingSectionHeader(
+                                        return GuideTarget(id: scheduled.isEmpty ? 'task_subsections' : 'task_available_subsection', child: _PendingSectionHeader(
                                           title: 'Available Anytime',
                                           count: pending.length,
-                                        );
+                                        ));
                                       }
                                       cursor -= 1;
                                       return _buildTaskRow(context, pending[cursor], index);
@@ -1734,8 +1784,15 @@ class _TasksScreenState extends State<TasksScreen> with TickerProviderStateMixin
                                         (scheduled.isNotEmpty ? 1 : 0) +
                                         (pending.isNotEmpty ? 1 : 0)
                                     : selectedTasks.length,
-                              ),
-                            ),
+                              );
+                              if (widget.walkthrough == null) return SliverList(delegate: rows);
+                              // ponytail: mount this passive category's O(n) rows
+                              // so native ensureVisible can reach any selection;
+                              // use indexed scrolling if task volume warrants it.
+                              return SliverToBoxAdapter(child: Column(children: [
+                                for (var i = 0; i < rows.childCount!; i++) rows.builder(context, i)!,
+                              ]));
+                            }),
                           ),
                       ],
                     ),
@@ -1933,18 +1990,22 @@ class _SegmentTab extends StatelessWidget {
 }
 
 class _CompactTaskCard extends StatefulWidget {
+  final bool readOnly, guideSelected;
   final TaskItem task;
   final TaskSubmission? submission;
   final VoidCallback onTapDetail;
   final VoidCallback? onScheduled;
 
-  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled, this.submission});
+  const _CompactTaskCard({super.key, required this.task, required this.onTapDetail, this.onScheduled, this.submission,
+    this.readOnly = false, this.guideSelected = false});
 
   @override
   State<_CompactTaskCard> createState() => _CompactTaskCardState();
 }
 
 class _CompactTaskCardState extends State<_CompactTaskCard> {
+  Widget _target(String id, Widget child) => widget.guideSelected
+      ? GuideTarget(id: id, child: child) : child;
   bool _isExpanded = false;
   String get _displayCategory => widget.submission != null ? 'Completed' : widget.task.category;
   bool get _awaitingAcceptance => widget.submission != null &&
@@ -2416,6 +2477,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   }
 
   Future<void> _launchOrFallback(Uri uri, String value, String label) async {
+    if (widget.readOnly) return;
     try {
       final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!launched) throw Exception('No app handled $label');
@@ -2434,6 +2496,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   }
 
   Future<void> _handleCall() async {
+    if (widget.readOnly) return;
     HapticFeedback.lightImpact();
     final phone = widget.task.applicantPhone;
     if (phone == null || phone.isEmpty) return _missingContact('phone number');
@@ -2441,6 +2504,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   }
 
   Future<void> _handleSMS() async {
+    if (widget.readOnly) return;
     HapticFeedback.lightImpact();
     final phone = widget.task.applicantPhone;
     if (phone == null || phone.isEmpty) return _missingContact('phone number');
@@ -2448,6 +2512,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
   }
 
   Future<void> _handleEmail() async {
+    if (widget.readOnly) return;
     HapticFeedback.lightImpact();
     final email = widget.task.applicantEmail;
     if (email == null || email.isEmpty) return _missingContact('email address');
@@ -2464,6 +2529,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
 
   // Scheduling changes only the Visit; the raw inspection lifecycle survives.
   Future<void> _scheduleTask(BuildContext context) async {
+    if (widget.readOnly) return;
     HapticFeedback.mediumImpact();
 
     final policy = widget.task.presentation;
@@ -2679,13 +2745,6 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
           )),
       ],
     ));
-    final identity = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(widget.task.name, style: InsightTheme.urbanist(16.5, w: FontWeight.w800, c: InsightTheme.ink),
-          maxLines: 2, overflow: TextOverflow.ellipsis),
-      const SizedBox(height: 3),
-      Text(widget.task.inspectionNo,
-          style: InsightTheme.inter(12, w: FontWeight.w600, c: InsightTheme.ink3)),
-    ]);
     final controls = Row(mainAxisSize: MainAxisSize.min, children: [
       FieldInfoButton(
         label: 'About task details for ${widget.task.name}',
@@ -2706,7 +2765,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
       ),
     ]);
 
-    return Container(
+    return _target('guide_task_card', _target('task_card_info', _target('task_notices', Container(
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
         color: isOverdue ? InsightTheme.redTint : InsightTheme.surface,
@@ -2731,19 +2790,8 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    LayoutBuilder(builder: (context, constraints) {
-                      final stacked = constraints.maxWidth < 270 ||
-                          (constraints.maxWidth < 480 && MediaQuery.textScalerOf(context).scale(12) >= 18);
-                      if (stacked) {
-                        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                          Row(children: [avatar, const Spacer(), controls]),
-                          const SizedBox(height: 8), identity,
-                        ]);
-                      }
-                      return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        avatar, const SizedBox(width: 12), Expanded(child: identity), controls,
-                      ]);
-                    }),
+                    TaskCardHeader(name: widget.task.name, reference: widget.task.inspectionNo,
+                      leading: avatar, controls: controls),
                     Padding(padding: const EdgeInsets.only(top: 8), child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -2794,131 +2842,10 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                         // ── Dates Container ──
                         if (taskCategory != 'Completed') ...[
                           const SizedBox(height: 12),
-                          LayoutBuilder(builder: (context, constraints) {
-                            final visit = p.lifecycle == MyTaskLifecycle.scheduled
-                                ? p.visitDay
-                                : null;
-                            final deadline = p.deadlineDay;
-                            final showTwoColumns = visit != null &&
-                                constraints.maxWidth >= 240 &&
-                                MediaQuery.textScalerOf(context).scale(12) < 18;
-
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: InsightTheme.surface2.withValues(alpha: 0.45),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: InsightTheme.line.withValues(alpha: 0.5)),
-                              ),
-                              child: showTwoColumns
-                                  ? Row(
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  const Icon(Icons.calendar_today_outlined, size: 14, color: InsightTheme.ink3),
-                                                  const SizedBox(width: 5),
-                                                  Text('Visit date', style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink3)),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 3),
-                                              Text(
-                                                formatTaskNoticeDate(visit),
-                                                style: InsightTheme.inter(13.5, w: FontWeight.w700, c: InsightTheme.ink),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Container(width: 1, height: 28, color: InsightTheme.line.withValues(alpha: 0.6)),
-                                        const SizedBox(width: 14),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Icon(
-                                                    Icons.outlined_flag,
-                                                    size: 14,
-                                                    color: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
-                                                  ),
-                                                  const SizedBox(width: 5),
-                                                  Text(
-                                                    'PO Deadline',
-                                                    style: InsightTheme.inter(
-                                                      11.5,
-                                                      w: FontWeight.w500,
-                                                      c: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 3),
-                                              Text(
-                                                formatTaskNoticeDate(deadline),
-                                                style: InsightTheme.inter(
-                                                  13.5,
-                                                  w: FontWeight.w800,
-                                                  c: isOverdue ? InsightTheme.red : InsightTheme.ink,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  : Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        if (visit != null) ...[
-                                          Row(
-                                            children: [
-                                              const Icon(Icons.calendar_today_outlined, size: 14, color: InsightTheme.ink3),
-                                              const SizedBox(width: 5),
-                                              Text('Visit date', style: InsightTheme.inter(11.5, w: FontWeight.w500, c: InsightTheme.ink3)),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 3),
-                                          Text(
-                                            formatTaskNoticeDate(visit),
-                                            style: InsightTheme.inter(13.5, w: FontWeight.w700, c: InsightTheme.ink),
-                                          ),
-                                          const SizedBox(height: 8),
-                                        ],
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.outlined_flag,
-                                              size: 14,
-                                              color: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
-                                            ),
-                                            const SizedBox(width: 5),
-                                            Text(
-                                              'PO Deadline',
-                                              style: InsightTheme.inter(
-                                                11.5,
-                                                w: FontWeight.w500,
-                                                c: isOverdue ? InsightTheme.redInk : InsightTheme.ink3,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          formatTaskNoticeDate(deadline),
-                                          style: InsightTheme.inter(
-                                            13.5,
-                                            w: FontWeight.w800,
-                                            c: isOverdue ? InsightTheme.red : InsightTheme.ink,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            );
-                          }),
+                          _target('task_dates', TaskDateFields(
+                            visitDate: p.lifecycle == MyTaskLifecycle.scheduled && p.visitDay != null
+                              ? formatTaskNoticeDate(p.visitDay) : null,
+                            deadline: formatTaskNoticeDate(p.deadlineDay), isOverdue: isOverdue)),
                         ],
                         // Completion dates still use submitted_at, never updated_at.
                         if (widget.task.category == 'Completed' &&
@@ -2932,100 +2859,13 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
                           ]),
                         ],
                         const SizedBox(height: 12),
-                        // ── Status & Step Row ──
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final stepLabel = Text(
-                              'STEP $stepValue/${InspectionProgress.totalSteps}',
-                              textAlign: TextAlign.end,
-                              style: InsightTheme.inter(11.5, w: FontWeight.w700, c: InsightTheme.ink3, ls: 0.5),
-                            );
-                            if (taskCategory == 'Completed') {
-                              return Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Expanded(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: statusColor.withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        TaskSubmission.badgeOrUnverified(
-                                          widget.submission,
-                                          canonicalCompleted: widget.task.category == 'Completed',
-                                        ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: InsightTheme.inter(12, w: FontWeight.w700, c: statusColor),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  stepLabel,
-                                ],
-                              );
-                            }
-                            return Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                            if (showInProgress || taskCategory == 'Ongoing')
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: statusColor,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    showInProgress ? 'In Progress' : 'Ongoing',
-                                    style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.ink),
-                                  ),
-                                ],
-                              )
-                            else if (widget.task.category == 'Completed' && widget.task.reworkStartedAt != null)
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: const BoxDecoration(
-                                      color: InsightTheme.orangeInk,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Modified',
-                                    style: InsightTheme.inter(13, w: FontWeight.w700, c: InsightTheme.orangeInk),
-                                  ),
-                                ],
-                              )
-                            else
-                              const SizedBox.shrink(),
-                            stepLabel,
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            value: InspectionProgress.totalSteps == 0 ? 0 : stepValue / InspectionProgress.totalSteps,
-                            minHeight: 4.5,
-                            backgroundColor: InsightTheme.surface2,
-                            valueColor: AlwaysStoppedAnimation(statusColor),
-                          ),
-                        ),
+                        TaskProgressView(step: stepValue, color: statusColor,
+                          deliveryBadge: taskCategory == 'Completed',
+                          statusLabel: taskCategory == 'Completed'
+                            ? TaskSubmission.badgeOrUnverified(widget.submission,
+                                canonicalCompleted: widget.task.category == 'Completed')
+                            : showInProgress || taskCategory == 'Ongoing'
+                              ? (showInProgress ? 'In Progress' : 'Ongoing') : null),
                       ],
                     )),
                   ]),
@@ -3168,7 +3008,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> {
           ],
         ),
       ),
-    );
+    ))));
   }
 }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/insight_theme.dart';
 import '../../tasks/screens/tasks_screen.dart';
+import '../../interactive_guide/guide_targets.dart';
 
 String formatPlanningReviewDate(String raw) {
   final date=DateTime.tryParse(raw)?.toLocal();
@@ -32,7 +33,7 @@ class RoundContextCard extends StatelessWidget {
     // The round number on its own line; "Reinspection" is the kind line below
     // it. Never compose them into one label here.
     final round = task.inspectionRoundNumber;
-    return Container(
+    return GuideTarget(id: 'overview_header', child: Container(
       decoration: BoxDecoration(
         color: InsightTheme.surface,
         borderRadius: BorderRadius.circular(16),
@@ -96,7 +97,7 @@ class RoundContextCard extends StatelessWidget {
               style: InsightTheme.jetBrains(11, c: InsightTheme.ink3)),
         ],
       ),
-    );
+    ));
   }
 }
 

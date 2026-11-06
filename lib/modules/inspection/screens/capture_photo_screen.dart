@@ -28,10 +28,14 @@ import '../services/photo_source_resolver.dart';
 import '../services/pending_capture_store.dart';
 import '../widgets/inspection_step_header.dart';
 import '../../../qa/demo_fixtures.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_targets.dart';
+import '../../interactive_guide/guide_examples.dart';
 
 class CapturePhotoScreen extends StatefulWidget {
   final TaskItem task;
-  const CapturePhotoScreen({super.key, required this.task});
+  final GuideReadOnlyData? walkthrough;
+  const CapturePhotoScreen({super.key, required this.task, this.walkthrough});
 
   /// Thumbnail decode ceiling. The grid can hold every accepted photo, so
   /// decoding each one at full resolution would exhaust memory on a large
@@ -46,6 +50,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   late final InspectionProvider _provider;
   late final String? _inspectorId;
   bool get _sameInspection =>
+      widget.walkthrough == null &&
       mounted &&
       _inspectorId != null &&
       DBHelper.currentInspectorId == _inspectorId &&
@@ -54,7 +59,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
           widget.task.inspectionRoundNumber;
   int get _round => widget.task.inspectionRoundNumber ?? 0;
   List<Map<String, dynamic>> get _capturedPhotos =>
-      _sameInspection ? _provider.capturedPhotos : [];
+      widget.walkthrough?.photos ?? (_sameInspection ? _provider.capturedPhotos : []);
   bool _isCameraMode = false;
   bool _demoEvidence = false;
 
@@ -78,6 +83,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
     super.initState();
     _provider = context.read<InspectionProvider>();
     _inspectorId = DBHelper.currentInspectorId;
+    if (widget.walkthrough != null) return;
     _initCamera();
     _fetchLocation();
     unawaited(_cleanAbandonedCaptures());
@@ -87,6 +93,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   /// Bounded to this owner/job/round; never touches accepted, queued, other
   /// round, other owner or unprovable files.
   Future<void> _cleanAbandonedCaptures() async {
+    if (widget.walkthrough != null) return;
     if (_inspectorId == null || !_sameInspection) return;
     try {
       await PendingCaptureStore.cleanupAbandoned(
@@ -101,6 +108,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _initCamera() async {
+    if (widget.walkthrough != null) return;
     try {
       await DemoFixtures.instance.cameraEntry(
         jobId: widget.task.id,
@@ -121,6 +129,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _initPhysicalCamera() async {
+    if (widget.walkthrough != null) return;
     try {
       final cameras = await availableCameras();
       final backCamera = cameras.firstWhere(
@@ -181,6 +190,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _fetchLocation() async {
+    if (widget.walkthrough != null) return;
     try {
       final position = await LocationService.getCurrentLocation(
         timeout: const Duration(seconds: 10),
@@ -241,6 +251,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _capturePhoto() async {
+    if (widget.walkthrough != null) return;
     if (_demoEvidence) {
       await _prepareSyntheticEvidence();
       return;
@@ -306,6 +317,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   void _discardPendingCapture() {
+    if (widget.walkthrough != null) return;
     if (_isSavingPhoto || _isCapturing) return;
     final path = _capturedPhotoPath;
     _capturedPhotoPath = null;
@@ -342,6 +354,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _enterCamera() async {
+    if (widget.walkthrough != null) return;
     if (!_sameInspection || _isCapturing || _isSavingPhoto) return;
     try {
       await DemoFixtures.instance.cameraEntry(
@@ -367,6 +380,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   /// Uses the same staging, acceptance, list and validation path as a camera
   /// capture, but bytes are generated locally. No picker or physical camera.
   Future<void> _prepareSyntheticEvidence() async {
+    if (widget.walkthrough != null) return;
     if (!_sameInspection || _isCapturing || _isSavingPhoto) return;
     setState(() => _isCapturing = true);
     try {
@@ -405,6 +419,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   void _confirmRemovePhoto(int index) {
+    if (widget.walkthrough != null) return;
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -433,6 +448,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _removePhoto(int index) async {
+    if (widget.walkthrough != null) return;
     if (index < 0 || index >= _capturedPhotos.length) return;
     final removed = await context.read<InspectionProvider>().removePhoto(index);
     if (!mounted) return;
@@ -451,6 +467,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _savePhotoAndReturnToGrid() async {
+    if (widget.walkthrough != null) return;
     if (_isSavingPhoto || !_sameInspection) return;
     // No fixed application photo cap: capacity is whatever the device can
     // store. Storage failures below are reported per capture and never
@@ -547,6 +564,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
   }
 
   Future<void> _finishAndContinue() async {
+    if (widget.walkthrough != null) return;
     if (_isSaving || _isSavingPhoto || !_sameInspection) return;
     final realCount = _capturedPhotos
         .where((photo) => !isLocationReferencePhoto(photo))
@@ -623,11 +641,13 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
         if (!isLocationReferencePhoto(_capturedPhotos[i])) i,
     ];
     final realPhotoCount = sitePhotoIndices.length;
+    final unknownPhotos = widget.walkthrough?.inspectionUnavailable == true && _capturedPhotos.isEmpty;
     return PopScope(
       canPop:
           !context.read<InspectionProvider>().isReworkMode &&
           InspectionProgress.instance.currentStep > 1,
       onPopInvokedWithResult: (didPop, _) {
+        if (widget.walkthrough != null) return;
         if (_isSaving) return;
         if (didPop) {
           context.read<InspectionProvider>().saveStepPhotos();
@@ -649,7 +669,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
             subtitle: widget.task.location,
             stepNumber: 3,
             stepSubtitle: 'CAPTURE EVIDENCE',
-            onBack: () => handleInspectionExit(
+            onBack: () => widget.walkthrough != null ? null : handleInspectionExit(
               context,
               onSaveProgress: () =>
                   context.read<InspectionProvider>().saveStepPhotos(),
@@ -658,7 +678,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
           ),
           action: Row(
             children: [
-              if (context.watch<InspectionProvider>().isReworkMode) ...[
+              if (widget.walkthrough == null && context.watch<InspectionProvider>().isReworkMode) ...[
                 Expanded(
                   child: FieldPrimaryButton(
                     label: 'Save',
@@ -702,12 +722,19 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
             ],
           ),
           children: [
+            if (unknownPhotos)
+              Text(widget.walkthrough!.inspectionUnavailableLabel)
+            else if (widget.walkthrough != null && _capturedPhotos.isEmpty &&
+                !widget.walkthrough!.unavailable.contains(GuideDataSection.inspection))
+              GuideSample(language: widget.walkthrough!.language,
+                child: const Text('Example evidence area — no camera is running.')),
+            GuideTarget(id: 'step_3', child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             FieldSectionHeading(
               title: 'Site photos',
               hint: _demoEvidence
                   ? 'DEMO · SYNTHETIC DATA. Generated model evidence only; physical camera and gallery are disabled.'
                   : 'Attach at least one genuine site photo to continue. Add as many site photos as this device can store.',
-              trailing: Text(
+              trailing: unknownPhotos ? null : Text(
                 '$realPhotoCount ${realPhotoCount == 1 ? 'site photo' : 'site photos'}',
                 style: InsightTheme.inter(
                   13,
@@ -752,6 +779,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                       ? 'Demo evidence ${index + 1}'
                       : 'Photo ${index + 1}';
                   return _PhotoCell(
+                    readOnly: widget.walkthrough != null,
                     photoPath: sitePaths[index],
                     allPhotoPaths: sitePaths,
                     photoDetails: siteDetails,
@@ -763,7 +791,9 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
                 }
                 return _AddPhotoCell(onTap: _enterCamera);
               },
-            ),          ],
+            ),
+            ])),
+          ],
         ),
       ),
     );
@@ -1140,6 +1170,7 @@ class _CapturePhotoScreenState extends State<CapturePhotoScreen> {
 }
 
 class _PhotoCell extends StatelessWidget {
+  final bool readOnly;
   final String photoPath;
   final List<String> allPhotoPaths;
   final List<Map<String, dynamic>> photoDetails;
@@ -1155,6 +1186,7 @@ class _PhotoCell extends StatelessWidget {
     required this.isLocationReference,
     required this.label,
     required this.onRemove,
+    this.readOnly = false,
   });
   @override
   Widget build(BuildContext context) {
@@ -1168,7 +1200,7 @@ class _PhotoCell extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: InsightTheme.roundedMd,
-          onTap: () => openFullscreenPhotoViewer(
+          onTap: readOnly ? null : () => openFullscreenPhotoViewer(
             context,
             allPhotoPaths,
             index,
@@ -1211,6 +1243,7 @@ class _PhotoCell extends StatelessWidget {
                                   CapturePhotoScreen.thumbnailCacheWidth,
                                 );
                         return AdaptivePhotoImage(
+                          allowNetwork: !readOnly,
                           path: photoPath,
                           cacheWidth: width,
                         );

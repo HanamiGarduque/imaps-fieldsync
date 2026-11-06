@@ -16,6 +16,7 @@ bool isRemotePhotoPath(String path) =>
 class AdaptivePhotoImage extends StatefulWidget {
   final String path;
   final BoxFit fit;
+  final bool allowNetwork;
   final String? fallbackPath;
   final PhotoSourceResolver? resolver;
   final Widget Function(BuildContext context)? errorBuilder;
@@ -29,6 +30,7 @@ class AdaptivePhotoImage extends StatefulWidget {
   const AdaptivePhotoImage({
     super.key,
     required this.path,
+    this.allowNetwork = true,
     this.fit = BoxFit.cover,
     this.fallbackPath,
     this.resolver,
@@ -51,6 +53,11 @@ class _AdaptivePhotoImageState extends State<AdaptivePhotoImage> {
           File(widget.path).existsSync()) {
         return ResolvedPhoto.local(widget.path);
       }
+      if (!widget.allowNetwork) {
+        final fallback = widget.fallbackPath;
+        return fallback != null && PhotoSourceResolver.classify(fallback) == PhotoSourceKind.localFile && File(fallback).existsSync()
+            ? ResolvedPhoto.local(fallback) : null;
+      }
       return await (widget.resolver ?? inspectionPhotoResolver()).resolve(
         widget.path,
         fallback: widget.fallbackPath,
@@ -71,7 +78,7 @@ class _AdaptivePhotoImageState extends State<AdaptivePhotoImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.path != widget.path ||
         oldWidget.fallbackPath != widget.fallbackPath ||
-        oldWidget.resolver != widget.resolver) {
+        oldWidget.resolver != widget.resolver || oldWidget.allowNetwork != widget.allowNetwork) {
       _photo = _resolve();
     }
   }

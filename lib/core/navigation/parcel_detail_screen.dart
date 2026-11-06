@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -17,6 +18,10 @@ import '../../modules/inspection/services/photo_source_resolver.dart';
 import '../../modules/inspection/services/photo_evidence_presentation.dart';
 import '../../modules/inspection/screens/completed_inspection_detail_screen.dart';
 import '../../modules/inspection/widgets/inspection_round_widgets.dart';
+import '../../modules/inspection/widgets/inspection_protocol_view.dart';
+import '../../modules/interactive_guide/guide_read_only_data.dart';
+import '../../modules/interactive_guide/guide_examples.dart';
+import '../../modules/interactive_guide/guide_targets.dart';
 
 import '../theme/insight_theme.dart';
 import '../widgets/field_form_widgets.dart';
@@ -26,12 +31,13 @@ import '../services/sync_outbox_service.dart';
 
 class ParcelDetailScreen extends StatefulWidget {
   final TaskItem task;
+  final GuideReadOnlyData? walkthrough;
   final List<TaskItem> relatedRounds;
 
   // Dashboard supplies the real fetch; Tasks/offline entry uses its cached row.
   final Map<String, dynamic>? fetchedJob;
 
-  const ParcelDetailScreen({super.key, required this.task, this.fetchedJob, this.relatedRounds = const []});
+  const ParcelDetailScreen({super.key, required this.task, this.fetchedJob, this.relatedRounds = const [], this.walkthrough});
 
   @override
   State<ParcelDetailScreen> createState() => _ParcelDetailScreenState();
@@ -44,6 +50,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   Future<void>? _draftLoad;
 
   Future<void> _loadDraft() async {
+    if (widget.walkthrough != null) return;
     if (task.lifecycleCategory == TaskLifecycleCategory.completed) return;
     final provider = context.read<InspectionProvider>();
     if (provider.activeTask?.id != task.id) {
@@ -54,6 +61,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.walkthrough != null) return;
     if (task.lifecycleCategory == TaskLifecycleCategory.completed) return;
     progress.ensureActiveInspection(
       task.id,
@@ -96,9 +104,9 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     // previously-uploaded remote photos. Display-only change — the Phase 8
     // persistence/outbox architecture is untouched.
     final provider = context.watch<InspectionProvider>();
-    final bool sessionActive =
+    final bool sessionActive = widget.walkthrough == null &&
         provider.activeTask?.id == task.id && provider.capturedPhotos.isNotEmpty;
-    final details = sessionActive
+    final details = widget.walkthrough?.photos.isNotEmpty == true ? widget.walkthrough!.photos : sessionActive
         ? provider.capturedPhotos.where((p) => (p['photoPath'] as String?)?.isNotEmpty == true).toList()
         : PhotoSourceResolver.evidence(task.photoDetails, task.photoPaths);
     final paths = details.map((p) => p['photoPath'] as String).toList();
@@ -132,7 +140,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                     child: SizedBox(
                       width: 90,
                       height: 90,
-                      child: AdaptivePhotoImage(path: displayPaths[i]),
+                      child: AdaptivePhotoImage(path: displayPaths[i], allowNetwork: widget.walkthrough == null),
                     ),
                   ),
                 ),
@@ -182,6 +190,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
     int startIndex,
     List<Map<String, dynamic>>? details,
   ) {
+    if (widget.walkthrough != null) return;
     openFullscreenPhotoViewer(
       context,
       photoPaths,
@@ -192,6 +201,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   }
 
   Future<void> _goToStep(BuildContext context, int step, WidgetBuilder builder) async {
+    if (widget.walkthrough != null) return;
     if (task.lifecycleCategory == TaskLifecycleCategory.completed) return;
     if (_enteringStep) return;
     if (progress.isLocked(step)) {
@@ -255,19 +265,46 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
   }
 
   void _handleExitRework() {
+    if (widget.walkthrough != null) return;
     context.read<InspectionProvider>().exitReworkMode();
     Navigator.pop(context);
+  }
+
+  Set<int> get _walkthroughCompleted => {
+    if (task.currentStep >= 1 || task.stepTimestamps.containsKey(1)) 1,
+    if (task.currentStep >= 2 || task.stepTimestamps.containsKey(2)) 2,
+    ...InspectionProgress.deriveCompletedSteps(task.currentStep, task.stepTimestamps),
+    if (task.currentStep >= 6 || task.stepTimestamps.containsKey(6)) 6,
+  };
+
+  InspectionProtocolStep _protocolStep({required int index, required String title,
+    required String description, required IconData icon, required VoidCallback onTap}) {
+    if (widget.walkthrough != null) {
+      final saved = task.stepTimestamps[index];
+      final completed = _walkthroughCompleted;
+      final done = completed.contains(index);
+      final current = [1, 2, 3, 4, 5, 6].firstWhere((step) => !completed.contains(step), orElse: () => 6);
+      final locked = index <= 2 ? !done && index > current
+        : index <= 5 ? !completed.contains(2)
+        : ![3, 4, 5].every(completed.contains);
+      return InspectionProtocolStep(index: index, title: title, description: description,
+        icon: icon, onTap: onTap, done: done, current: !done && index == current, locked: locked, savedAt: saved);
+    }
+    final done = progress.isDone(index) || progress.isComplete;
+    final current = progress.isCurrent(index) && !progress.isComplete;
+    return InspectionProtocolStep(index: index, title: title, description: description,
+      icon: icon, onTap: onTap, done: done, current: current, locked: !done && !current,
+      savedAt: progress.completedAtFor(index) ?? task.stepTimestamps[index]);
   }
 
   @override
   Widget build(BuildContext context) {
     if (task.lifecycleCategory == TaskLifecycleCategory.completed) {
-      return CompletedInspectionDetailScreen(task: task, historicalReadOnly: true);
+      return CompletedInspectionDetailScreen(task: task, historicalReadOnly: true, walkthrough: widget.walkthrough);
     }
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    final currentStep = progress.currentStep;
 
-    final isReworkMode = context.watch<InspectionProvider>().isReworkMode;
+    final isReworkMode = widget.walkthrough == null && context.watch<InspectionProvider>().isReworkMode;
 
     return SensitiveScreen(child: Scaffold(
       backgroundColor: InsightTheme.bg,
@@ -317,7 +354,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Row(
                     children: [
-                      FieldBackButton(onPressed: () => Navigator.pop(context)),
+                      FieldBackButton(onPressed: () { if (widget.walkthrough == null) Navigator.pop(context); }),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -331,117 +368,44 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
 
                 Expanded(
                   child: ListView(
+                    // ponytail: 12k passive document cache; add explicit section
+                    // navigation if it grows. Infinite caches break semantics.
+                    scrollCacheExtent: widget.walkthrough == null ? null : const ScrollCacheExtent.pixels(12000),
                     padding: const EdgeInsets.fromLTRB(12, 4, 12, 40),
                     physics: const BouncingScrollPhysics(),
                     children: [
-                      RoundContextCard(task: task),
+                      widget.walkthrough?.canShowTaskExample == true
+                        ? GuideSample(language: widget.walkthrough!.language, child: RoundContextCard(task: task))
+                        : RoundContextCard(task: task),
                       const SizedBox(height: 12),
                       if (task.isReinspection) ...[
                         ReinspectionContextCard(task: task, rounds: widget.relatedRounds),
                         const SizedBox(height: 12),
                       ],
                       
-                      _GlassCard(
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('INSPECTION PROTOCOL', style: InsightTheme.jetBrains(10, w: FontWeight.w700, c: InsightTheme.ink3, ls: 1.0)),
-                              const SizedBox(height: 12),
-                              
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Container(
-                                      height: 4,
-                                      decoration: BoxDecoration(
-                                        color: InsightTheme.surface2,
-                                        borderRadius: BorderRadius.circular(2),
-                                      ),
-                                      child: FractionallySizedBox(
-                                        alignment: Alignment.centerLeft,
-                                        widthFactor: progress.isComplete ? 1.0 : progress.completedStepCount / InspectionProgress.totalSteps,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: InsightTheme.blue1,
-                                            borderRadius: BorderRadius.circular(2),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    progress.isComplete ? '100%' : '${(progress.completedStepCount / InspectionProgress.totalSteps * 100).toInt()}%',
-                                    style: InsightTheme.jetBrains(11, w: FontWeight.w700, c: InsightTheme.ink),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-
-                              if (progress.completedStepCount >= 2) ...[
-                                Text(
-                                  'Steps 3–5 are independent: open them in any '
-                                  'order and come back to the rest. Each step '
-                                  'keeps its own saved status.',
-                                  style: InsightTheme.inter(11, c: InsightTheme.ink3),
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-
-                              _StepsTimelineCard(
-                                currentStep: currentStep,
-                                isComplete: progress.isComplete,
-                                // Each step shows its own real status: the
-                                // independent steps 3-5 are never shown as
-                                // done just because a later step was reached.
-                                isStepDone: progress.isDone,
-                                isStepCurrent: progress.isCurrent,
-                                isStepLocked: progress.isLocked,
-                                // F1 fix: live times recorded this session for
-                                // the active task, merged over the persisted
-                                // step_timestamps fetched with the task.
-                                savedTimes: {
-                                  ...task.stepTimestamps,
-                                  ...InspectionProgress.instance.stepCompletedAt,
-                                },
-                                steps: [
-                                  _StepInfo(
-                                    index: 1, title: 'Site Verification', icon: Icons.map_rounded,
-                                    description: 'Pinpoint the exact application site.',
-                                    onTap: () => _goToStep(context, 1, (_) => SiteMapScreen(task: task)),
-                                  ),
-                                  _StepInfo(
-                                    index: 2, title: 'GPS Verification', icon: Icons.gps_fixed_rounded,
-                                    description: 'Confirm live location matches target.',
-                                    onTap: () => _goToStep(context, 2, (_) => GpsVerificationScreen(task: task)),
-                                  ),
-                                  _StepInfo(
-                                    index: 3, title: 'Photographic Evidence', icon: Icons.photo_camera_rounded,
-                                    description: 'Capture comprehensive site photos.',
-                                    onTap: () => _goToStep(context, 3, (_) => CapturePhotoScreen(task: task)),
-                                  ),
-                                  _StepInfo(
-                                    index: 4, title: 'Zoning Checklist', icon: Icons.checklist_rounded,
-                                    description: 'Evaluate standard compliance metrics.',
-                                    onTap: () => _goToStep(context, 4, (_) => InspectionChecklistScreen(task: task)),
-                                  ),
-                                  _StepInfo(
-                                    index: 5, title: 'Field Findings', icon: Icons.fact_check_rounded,
-                                    description: 'Log specific operational observations.',
-                                    onTap: () => _goToStep(context, 5, (_) => FieldFindingsScreen(task: task)),
-                                  ),
-                                  _StepInfo(
-                                    index: 6, title: 'Review & Submit', icon: Icons.cloud_upload_rounded,
-                                    description: 'Finalize and push the active report.',
-                                    onTap: () => _goToStep(context, 6, (_) => ReviewSubmitScreen(task: task)),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
+                      InspectionProtocolView(
+                        completedCount: widget.walkthrough == null ? progress.completedStepCount : _walkthroughCompleted.length,
+                        isComplete: widget.walkthrough == null ? progress.isComplete : _walkthroughCompleted.length == 6,
+                        steps: [
+                          _protocolStep(index: 1, title: 'Site Verification', icon: Icons.map_rounded,
+                            description: 'Pinpoint the exact application site.',
+                            onTap: () => _goToStep(context, 1, (_) => SiteMapScreen(task: task))),
+                          _protocolStep(index: 2, title: 'GPS Verification', icon: Icons.gps_fixed_rounded,
+                            description: 'Confirm live location matches target.',
+                            onTap: () => _goToStep(context, 2, (_) => GpsVerificationScreen(task: task))),
+                          _protocolStep(index: 3, title: 'Photographic Evidence', icon: Icons.photo_camera_rounded,
+                            description: 'Capture comprehensive site photos.',
+                            onTap: () => _goToStep(context, 3, (_) => CapturePhotoScreen(task: task))),
+                          _protocolStep(index: 4, title: 'Zoning Checklist', icon: Icons.checklist_rounded,
+                            description: 'Evaluate standard compliance metrics.',
+                            onTap: () => _goToStep(context, 4, (_) => InspectionChecklistScreen(task: task))),
+                          _protocolStep(index: 5, title: 'Field Findings', icon: Icons.fact_check_rounded,
+                            description: 'Log specific operational observations.',
+                            onTap: () => _goToStep(context, 5, (_) => FieldFindingsScreen(task: task))),
+                          _protocolStep(index: 6, title: 'Review & Submit', icon: Icons.cloud_upload_rounded,
+                            description: 'Finalize and push the active report.',
+                            onTap: () => _goToStep(context, 6, (_) => ReviewSubmitScreen(task: task))),
+                        ],
                       ),
 
                       if (task.assignmentInstructions?.trim().isNotEmpty == true ||
@@ -477,13 +441,14 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
 
                       const SizedBox(height: 16),
 
-                      _GlassCard(
+                      GuideTarget(id: 'evidence_details', child: _GlassCard(
                         child: _photoStepSection(task),
-                      ),
+                      )),
 
                       const SizedBox(height: 16),
 
-                      _GlassCard(
+                      Builder(builder: (context) {
+                        final application = _GlassCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -497,7 +462,7 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                                     child: const Icon(Icons.description_outlined, color: InsightTheme.ink2, size: 16),
                                   ),
                                   const SizedBox(width: 10),
-                                  Text('Application Details', style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.ink)),
+                                  Expanded(child: Text('Application Details', style: InsightTheme.poppins(13, w: FontWeight.w700, c: InsightTheme.ink))),
                                 ],
                               ),
                             ),
@@ -516,7 +481,10 @@ class _ParcelDetailScreenState extends State<ParcelDetailScreen> {
                             ),
                           ],
                         ),
-                      ),
+                        );
+                        return widget.walkthrough?.canShowTaskExample == true
+                          ? GuideSample(language: widget.walkthrough!.language, child: application) : application;
+                      }),
                     ],
                   ),
                 ),
@@ -595,216 +563,6 @@ class _GlassCard extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: child,
-      ),
-    );
-  }
-}
-
-class _StepInfo {
-  final int index;
-  final String title;
-  final String description;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _StepInfo({
-    required this.index, 
-    required this.title, 
-    required this.description, 
-    required this.icon, 
-    required this.onTap
-  });
-}
-
-class _StepsTimelineCard extends StatelessWidget {
-  final List<_StepInfo> steps;
-  final int currentStep;
-  final bool isComplete;
-  // Per-step truth from InspectionProgress: the independent steps 3-5 each
-  // have their own completion, so a later step never marks an earlier one
-  // as done.
-  final bool Function(int step) isStepDone;
-  final bool Function(int step) isStepCurrent;
-  final bool Function(int step) isStepLocked;
-  // F1 fix: real per-step saved times (step number -> ISO8601). Resolved
-  // by the parent: live InspectionProgress entries for the active task,
-  // falling back to the task's persisted step_timestamps.
-  final Map<int, String> savedTimes;
-
-  const _StepsTimelineCard({
-    required this.steps, required this.currentStep, this.isComplete = false,
-    required this.isStepDone, required this.isStepCurrent, required this.isStepLocked,
-    this.savedTimes = const <int, String>{},
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: List.generate(steps.length, (i) {
-        final step = steps[i];
-        final isLast = i == steps.length - 1;
-        final isCurrent = isStepCurrent(step.index) && !isComplete;
-        final isDone = isStepDone(step.index) || isComplete;
-        final isLocked = !isDone && !isCurrent;
-        return _StepRow(
-          step: step,
-          isLast: isLast,
-          isCurrent: isCurrent,
-          isDone: isDone,
-          isLocked: isLocked,
-          savedAt: savedTimes[step.index],
-        );
-      }),
-    );
-  }
-}
-
-class _StepRow extends StatelessWidget {
-  final _StepInfo step;
-  final bool isLast;
-  final bool isCurrent;
-  final bool isDone;
-  final bool isLocked;
-  // F1 fix: real saved time for this step (ISO8601), resolved by the
-  // parent from live InspectionProgress data or the task's stored
-  // step_timestamps. Replaces the old simulated "Verified on" text.
-  final String? savedAt;
-
-  const _StepRow({
-    required this.step, required this.isLast, required this.isCurrent,
-    required this.isDone, required this.isLocked, this.savedAt,
-  });
-
-  /// Formats a stored UTC ISO timestamp as e.g. "Aug 25, 3:45 PM".
-  String _formatSavedAt(String iso) {
-    try {
-      final dt = DateTime.parse(iso).toLocal();
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      final month = months[dt.month - 1];
-      final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
-      final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-      final minute = dt.minute.toString().padLeft(2, '0');
-      return '$month ${dt.day}, $hour:$minute $amPm';
-    } catch (_) {
-      return iso;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final markerSize = MediaQuery.textScalerOf(context).scale(12) * 2 + 8;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.only(bottom: 6),
-      constraints: const BoxConstraints(minHeight: 48),
-      decoration: BoxDecoration(
-        color: isCurrent ? InsightTheme.surface2 : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () {
-            HapticFeedback.selectionClick();
-            step.onTap();
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Column(
-                    children: [
-                      Container(
-                        width: markerSize, height: markerSize,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isDone ? InsightTheme.greenTint : (isCurrent ? InsightTheme.blue1 : InsightTheme.surface2),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          step.index.toString().padLeft(2, '0'),
-                          style: InsightTheme.inter(12, w: FontWeight.w700,
-                              c: isDone ? InsightTheme.greenInk : (isCurrent ? Colors.white : InsightTheme.ink3)),
-                        ),
-                      ),
-                      if (!isLast)
-                        Expanded(
-                          child: Container(
-                            width: 2,
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            color: isDone ? InsightTheme.green.withValues(alpha: 0.35) : InsightTheme.line,
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(width: 12),
-                  
-                  Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(bottom: isLast ? 0 : 4, top: 2),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                  step.title, 
-                                  style: InsightTheme.poppins(13.5, w: FontWeight.w600, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink),
-                              ),
-                              if (isLocked)
-                                const Icon(Icons.lock_outline_rounded, size: 14, color: InsightTheme.ink3),
-                              if (isCurrent)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                  decoration: BoxDecoration(
-                                    color: InsightTheme.blue1, 
-                                    borderRadius: BorderRadius.circular(10),
-                                    boxShadow: const [
-                                      BoxShadow(color: Color(0x283563FF), blurRadius: 6, offset: Offset(0, 2))
-                                    ],
-                                  ),
-                                  child: Text('Start Task', style: InsightTheme.inter(10.5, w: FontWeight.w700, c: Colors.white)),
-                                )
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          if (isDone)
-                             Row(
-                               children: [
-                                 const Icon(Icons.verified_rounded, size: 12, color: InsightTheme.greenInk),
-                                 const SizedBox(width: 4),
-                                 Expanded(
-                                   child: Text(
-                                     // F1 fix: real per-task, per-step saved
-                                     // time (replaces the old simulated text).
-                                     savedAt != null
-                                         ? 'Saved on ${_formatSavedAt(savedAt!)}'
-                                         : 'Completed',
-                                     style: InsightTheme.inter(11, w: FontWeight.w500, c: InsightTheme.greenInk),
-                                   ),
-                                 ),
-                               ],
-                             )
-                          else
-                            Text(
-                              step.description,
-                              style: InsightTheme.inter(11, w: FontWeight.w400, c: isLocked ? InsightTheme.ink3 : InsightTheme.ink2),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

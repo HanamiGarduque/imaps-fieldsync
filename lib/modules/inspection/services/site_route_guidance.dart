@@ -2,7 +2,11 @@ import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
 
+import '../inspection_constants.dart';
 import 'spatial_offline_service.dart';
+
+export '../inspection_constants.dart'
+    show kReliableFixMaxAccuracyMeters, kReliableFixMaxAge, kReliableFixFutureSkew;
 
 /// Step 1 guidance only. None of these decisions authorizes an inspection step.
 bool validSiteMapPoint(LatLng point) =>
@@ -23,13 +27,6 @@ double sitePointDistance(LatLng a, LatLng b) =>
       b.latitude,
       b.longitude,
     );
-
-/// Shared reliability gates for a usable GPS fix: at most 25 m of reported
-/// accuracy, no older than 15 s, and no more than 2 s into the future.
-/// Step 1 guidance and Step 2 verification both read these values.
-const double kReliableFixMaxAccuracyMeters = 25;
-const Duration kReliableFixMaxAge = Duration(seconds: 15);
-const Duration kReliableFixFutureSkew = Duration(seconds: 2);
 
 bool reliableSiteFix({
   required double accuracyMeters,

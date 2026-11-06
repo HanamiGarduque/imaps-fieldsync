@@ -8,9 +8,31 @@ import '../models/faq_item.dart';
 import '../models/faq_data.dart';
 import '../widgets/faq_widgets.dart';
 import 'reports_support_screen.dart';
+import '../../interactive_guide/guide_host.dart';
+import '../../interactive_guide/guide_preferences.dart';
+import '../../interactive_guide/guide_script.dart';
+import '../../interactive_guide/screens/interactive_guide_screen.dart';
+
+/// Public Help UI only; no account or business data is restored from this.
+class HelpFaqSnapshot {
+  const HelpFaqSnapshot(this.isTagalog, this.search, this.category, this.scrollOffset);
+  final bool isTagalog;
+  final String search;
+  final int? category;
+  final double scrollOffset;
+}
+
+class HelpGuideReplay extends GuideReplayRequest {
+  const HelpGuideReplay(super.language, this.origin);
+  final HelpFaqSnapshot origin;
+}
 
 class HelpFaqScreen extends StatefulWidget {
-  const HelpFaqScreen({super.key});
+  const HelpFaqScreen({super.key, this.origin, this.reopenGuide = false,
+    this.initialGuideLanguage = GuideLanguage.english, this.hasPreviousOffer = false});
+  final HelpFaqSnapshot? origin;
+  final bool reopenGuide, hasPreviousOffer;
+  final GuideLanguage initialGuideLanguage;
 
   @override
   State<HelpFaqScreen> createState() => _HelpFaqScreenState();
@@ -21,10 +43,38 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   int? _selectedCategoryIndex;
+  late final ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    final origin = widget.origin;
+    _isTagalog = origin?.isTagalog ?? false;
+    _searchController.text = origin?.search ?? '';
+    _searchQuery = _searchController.text.trim().toLowerCase();
+    _selectedCategoryIndex = origin?.category;
+    _scrollController = ScrollController(initialScrollOffset: origin?.scrollOffset ?? 0);
+    if (widget.reopenGuide) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openGuide();
+      });
+    }
+  }
+
+  Future<void> _openGuide() async {
+    final origin = HelpFaqSnapshot(_isTagalog, _searchController.text,
+      _selectedCategoryIndex, _scrollController.hasClients ? _scrollController.offset : 0);
+    final request = await Navigator.of(context).push<GuideReplayRequest>(MaterialPageRoute(
+      builder: (_) => InteractiveGuideScreen(initialLanguage: widget.initialGuideLanguage,
+        hasPreviousOffer: widget.hasPreviousOffer)));
+    if (!mounted || request == null || !Navigator.of(context).canPop()) return;
+    Navigator.of(context).pop(HelpGuideReplay(request.language, origin));
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -85,6 +135,7 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
                 ),
                 Expanded(
                   child: ListView(
+                    key: const ValueKey('help-faq-list'), controller: _scrollController,
                     padding: const EdgeInsets.only(bottom: 24),
                     children: [
                       SizedBox(
@@ -95,6 +146,13 @@ class _HelpFaqScreenState extends State<HelpFaqScreen> {
                               setState(() => _isTagalog = tagalog),
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      ListTile(key: const ValueKey('interactive-guide-entry'),
+                        leading: const Icon(Icons.fingerprint_rounded, color: InsightTheme.blueInk),
+                        title: Text('FieldSync Interactive Guide', style: InsightTheme.inter(14, w: FontWeight.w600)),
+                        subtitle: Text(GuideLabels(_isTagalog ? GuideLanguage.tagalog : GuideLanguage.english).pageIntroduction,
+                          style: InsightTheme.inter(13)),
+                        trailing: const Icon(Icons.chevron_right_rounded), onTap: _openGuide),
                       const SizedBox(height: 16),
                       _buildSearchBar(),
                       const SizedBox(height: 12),

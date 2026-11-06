@@ -27,6 +27,10 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/offline_banner.dart';
 import '../../../core/widgets/task_sync_indicator.dart';
 import '../widgets/active_assignments_folder_card.dart';
+import '../widgets/home_guide_sections.dart';
+import '../../interactive_guide/guide_targets.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_examples.dart';
 import '../../../core/theme/insight_theme.dart';
 
 /// Whether a task belongs in the dashboard's Active Assignments carousel.
@@ -56,6 +60,7 @@ String? homeDashboardTaskPresentationCategory(TaskItem task) {
 /// ==================================================================
 class HomeDashboardScreen extends StatefulWidget {
   final UserProfile profile;
+  final GuideReadOnlyData? walkthrough;
   // Optional — when this screen is hosted inside MainShellScreen, this is
   // wired to the shell's own tab switcher so "See All" / "More details"
   // land on the Tasks tab WITH the bottom nav bar still visible, instead
@@ -66,11 +71,14 @@ class HomeDashboardScreen extends StatefulWidget {
   // Optional callback — called when profile is updated externally (e.g.
   // from Edit Profile screen) so the shell can refresh shared profile state.
   final ValueChanged<UserProfile>? onProfileUpdated;
+  final ValueChanged<bool>? onGuideReadyChanged;
   const HomeDashboardScreen({
     super.key,
     required this.profile,
+    this.walkthrough,
     this.onNavigateToTab,
     this.onProfileUpdated,
+    this.onGuideReadyChanged,
   });
 
   @override
@@ -104,11 +112,33 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   // rather than issuing a second network/service call.
   List<TaskItem> _allTasks = [];
   Set<String> _deviceCompletedIds = {};
+  bool get _showAssignmentExample => widget.walkthrough != null &&
+      !widget.walkthrough!.unavailable.contains(GuideDataSection.tasks) &&
+      _taskRefreshPhase != TaskRefreshPhase.cacheUnavailable &&
+      _upcomingTasks.isEmpty;
   // Keep real fetched metadata for selected normal entry; display is read-only.
   Map<String, Map<String, dynamic>> _entryJobs = {};
   // Durable saved progress per upcoming card, read from the exact-owner draft.
   Map<String, int> _cardSteps = {};
   bool _isLoadingTasks = true;
+  bool _reportedGuideReady = false, _guideReadinessScheduled = false;
+
+  void _scheduleGuideReadiness() {
+    if (widget.onGuideReadyChanged == null || _guideReadinessScheduled) return;
+    _guideReadinessScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _guideReadinessScheduled = false;
+      if (!mounted) return;
+      final ready = !_isLoadingTasks && _taskRefreshPhase != TaskRefreshPhase.checking &&
+        _tasksOwner == widget.profile.id &&
+        List.generate(4, springFor).every((spring) => spring.status == AnimationStatus.completed);
+      if (ready == _reportedGuideReady) return;
+      _reportedGuideReady = ready;
+      widget.onGuideReadyChanged?.call(ready);
+    });
+  }
+
+  void _onGuideEntranceStatus(AnimationStatus _) => _scheduleGuideReadiness();
 
   /// Only the newest assignments load may write to this screen's state. A
   /// superseded request, or a late answer to one, is discarded instead of
@@ -208,10 +238,17 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
       (_) => _retireIfOwnerChanged(),
       onError: (Object _) => _retireIfOwnerChanged(),
     );
-    SyncOutboxService.drainCompleted.addListener(_refreshSubmissionState);
-    SyncOutboxService.progress.addListener(_refreshSubmissionState);
+    if (widget.walkthrough == null) {
+      SyncOutboxService.drainCompleted.addListener(_refreshSubmissionState);
+      SyncOutboxService.progress.addListener(_refreshSubmissionState);
+    }
     _loadUpcomingTasks();
     _loadUnreadActivityCount();
+    if (widget.onGuideReadyChanged != null) {
+      for (var i = 0; i < 4; i++) {
+        springFor(i).addStatusListener(_onGuideEntranceStatus);
+      }
+    }
   }
 
   /// A real account change invalidates what this mounted page is showing: the
@@ -334,6 +371,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   /// Final intent and receipts refresh from the same owner-scoped SQLite
   /// snapshot as My Tasks; no network request or invented remote completion.
   Future<void> _refreshSubmissionState() async {
+    if (widget.walkthrough != null) return;
     final owner = _tasksOwner;
     final request = _tasksRequestId;
     if (owner == null || owner != DBHelper.currentInspectorId) return;
@@ -394,6 +432,37 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   ///    damaged or unavailable store reaches a recoverable state instead of an
   ///    unhandled future or a stuck spinner, and never deletes the row.
   Future<void> _loadUpcomingTasks() async {
+    final walkthrough = widget.walkthrough;
+    if (walkthrough != null) {
+      try {
+        final snapshot = (jobs: walkthrough.jobs, submissions: walkthrough.submissions);
+        _tasksOwner = walkthrough.ownerId;
+        _allTasks = _snapshotTasks(snapshot);
+        _deviceCompletedIds = _deviceCompletions(snapshot);
+        _upcomingTasks = _upcomingFrom(_allTasks);
+        _taskRefreshPhase = TaskRefreshPhase.saved;
+        if (walkthrough.unavailable.contains(GuideDataSection.tasks)) {
+          _savedDataNotice = SavedDataNotice.cacheReadFailed;
+          _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+        }
+        final selectedId = walkthrough.selectedJob?['id'];
+        if (selectedId is String) {
+          _cardSteps[selectedId] = max(
+            _allTasks.where((task) => task.id == selectedId).first.currentStep,
+            (walkthrough.draft?['current_step'] as num?)?.toInt() ?? 0,
+          ).clamp(0, 6);
+        }
+      } catch (_) {
+        _allTasks = [];
+        _upcomingTasks = [];
+        _deviceCompletedIds = {};
+        _savedDataNotice = SavedDataNotice.cacheReadFailed;
+        _taskRefreshPhase = TaskRefreshPhase.cacheUnavailable;
+      } finally {
+        _isLoadingTasks = false;
+      }
+      return;
+    }
     final requestId = ++_tasksRequestId;
     final owner = DBHelper.currentInspectorId;
     setState(() => _taskRefreshPhase = TaskRefreshPhase.checking);
@@ -603,6 +672,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   }
 
   Future<void> _loadUnreadActivityCount() async {
+    if (widget.walkthrough != null) return;
     try {
       final unread = await SupabaseService.fetchUnreadActivityCount();
       if (mounted) setState(() => _unreadCount = unread);
@@ -755,6 +825,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
   static const int _kTasksTabIndex = 1;
 
   void _goToTasksTab() {
+    if (widget.walkthrough != null) return;
     if (widget.onNavigateToTab != null) {
       widget.onNavigateToTab!(_kTasksTabIndex);
     } else {
@@ -846,6 +917,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
+    _scheduleGuideReadiness();
     final initials = _getInitials(widget.profile.fullName);
     final firstName = UserProfile.displayFullName(widget.profile.fullName);
     final greeting = _greeting(_now);
@@ -876,252 +948,22 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   // ----------------------------------------------------
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                    child: Container(
-                      key: const ValueKey('inspector_section'),
-                      width: double.infinity,
-                      padding: const EdgeInsets.only(top: 12),
-                      decoration: BoxDecoration(
-                        color: InsightTheme.surface,
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // ----------------------------------------------------
-                          // 1. TOP BAR — avatar left, status + bell right
-                          // ----------------------------------------------------
-                          SpringSlide(
-                            animation: springFor(0),
-                            beginOffset: const Offset(0, -32),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final titleStyle = InsightTheme.urbanist(
-                                    16,
-                                    w: FontWeight.w700,
-                                    c: InsightTheme.ink,
-                                  );
-                                  final titleSize = TextPainter(
-                                    text: TextSpan(
-                                      text: 'FieldSync',
-                                      style: titleStyle,
-                                    ),
-                                    textScaler: MediaQuery.textScalerOf(
-                                      context,
-                                    ),
-                                    textDirection: Directionality.of(context),
-                                  )..layout();
-                                  final fitsOneRow =
-                                      constraints.maxWidth >=
-                                      60 + titleSize.width + 24 + 48;
-                                  titleSize.dispose();
-                                  final identity = Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Semantics(
-                                        button: true,
-                                        label: 'Edit profile',
-                                        child: GestureDetector(
-                                          onTap: () async {
-                                            final result =
-                                                await Navigator.push<
-                                                  UserProfile?
-                                                >(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (_) =>
-                                                        ProfileEditScreen(
-                                                          profile:
-                                                              widget.profile,
-                                                        ),
-                                                  ),
-                                                );
-                                            if (result != null && mounted) {
-                                              widget.onProfileUpdated?.call(
-                                                result,
-                                              );
-                                            }
-                                          },
-                                          child: Container(
-                                            width: 48,
-                                            height: 48,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: InsightTheme.blue1,
-                                              border: Border.all(
-                                                color: InsightTheme.blue1,
-                                                width: 2,
-                                              ),
-                                            ),
-                                            child: ClipOval(
-                                              child:
-                                                  widget.profile.avatarUrl !=
-                                                          null &&
-                                                      widget
-                                                          .profile
-                                                          .avatarUrl!
-                                                          .isNotEmpty
-                                                  ? Image.network(
-                                                      widget.profile.avatarUrl!,
-                                                      width: 44,
-                                                      height: 44,
-                                                      fit: BoxFit.cover,
-                                                      errorBuilder:
-                                                          (
-                                                            context,
-                                                            error,
-                                                            stackTrace,
-                                                          ) => Center(
-                                                            child: Text(
-                                                              initials,
-                                                              style:
-                                                                  InsightTheme.urbanist(
-                                                                    13,
-                                                                    w: FontWeight
-                                                                        .w700,
-                                                                    c: Colors
-                                                                        .white,
-                                                                  ),
-                                                            ),
-                                                          ),
-                                                    )
-                                                  : Center(
-                                                      child: Text(
-                                                        initials,
-                                                        style:
-                                                            InsightTheme.urbanist(
-                                                              13,
-                                                              w: FontWeight
-                                                                  .w700,
-                                                              c: Colors.white,
-                                                            ),
-                                                      ),
-                                                    ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text('FieldSync', style: titleStyle),
-                                          const SizedBox(height: 4),
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Container(
-                                                width: 6,
-                                                height: 6,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: _isOnline
-                                                      ? InsightTheme.green
-                                                      : InsightTheme.red,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Text(
-                                                _isOnline
-                                                    ? 'Online'
-                                                    : 'Offline',
-                                                style: InsightTheme.inter(
-                                                  12,
-                                                  w: FontWeight.w600,
-                                                  c: _isOnline
-                                                      ? InsightTheme.greenInk
-                                                      : InsightTheme.redInk,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  );
-                                  final notification = _NotificationBtn(
-                                    hasUnread: _unreadCount > 0,
-                                    onTap: () async {
-                                      await Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const NotificationsScreen(),
-                                        ),
-                                      );
-                                      // Notifications screen marks things read on its own
-                                      // timeline — resync the badge once the inspector
-                                      // backs out of it instead of leaving it stale.
-                                      _loadUnreadActivityCount();
-                                    },
-                                  );
-                                  if (fitsOneRow) {
-                                    return Row(
-                                      children: [
-                                        identity,
-                                        const Spacer(),
-                                        notification,
-                                      ],
-                                    );
-                                  }
-                                  return Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      identity,
-                                      const SizedBox(height: 8),
-                                      Align(
-                                        alignment: Alignment.centerRight,
-                                        child: notification,
-                                      ),
-                                    ],
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-
-                          // ----------------------------------------------------
-                          // GREETING
-                          // ----------------------------------------------------
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: SpringSlide(
-                              animation: springFor(0),
-                              beginOffset: const Offset(0, -20),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    greeting,
-                                    style: InsightTheme.inter(
-                                      13,
-                                      w: FontWeight.w500,
-                                      c: InsightTheme.ink3,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    firstName,
-                                    style: InsightTheme.urbanist(
-                                      24,
-                                      w: FontWeight.w700,
-                                      c: InsightTheme.ink,
-                                      ls: -0.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                        ],
-                      ),
+                    child: HomeInspectorSection(
+                      initials: initials, displayName: firstName, greeting: greeting,
+                      avatarUrl: widget.walkthrough == null ? widget.profile.avatarUrl : null, online: _isOnline,
+                      hasUnread: _unreadCount > 0, entrance: springFor(0),
+                      onEditProfile: () async {
+                        if (widget.walkthrough != null) return;
+                        final result = await Navigator.push<UserProfile?>(context,
+                          MaterialPageRoute(builder: (_) => ProfileEditScreen(profile: widget.profile)));
+                        if (result != null && mounted) widget.onProfileUpdated?.call(result);
+                      },
+                      onNotifications: () async {
+                        if (widget.walkthrough != null) return;
+                        await Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                        _loadUnreadActivityCount();
+                      },
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1136,13 +978,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                       Positioned.fill(
                         left: 20,
                         right: 20,
-                        child: Container(
+                        child: GuideTarget(id: 'assignments_section', child: Container(
                           key: const ValueKey('assignments_section'),
                           decoration: BoxDecoration(
                             color: InsightTheme.surface,
                             borderRadius: BorderRadius.circular(24),
                           ),
-                        ),
+                        )),
                       ),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1161,7 +1003,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   lastChecked: _lastTaskRefreshAt,
                                   onRetry: _retryTaskRefresh,
                                 ),
-                                trailing: _SectionActionButton(
+                                trailing: HomeSectionActionButton(
                                   label: 'See All',
                                   onTap: _goToTasksTab,
                                 ),
@@ -1172,9 +1014,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                           SpringSlide(
                             animation: springFor(2),
                             beginOffset: const Offset(70, 0),
-                            child: SizedBox(
+                            child: GuideTarget(id: _upcomingTasks.isEmpty ? 'empty_assignments' : 'assignment_carousel', child: SizedBox(
                               height:
-                                  244 *
+                                  _showAssignmentExample ? null : 244 *
                                   max(
                                     1,
                                     MediaQuery.textScalerOf(context).scale(12) /
@@ -1183,6 +1025,23 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                               child: _isLoadingTasks
                                   ? const Center(
                                       child: ImapsLoadingIndicator(size: 50),
+                                    )
+                                  : _showAssignmentExample
+                                  ? Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 26),
+                                      child: GuideSample(language: widget.walkthrough!.language,
+                                        child: GuideTarget(id: 'assignment_card', child: SizedBox(
+                                          height: 220 * max(1, MediaQuery.textScalerOf(context).scale(12) / 12),
+                                          child: ActiveAssignmentsFolderCard(
+                                            inspectionId: '', referenceNo: guideExample.reference,
+                                            date: guideExample.visitDate, dateLabel: 'Visit Date', savedStep: 0,
+                                            location: guideExample.location, applicantName: guideExample.applicant,
+                                            applicationType: 'Sample application — Fictional',
+                                            lifecycleCategory: TaskLifecycleCategory.pending,
+                                            pendingSection: PendingTaskSection.scheduled, onTap: () {},
+                                          ),
+                                        )),
+                                      ),
                                     )
                                   : _upcomingTasks.isEmpty
                                   ? (_savedDataNotice != null
@@ -1268,7 +1127,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                             margin: const EdgeInsets.symmetric(
                                               horizontal: 6,
                                             ),
-                                            child: UpdatingTile(
+                                            child: GuideTarget(
+                                              id: index == 0 ? 'assignment_card' : 'assignment_card_$index',
+                                              child: UpdatingTile(
                                               itemKey: _upcomingTasks[index].id,
                                               signature: Object.hash(
                                                 _upcomingTasks[index]
@@ -1345,6 +1206,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                                     _upcomingTasks[index]
                                                         .pendingSection,
                                                 onTap: () {
+                                                  if (widget.walkthrough != null) return;
                                                   // A callback bound before an account
                                                   // change must not open another
                                                   // inspector's task from this page.
@@ -1375,12 +1237,12 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                                   );
                                                 },
                                               ),
-                                            ),
+                                            )),
                                           ),
                                         );
                                       },
                                     ),
-                            ),
+                            )),
                           ),
                           const SizedBox(height: 12),
 
@@ -1422,6 +1284,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   applicantName: task.name,
                                   inset: true,
                                   onDetails: () {
+                                    if (widget.walkthrough != null) return;
                                     final current = DBHelper.currentInspectorId;
                                     if (!mounted ||
                                         current == null ||
@@ -1448,7 +1311,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                   const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Container(
+                    child: GuideTarget(id: 'calendar_section', child: Container(
                       key: const ValueKey('calendar_section'),
                       padding: const EdgeInsets.only(top: 12, bottom: 4),
                       decoration: BoxDecoration(
@@ -1470,6 +1333,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                                   'home_calendar_${widget.profile.id}',
                                 ),
                                 userId: widget.profile.id,
+                                rememberView: widget.walkthrough == null,
                                 month: _calendarMonth,
                                 selectedDay: _selectedDay,
                                 tasksByDay: tasksByDay,
@@ -1531,7 +1395,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                           ),
                         ],
                       ),
-                    ),
+                    )),
                   ),
                   _SuspendedMonthCalendar(
                     visible: _showFullCalendar,
@@ -1606,7 +1470,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
                             }
                             return task.scheduleUrgency == 'Overdue';
                           }).length;
-                          return _TaskCompletionBubbleChart(
+                          return HomeTaskStatusChart(
                             total: total,
                             labels: labels,
                             colors: colors,
@@ -1658,6 +1522,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen>
 /// swipes. Its controller is restored once, never reset by data refreshes.
 class _HomeCalendarPager extends StatefulWidget {
   final String userId;
+  final bool rememberView;
   final DateTime month;
   final int selectedDay;
   final Map<int, List<TaskItem>> tasksByDay;
@@ -1670,6 +1535,7 @@ class _HomeCalendarPager extends StatefulWidget {
   const _HomeCalendarPager({
     super.key,
     required this.userId,
+    this.rememberView = true,
     required this.month,
     required this.selectedDay,
     required this.tasksByDay,
@@ -1704,6 +1570,10 @@ class _HomeCalendarPagerState extends State<_HomeCalendarPager> {
   }
 
   Future<void> _restoreView() async {
+    if (!widget.rememberView) {
+      _views = PageController();
+      return;
+    }
     SharedPreferences? preferences;
     var view = 0;
     try {
@@ -1721,6 +1591,7 @@ class _HomeCalendarPagerState extends State<_HomeCalendarPager> {
   }
 
   Future<void> _rememberView(int view) async {
+    if (!widget.rememberView) return;
     try {
       await _preferences?.setInt(_preferenceKey, view);
     } catch (error) {
@@ -1946,167 +1817,13 @@ class _HomeCalendarPagerState extends State<_HomeCalendarPager> {
                     },
                     children: [
                       withViewCue(
-                        Container(
-                          key: const ValueKey('calendar_preview'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: InsightTheme.surface,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: InsightTheme.line),
-                          ),
-                          child: Column(
-                            children: [
-                              SizedBox(
-                                key: const ValueKey('calendar_preview_header'),
-                                height: headerHeight,
-                                child: Row(
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Previous preview month',
-                                      onPressed: widget.onPreviousMonth,
-                                      icon: const Icon(
-                                        Icons.chevron_left_rounded,
-                                        color: InsightTheme.ink2,
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(top: 12),
-                                        child: Text(
-                                          monthLabel,
-                                          textAlign: TextAlign.center,
-                                          style: monthStyle,
-                                        ),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Next preview month',
-                                      onPressed: widget.onNextMonth,
-                                      icon: const Icon(
-                                        Icons.chevron_right_rounded,
-                                        color: InsightTheme.ink2,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: ListView.builder(
-                                  key: const ValueKey('calendar_preview_days'),
-                                  controller: _dates,
-                                  scrollDirection: Axis.horizontal,
-                                  itemExtent: _dayExtent,
-                                  itemCount: days,
-                                  itemBuilder: (context, index) {
-                                    final day = index + 1;
-                                    final selected =
-                                        widget.selectedDay.clamp(1, days) ==
-                                        day;
-                                    final dayDate = DateTime(
-                                      widget.month.year,
-                                      widget.month.month,
-                                      day,
-                                    );
-                                    final colors =
-                                        (widget.tasksByDay[day] ??
-                                                const <TaskItem>[])
-                                            .map(widget.dotColorForTask)
-                                            .toSet()
-                                            .take(3)
-                                            .toList();
-                                    return Padding(
-                                      padding: const EdgeInsets.only(right: 6),
-                                      child: Semantics(
-                                        container: true,
-                                        button: true,
-                                        selected: selected,
-                                        label: '$monthLabel, $day',
-                                        child: Material(
-                                          color: selected
-                                              ? InsightTheme.blue1
-                                              : InsightTheme.surface2,
-                                          borderRadius: BorderRadius.circular(
-                                            14,
-                                          ),
-                                          child: InkWell(
-                                            borderRadius: BorderRadius.circular(
-                                              14,
-                                            ),
-                                            onTap: () => widget.onPick(
-                                              widget.month,
-                                              day,
-                                            ),
-                                            child: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                Text(
-                                                  const [
-                                                    'Mon',
-                                                    'Tue',
-                                                    'Wed',
-                                                    'Thu',
-                                                    'Fri',
-                                                    'Sat',
-                                                    'Sun',
-                                                  ][dayDate.weekday - 1],
-                                                  style: weekdayStyle.copyWith(
-                                                    color: selected
-                                                        ? Colors.white
-                                                        : InsightTheme.ink2,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  '$day',
-                                                  style: numberStyle.copyWith(
-                                                    color: selected
-                                                        ? Colors.white
-                                                        : InsightTheme.ink,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 2),
-                                                SizedBox(
-                                                  height: 4,
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      for (final color
-                                                          in colors)
-                                                        Container(
-                                                          width: 4,
-                                                          height: 4,
-                                                          margin:
-                                                              const EdgeInsets.symmetric(
-                                                                horizontal: 1,
-                                                              ),
-                                                          decoration:
-                                                              BoxDecoration(
-                                                                shape: BoxShape
-                                                                    .circle,
-                                                                color: selected
-                                                                    ? Colors
-                                                                          .white
-                                                                    : color,
-                                                              ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
+                        HomeCalendarPreview(
+                          month: widget.month, selectedDay: widget.selectedDay,
+                          headerHeight: headerHeight, dayExtent: _dayExtent, controller: _dates,
+                          onPreviousMonth: widget.onPreviousMonth, onNextMonth: widget.onNextMonth,
+                          onPick: (day) => widget.onPick(widget.month, day),
+                          dayColors: {for (final entry in widget.tasksByDay.entries)
+                            entry.key: entry.value.map(widget.dotColorForTask).toSet().take(3).toList()},
                         ),
                         0,
                       ),
@@ -2398,56 +2115,6 @@ class _CalendarTaskRow extends StatelessWidget {
   }
 }
 
-class _NotificationBtn extends StatelessWidget {
-  final VoidCallback onTap;
-  final bool hasUnread;
-  const _NotificationBtn({required this.onTap, this.hasUnread = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: 'Notifications',
-      onPressed: onTap,
-      padding: EdgeInsets.zero,
-      style: IconButton.styleFrom(
-        minimumSize: const Size(48, 48),
-        backgroundColor: InsightTheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        side: const BorderSide(color: InsightTheme.line),
-      ),
-      icon: SizedBox(
-        width: 48,
-        height: 48,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            const Icon(
-              Icons.notifications_outlined,
-              color: InsightTheme.ink,
-              size: 22,
-            ),
-            if (hasUnread)
-              Positioned(
-                right: 10,
-                top: 10,
-                child: Container(
-                  key: const ValueKey('notification_unread_badge'),
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: InsightTheme.red,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _SectionLabel extends StatelessWidget {
   final String title;
   final Widget? trailing;
@@ -2514,301 +2181,6 @@ class _SectionLabel extends StatelessWidget {
         if (trailing != null) const SizedBox(width: 12),
         ?trailing,
       ],
-    );
-  }
-}
-
-/// Section navigation keeps a full-height touch target.
-class _SectionActionButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _SectionActionButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 48),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: InsightTheme.inter(
-                12,
-                w: FontWeight.w700,
-                c: InsightTheme.blueInk,
-              ),
-            ),
-            const SizedBox(width: 3),
-            Icon(
-              Icons.arrow_forward_rounded,
-              size: 12,
-              color: InsightTheme.blueInk,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Compact bubble chart and legend for the current task-status counts.
-class _TaskCompletionBubbleChart extends StatelessWidget {
-  final int total;
-  final List<String> labels;
-  final List<Color> colors;
-  final List<int> counts;
-  final int overdueCount;
-  final bool isLoading;
-  final bool hasTasks;
-  final VoidCallback onMoreDetails;
-
-  const _TaskCompletionBubbleChart({
-    required this.total,
-    required this.labels,
-    required this.colors,
-    required this.counts,
-    required this.overdueCount,
-    required this.isLoading,
-    required this.hasTasks,
-    required this.onMoreDetails,
-  });
-
-  Color _countColor(Color background) {
-    final luminance = background.computeLuminance();
-    final darkContrast =
-        (luminance + 0.05) / (InsightTheme.ink.computeLuminance() + 0.05);
-    final lightContrast = 1.05 / (luminance + 0.05);
-    return lightContrast > darkContrast ? Colors.white : InsightTheme.ink;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scaler = MediaQuery.textScalerOf(context);
-    final statuses = <({String label, int count, Color color})>[
-      for (var i = 0; i < labels.length; i++)
-        (label: labels[i], count: counts[i], color: colors[i]),
-      (label: 'Overdue', count: overdueCount, color: InsightTheme.red),
-    ];
-    final bubbles = SizedBox(
-      key: const ValueKey('completion_bubble_chart'),
-      width: 138,
-      height: 102,
-      child: Stack(
-        key: const ValueKey('completion_bubbles'),
-        clipBehavior: Clip.none,
-        children: [
-          for (var i = 0; i < statuses.length; i++)
-            Builder(
-              builder: (context) {
-                const centers = [
-                  Offset(31.5, 31.5),
-                  Offset(67.5, 31.5),
-                  Offset(103.5, 31.5),
-                  Offset(49.5, 70.5),
-                  Offset(85.5, 70.5),
-                ];
-                final status = statuses[i];
-                final cappedCount = status.count.clamp(0, 7);
-                final diameter = 42.0 + 3.0 * cappedCount;
-                final color = status.color;
-                return Positioned(
-                  left: centers[i].dx - diameter / 2,
-                  top: centers[i].dy - diameter / 2,
-                  width: diameter,
-                  height: diameter,
-                  child: Semantics(
-                    label: status.label == 'Overdue'
-                        ? '${status.count} overdue tasks'
-                        : '${status.label}: ${status.count} tasks',
-                    child: Container(
-                      key: ValueKey('completion_bubble_${status.label}'),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: InsightTheme.surface,
-                          width: 2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withValues(alpha: 0.12),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: Text(
-                            '${status.count}',
-                            style: InsightTheme.urbanist(
-                              13,
-                              w: FontWeight.w800,
-                              c: _countColor(color),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-        ],
-      ),
-    );
-
-    Widget legend() => Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final status in statuses)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Container(
-              key: ValueKey('completion_${status.label}'),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Container(
-                    key: ValueKey('completion_icon_${status.label}'),
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: status.color,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      status.label,
-                      style: InsightTheme.inter(
-                        11,
-                        w: FontWeight.w500,
-                        c: status.label == 'Overdue'
-                            ? InsightTheme.redInk
-                            : InsightTheme.ink2,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${status.count}',
-                    style: InsightTheme.inter(
-                      12,
-                      w: FontWeight.w700,
-                      c: status.label == 'Overdue'
-                          ? InsightTheme.redInk
-                          : InsightTheme.ink,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-
-    return LayoutBuilder(
-      key: const ValueKey('completion_chart'),
-      builder: (context, constraints) {
-        return Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: InsightTheme.surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: InsightTheme.line),
-            boxShadow: [
-              BoxShadow(
-                color: InsightTheme.ink.withValues(alpha: 0.04),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              LayoutBuilder(
-                builder: (context, headerConstraints) {
-                  final stackHeader =
-                      headerConstraints.maxWidth < 320 || scaler.scale(16) > 24;
-                  final title = Semantics(
-                    header: true,
-                    child: Text(
-                      'Task Status Overview',
-                      maxLines: stackHeader ? 2 : 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: InsightTheme.urbanist(
-                        16,
-                        w: FontWeight.w700,
-                        c: InsightTheme.ink,
-                      ),
-                    ),
-                  );
-                  return title;
-                },
-              ),
-              const SizedBox(height: 3),
-              Text(
-                'Tasks grouped by status',
-                style: InsightTheme.inter(
-                  11,
-                  w: FontWeight.w400,
-                  c: InsightTheme.inkMuted,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (isLoading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Center(child: ImapsLoadingIndicator(size: 40)),
-                )
-              else if (!hasTasks)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Center(
-                    child: Text(
-                      'No tasks yet.',
-                      style: InsightTheme.inter(12, c: InsightTheme.ink2),
-                    ),
-                  ),
-                )
-              else
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    bubbles,
-                    const SizedBox(width: 8),
-                    Expanded(child: legend()),
-                  ],
-                ),
-              if (!isLoading && hasTasks) ...[
-                const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: _SectionActionButton(
-                    label: 'More details',
-                    onTap: onMoreDetails,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        );
-      },
     );
   }
 }

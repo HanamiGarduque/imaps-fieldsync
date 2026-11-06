@@ -12,13 +12,19 @@ import '../../../core/widgets/sensitive_screen.dart';
 
 import '../../../core/theme/insight_theme.dart';
 import '../widgets/inspection_step_header.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_targets.dart';
+import '../../interactive_guide/guide_examples.dart';
+import '../inspection_constants.dart';
 
 class InspectionChecklistScreen extends StatefulWidget {
   final TaskItem task;
+  final GuideReadOnlyData? walkthrough;
   final List<Map<String, dynamic>> capturedPhotos;
   const InspectionChecklistScreen({
     super.key,
     required this.task,
+    this.walkthrough,
     this.capturedPhotos = const [],
   });
   @override
@@ -44,15 +50,20 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
     final provider = context.read<InspectionProvider>();
     _siteCondition
       ..clear()
-      ..addAll(provider.siteCondition);
+      ..addAll(widget.walkthrough == null ? provider.siteCondition : {
+        for (final key in defaultSiteCondition.keys) key: widget.walkthrough!.savedChecklist[key] ?? false,
+      });
     _zoningObservations
       ..clear()
-      ..addAll(provider.zoningObservations);
+      ..addAll(widget.walkthrough == null ? provider.zoningObservations : {
+        for (final key in defaultZoningObservations.keys) key: widget.walkthrough!.savedChecklist[key] ?? false,
+      });
 
   }
 
 
   Future<bool> _saveChecklist() async {
+    if (widget.walkthrough != null) return false;
     bool ok;
     try {
       ok = await context.read<InspectionProvider>().saveStepChecklist();
@@ -72,6 +83,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   }
 
   Future<void> _continueToFindings() async {
+    if (widget.walkthrough != null) return;
     if (_isSaving) return;
     setState(() => _isSaving = true);
     final ok = await _saveChecklist();
@@ -93,6 +105,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
+    final unknownChecklist = widget.walkthrough?.inspectionUnavailable == true && widget.walkthrough!.savedChecklist.isEmpty;
 
     return SensitiveScreen(
       child: PopScope(
@@ -101,6 +114,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
             !context.read<InspectionProvider>().isReworkMode &&
             InspectionProgress.instance.currentStep > 1,
         onPopInvokedWithResult: (didPop, _) {
+          if (widget.walkthrough != null) return;
           if (_isSaving) return;
           if (didPop) {
             // Already popped natively (smooth swipe/hardware-back animation) —
@@ -124,7 +138,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
               subtitle: widget.task.location,
               stepNumber: 4,
               stepSubtitle: 'VERIFY CRITERIA',
-              onBack: () => _isSaving
+              onBack: () => _isSaving || widget.walkthrough != null
                   ? null
                   : handleInspectionExit(
                       context,
@@ -138,7 +152,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
             ),
             action: Row(
               children: [
-                if (context.watch<InspectionProvider>().isReworkMode) ...[
+                if (widget.walkthrough == null && context.watch<InspectionProvider>().isReworkMode) ...[
                   Expanded(
                     child: FieldPrimaryButton(
                       label: 'Save',
@@ -174,11 +188,18 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
               ],
             ),
             children: [
+              if (unknownChecklist)
+                Text(widget.walkthrough!.inspectionUnavailableLabel)
+              else if (widget.walkthrough != null && widget.walkthrough!.savedChecklist.isEmpty &&
+                  !widget.walkthrough!.unavailable.contains(GuideDataSection.inspection))
+                GuideSample(language: widget.walkthrough!.language,
+                  child: const Text('Example checklist — no saved answers are being changed.')),
+              GuideTarget(id: 'step_4', child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               FieldSectionHeading(
                 title: 'Site condition',
                 hint:
                     'Check only statements you verified on-site. Unchecked means not affirmed, not automatically non-compliant.',
-                trailing: Text(
+                trailing: unknownChecklist ? null : Text(
                   '$_doneCount of $_totalCount checked',
                   style: InsightTheme.inter(
                     13,
@@ -195,7 +216,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                   boxShadow: InsightTheme.inspectionCardShadow,
                 ),
                 child: Column(
-                  children: _siteCondition.entries.toList().asMap().entries.map((
+                  children: (unknownChecklist ? <String, bool>{} : _siteCondition).entries.toList().asMap().entries.map((
                     entry,
                   ) {
                     var e = entry.value;
@@ -204,6 +225,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                       isChecked: e.value,
                       isLast: entry.key == _siteCondition.length - 1,
                       onTap: () {
+                        if (widget.walkthrough != null) return;
                         if (_isSaving) return;
                         // Persist through the provider FIRST: it refuses a write that is no
                         // longer owned by this session, and the visible
@@ -223,6 +245,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                   }).toList(),
                 ),
               ),
+              ])),
               const SizedBox(height: 24),
               const FieldSectionHeading(
                 title: 'Zoning observations',
@@ -237,7 +260,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                   boxShadow: InsightTheme.inspectionCardShadow,
                 ),
                 child: Column(
-                  children: _zoningObservations.entries
+                  children: (unknownChecklist ? <String, bool>{} : _zoningObservations).entries
                       .toList()
                       .asMap()
                       .entries
@@ -248,6 +271,7 @@ class _InspectionChecklistScreenState extends State<InspectionChecklistScreen> {
                           isChecked: e.value,
                           isLast: entry.key == _zoningObservations.length - 1,
                           onTap: () {
+                            if (widget.walkthrough != null) return;
                             if (_isSaving) return;
                             try {
                               context

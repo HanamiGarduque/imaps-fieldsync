@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../../../core/theme/insight_theme.dart';
-import '../../tasks/screens/tasks_screen.dart';
+import '../../tasks/models/task_lifecycle.dart';
 
 /// Human-readable card status derived from the shared lifecycle contract.
 ///
@@ -377,6 +377,11 @@ class _GlossyPocket extends StatelessWidget {
     ) : null;
     final stepInfo = savedStep == null ? null : Text('STEP ${savedStep!.clamp(0, 6)}/6',
       maxLines: 1, style: InsightTheme.inter(12, w: FontWeight.w700, c: Colors.white));
+    final applicant = Text(
+      applicantName.trim().isEmpty ? 'Applicant not on file' : applicantName.trim(),
+      style: InsightTheme.urbanist(19, w: FontWeight.w800, c: Colors.white, h: 1.12),
+      maxLines: 2, overflow: TextOverflow.ellipsis,
+    );
     return ClipPath(
       clipper: _PocketClipper(),
       child: Container(
@@ -438,12 +443,7 @@ class _GlossyPocket extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    applicantName.trim().isEmpty ? 'Applicant not on file' : applicantName.trim(),
-                    style: InsightTheme.urbanist(19, w: FontWeight.w800, c: Colors.white, h: 1.12),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  applicant,
                   const SizedBox(height: 5),
                   Row(children: [
                     Icon(Icons.location_on_outlined, size: 15, color: Colors.white.withValues(alpha: 0.84)),

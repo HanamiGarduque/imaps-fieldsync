@@ -1,12 +1,17 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import '../../modules/interactive_guide/guide_targets.dart';
 
 import '../layout/responsive_layout.dart';
 import '../theme/insight_theme.dart';
 
 /// Compact visual plate inside the full native navigation target.
 class FieldBackButton extends StatelessWidget {
-  const FieldBackButton({super.key, required this.onPressed, this.tooltip = 'Back'});
+  const FieldBackButton({
+    super.key,
+    required this.onPressed,
+    this.tooltip = 'Back',
+  });
   final VoidCallback onPressed;
   final String tooltip;
 
@@ -19,10 +24,19 @@ class FieldBackButton extends StatelessWidget {
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 48, height: 48),
       icon: DecoratedBox(
-        decoration: BoxDecoration(color: InsightTheme.surface,
-          borderRadius: InsightTheme.roundedSm, border: Border.all(color: InsightTheme.line)),
-        child: const SizedBox.square(dimension: 38,
-          child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: InsightTheme.ink)),
+        decoration: BoxDecoration(
+          color: InsightTheme.surface,
+          borderRadius: InsightTheme.roundedSm,
+          border: Border.all(color: InsightTheme.line),
+        ),
+        child: const SizedBox.square(
+          dimension: 38,
+          child: Icon(
+            Icons.arrow_back_ios_new_rounded,
+            size: 16,
+            color: InsightTheme.ink,
+          ),
+        ),
       ),
     ),
   );
@@ -30,8 +44,13 @@ class FieldBackButton extends StatelessWidget {
 
 /// Secondary explanatory control; the screen owns its message and action.
 class FieldInfoButton extends StatelessWidget {
-  const FieldInfoButton({super.key, required this.label, required this.onPressed,
-    this.color = InsightTheme.blueInk, this.backgroundColor = InsightTheme.blueTint});
+  const FieldInfoButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.color = InsightTheme.blueInk,
+    this.backgroundColor = InsightTheme.blueTint,
+  });
   final String label;
   final VoidCallback onPressed;
   final Color color;
@@ -46,10 +65,14 @@ class FieldInfoButton extends StatelessWidget {
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 48, height: 48),
       icon: DecoratedBox(
-        decoration: BoxDecoration(color: backgroundColor,
-          borderRadius: BorderRadius.circular(10)),
-        child: SizedBox.square(dimension: 28,
-          child: Icon(Icons.info_outline_rounded, size: 18, color: color)),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: SizedBox.square(
+          dimension: 28,
+          child: Icon(Icons.info_outline_rounded, size: 18, color: color),
+        ),
       ),
     ),
   );
@@ -57,7 +80,11 @@ class FieldInfoButton extends StatelessWidget {
 
 /// Compact language switch used by informational panels.
 class FieldLanguageToggle extends StatelessWidget {
-  const FieldLanguageToggle({super.key, required this.isTagalog, required this.onChanged});
+  const FieldLanguageToggle({
+    super.key,
+    required this.isTagalog,
+    required this.onChanged,
+  });
   final bool isTagalog;
   final ValueChanged<bool> onChanged;
 
@@ -77,20 +104,32 @@ class FieldPageHeader extends StatelessWidget {
   final VoidCallback? onBack;
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-    FieldBackButton(
-      onPressed: onBack ?? () => Navigator.maybePop(context),
-    ),
-    const SizedBox(width: 8),
-    Expanded(child: Semantics(header: true,
-        child: Text(title, style: InsightTheme.urbanist(20, w: FontWeight.w700)))),
-  ]);
+  Widget build(BuildContext context) => Row(
+    children: [
+      FieldBackButton(onPressed: onBack ?? () => Navigator.maybePop(context)),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Semantics(
+          header: true,
+          child: Text(
+            title,
+            style: InsightTheme.urbanist(20, w: FontWeight.w700),
+          ),
+        ),
+      ),
+    ],
+  );
 }
 
 /// Restyles existing two-way selectors; values and callbacks stay screen-owned.
 class FieldSegmentedControl<T extends Object> extends StatelessWidget {
-  const FieldSegmentedControl({super.key, required this.labels,
-    required this.value, required this.onChanged, this.compact = false});
+  const FieldSegmentedControl({
+    super.key,
+    required this.labels,
+    required this.value,
+    required this.onChanged,
+    this.compact = false,
+  });
   final Map<T, String> labels;
   final T value;
   final ValueChanged<T> onChanged;
@@ -108,10 +147,20 @@ class FieldSegmentedControl<T extends Object> extends StatelessWidget {
           constraints: BoxConstraints(minHeight: compact ? 40 : 48),
           child: Padding(
             padding: EdgeInsets.symmetric(
-                horizontal: compact ? 4 : 12, vertical: compact ? 8 : 12),
-            child: Text(entry.value, textAlign: TextAlign.center,
-                style: InsightTheme.inter(compact ? 12 : 13, w: FontWeight.w600,
-                    c: entry.key == value ? InsightTheme.blueInk : InsightTheme.ink2)),
+              horizontal: compact ? 4 : 12,
+              vertical: compact ? 8 : 12,
+            ),
+            child: Text(
+              entry.value,
+              textAlign: TextAlign.center,
+              style: InsightTheme.inter(
+                compact ? 12 : 13,
+                w: FontWeight.w600,
+                c: entry.key == value
+                    ? InsightTheme.blueInk
+                    : InsightTheme.ink2,
+              ),
+            ),
           ),
         ),
     },
@@ -186,6 +235,7 @@ class FieldSectionHeading extends StatelessWidget {
     this.trailing,
     this.hintSize = 14,
     this.bottomSpacing = 12,
+    this.guideTargetId,
   });
   final String title;
   final String? hint;
@@ -195,38 +245,41 @@ class FieldSectionHeading extends StatelessWidget {
   /// with the section title. Defaults to the shared 14px hint size.
   final double hintSize;
   final double bottomSpacing;
+  final String? guideTargetId;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.only(bottom: bottomSpacing),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Semantics(
-              header: true,
-              child: Text(
-                title,
-                style: InsightTheme.urbanist(18, w: FontWeight.w700),
-              ),
-            ),
-            ?trailing,
-          ],
-        ),
-        if (hint != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            hint!,
-            style: InsightTheme.inter(hintSize, c: InsightTheme.ink3),
+  Widget build(BuildContext context) {
+    final heading = Semantics(
+      header: true,
+      child: Text(title, style: InsightTheme.urbanist(18, w: FontWeight.w700)),
+    );
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomSpacing),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              guideTargetId == null
+                  ? heading
+                  : GuideTarget(id: guideTargetId!, child: heading),
+              ?trailing,
+            ],
           ),
+          if (hint != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              hint!,
+              style: InsightTheme.inter(hintSize, c: InsightTheme.ink3),
+            ),
+          ],
         ],
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 /// Read-only grouped content — a bordered surface holding the related rows of

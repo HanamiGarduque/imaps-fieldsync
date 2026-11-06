@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,8 @@ import '../../../core/widgets/imaps_loading_indicator.dart';
 import '../../../core/widgets/field_form_widgets.dart';
 import '../../../core/widgets/app_feedback.dart';
 import '../../../core/theme/insight_theme.dart';
+import '../../interactive_guide/guide_read_only_data.dart';
+import '../../interactive_guide/guide_targets.dart';
 
 /// Vertical room the alignment tip needs below the dial: the 14px gap plus its
 /// text, which the theme floors at 12pt.
@@ -71,11 +74,12 @@ const Duration kGpsStaleTickerInterval = Duration(seconds: 1);
 
 class GpsVerificationScreen extends StatefulWidget {
   final TaskItem task;
+  final GuideReadOnlyData? walkthrough;
 
   /// Test seam: overrides the freshness clock. Defaults to [DateTime.now].
   final DateTime Function()? clock;
 
-  const GpsVerificationScreen({super.key, required this.task, this.clock});
+  const GpsVerificationScreen({super.key, required this.task, this.clock, this.walkthrough});
 
   @override
   State<GpsVerificationScreen> createState() => _GpsVerificationScreenState();
@@ -133,6 +137,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   /// Confirm-readiness: one accepted fix, accurate to ≤ 25 m, at most 15 s
   /// old, inside the preserved inclusive ≤ 30 m site distance.
   bool get _verified =>
+      widget.walkthrough == null &&
       _distance != null &&
       _distance! <= siteVerificationDistanceThresholdMeters &&
       _hasFix &&
@@ -141,6 +146,12 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   /// The visible GPS state. 'Unavailable' also covers live tracking that
   /// stopped without leaving a usable fix behind.
   String get _gpsStatusText {
+    if (widget.walkthrough != null) {
+      if (_latitude == null && widget.walkthrough!.inspectionUnavailable) {
+        return widget.walkthrough!.inspectionUnavailableLabel;
+      }
+      return _latitude == null ? 'No saved GPS reading' : 'Saved reading — not a live fix';
+    }
     if (!_hasFix) return _trackingStopped ? 'Unavailable' : 'Acquiring';
     if (!_accuracyWithinGate) return 'Inaccurate';
     if (!_fixAgeAccepted) return 'Outdated';
@@ -149,6 +160,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   }
 
   String get _confirmHelperText {
+    if (widget.walkthrough != null) return 'Walkthrough only — live GPS is not running.';
     if (_trackingStopped) return 'GPS updates stopped. Reconnect to continue.';
     if (!_hasFix) return 'Acquiring a GPS fix...';
     if (!_accuracyWithinGate) return 'Move to an open area — accuracy must be ≤ 25 m.';
@@ -165,6 +177,25 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   @override
   void initState() {
     super.initState();
+    final walkthrough = widget.walkthrough;
+    if (walkthrough != null) {
+      _latitude = (walkthrough.gpsRow?['latitude'] as num?)?.toDouble() ?? widget.task.confirmedLatitude;
+      _longitude = (walkthrough.gpsRow?['longitude'] as num?)?.toDouble() ?? widget.task.confirmedLongitude;
+      _accuracy = (walkthrough.gpsRow?['accuracy_meters'] as num?)?.toDouble() ?? widget.task.gpsAccuracyM;
+      for (final row in walkthrough.gpsRow == null ? walkthrough.pendingActions : <Map<String, dynamic>>[]) {
+        if (row['job_id'] != widget.task.id || row['type'] != 'gps_confirm') continue;
+        try {
+          final payload = jsonDecode(row['payload'] as String) as Map;
+          _latitude = (payload['latitude'] as num?)?.toDouble();
+          _longitude = (payload['longitude'] as num?)?.toDouble();
+          _accuracy = (payload['accuracyMeters'] as num?)?.toDouble();
+        } catch (_) { /* Unreadable evidence is not a verified location. */ }
+        break;
+      }
+      _loading = false;
+      _compassUnavailable = true;
+      return;
+    }
     WidgetsBinding.instance.addObserver(this);
     _checkLocation();
     _startCompass();
@@ -172,6 +203,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   }
 
   void _startStaleTicker() {
+    if (widget.walkthrough != null) return;
     _staleTicker?.cancel();
     if (!_foreground || _routeCovered) return;
     _staleTicker = Timer.periodic(kGpsStaleTickerInterval, (_) {
@@ -193,6 +225,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (widget.walkthrough != null) return;
     _foreground = state == AppLifecycleState.resumed;
     if (!_foreground) {
       _staleTicker?.cancel();
@@ -209,6 +242,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   }
 
   void _startCompass() {
+    if (widget.walkthrough != null) return;
     final events = FlutterCompass.events;
     if (events == null) {
       setState(() => _compassUnavailable = true);
@@ -221,6 +255,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   }
 
   Future<void> _checkLocation() async {
+    if (widget.walkthrough != null) return;
     setState(() { _loading = true; _error = null; _errorIsLocation = false; });
     try {
       if (widget.task.parcelId == null) throw Exception('No parcel linked.');
@@ -294,6 +329,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   }
 
   void _startLiveTracking() {
+    if (widget.walkthrough != null) return;
     if (!mounted || !_foreground || _routeCovered || _isLive) return;
     _isLive = true;
     _trackingStopped = false;
@@ -353,6 +389,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   }
 
   void _reconnectGps() {
+    if (widget.walkthrough != null) return;
     _streamRetryTimer?.cancel();
     _streamRetryTimer = null;
     _streamRestarts = 0;
@@ -460,6 +497,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   /// call with that missing fallback, mirroring the pattern already used
   /// for GPS confirm below.
   Future<bool> _markOngoingWithFallback(String jobId) async {
+    if (widget.walkthrough != null) return false;
     final result = await SupabaseService.markJobOngoing(jobId);
     if (result == InspectionAuthorityResult.authorized) return true;
     if (result != InspectionAuthorityResult.offlineOrUnverifiable) {
@@ -475,6 +513,7 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
   }
 
   Future<void> _startInspection() async {
+    if (widget.walkthrough != null) return;
     if (!_verified || _latitude == null || _submitting) return;
     // Keep the online attempt, outbox fallback and recorded distance tied to
     // the same accepted fix, even while live GPS changes during the await.
@@ -670,25 +709,27 @@ class _GpsVerificationScreenState extends State<GpsVerificationScreen>
       coords: _coordsText,
       location: widget.task.location,
       submitting: _submitting,
-      isReworkMode: context.read<InspectionProvider>().isReworkMode,
+      isReworkMode: widget.walkthrough == null && context.read<InspectionProvider>().isReworkMode,
       statusText: _gpsStatusText,
       helperText: _confirmHelperText,
       trackingStopped: _trackingStopped,
       onReconnect: _reconnectGps,
       onConfirm: _startInspection,
+      readOnly: widget.walkthrough != null,
     );
-    return card;
+    return widget.walkthrough == null ? card : SingleChildScrollView(child: card);
   }
 
   @override
   Widget build(BuildContext context) {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
-    final isReworkMode = context.read<InspectionProvider>().isReworkMode;
+    final isReworkMode = widget.walkthrough == null && context.read<InspectionProvider>().isReworkMode;
 
     return SensitiveScreen(
       child: PopScope(
-        canPop: !isReworkMode && InspectionProgress.instance.currentStep > 1,
+        canPop: widget.walkthrough != null || (!isReworkMode && InspectionProgress.instance.currentStep > 1),
         onPopInvokedWithResult: (didPop, _) {
+          if (widget.walkthrough != null) return;
           if (didPop) {
             _markOngoingWithFallback(widget.task.id);
             return;
@@ -1255,6 +1296,7 @@ class _AlignmentTip extends StatelessWidget {
 /// and the confirm action. Only the readouts scroll on short/enlarged layouts;
 /// the existing gated action remains visible, including in fullscreen.
 class _VerificationCard extends StatelessWidget {
+  final bool readOnly;
   final String distanceText;
   final double? accuracy;
   final bool verified;
@@ -1273,6 +1315,7 @@ class _VerificationCard extends StatelessWidget {
   final VoidCallback onConfirm;
 
   const _VerificationCard({
+    this.readOnly = false,
     required this.distanceText,
     required this.accuracy,
     required this.verified,
@@ -1300,7 +1343,10 @@ class _VerificationCard extends StatelessWidget {
     final readingStatus = verified
         ? 'Ready'
         : statusText == 'Outside zone' ? 'Too far' : 'Fix needed';
-    return Container(
+    final stackedStatus = readOnly && MediaQuery.textScalerOf(context).scale(12) > 18;
+    final reading = Text(statusText, textAlign: TextAlign.end,
+      style: InsightTheme.inter(12, w: FontWeight.w600, c: accentInk));
+    return GuideTarget(id: 'step_2', child: Container(
       key: const ValueKey('gps-details'),
       margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       padding: const EdgeInsets.all(12),
@@ -1360,13 +1406,13 @@ class _VerificationCard extends StatelessWidget {
                               child: Text(heading == null ? '—' : '${heading!.round()}°',
                                 style: InsightTheme.inter(14, w: FontWeight.w700, c: InsightTheme.ink)),
                             ),
-                            Text(statusText, textAlign: TextAlign.end,
-                              style: InsightTheme.inter(12, w: FontWeight.w600, c: accentInk)),
+                            if (!stackedStatus) reading,
                           ],
                         ),
                       ),
                     ],
                   ),
+                  if (stackedStatus) Align(alignment: Alignment.centerRight, child: reading),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.all(8),
@@ -1427,7 +1473,7 @@ class _VerificationCard extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ));
   }
 
 }
