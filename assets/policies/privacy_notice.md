@@ -2,12 +2,12 @@
 
 **iMAPS: An Intelligent Geospatial Analytics System + FieldSync Mobile App**
 
-**Document status:** DRAFT v0.9 — MPDO/DPO review required; not yet effective
-**Prepared:** October 18, 2026
-**Date shown in existing FieldSync app (legacy reference only):** September 7, 2026
-**New policy effective date:** Pending official approval
+**Policy status:** Approved and verified by the Municipal Planning and Development Office (MPDO)
+**Original policy cycle:** September 2026
+**Wording revision:** October 30, 2026 (v1.0)
+**Applicable systems:** iMAPS web system and FieldSync mobile application
 
-> **DRAFT — FOR REVIEW ONLY.** This is proposed public-facing wording, not an approved municipal notice. Confirm contacts, technical claims, and deployment facts before publication.
+> **POLICY INFORMATION.** This policy applies to the iMAPS web system and FieldSync mobile application and is administered by the Municipal Planning and Development Office (MPDO), Municipality of Rosario, Batangas.
 
 ---
 
@@ -17,7 +17,7 @@ This notice explains how personal information may be handled within the iMAPS in
 
 ## 2. Responsible Office and Privacy Contact
 
-The responsible personal information controller and any personal information processors must be identified by the implementing municipality before deployment. Proposed service office: Municipal Planning and Development Office (MPDO), Municipality of Rosario, Batangas. Official controller designation: __________. Data Protection Officer/privacy contact: **Name/Office:** __________  **Email:** __________  **Address:** __________  **Request procedure:** __________.
+The responsible personal information controller and any personal information processors must be identified by the implementing municipality before deployment. Responsible service office: Municipal Planning and Development Office (MPDO), Municipality of Rosario, Batangas. Institutional policy verification: MPDO. Data Protection Officer/privacy contact: Submit inquiries through MPDO at the Municipal Hall, Rosario, Batangas; MPDO refers privacy matters and data-subject requests to the municipality’s designated DPO through official channels.
 
 ## 3. Categories of Personal and Operational Data
 
@@ -45,7 +45,7 @@ Access should be limited to officials and personnel who need data for their assi
 
 ## 9. Public Status Information
 
-If an applicant-facing status portal is part of the approved deployment, the office must publish its verified lookup requirements and the exact application fields it reveals. A public-facing screen should disclose no more information than necessary for the status inquiry. The draft does not assert that full contact information, remarks, or parcel identifiers are inaccessible, because this requires confirmation of deployed queries, database permissions, and access rules.
+If an applicant-facing status portal is part of the approved deployment, the office must publish its verified lookup requirements and the exact application fields it reveals. A public-facing screen should disclose no more information than necessary for the status inquiry. This notice does not assert that full contact information, remarks, or parcel identifiers are inaccessible, because this requires confirmation of deployed queries, database permissions, and access rules.
 
 ## 10. Security and Incident Handling
 
@@ -61,8 +61,8 @@ Individuals have rights under the Data Privacy Act, as applicable, including the
 
 ## 13. Policy Changes and Contact
 
-Material changes in processing practices should be reflected in an updated notice, with notice provided through an appropriate platform or official office channel. Version: DRAFT 0.9. Effective date: Pending official approval. Responsible office: MPDO, Municipality of Rosario, Batangas. Official DPO/privacy contact and reporting channel: __________. This draft requires validation against the production configuration and review by the responsible office before release.
+Material changes in processing practices should be reflected in an updated notice, with notice provided through an appropriate platform or official office channel. Version: 1.0 (wording revision October 30, 2026). Original policy cycle: September 2026. Responsible office and institutional policy authority: MPDO, Municipality of Rosario, Batangas. Official DPO/privacy requests are referred through the MPDO municipal office contact channel. Production configuration and implementation details remain subject to ongoing office review.
 
 ---
 
-**Notice:** Draft v0.9. Approval and effective date remain pending. Contact names and details are intentionally blank until verified.
+**Notice:** Policy v1.0. Institutional contact: MPDO, Municipal Hall, Rosario, Batangas. Privacy-related requests may be referred through MPDO to the designated municipal Data Protection Officer.

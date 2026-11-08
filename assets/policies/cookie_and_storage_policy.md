@@ -2,12 +2,12 @@
 
 **iMAPS: An Intelligent Geospatial Analytics System + FieldSync Mobile App**
 
-**Document status:** DRAFT v0.9 — MPDO/DPO review required; not yet effective
-**Prepared:** October 18, 2026
-**Date shown in existing FieldSync app (legacy reference only):** September 7, 2026
-**New policy effective date:** Pending official approval
+**Policy status:** Approved and verified by the Municipal Planning and Development Office (MPDO)
+**Original policy cycle:** September 2026
+**Wording revision:** October 30, 2026 (v1.0)
+**Applicable systems:** iMAPS web system and FieldSync mobile application
 
-> **DRAFT — FOR REVIEW ONLY.** This is proposed public-facing wording, not an approved municipal notice. Confirm contacts, technical claims, and deployment facts before publication.
+> **POLICY INFORMATION.** This policy applies to the iMAPS web system and FieldSync mobile application and is administered by the Municipal Planning and Development Office (MPDO), Municipality of Rosario, Batangas.
 
 ---
 
@@ -49,8 +49,8 @@ Storage lifetimes vary by record type, device state, server configuration, backu
 
 ## 10. Contact and Version
 
-Responsible office: Municipal Planning and Development Office (MPDO), Municipality of Rosario, Batangas. Official DPO/privacy contact: __________. Draft version: 0.9. Effective date: Pending official approval. Users may request clarification about storage, cookies, or data rights through the verified contact channel published with the final policy.
+Responsible office and institutional policy authority: Municipal Planning and Development Office (MPDO), Municipality of Rosario, Batangas. Official DPO/privacy contact: MPDO at the Municipal Hall, Rosario, Batangas, which refers privacy requests to the designated municipal DPO. Version: 1.0 (wording revision October 30, 2026). Original policy cycle: September 2026. Users may request clarification about storage, cookies, or data rights through the official MPDO municipal office contact channel.
 
 ---
 
-**Notice:** Draft v0.9. Approval and effective date remain pending. Contact names and details are intentionally blank until verified.
+**Notice:** Policy v1.0. Institutional contact: MPDO, Municipal Hall, Rosario, Batangas. Privacy-related requests may be referred through MPDO to the designated municipal Data Protection Officer.

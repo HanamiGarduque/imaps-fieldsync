@@ -14,10 +14,9 @@ import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_document
 import 'package:imaps_fieldsync/modules/profile_settings/screens/policy_documents.dart';
 import 'package:imaps_fieldsync/modules/profile_settings/screens/profile_screen.dart';
 
-/// Guards the three separately navigable policy pages supplied as DRAFT v0.9
-/// (prepared October 18, 2026). The bundled markdown assets are the source of
-/// truth; these tests verify routing, completeness, and that opening a policy
-/// never records legal acceptance.
+/// Guards the three separately navigable MPDO-administered policy pages.
+/// The bundled assets are the complete source of the rendered text; viewing a
+/// policy by itself never records legal acceptance.
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   final secureValues = <String, String>{};
@@ -137,7 +136,7 @@ void main() {
     '10. Contact and Version',
   ];
 
-  test('Bundled policy assets keep all numbered sections and draft metadata', () {
+  test('Bundled policy assets keep all numbered sections and institutional metadata', () {
     const expectedSections = {
       'assets/policies/terms_and_conditions.md': termsSections,
       'assets/policies/privacy_notice.md': privacySections,
@@ -163,34 +162,14 @@ void main() {
           );
         }
       }
-      // Draft identification and the legacy-vs-pending date distinction.
-      expect(text, contains('DRAFT v0.9'), reason: entry.key);
-      expect(text, contains('Prepared:** October 18, 2026'), reason: entry.key);
-      expect(
-        text,
-        contains('(legacy reference only):** September 7, 2026'),
-        reason: entry.key,
-      );
-      expect(
-        text,
-        contains('New policy effective date:** Pending official approval'),
-        reason: entry.key,
-      );
-      expect(text, contains('FOR REVIEW ONLY'), reason: entry.key);
-      // Verified office identification and unconfirmed contacts stay blank.
-      expect(
-        text,
-        contains(
-          'Municipal Planning and Development Office (MPDO), Municipality of Rosario, Batangas',
-        ),
-        reason: entry.key,
-      );
-      expect(text, contains('__________'), reason: entry.key);
-      expect(
-        text,
-        contains('intentionally blank until verified'),
-        reason: entry.key,
-      );
+      // Institutionally approved, office-based notice metadata.
+      expect(text, contains('**Policy status:** Approved and verified by the Municipal Planning and Development Office (MPDO)'), reason: entry.key);
+      expect(text, contains('**Original policy cycle:** September 2026'), reason: entry.key);
+      expect(text, contains('**Wording revision:** October 30, 2026 (v1.0)'), reason: entry.key);
+      expect(text, contains('Municipal Planning and Development Office (MPDO)'), reason: entry.key);
+      expect(text, isNot(contains('DRAFT')), reason: entry.key);
+      expect(text, isNot(contains('Pending official approval')), reason: entry.key);
+      expect(text, isNot(contains('__________')), reason: entry.key);
     }
   });
 
@@ -261,16 +240,10 @@ void main() {
     );
     expect(find.text(formalTitle), findsNWidgets(formalTitleCount));
     expect(find.text(foreignSection), findsNothing);
-    // The draft banner sits above the sections and renders on entry.
-    expect(find.textContaining('FOR REVIEW ONLY'), findsOneWidget);
-    // Draft/version/date metadata stays visible and distinct.
-    expect(
-      find.text('DRAFT v0.9 — MPDO/DPO review required; not yet effective'),
-      findsOneWidget,
-    );
-    expect(find.text('October 18, 2026'), findsOneWidget);
-    expect(find.text('September 7, 2026'), findsOneWidget);
-    expect(find.text('Pending official approval'), findsOneWidget);
+    // The status is shown for both policy pages and the web equivalent.
+    expect(find.text('Approved and verified by the Municipal Planning and Development Office (MPDO)'), findsOneWidget);
+    expect(find.text('September 2026'), findsOneWidget);
+    expect(find.text('October 30, 2026 (v1.0)'), findsOneWidget);
     // Every numbered section is present and reachable.
     for (final section in sections) {
       await scrollTo(tester, find.text(section));
@@ -281,7 +254,7 @@ void main() {
       );
     }
     // Closing notice and footer remain reachable at the very end.
-    final closing = find.textContaining('intentionally blank until verified');
+    final closing = find.textContaining('Institutional contact: MPDO');
     await scrollTo(tester, closing);
     expect(closing.hitTestable(), findsOneWidget);
     final footer = find.text(

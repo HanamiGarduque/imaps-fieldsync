@@ -1,4 +1,9 @@
 import java.util.Base64
+import java.util.Properties
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.security.PrivateKey
+import java.security.cert.X509Certificate
 
 plugins {
     id("com.android.application")
@@ -28,6 +33,32 @@ val hasDemoSigningInputs =
     demoKeystorePath != null && demoKeystoreAlias != null &&
         demoKeystorePassword != null && demoKeyPassword != null
 
+// Owner-approved F-02 route: external production credentials, never debug signing.
+// https://developer.android.com/studio/publish/app-signing#secure-shared-keystore
+val productionProperties = Properties().apply {
+    runCatching {
+        val inputs = file(
+            System.getenv("FIELDSYNC_PROD_SIGNING_PROPERTIES")
+                ?: rootProject.file("key.properties").absolutePath,
+        )
+        if (inputs.isFile) inputs.inputStream().use { load(it) }
+    }.onFailure { clear() } // Bad release inputs must not block debug/profile/demo.
+}
+val prodKeystorePath = productionProperties.getProperty("storeFile")
+val prodKeystoreAlias = productionProperties.getProperty("keyAlias")
+val prodKeystorePassword = productionProperties.getProperty("storePassword")
+val prodKeyPassword = productionProperties.getProperty("keyPassword")
+val prodKeystoreFile = runCatching {
+    prodKeystorePath?.let { file(it).canonicalFile }
+}.getOrNull()
+val hasProductionSigningInputs =
+    prodKeystoreFile != null &&
+        listOf(prodKeystorePath, prodKeystoreAlias, prodKeystorePassword, prodKeyPassword)
+            .all { !it.isNullOrBlank() }
+// Public certificate pin, not a secret. A signer change requires a reviewed commit.
+val approvedProdSignerSha256 =
+    "9963e98109a4cac056af70374fe57120d440cf1b88258694d6aacf6500225dac"
+
 android {
     namespace = "com.example.imaps_fieldsync"
     compileSdk = flutter.compileSdkVersion
@@ -49,6 +80,14 @@ android {
     }
 
     signingConfigs {
+        create("production") {
+            if (hasProductionSigningInputs) {
+                storeFile = prodKeystoreFile
+                storePassword = prodKeystorePassword
+                keyAlias = prodKeystoreAlias
+                keyPassword = prodKeyPassword
+            }
+        }
         // The demo signer is owned by the credential owner: never a debug-
         // keystore fallback and never a keystore created here. Without
         // external inputs the config stays empty; the task-graph gate rejects
@@ -88,10 +127,7 @@ android {
 
     buildTypes {
         release {
-            // Unchanged: prodRelease signing is the separate F-02 gate. The
-            // execution gate below blocks scheduled prodRelease builds until
-            // that approval lands.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("production")
         }
     }
 }
@@ -105,7 +141,7 @@ val demoSigningConfig = android.signingConfigs.getByName("demo")
 androidComponents {
     // Demo profile/release have no enabled variant; the runtime !kDebugMode
     // check rejects independently. Regular profile/release keep their own
-    // gates (prodRelease is blocked in the execution gate below until F-02).
+    // gates (prodRelease requires the pinned production signer below).
     beforeVariants(
         selector()
             .withFlavor("environment" to "demo")
@@ -136,10 +172,10 @@ androidComponents {
 // including direct Gradle invocations the flutter tool did not start:
 //
 //   prod  debug/profile -> lib/main.dart, no QA_PREVIEW
+//   prod  release       -> lib/main.dart, no QA_PREVIEW + pinned external signer
 //   demo  debug         -> lib/main_qa.dart + QA_PREVIEW=true + approved
 //                          signer pin + credential-owner signing inputs
-//   everything else     -> rejected (demo profile/release are disabled above;
-//                          prodRelease waits for the F-02 approval)
+//   everything else     -> rejected (demo profile/release are disabled above)
 //
 // The effective canonical target mirrors the installed Flutter tool's own
 // precedence (-Ptarget, then the unused flutter{target} extension, then
@@ -148,6 +184,20 @@ androidComponents {
 // encodeDartDefines). Unknown/aggregate mixed-target execution fails here.
 gradle.taskGraph.whenReady {
     val flutterTasks = allTasks.filter { it.name.startsWith("compileFlutterBuild") }
+    val prodArtifactScheduled = allTasks.any { task ->
+        task.project == project &&
+            listOf("assembleProdRelease", "bundleProdRelease", "packageProdRelease", "signProdRelease")
+                .any { task.name.startsWith(it) }
+    }
+    if (prodArtifactScheduled && flutterTasks.none {
+            it.project == project && it.name == "compileFlutterBuildProdRelease"
+        }
+    ) {
+        throw GradleException(
+            "prodRelease artifact creation requires compileFlutterBuildProdRelease " +
+                "in the task graph; excluding it would bypass signer/entry-point validation.",
+        )
+    }
     if (flutterTasks.isEmpty()) return@whenReady
 
     fun variantParts(taskName: String): Pair<String, String> {
@@ -212,21 +262,44 @@ gradle.taskGraph.whenReady {
                 else -> null
             }
             "prod" -> when {
-                buildType == "release" ->
-                    "prodRelease is blocked until the F-02 production " +
-                        "signing approval; do not build or distribute it"
-                buildType != "debug" && buildType != "profile" ->
+                buildType !in setOf("debug", "profile", "release") ->
                     "unknown prod build type '$buildType'"
                 target != "lib/main.dart" ->
                     "prod variants must target lib/main.dart"
                 hasQaPreview ->
                     "QA_PREVIEW=true must not be set for prod builds"
+                buildType == "release" && !hasProductionSigningInputs ->
+                    "production signing inputs are missing; set " +
+                        "FIELDSYNC_PROD_SIGNING_PROPERTIES to private signing properties"
                 else -> null
             }
             else -> "unknown flavor '$flavor' in scheduled task '${task.name}'"
         }
         if (reject != null) {
             throw GradleException("Rejected ${task.name}: $reject (Task 4 B1 build matrix).")
+        }
+    }
+
+    val prodReleaseScheduled = flutterTasks.any { variantParts(it.name) == ("prod" to "release") }
+    if (prodReleaseScheduled) {
+        val repositoryRoot = rootProject.projectDir.parentFile.canonicalFile.toPath()
+        val keystore = prodKeystoreFile!!
+        if (keystore.toPath().startsWith(repositoryRoot)) {
+            throw GradleException("Rejected production signing: keystore must be outside the repository.")
+        }
+        val certificate = try {
+            val store = KeyStore.getInstance(keystore, prodKeystorePassword!!.toCharArray())
+            require(store.isKeyEntry(prodKeystoreAlias))
+            require(store.getKey(prodKeystoreAlias, prodKeyPassword!!.toCharArray()) is PrivateKey)
+            (store.getCertificate(prodKeystoreAlias) as X509Certificate).also { it.checkValidity() }
+        } catch (_: Exception) {
+            // Never include credential values or a signing-config object in errors.
+            throw GradleException("Rejected unreadable production signing inputs or invalid certificate.")
+        }
+        val fingerprint = MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
+            .joinToString("") { "%02x".format(it) }
+        if (fingerprint != approvedProdSignerSha256) {
+            throw GradleException("Rejected production signing certificate: it does not match the approved signer.")
         }
     }
 
